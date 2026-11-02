@@ -1113,10 +1113,11 @@ public static partial class SemanticVerifier
                     fieldMasks[i] = FullMask(program, function.Variables[i].Type);
                     initialized.SetPossibleFieldMask(i, fieldMasks[i]);
                 }
-                if (IsRawUnionType(program, function.Variables[i].Type))
+                if (CarriesRawUnionPayloadFacts(
+                        program, function.Variables[i].Type))
                 {
-                    var size = program.Structures[
-                        (int)function.Variables[i].Type - 100].Size;
+                    var size = ValueLayout.Size(
+                        function.Variables[i].Type, program.Structures);
                     var initialBytes = initialized[i]
                         ? GuaranteedInitializedPayloadBytes(
                             function.Variables[i].Type, program)
@@ -2985,12 +2986,13 @@ public static partial class SemanticVerifier
                 var nativeOutputResult = NativeOutputResultForValue(
                     local.Initializer, initialized, local.Variable);
                 initialized.MarkAssigned(local.Variable);
-                if (IsRawUnionType(program, local.Initializer.Type))
+                if (CarriesRawUnionPayloadFacts(
+                        program, local.Initializer.Type))
                 {
                     initialized.SetRawUnionInitializedBytes(local.Variable,
                         InitializedPayloadBytesOfExpression(
                             local.Initializer, local.Initializer.Type,
-                            initialized, program));
+                            initialized, function, program));
                 }
                 initialized.SetNativeOutputResult(local.Variable, nativeOutputResult);
                 if (program.NativeLoweringAgreement
@@ -3333,13 +3335,14 @@ public static partial class SemanticVerifier
                         assignment.Variable, fieldMasks[assignment.Variable]);
                 }
                 initialized.MarkAssigned(assignment.Variable);
-                if (IsRawUnionType(program, assignment.Value.Type))
+                if (CarriesRawUnionPayloadFacts(
+                        program, assignment.Value.Type))
                 {
                     initialized.SetRawUnionInitializedBytes(
                         assignment.Variable,
                         InitializedPayloadBytesOfExpression(
                             assignment.Value, assignment.Value.Type,
-                            initialized, program));
+                            initialized, function, program));
                 }
                 initialized.SetNativeOutputResult(assignment.Variable, nativeOutputAssignmentResult);
                 if (program.NativeLoweringAgreement
@@ -3823,15 +3826,28 @@ public static partial class SemanticVerifier
                     initialized.AdvanceFieldPlaceGeneration(fieldAssignment.Variable,
                         fieldPlaceProjection, fieldAssignment.Span);
                 }
-                if (fieldSegments.Length == 1
-                    && IsRawUnionType(program, ownerType)
-                    && initialized.Dependencies
-                        is BackingDependencies rawUnionDependencies)
+                if (CarriesRawUnionPayloadFacts(program,
+                        function.Variables[fieldAssignment.Variable].Type)
+                    && TryGetFieldPathByteOffset(
+                        function.Variables[fieldAssignment.Variable].Type,
+                        fieldProjectionPath, program, out var rawUnionOffset))
+                {
+                    var initializedValueBytes
+                        = InitializedPayloadBytesOfExpression(
+                            fieldAssignment.Value, targetField.Type,
+                            initialized, function, program);
+                    initialized.ReplaceRawUnionPayloadRange(
+                        fieldAssignment.Variable, rawUnionOffset,
+                        initializedValueBytes);
+                }
+                if (initialized.Dependencies
+                    is BackingDependencies rawUnionDependencies)
                 {
                     InvalidateOverlappingRawUnionFacts(
-                        fieldAssignment.Variable, ownerType,
-                        fieldSegments[^1].Field, targetField.Offset,
-                        targetField.Size, rawUnionDependencies, program);
+                        fieldAssignment.Variable,
+                        function.Variables[fieldAssignment.Variable].Type,
+                        fieldProjectionPath, targetField.Size,
+                        rawUnionDependencies, program);
                 }
                 if (initialized.Dependencies is BackingDependencies fieldCopyOriginDependencies
                     && TryGetNativePointerFieldAssignmentPlace(fieldAssignment,
@@ -3904,13 +3920,6 @@ public static partial class SemanticVerifier
                         fieldProjectionPath);
                     if (IsRawUnionType(program, ownerType))
                     {
-                        var initializedValueBytes
-                            = InitializedPayloadBytesOfExpression(
-                                fieldAssignment.Value, targetField.Type,
-                                initialized, program);
-                        initialized.ReplaceRawUnionPayloadRange(
-                            fieldAssignment.Variable, targetField.Offset,
-                            initializedValueBytes);
                         initialized[fieldAssignment.Variable] = true;
                     }
                     fieldMasks[fieldAssignment.Variable] |= rootFieldBit;
@@ -4635,7 +4644,7 @@ public static partial class SemanticVerifier
                         && IsRawUnionType(program, function.ReturnType)
                             ? InitializedPayloadBytesOfExpression(
                                 rawUnionReturnValue, function.ReturnType,
-                                initialized, program)
+                                initialized, function, program)
                             : null;
                 Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>? returnCopyOriginFacts = null;
                 if (copyOriginSummaryBuilder?.Kind == BoundCopyOriginSummaryKind.NormalResult
@@ -6007,13 +6016,27 @@ public static partial class SemanticVerifier
 
         internal byte[] GetRawUnionInitializedBytes(int variable)
         {
-            if (!_rawUnionInitializedBytes.TryGetValue(variable,
+            if (!TryGetRawUnionInitializedBytes(variable,
                     out var initializedBytes))
             {
                 throw Invalid();
             }
 
-            return (byte[])initializedBytes.Clone();
+            return initializedBytes;
+        }
+
+        internal bool TryGetRawUnionInitializedBytes(int variable,
+            out byte[] initializedBytes)
+        {
+            if (_rawUnionInitializedBytes.TryGetValue(variable,
+                    out var storedBytes))
+            {
+                initializedBytes = (byte[])storedBytes.Clone();
+                return true;
+            }
+
+            initializedBytes = [];
+            return false;
         }
 
         internal void SetRawUnionInitializedBytes(int variable,
@@ -6649,50 +6672,95 @@ public static partial class SemanticVerifier
     }
 
     private static void InvalidateOverlappingRawUnionFacts(
-        int variable, PrimitiveType unionType, int writtenField,
-        int writeOffset, int writeSize, BackingDependencies dependencies,
-        BoundProgram program)
+        int variable, PrimitiveType rootType,
+        FieldProjectionPath fieldPath, int writeSize,
+        BackingDependencies dependencies, BoundProgram program)
     {
-        if (!IsRawUnionType(program, unionType) || writeSize <= 0
-            || (uint)writtenField
-                >= (uint)program.Structures[(int)unionType - 100].Fields.Length)
+        if (writeSize <= 0
+            || !TryGetFieldPathByteOffset(rootType, fieldPath, program,
+                out var rootWriteOffset))
         {
             return;
         }
-
-        var writeEnd = checked(writeOffset + writeSize);
-        dependencies.SetCopyOriginRoot(variable, CopyOriginFact.Unavailable());
-        dependencies.ClearCopyOriginFieldValues(variable,
-            StorageProjection.WholeObject);
-        dependencies.ClearBackingSources(variable);
-        dependencies.ClearReferenceTargets(variable);
-        dependencies.SetReferenceObligations(variable, EmptyBackingSources);
-        dependencies.SetReferenceBackingSources(variable, EmptyBackingSources);
-        dependencies.ClearNativePointerProvenance(variable);
-
-        var fields = program.Structures[(int)unionType - 100].Fields;
-        for (var field = 0; field < fields.Length; field++)
+        var segments = fieldPath.Segments;
+        for (var unionOwnerIndex = 0;
+            unionOwnerIndex < segments.Length;
+            unionOwnerIndex++)
         {
-            if (field == writtenField)
+            var unionType = segments[unionOwnerIndex].OwnerType;
+            if (!IsRawUnionType(program, unionType))
             {
                 continue;
             }
 
-            var candidate = fields[field];
-            var candidateEnd = checked(candidate.Offset + candidate.Size);
-            if (candidate.Size == 0 || candidate.Offset >= writeEnd
-                || writeOffset >= candidateEnd)
+            var unionOwnerPath = FieldPathPrefix(fieldPath,
+                unionOwnerIndex);
+            var unionOffset = 0;
+            if (!unionOwnerPath.Segments.IsEmpty
+                && !TryGetFieldPathByteOffset(rootType,
+                    unionOwnerPath, program, out unionOffset))
             {
-                continue;
+                throw Invalid();
+            }
+            if (unionOffset > rootWriteOffset)
+            {
+                throw Invalid();
             }
 
-            var path = default(FieldProjectionPath)
-                .Append(unionType, field);
-            var projection = StorageProjection.ForFieldPath(path);
-            dependencies.ClearCopyOriginFieldValues(variable, projection);
-            dependencies.ClearBackingFieldValues(variable, projection);
-            dependencies.ClearReferenceFieldValues(variable, projection);
-            dependencies.ClearNativePointerFieldValues(variable, projection);
+            var unionWriteOffset = rootWriteOffset - unionOffset;
+            var writtenAlternative = segments[unionOwnerIndex].Field;
+            var writeEnd = checked(unionWriteOffset + writeSize);
+            var unionFields = program.Structures[
+                (int)unionType - 100].Fields;
+            if ((uint)writtenAlternative >= (uint)unionFields.Length
+                || unionWriteOffset > program.Structures[
+                    (int)unionType - 100].Size
+                || writeSize > program.Structures[
+                    (int)unionType - 100].Size - unionWriteOffset)
+            {
+                throw Invalid();
+            }
+
+            dependencies.SetCopyOriginRoot(variable,
+                CopyOriginFact.Unavailable());
+            dependencies.ClearCopyOriginFieldValues(variable,
+                StorageProjection.WholeObject);
+            dependencies.ClearBackingSources(variable);
+            dependencies.ClearReferenceTargets(variable);
+            dependencies.SetReferenceObligations(variable,
+                EmptyBackingSources);
+            dependencies.SetReferenceBackingSources(variable,
+                EmptyBackingSources);
+            dependencies.ClearNativePointerAggregateProvenance(variable);
+
+            var wholeAlternativeWrite
+                = unionOwnerIndex == segments.Length - 1;
+            for (var field = 0; field < unionFields.Length; field++)
+            {
+                if (wholeAlternativeWrite && field == writtenAlternative)
+                {
+                    continue;
+                }
+
+                var candidate = unionFields[field];
+                var candidateEnd = checked(candidate.Offset
+                    + candidate.Size);
+                if (candidate.Size == 0
+                    || candidate.Offset >= writeEnd
+                    || unionWriteOffset >= candidateEnd)
+                {
+                    continue;
+                }
+
+                var path = unionOwnerPath.Append(unionType, field);
+                var projection = StorageProjection.ForFieldPath(path);
+                dependencies.ClearCopyOriginFieldValues(variable,
+                    projection);
+                dependencies.ClearBackingFieldValues(variable, projection);
+                dependencies.ClearReferenceFieldValues(variable, projection);
+                dependencies.InvalidateNativePointerFieldValues(variable,
+                    projection);
+            }
         }
     }
 
@@ -8139,7 +8207,7 @@ public static partial class SemanticVerifier
                     var initializedBytes
                         = InitializedPayloadBytesOfExpression(
                             fieldRead.Receiver, fieldRead.Receiver.Type,
-                            initialized, program);
+                            initialized, function, program);
                     if (rawUnionField.Offset < 0
                         || rawUnionField.Size < 0
                         || rawUnionField.Offset > initializedBytes.Length
@@ -8150,6 +8218,17 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid(fieldRead.Span);
                     }
+                }
+                if (IsNativePointerValue(fieldRead.Type, program)
+                    && initialized.Dependencies
+                        is BackingDependencies pointerFieldDependencies
+                    && NativePointerFieldValueInvalidatedOfExpression(
+                        fieldRead, fieldRead.Type,
+                        StorageProjection.WholeObject,
+                        pointerFieldDependencies, function, program,
+                        ref remaining, depth + 1))
+                {
+                    throw InvalidEffect(fieldRead.Span, "NativePointer");
                 }
                 if (IsUnique(program, fieldRead.Type))
                 {
@@ -10086,6 +10165,43 @@ public static partial class SemanticVerifier
             && program.Structures[index].IsUnion;
     }
 
+    private static bool CarriesRawUnionPayloadFacts(
+        BoundProgram program, PrimitiveType type)
+    {
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        pending.Push(type);
+        var carriesRawUnion = false;
+        while (pending.TryPop(out var current))
+        {
+            if (IsRawUnionType(program, current))
+            {
+                carriesRawUnion = true;
+                continue;
+            }
+            if (NativeFixedArrayContract.IsCarrier(current)
+                || ManagedClassTypes.IsClass(current))
+            {
+                return false;
+            }
+            if (!HasFields(program, current) || !visited.Add(current))
+            {
+                continue;
+            }
+
+            foreach (var field in Fields(program, current))
+            {
+                if (NativeFixedArrayContract.IsCarrier(field.Type))
+                {
+                    return false;
+                }
+                pending.Push(field.Type);
+            }
+        }
+
+        return carriesRawUnion;
+    }
+
     private static bool IsUnion(BoundProgram program, PrimitiveType type)
     {
         if (ManagedClassTypes.IsClass(type) || BoundEnumTypes.IsType(type)
@@ -10352,28 +10468,94 @@ public static partial class SemanticVerifier
         return GuaranteedInitializedPayloadBytes(type, program);
     }
 
+    private static bool TryGetFieldPathByteOffset(PrimitiveType rootType,
+        FieldProjectionPath fieldPath, BoundProgram program,
+        out int byteOffset)
+    {
+        byteOffset = 0;
+        var currentType = rootType;
+        ulong offset = 0;
+        foreach (var segment in fieldPath.Segments)
+        {
+            if (segment.OwnerType != currentType
+                || !HasFields(program, currentType)
+                || (uint)segment.Field
+                    >= (uint)Fields(program, currentType).Length)
+            {
+                return false;
+            }
+
+            var field = Fields(program, currentType)[segment.Field];
+            if (field.Offset < 0)
+            {
+                return false;
+            }
+            offset = checked(offset + (uint)field.Offset);
+            currentType = field.Type;
+        }
+
+        if (fieldPath.Segments.IsDefaultOrEmpty
+            || offset > int.MaxValue)
+        {
+            return false;
+        }
+
+        byteOffset = checked((int)offset);
+        return true;
+    }
+
     private static byte[] InitializedPayloadBytesOfExpression(
         BoundExpression expression, PrimitiveType type,
-        InitializationState initialized, BoundProgram program)
+        InitializationState initialized, BoundFunction function,
+        BoundProgram program)
     {
-        if (IsRawUnionType(program, type))
+        if (!CarriesRawUnionPayloadFacts(program, type))
         {
-            return expression switch
+            return GuaranteedInitializedPayloadBytes(type, program);
+        }
+
+        if (expression is BoundCall call
+            && IsRawUnionType(program, type)
+            && call.Type == type
+            && (uint)call.Function
+                < (uint)initialized.RawUnionReturnCoverageSummaries.Length
+            && initialized.RawUnionReturnCoverageSummaries[call.Function].Length
+                == ValueLayout.Size(type, program.Structures))
+        {
+            return [.. initialized.RawUnionReturnCoverageSummaries[
+                call.Function]];
+        }
+
+        if (expression is BoundRead read && read.Type == type
+            && initialized.TryGetRawUnionInitializedBytes(read.Variable,
+                out var readBytes))
+        {
+            return readBytes;
+        }
+        if (expression is BoundMove move && move.Type == type
+            && initialized.TryGetRawUnionInitializedBytes(move.Variable,
+                out var moveBytes))
+        {
+            return moveBytes;
+        }
+        if (expression is BoundFieldRead fieldRead
+            && fieldRead.Type == type
+            && TryGetFieldProjectionPath(fieldRead, function, program,
+                out var rootVariable, out var fieldPath)
+            && TryGetFieldPathByteOffset(
+                function.Variables[rootVariable].Type, fieldPath, program,
+                out var offset)
+            && initialized.TryGetRawUnionInitializedBytes(rootVariable,
+                out var rootBytes))
+        {
+            var size = ValueLayout.Size(type, program.Structures,
+                program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement);
+            if (size >= 0 && offset <= rootBytes.Length
+                && size <= rootBytes.Length - offset)
             {
-                BoundRead read when read.Type == type
-                    => initialized.GetRawUnionInitializedBytes(read.Variable),
-                BoundMove move when move.Type == type
-                    => initialized.GetRawUnionInitializedBytes(move.Variable),
-                BoundCall call when call.Type == type
-                    && (uint)call.Function
-                        < (uint)initialized.RawUnionReturnCoverageSummaries.Length
-                    && initialized.RawUnionReturnCoverageSummaries[
-                        call.Function].Length
-                            == ValueLayout.Size(type, program.Structures)
-                    => [.. initialized.RawUnionReturnCoverageSummaries[
-                        call.Function]],
-                _ => GuaranteedInitializedPayloadBytes(type, program),
-            };
+                return rootBytes.AsSpan(offset, size).ToArray();
+            }
         }
 
         return GuaranteedInitializedPayloadBytes(type, program);

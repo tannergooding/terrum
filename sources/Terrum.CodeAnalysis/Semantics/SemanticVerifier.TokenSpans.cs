@@ -950,16 +950,19 @@ public static partial class SemanticVerifier
     {
         internal HashSet<ProvenanceAnchor> Sources { get; }
         internal bool MayBeUnknown { get; set; }
+        internal bool IsInvalidated { get; set; }
         internal HashSet<ProvenanceAnchor> ExtentSources { get; }
         internal bool ExtentMayBeOpaque { get; set; }
         internal bool ExtentUnavailable { get; set; }
 
         internal NativePointerFieldValue(IReadOnlySet<ProvenanceAnchor> sources,
             bool mayBeUnknown, IReadOnlySet<ProvenanceAnchor>? extentSources = null,
-            bool extentMayBeOpaque = false, bool extentUnavailable = true)
+            bool extentMayBeOpaque = false, bool extentUnavailable = true,
+            bool isInvalidated = false)
         {
             Sources = [.. sources];
             MayBeUnknown = mayBeUnknown;
+            IsInvalidated = isInvalidated;
             ExtentSources = extentSources is null ? [] : [.. extentSources];
             ExtentMayBeOpaque = extentMayBeOpaque;
             ExtentUnavailable = extentUnavailable;
@@ -967,7 +970,7 @@ public static partial class SemanticVerifier
 
         internal NativePointerFieldValue Clone()
             => new(Sources, MayBeUnknown, ExtentSources,
-                ExtentMayBeOpaque, ExtentUnavailable);
+                ExtentMayBeOpaque, ExtentUnavailable, IsInvalidated);
     }
 
     private sealed class BackingFieldValue
@@ -2117,6 +2120,11 @@ public static partial class SemanticVerifier
                     if (otherValue.MayBeUnknown && !currentValue.MayBeUnknown)
                     {
                         currentValue.MayBeUnknown = true;
+                        changed = true;
+                    }
+                    if (otherValue.IsInvalidated && !currentValue.IsInvalidated)
+                    {
+                        currentValue.IsInvalidated = true;
                         changed = true;
                     }
                     var currentExtentCount = currentValue.ExtentSources.Count;
@@ -3415,6 +3423,17 @@ public static partial class SemanticVerifier
             ClearNativePointerFieldValues(slot);
         }
 
+        internal void ClearNativePointerAggregateProvenance(int slot)
+        {
+            if ((uint)slot >= (uint)NativePointerSources.Length)
+            {
+                throw Invalid();
+            }
+            NativePointerSources[slot] = null;
+            NativePointerMayBeUnknown[slot] = false;
+            ClearNativePointerExtentProvenance(slot);
+        }
+
         internal void MarkAllNativePointerProvenanceUnknown()
         {
             Array.Fill(NativePointerMayBeUnknown, true);
@@ -3478,7 +3497,7 @@ public static partial class SemanticVerifier
 
         internal void SetNativePointerFieldValue(int slot, StorageProjection projection,
             IReadOnlySet<ProvenanceAnchor> sources, bool mayBeUnknown,
-            NativePointerExtentFact extentFact)
+            NativePointerExtentFact extentFact, bool isInvalidated = false)
         {
             if ((uint)slot >= (uint)StorageInstances.Length
                 || !IsNativePointerFieldValueProjection(slot, projection)
@@ -3492,7 +3511,8 @@ public static partial class SemanticVerifier
                 var key = new StorageKey(FunctionActivation, slot, instance, projection);
                 NativePointerFieldValues[key] = new NativePointerFieldValue(
                     sources, mayBeUnknown, extentFact.Sources,
-                    extentFact.MayBeOpaque, extentFact.IsUnavailable);
+                    extentFact.MayBeOpaque, extentFact.IsUnavailable,
+                    isInvalidated);
             }
         }
 
@@ -3706,6 +3726,91 @@ public static partial class SemanticVerifier
             }
         }
 
+        internal void InvalidateNativePointerFieldValues(
+            int slot, StorageProjection prefix)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || (prefix.Kind != StorageProjectionKind.WholeObject
+                    && prefix.Kind != StorageProjectionKind.UnknownElement
+                    && !IsNativePointerFieldValueProjection(slot, prefix)))
+            {
+                throw Invalid();
+            }
+
+            foreach (var (key, value) in NativePointerFieldValues)
+            {
+                if (key.Site != slot
+                    || !NativePointerFieldProjectionOverlaps(
+                        slot, prefix, key.Projection))
+                {
+                    continue;
+                }
+
+                value.Sources.Clear();
+                value.MayBeUnknown = true;
+                value.IsInvalidated = true;
+                value.ExtentSources.Clear();
+                value.ExtentMayBeOpaque = false;
+                value.ExtentUnavailable = true;
+            }
+        }
+
+        internal bool NativePointerFieldValueIsInvalidated(
+            int slot, StorageProjection projection)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || !IsNativePointerFieldValueProjection(slot, projection))
+            {
+                throw Invalid();
+            }
+
+            foreach (var instance in StorageInstances[slot])
+            {
+                if (projection.ProjectionPath.IsConcrete)
+                {
+                    var exactKey = new StorageKey(FunctionActivation, slot,
+                        instance, projection);
+                    if (NativePointerFieldValues.TryGetValue(
+                        exactKey, out var exactValue)
+                        && exactValue.IsInvalidated)
+                    {
+                        return true;
+                    }
+                    continue;
+                }
+
+                foreach (var (key, value) in NativePointerFieldValues)
+                {
+                    if (key.Activation == FunctionActivation
+                        && key.Site == slot && key.Instance == instance
+                        && projection.ProjectionPath.Matches(
+                            key.Projection.ProjectionPath))
+                    {
+                        if (value.IsInvalidated)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        internal bool NativePointerCallResultIsInvalidated(
+            BoundExpression expression, StorageProjection projection)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+
+            return NativePointerCallResults.TryGetValue(
+                    expression, out var values)
+                && values.TryGetValue(projection, out var value)
+                && value.IsInvalidated;
+        }
+
         private bool NativePointerFieldValuesEqualForSlot(
             int slot, BackingDependencies other)
         {
@@ -3717,6 +3822,7 @@ public static partial class SemanticVerifier
                 }
                 if (!other.NativePointerFieldValues.TryGetValue(key, out var otherValue)
                     || value.MayBeUnknown != otherValue.MayBeUnknown
+                    || value.IsInvalidated != otherValue.IsInvalidated
                     || !value.Sources.SetEquals(otherValue.Sources)
                     || value.ExtentMayBeOpaque != otherValue.ExtentMayBeOpaque
                     || value.ExtentUnavailable != otherValue.ExtentUnavailable
@@ -6465,14 +6571,67 @@ public static partial class SemanticVerifier
             var extentFact = NativePointerExtentValueFactsOfExpression(
                 expression, valueType, leaf.Projection, facts, function, program,
                 ref remaining, depth + 1);
+            var isInvalidated = NativePointerFieldValueInvalidatedOfExpression(
+                expression, valueType, leaf.Projection, facts, function,
+                program, ref remaining, depth + 1);
             if (!result.TryAdd(projection,
                 new NativePointerFieldValue(sources, mayBeUnknown,
                     extentFact.Sources, extentFact.MayBeOpaque,
-                    extentFact.IsUnavailable)))
+                    extentFact.IsUnavailable, isInvalidated)))
             {
                 throw Invalid(expression.Span);
             }
         }
+    }
+
+    private static bool NativePointerFieldValueInvalidatedOfExpression(
+        BoundExpression expression, PrimitiveType valueType,
+        StorageProjection relativeProjection, BackingDependencies facts,
+        BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (expression is null || expression.Type != valueType)
+        {
+            throw Invalid(expression?.Span ?? default);
+        }
+
+        switch (expression)
+        {
+            case BoundUnsafeExpression unsafeExpression:
+                return NativePointerFieldValueInvalidatedOfExpression(
+                    unsafeExpression.Expression, valueType,
+                    relativeProjection, facts, function, program,
+                    ref remaining, depth + 1);
+            case BoundCall call:
+                return facts.NativePointerCallResultIsInvalidated(
+                    call, relativeProjection);
+            case BoundFieldMove move:
+                return facts.NativePointerCallResultIsInvalidated(
+                    move, relativeProjection);
+            case BoundConditional conditional
+                when CarriesNativePointer(valueType, program):
+                return NativePointerFieldValueInvalidatedOfExpression(
+                        conditional.WhenTrue, valueType,
+                        relativeProjection, facts, function, program,
+                        ref remaining, depth + 1)
+                    || NativePointerFieldValueInvalidatedOfExpression(
+                        conditional.WhenFalse, valueType,
+                        relativeProjection, facts, function, program,
+                        ref remaining, depth + 1);
+        }
+
+        if (TryGetNativePointerFieldPlace(expression, function, program,
+            out var variable, out var sourcePrefix))
+        {
+            var sourceProjection = StorageProjection.Combine(
+                sourcePrefix, relativeProjection);
+            return IsNativePointerFieldProjection(sourceProjection)
+                && facts.NativePointerFieldValueIsInvalidated(
+                    variable, sourceProjection);
+        }
+
+        return false;
     }
 
     private static Dictionary<StorageProjection, BackingFieldValue>?
@@ -8641,7 +8800,8 @@ public static partial class SemanticVerifier
             facts.SetNativePointerFieldValue(destination, destinationProjection,
                 value.Sources, value.MayBeUnknown,
                 new NativePointerExtentFact(value.ExtentSources,
-                    value.ExtentMayBeOpaque, value.ExtentUnavailable));
+                    value.ExtentMayBeOpaque, value.ExtentUnavailable),
+                value.IsInvalidated);
         }
     }
 

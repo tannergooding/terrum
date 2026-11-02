@@ -188,6 +188,273 @@ internal sealed class UnionLayoutTests
     }
 
     [Test]
+    public void RawUnionNestedFieldStoresCarryPayloadFacts()
+    {
+        const string prefix = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Sparse {
+                public uint8 First;
+                public uint32 Last;
+                public Sparse(uint8 first, uint32 last) {
+                    First = first;
+                    Last = last;
+                }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint64 Wide;
+                public mut Sparse Padded;
+                public RawWord(uint64 value) {
+                    unsafe { Wide = value; }
+                }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Envelope {
+                public mut RawWord Word;
+                public Envelope(RawWord word) {
+                    Word = word;
+                }
+            }
+            """;
+
+        var constructionOnly = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public int32 ConstructEnvelope() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    return 0;
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(constructionOnly.HasErrors, Is.False,
+            string.Join(Environment.NewLine, constructionOnly.Diagnostics));
+
+        var storedWideOnly = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public int32 StoreNestedWide() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe { value.Word.Wide = 7; }
+                    return 0;
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(storedWideOnly.HasErrors, Is.False,
+            string.Join(Environment.NewLine, storedWideOnly.Diagnostics));
+
+        var storedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 StoreAndReadNestedWide() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe {
+                        value.Word.Wide = 7;
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(storedWide.HasErrors, Is.False,
+            string.Join(Environment.NewLine, storedWide.Diagnostics));
+
+        var narrowThenWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterNarrow() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe {
+                        value.Word.Padded = new Sparse(1, 2);
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(narrowThenWide.HasErrors, Is.True,
+            string.Join(Environment.NewLine, narrowThenWide.Diagnostics));
+
+        var copiedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 CopyNestedWideBeforeOverlappingStore() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe { value.Word.Wide = 7; }
+                    mut Envelope copy = value;
+                    unsafe {
+                        value.Word.Padded = new Sparse(1, 2);
+                        return copy.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(copiedWide.HasErrors, Is.False,
+            string.Join(Environment.NewLine, copiedWide.Diagnostics));
+    }
+
+    [Test]
+    public void RawUnionNestedFieldStoreInvalidatesPointerValidity()
+    {
+        const string prefix = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawPointer {
+                public mut ptr<int32> Pointer;
+                public mut uint64 Bits;
+                public RawPointer(uint64 bits) {
+                    unsafe { Bits = bits; }
+                }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Envelope {
+                public mut RawPointer Value;
+                public Envelope(RawPointer value) {
+                    Value = value;
+                }
+            }
+            """;
+
+        var preserved = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public unsafe int32 ReadNestedPointer() {
+                    int32 value = 42;
+                    mut Envelope envelope
+                        = new Envelope(new RawPointer(0));
+                    unsafe {
+                        envelope.Value.Pointer = &value;
+                        return *envelope.Value.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+
+        var invalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public unsafe int32 ReadNestedPointerAfterOverwrite() {
+                    int32 value = 42;
+                    mut Envelope envelope
+                        = new Envelope(new RawPointer(0));
+                    unsafe {
+                        envelope.Value.Pointer = &value;
+                        envelope.Value.Bits = 0;
+                        return *envelope.Value.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer",
+                    StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+
+        var copiedInvalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public unsafe int32 ReadCopiedNestedPointerAfterOverwrite() {
+                    int32 value = 42;
+                    mut Envelope envelope
+                        = new Envelope(new RawPointer(0));
+                    unsafe {
+                        envelope.Value.Pointer = &value;
+                        envelope.Value.Bits = 0;
+                        mut Envelope copy = envelope;
+                        return *copy.Value.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(copiedInvalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                copiedInvalidated.Diagnostics));
+        Assert.That(copiedInvalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer",
+                    StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine,
+                copiedInvalidated.Diagnostics));
+
+        var restored = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public unsafe int32 ReadNestedPointerAfterRestore() {
+                    int32 value = 42;
+                    mut Envelope envelope
+                        = new Envelope(new RawPointer(0));
+                    unsafe {
+                        envelope.Value.Pointer = &value;
+                        envelope.Value.Bits = 0;
+                        envelope.Value.Pointer = &value;
+                        return *envelope.Value.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(restored.HasErrors, Is.False,
+            string.Join(Environment.NewLine, restored.Diagnostics));
+
+        var maybeInvalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public unsafe int32 ReadNestedPointerAfterConditionalOverwrite(
+                    bool overwrite) {
+                    int32 value = 42;
+                    mut Envelope envelope
+                        = new Envelope(new RawPointer(0));
+                    unsafe {
+                        envelope.Value.Pointer = &value;
+                        if (overwrite) {
+                            envelope.Value.Bits = 0;
+                        }
+                        return *envelope.Value.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(maybeInvalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                maybeInvalidated.Diagnostics));
+        Assert.That(maybeInvalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer",
+                    StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine,
+                maybeInvalidated.Diagnostics));
+
+        const string siblingPrefix = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawPointer {
+                public mut ptr<int32> Pointer;
+                public mut uint64 Bits;
+                public RawPointer(uint64 bits) {
+                    unsafe { Bits = bits; }
+                }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Envelope {
+                public mut RawPointer Value;
+                public mut RawPointer Other;
+                public Envelope(RawPointer value, RawPointer other) {
+                    Value = value;
+                    Other = other;
+                }
+            }
+            """;
+        var unrelatedPointer = Compilation.CreateLibrary(
+            SyntaxTree.Parse(siblingPrefix + """
+                public unsafe int32 ReadUnrelatedPointerAfterOverwrite() {
+                    int32 value = 42;
+                    int32 other = 17;
+                    mut Envelope envelope = new Envelope(
+                        new RawPointer(0), new RawPointer(0));
+                    unsafe {
+                        envelope.Value.Pointer = &value;
+                        envelope.Other.Pointer = &other;
+                        envelope.Value.Bits = 0;
+                        return *envelope.Other.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(unrelatedPointer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                unrelatedPointer.Diagnostics));
+    }
+
+    [Test]
     public void RawUnionAlternativeStoreInvalidatesPaddingCoverage()
     {
         var partialCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -265,11 +532,14 @@ internal sealed class UnionLayoutTests
                 public struct RawPointer {
                     public mut ptr<int32> Pointer;
                     public mut uint64 Bits;
+                    public RawPointer(uint64 bits) {
+                        unsafe { Bits = bits; }
+                    }
                 }
 
                 public unsafe int32 ReadPointer() {
-                    mut int32 value = 42;
-                    init mut RawPointer rawValue;
+                    int32 value = 42;
+                    mut RawPointer rawValue = new RawPointer(0);
                     unsafe {
                         rawValue.Pointer = &value;
                         return *rawValue.Pointer;
@@ -287,11 +557,14 @@ internal sealed class UnionLayoutTests
                 public struct RawPointer {
                     public mut ptr<int32> Pointer;
                     public mut uint64 Bits;
+                    public RawPointer(uint64 bits) {
+                        unsafe { Bits = bits; }
+                    }
                 }
 
                 public unsafe int32 ReadAfterOverwrite() {
-                    mut int32 value = 42;
-                    init mut RawPointer rawValue;
+                    int32 value = 42;
+                    mut RawPointer rawValue = new RawPointer(0);
                     unsafe {
                         rawValue.Pointer = &value;
                         rawValue.Bits = 0;
@@ -300,6 +573,12 @@ internal sealed class UnionLayoutTests
                 }
                 """), BoundRuntimePolicy.FailFast);
         Assert.That(invalidatedCompilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                invalidatedCompilation.Diagnostics));
+        Assert.That(invalidatedCompilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer",
+                    StringComparison.Ordinal)), Is.True,
             string.Join(Environment.NewLine,
                 invalidatedCompilation.Diagnostics));
     }
