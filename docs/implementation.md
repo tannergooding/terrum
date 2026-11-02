@@ -697,8 +697,12 @@ dynamic `0 <= i < N` and `Q <= N-i`,
 initialization/publication, actual address/alignment execution and source-free
 reconstruction/remapping remain open outside the selected nested scalar-read
 and NativeParameter cases. The final private/A2 nested-address selection
-passed 38/38 with zero skips at
-`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-11-01_18_55_48_net11.0.trx`;
+passed 41/41 with zero skips at
+`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-11-01_19_04_41_net11.0.trx`;
+successful recursive leaf calls execute exactly once in source order through
+the private reader, JIT and AOT. The private type-closure boundary accepts 64
+nested single-element dimensions (p=63) and rejects 65; source syntax rejects
+128 dimensions with `TRM1004`.
 its bounded private address-only backing cases do not discharge the wider A2
 or overall source/runtime gates.
 The `MessageBoxW` sample is authored using the same direct import form as any

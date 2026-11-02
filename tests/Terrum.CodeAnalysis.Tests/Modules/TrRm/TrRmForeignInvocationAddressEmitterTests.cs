@@ -3763,6 +3763,69 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             diagnostic.Code == "TRM1004"), Is.True);
     }
 
+    [Test]
+    public void SourceDepthRejectsHighNestedAddressPath()
+    {
+        var source = CreateDeepPrivateNestedAddressSource(127);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM1004"), Is.True);
+    }
+
+    [Test]
+    public async Task PrivateRevision101MaximumNestedTypeClosureExecutes()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(CreateDeepPrivateNestedAddressSource(64)),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            compilation.Program!, ["Exercise"]);
+        _ = FindPrivateStorageAddressWithAncestorCount(producer, 63,
+            expectedElementCount: 1);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(77));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        await AssertPrivateNestedBackingAotAsync(
+            ModuleCompiler.Link(consumer, producer),
+            "private-nested-depth-64", 77).ConfigureAwait(true);
+    }
+
+    [Test]
+    public void PrivateRevision101RejectsNestedTypeClosurePastDepth64()
+    {
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(CreateDeepPrivateNestedAddressSource(65)),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compilation.Diagnostics));
+
+        var exception = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(compilation.Program!,
+                ["Exercise"]));
+        Assert.That(exception!.Message,
+            Does.Contain("fixed-array type closure"));
+    }
+
     private static string CreateDeepPrivateNestedAddressSource(int dimensions)
     {
         var arrayType = "int32";
@@ -3870,7 +3933,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     private static int FindPrivateStorageAddressWithAncestorCount(
-        byte[] artifact, int ancestorCount)
+        byte[] artifact, int ancestorCount,
+        ulong expectedElementCount = 2)
     {
         for (var offset = sizeof(int) * 2;
             offset <= artifact.Length - 54; offset++)
@@ -3880,7 +3944,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     artifact.AsSpan(offset + 1, sizeof(int)))
                     == (int)PrimitiveType.NativeStorageAddress
                 && BinaryPrimitives.ReadUInt64LittleEndian(
-                    artifact.AsSpan(offset + 25, sizeof(ulong))) == 2
+                    artifact.AsSpan(offset + 25, sizeof(ulong)))
+                    == expectedElementCount
                 && BinaryPrimitives.ReadUInt64LittleEndian(
                     artifact.AsSpan(offset + 33, sizeof(ulong)))
                     == sizeof(int)
