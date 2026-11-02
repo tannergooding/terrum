@@ -6016,8 +6016,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var compilerPath = typeof(TrRmExecutableCompiler).Assembly.Location;
         var importPath = Path.Combine(Environment.SystemDirectory,
             "kernel32.dll");
+        var compilerHash = Convert.ToHexString(SHA256.HashData(
+            await File.ReadAllBytesAsync(compilerPath).ConfigureAwait(true)));
+        var importHash = Convert.ToHexString(SHA256.HashData(
+            await File.ReadAllBytesAsync(importPath).ConfigureAwait(true)));
         TestContext.WriteLine(
-            $"A2 nested source-free runtime input: scenario={scenario}; schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; native-library={importPath}; native-library-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
+            $"A2 nested source-free runtime input: scenario={scenario}; schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={compilerHash}; native-library={importPath}; native-library-sha256={importHash}.");
         if (runJit)
         {
             var jitResult = NativeJit.Execute(loaded,
