@@ -1,7 +1,9 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Terrum.CodeAnalysis.Semantics;
@@ -32,8 +34,8 @@ public static partial class TrRmExecutableCompiler
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
-        if (program.EntryPoint != -1 || !program.Functions.IsEmpty
-            || program.Structures.IsEmpty             || !program.Classes.IsEmpty
+        if (program.EntryPoint != -1 || program.Structures.IsEmpty
+            || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
             || !program.CheckedReferenceTypes.IsEmpty
@@ -51,6 +53,13 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported(
                 "A2 Copy declaration emission requires a fail-fast library of supported struct declarations.");
+        }
+        if (!program.Functions.IsEmpty
+            && schema
+                != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
+        {
+            throw Unsupported(
+                "Only the exact A2R1 schema publishes verified function return coverage.");
         }
 
         ValidateA2SourceTypeDeclarationMap(program);
@@ -302,6 +311,107 @@ public static partial class TrRmExecutableCompiler
             _ = GetArrayTypeSpecRow(arrayIndex);
         }
 
+        var methodSignatureRows
+            = new List<TrRmMethodSigRow>(program.Functions.Length);
+        var parameterRows = new List<TrRmParamRow>();
+        var methodNameRows = new int[program.Functions.Length];
+        var methodContractFirst = new int[program.Functions.Length];
+        var methodContractCount = new int[program.Functions.Length];
+        var contractRows = new List<TrRmContractRow>();
+        var hasRawUnionReturnCoverage = false;
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length;
+            functionIndex++)
+        {
+            var function = program.Functions[functionIndex];
+            var methodSigRow = functionIndex + 1;
+            var parameterFirst = function.ParameterCount == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < function.ParameterCount; ordinal++)
+            {
+                var parameter = function.Variables[ordinal];
+                parameterRows.Add(new TrRmParamRow(methodSigRow, ordinal,
+                    GetFieldTypeSpecRef(parameter.Type), 0));
+            }
+
+            methodSignatureRows.Add(new TrRmMethodSigRow(
+                GetFieldTypeSpecRef(function.ReturnType), 0,
+                parameterFirst, function.ParameterCount, 0, 0));
+            methodNameRows[functionIndex] = GetStringRow(function.Name);
+            if (function.RawUnionReturnCoverage.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+            if (!SemanticVerifier.IsRawUnionType(program,
+                    function.ReturnType))
+            {
+                throw Unsupported(
+                    "A Raw Union ReturnCoverage summary is attached to a non-Union result.");
+            }
+
+            var initializedBytes = function.RawUnionReturnCoverage;
+            var guaranteedBytes
+                = SemanticVerifier.RawUnionGuaranteedInitializedPayloadBytes(
+                    function.ReturnType, program);
+            if (initializedBytes.Length != guaranteedBytes.Length)
+            {
+                throw Unsupported(
+                    "A Raw Union ReturnCoverage summary does not match the result layout.");
+            }
+
+            var strongerThanGuarantee = false;
+            for (var offset = 0; offset < initializedBytes.Length; offset++)
+            {
+                strongerThanGuarantee |= initializedBytes[offset] != 0
+                    && guaranteedBytes[offset] == 0;
+            }
+            if (!strongerThanGuarantee)
+            {
+                continue;
+            }
+
+            methodContractFirst[functionIndex] = contractRows.Count + 1;
+            var owner = 0x1600_0000u
+                | checked((uint)(functionIndex + 1));
+            contractRows.Add(new TrRmContractRow(owner, 0x0F,
+                CreateReturnCoveragePayload(initializedBytes.AsSpan())));
+            methodContractCount[functionIndex] = 1;
+            hasRawUnionReturnCoverage = true;
+        }
+
+        var methodRows = new List<TrRmMethodDefRow>(
+            program.Functions.Length);
+        var exportKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var export in exportRows)
+        {
+            _ = exportKeys.Add(stringRows[export.ExportKeyStringRow - 1].Text);
+        }
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length;
+            functionIndex++)
+        {
+            var function = program.Functions[functionIndex];
+            var methodRow = functionIndex + 1;
+            var visibility = function.IsPrivate ? 0u
+                : function.IsInternal ? 1u : 2u;
+            methodRows.Add(new TrRmMethodDefRow(0,
+                methodNameRows[functionIndex], functionIndex + 1,
+                visibility, methodContractFirst[functionIndex],
+                methodContractCount[functionIndex], BodyRow: 0));
+            if (visibility == 2)
+            {
+                if (!exportKeys.Add(function.Name))
+                {
+                    throw Unsupported(
+                        "A2R1 declaration emission requires unique public MethodDef export names.");
+                }
+
+                exportRows.Add(new TrRmExportRow(
+                    0x1600_0000u | checked((uint)methodRow),
+                    methodNameRows[functionIndex]));
+            }
+        }
+
         var featureRows = new List<TrRmFeatureRow>();
         if (hasCopyEvidence)
         {
@@ -314,6 +424,14 @@ public static partial class TrRmExecutableCompiler
             {
                 featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
             }
+        }
+        if (hasRawUnionReturnCoverage)
+        {
+            if (!featureRows.Contains(TrRmFeatureRow.RootlessNativeValues))
+            {
+                featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
+            }
+            featureRows.Add(TrRmFeatureRow.RawUnionValueCoverageCandidate);
         }
         var featureBytes = featureRows.Count == 0
             ? [] : TrRmFeatureTableWriter.Encode(featureRows, schema);
@@ -328,10 +446,11 @@ public static partial class TrRmExecutableCompiler
                 0, 0, 1, 1, 1, 1,
                 FeatureFirst: featureRows.Count == 0 ? 0 : 1,
                 FeatureCount: featureRows.Count),
-        ], strings, typeImportPlan.ModuleRefs.Count, typeDefCount, 0, 0,
-            featureRows.Count);
+        ], strings, typeImportPlan.ModuleRefs.Count, typeDefCount,
+            methodRows.Count, 0, featureRows.Count);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            typeImportPlan.ModuleRefs.Count, typeDefCount, 0, 0,
+            typeImportPlan.ModuleRefs.Count, typeDefCount,
+            methodRows.Count, 0,
             featureRows.Count);
         var moduleRefBytes = typeImportPlan.ModuleRefs.Count == 0 ? []
             : TrRmModuleRefTableWriter.Encode(typeImportPlan.ModuleRefs,
@@ -339,15 +458,18 @@ public static partial class TrRmExecutableCompiler
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes,
             typeImportPlan.ModuleRefs.Count, strings, modules);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeRows,
-            typeDefCount, typeImportPlan.Imports.Count, 0, 0, schema);
+            typeDefCount, typeImportPlan.Imports.Count, 0, 0, schema,
+            methodDefCount: methodRows.Count);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
             typeRows.Count, typeDefCount, typeImportPlan.Imports.Count, 0, 0,
-            schema);
+            schema, methodDefCount: methodRows.Count);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
-            strings, modules, fieldRows.Count, 0, layoutRows.Count, 0,
+            strings, modules, fieldRows.Count, 0, layoutRows.Count,
+            contractRows.Count,
             schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
-            strings, modules, fieldRows.Count, 0, layoutRows.Count, 0,
+            strings, modules, fieldRows.Count, 0, layoutRows.Count,
+            contractRows.Count,
             schema);
         var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
             typeDefs, typeSpecs);
@@ -361,6 +483,32 @@ public static partial class TrRmExecutableCompiler
             typeImportPlan.Imports.Count, strings, moduleRefs, typeDefs,
             default, default, default, default, fields, features, modules,
             schema);
+        var methodSignatureBytes = methodSignatureRows.Count == 0 ? []
+            : TrRmMethodSigTableWriter.Encode(methodSignatureRows, typeSpecs,
+                parameterRows.Count, 0);
+        var signatures = methodSignatureRows.Count == 0
+            ? default
+            : new TrRmMethodSigTableReader(methodSignatureBytes,
+                methodSignatureRows.Count, typeSpecs, parameterRows.Count, 0);
+        var parameterBytes = parameterRows.Count == 0 ? []
+            : TrRmParamTableWriter.Encode(parameterRows, signatures, typeSpecs,
+                schema);
+        var parameters = parameterRows.Count == 0
+            ? default
+            : new TrRmParamTableReader(parameterBytes, parameterRows.Count,
+                signatures, typeSpecs, schema);
+        var methodBytes = methodRows.Count == 0 ? []
+            : TrRmMethodDefTableWriter.Encode(methodRows, strings, modules,
+                typeDefs, signatures, contractRows.Count, bodyCount: 0);
+        var methods = methodRows.Count == 0
+            ? default
+            : new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
+                strings, modules, typeDefs, signatures, contractRows.Count, 0);
+        var contractBytes = contractRows.Count == 0 ? []
+            : TrRmContractTableWriter.EncodeForeignInvocationDraft(
+                contractRows, typeDefs, methods, signatures, parameters,
+                typeSpecs, features, modules, predicateGraphCount: 0,
+                schema: schema);
         var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(
                 TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
@@ -377,7 +525,7 @@ public static partial class TrRmExecutableCompiler
             layoutFieldRows, layouts, typeDefs, fields);
         var exportBytes = exportRows.Count == 0 ? []
             : TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
-                default, default, imports, default, default, default,
+                methods, default, imports, default, default, fields,
                 features, modules, schema);
         var sections = new List<TrRmSection>
         {
@@ -391,6 +539,23 @@ public static partial class TrRmExecutableCompiler
                 layoutFieldBytes),
             new(0x0048, 0, 1, targetProfileBytes),
         };
+        if (methodRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0016, 0,
+                (uint)methodRows.Count, methodBytes));
+            sections.Add(new TrRmSection(0x0017, 0,
+                (uint)methodSignatureRows.Count, methodSignatureBytes));
+        }
+        if (parameterRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                (uint)parameterRows.Count, parameterBytes));
+        }
+        if (contractRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001B, 0,
+                (uint)contractRows.Count, contractBytes));
+        }
         if (exportRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x001D, 0,
@@ -601,6 +766,53 @@ public static partial class TrRmExecutableCompiler
 
         ValidateA2SourceTypeExportClosure(program, selectedStructures);
         return rows;
+    }
+
+    private static byte[] CreateReturnCoveragePayload(
+        ReadOnlySpan<byte> initializedBytes)
+    {
+        var ranges = new List<(int Offset, int Length)>();
+        var offset = 0;
+        while (offset < initializedBytes.Length)
+        {
+            if (initializedBytes[offset] == 0)
+            {
+                offset++;
+                continue;
+            }
+
+            var start = offset;
+            do
+            {
+                offset++;
+            }
+            while (offset < initializedBytes.Length
+                && initializedBytes[offset] != 0);
+            ranges.Add((start, offset - start));
+        }
+
+        if (ranges.Count == 0)
+        {
+            throw new InvalidDataException(
+                "A Raw Union ReturnCoverage summary contains no initialized bytes.");
+        }
+
+        var result = new byte[checked(8 + (ranges.Count * 20))];
+        BinaryPrimitives.WriteUInt32LittleEndian(result, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(4),
+            checked((uint)ranges.Count));
+        var rowOffset = 8;
+        foreach (var (rangeOffset, rangeLength) in ranges)
+        {
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                result.AsSpan(rowOffset), checked((ulong)rangeOffset));
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                result.AsSpan(rowOffset + sizeof(ulong)),
+                checked((ulong)rangeLength));
+            rowOffset += 20;
+        }
+
+        return result;
     }
 
     private static List<TrRmExportRow> CreateA2RetainedSourceTypeExportRows(

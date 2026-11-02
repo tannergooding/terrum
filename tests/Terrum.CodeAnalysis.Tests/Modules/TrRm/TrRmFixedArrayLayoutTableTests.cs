@@ -153,6 +153,114 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     public void StandardA2R1SourceFreeRoundTripsRawUnionArrayFields()
         => VerifyRawUnionArrayTypeLibrary(A2R1SchemaIdentity);
 
+    [Test]
+    public void StandardA2R1EmitsVerifiedRawUnionReturnCoverage()
+    {
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+
+            public uint64 ObserveWide() {
+                mut RawWord value = MakeWide();
+                unsafe { return value.Wide; }
+            }
+
+            public RawWord MakeWide() {
+                init mut RawWord value;
+                unsafe { value.Wide = 7; }
+                return value;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "raw-union-return-provider",
+            A2R1SchemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                        artifact));
+        var makeWideMethod = 0;
+        var observeWideMethod = 0;
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            switch (tables.Methods.GetName(method))
+            {
+                case "MakeWide":
+                    makeWideMethod = method;
+                    break;
+                case "ObserveWide":
+                    observeWideMethod = method;
+                    break;
+            }
+        }
+
+        Assert.That(makeWideMethod, Is.GreaterThan(0));
+        Assert.That(observeWideMethod, Is.GreaterThan(0));
+        Assert.That(tables.Methods.GetBodyRow(makeWideMethod), Is.Zero);
+        var coverage = tables.Contracts.GetReturnCoverageContracts(
+            makeWideMethod);
+        Assert.That(coverage, Has.Length.EqualTo(1));
+        Assert.That(coverage[0].TargetProfileRow, Is.EqualTo(1));
+        Assert.That(coverage[0].Regions, Has.Length.EqualTo(1));
+        Assert.That(coverage[0].Regions[0].Offset, Is.Zero);
+        Assert.That(coverage[0].Regions[0].Length, Is.EqualTo(8));
+        Assert.That(tables.Contracts.GetReturnCoverageContracts(
+            observeWideMethod), Is.Empty);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.RawUnionValueCoverageFeatureId,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft),
+            Is.True);
+    }
+
+    [Test]
+    public void StandardA2R1OmitsReturnCoverageForTheTypeGuaranteeAlone()
+    {
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+
+            public RawWord MakeNarrow() {
+                init mut RawWord value;
+                unsafe { value.Narrow = 7; }
+                return value;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "raw-union-g-only-provider",
+            A2R1SchemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                        artifact));
+        Assert.That(tables.Methods.Count, Is.EqualTo(1));
+        Assert.That(tables.Contracts.GetReturnCoverageContracts(1), Is.Empty);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.RawUnionValueCoverageFeatureId,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft),
+            Is.False);
+    }
+
     private static void VerifyRawUnionArrayTypeLibrary(string schemaIdentity)
     {
         const string moduleIdentity = "a2-raw-union-array-types";
@@ -194,14 +302,35 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             [Blittable]
             [Layout(LayoutKind.Union)]
             public struct PayloadUnion {
-                public uint64 Whole;
-                public [Sparse; 2] Parts;
+                public mut uint64 Whole;
+                public mut [Sparse; 2] Parts;
             }
 
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct PayloadUnionHolder {
                 public PayloadUnion Value;
+            }
+
+            public void UsePayloadArray() {
+                init mut [PayloadUnion; 10] values;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct DensePayloadUnion {
+                public DensePayload Whole;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct DensePayload {
+                public uint64 Low;
+                public uint64 High;
+            }
+
+            public void UseDensePayloadArray() {
+                init mut [DensePayloadUnion; 9] values;
             }
 
             [Blittable]
@@ -222,8 +351,9 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
 
+        var typeLibraryProgram = program with { Functions = [] };
         var artifact = TrRmExecutableCompiler.EmitStandard(
-            program, moduleIdentity, schemaIdentity, 1);
+            typeLibraryProgram, moduleIdentity, schemaIdentity, 1);
         var isA2R1 = StringComparer.Ordinal.Equals(schemaIdentity,
             A2R1SchemaIdentity);
         var tables = isA2R1
@@ -249,7 +379,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var rawWordLayout = tables.Layouts.GetLayoutForProfile(rawWordRow, 1);
         Assert.That(tables.Layouts.GetLayoutKind(rawWordLayout),
             Is.EqualTo(2));
-        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(5));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(7));
         if (isA2R1)
         {
             var envelopeTypeDef = 0;
@@ -445,6 +575,75 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                             new TrRmReturnCoverageRepetition(9, 1),
                         ]))),
                 Is.True);
+
+            var largePayloadArrayTypeSpecRef = 0u;
+            for (var typeSpecRow = 1;
+                typeSpecRow <= tables.TypeSpecs.Count;
+                typeSpecRow++)
+            {
+                if (tables.TypeSpecs.TryGetFixedInlineArray(
+                        (uint)typeSpecRow, out _, out var count)
+                    && count == 9)
+                {
+                    largePayloadArrayTypeSpecRef = (uint)typeSpecRow;
+                    break;
+                }
+            }
+            Assert.That(largePayloadArrayTypeSpecRef, Is.GreaterThan(0));
+            var largePayloadArrayGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        largePayloadArrayTypeSpecRef, 1);
+            Assert.That(largePayloadArrayGeometry.Size, Is.EqualTo(144));
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    largePayloadArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 129, []))),
+                Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    largePayloadArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 145, []))),
+                Is.False);
+
+            var sparsePayloadArrayTypeSpecRef = 0u;
+            for (var typeSpecRow = 1;
+                typeSpecRow <= tables.TypeSpecs.Count;
+                typeSpecRow++)
+            {
+                if (tables.TypeSpecs.TryGetFixedInlineArray(
+                        (uint)typeSpecRow, out _, out var count)
+                    && count == 10)
+                {
+                    sparsePayloadArrayTypeSpecRef = (uint)typeSpecRow;
+                    break;
+                }
+            }
+            Assert.That(sparsePayloadArrayTypeSpecRef, Is.GreaterThan(0));
+            var sparsePayloadArrayGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        sparsePayloadArrayTypeSpecRef, 1);
+            Assert.That(sparsePayloadArrayGeometry.Size, Is.EqualTo(160));
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    sparsePayloadArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 9, [
+                            new TrRmReturnCoverageRepetition(10, 16),
+                        ]),
+                        new TrRmReturnCoverageRegion(12, 4, [
+                            new TrRmReturnCoverageRepetition(10, 16),
+                        ]))), Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    sparsePayloadArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 13, [
+                            new TrRmReturnCoverageRepetition(10, 16),
+                        ]))), Is.False);
 
             var (nestedPaddedFirstField, nestedPaddedEndField)
                 = tables.TypeDefs.GetFieldRange(nestedPaddedHolderTypeDef);

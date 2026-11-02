@@ -62,8 +62,11 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
-            && program.EntryPoint < 0 && program.Functions.IsEmpty
-            && !program.Structures.IsEmpty)
+                && program.EntryPoint < 0
+                && (program.Functions.IsEmpty
+                    || schema
+                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
+                && !program.Structures.IsEmpty)
         {
             return EmitForeignInvocationStorageFixedArrayCopyDeclarations(
                 program, moduleIdentity, schema, sourceTypeExports);
