@@ -4025,6 +4025,63 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task StandardA2FieldArrayReadUsesPositiveDynamicExtent()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-array-field-positive-native-read";
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            public struct Holder {
+                public mut [int32; 2] Values;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut uint64 index = 0;
+                [int32; 2] initial = [-1, -1];
+                mut int32 observed = 0;
+                init mut Holder holder;
+                holder.Values = initial;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&observed,
+                        &holder.Values[++index], index);
+                }
+                return observed;
+            }
+            """;
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            source, 255, "positive dynamic field suffix read")
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public void StandardA2EmitsAndReconstructsNestedArrayInitialization()
     {
         const string schemaIdentity
