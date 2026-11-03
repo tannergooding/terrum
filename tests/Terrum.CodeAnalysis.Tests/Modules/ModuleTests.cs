@@ -602,6 +602,113 @@ public sealed class ModuleTests
     }
 
     [Test]
+    public void PrivateFieldPathConsumesInheritedNodeAndByteBudgets()
+    {
+        var source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            public int32 WriteLow() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11223344); }
+                mut [Word; 2] values = [seed; 2];
+                {}
+                unsafe { values[1].Low = uint8(0xAA); }
+                return 0;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var producer = ModuleCompiler.CreateProducer(program, ["WriteLow"]);
+        var function = program.Functions.Single(
+            static item => item.Name == "WriteLow");
+        BoundNativeFixedArrayPathWrite? pathWrite = null;
+        BoundBlock? emptyBlock = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayPathWrite write)
+                {
+                    pathWrite = write;
+                }
+            }), Is.True);
+        Assert.That(BoundTreeTraversal.VisitStatements(function.Body,
+            statement =>
+            {
+                if (statement is BoundBlock block
+                    && !ReferenceEquals(block, function.Body)
+                    && block.Statements.IsEmpty)
+                {
+                    emptyBlock = block;
+                }
+            }), Is.True);
+        Assert.That(pathWrite, Is.Not.Null);
+        Assert.That(emptyBlock, Is.Not.Null);
+
+        var statementNodeCount = 0;
+        var expressionNodeCount = 0;
+        Assert.That(BoundTreeTraversal.VisitStatements(function.Body,
+            _ => statementNodeCount++), Is.True);
+        Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+            _ => expressionNodeCount++), Is.True);
+        var workNodeCount = statementNodeCount + expressionNodeCount
+            + pathWrite!.Projections.Length + pathWrite.LeafFields.Length;
+        var duplicateCount
+            = SemanticVerifier.MaximumAnalysisVisits - workNodeCount + 1;
+        var rootBlockOffset = FindPrivateStatementOffset(producer, 1,
+            function.Body.Span);
+        var statementCountOffset = rootBlockOffset
+            + 1 + (2 * sizeof(int)) + sizeof(bool) + sizeof(int);
+        var originalStatementCount
+            = BinaryPrimitives.ReadInt32LittleEndian(
+                producer.AsSpan(statementCountOffset));
+        var expandedStatementCount
+            = checked(originalStatementCount + duplicateCount);
+        Assert.That(expandedStatementCount,
+            Is.LessThan(100_000));
+
+        var emptyBlockFrameOffset = FindPrivateStatementOffset(producer, 1,
+            emptyBlock!.Span);
+        var emptyBlockFrameLength = 1 + (2 * sizeof(int))
+            + sizeof(bool) + (2 * sizeof(int));
+        var emptyBlockFrame = producer.AsSpan(emptyBlockFrameOffset,
+            emptyBlockFrameLength).ToArray();
+        var insertionOffset = statementCountOffset + sizeof(int);
+        var addedBytes = checked(duplicateCount * emptyBlockFrameLength);
+        var overBudget = new byte[checked(producer.Length + addedBytes)];
+        producer.AsSpan(0, insertionOffset).CopyTo(overBudget);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            overBudget.AsSpan(statementCountOffset),
+            expandedStatementCount);
+        for (var index = 0; index < duplicateCount; index++)
+        {
+            emptyBlockFrame.AsSpan().CopyTo(overBudget.AsSpan(
+                insertionOffset + (index * emptyBlockFrameLength)));
+        }
+        producer.AsSpan(insertionOffset).CopyTo(overBudget.AsSpan(
+            insertionOffset + addedBytes));
+        Assert.That(overBudget.Length, Is.LessThan(4 * 1024 * 1024));
+        var nodeBudgetFailure = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(overBudget));
+        Assert.That(nodeBudgetFailure!.Message,
+            Is.EqualTo("Module graph exceeds limits."));
+
+        var oversizedArtifact = new byte[(4 * 1024 * 1024) + 1];
+        producer.AsSpan().CopyTo(oversizedArtifact);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(oversizedArtifact));
+    }
+
+    [Test]
     public void PrivateFieldPathKeepsExcludedFieldRootsAndWholeLeafWritesRejected()
     {
         static void AssertPrivateRejection(string source)
