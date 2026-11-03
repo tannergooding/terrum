@@ -363,6 +363,188 @@ rereading, N-element expansion or Standard/private fallback. The A2R1+Repeat
 Standard successor above is **unchanged**; private 102 is a distinct exact
 route, not its alias or a replacement for its conformance gates.
 
+## Field writes through captured array elements
+
+**Unapproved integration amendment.** Preserve every repeat rule, tag-47
+payload and the A2R1+Repeat Standard successor above. The required
+`values[i].Low = value` is a **field store through an element place**, not
+whole-Word replacement or mutation of a copied temporary.
+
+The accepted [PlaceSelection/store text](../specs/il-instruction-set.md#typed-operand-records)
+and [place semantics](../specs/il-instruction-set.md#fields-elements-and-ranges)
+already distinguish field/element places from value extraction. They impose
+no Field-only predecessor restriction on a register containing a captured
+place. The provisional array source contract makes indexed storage a place.
+The [binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs)
+currently accepts only a named local/receiver root in `BindFieldAssignment`,
+causing TRM3008 for an indexed root. The
+[Standard reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)
+requires `basePlace.TargetKind == 2` in its Field/register-base branch, even
+though its Element/register-base branch accepts Field or Element. These
+are implementation restrictions, not reasons to allocate a Standard opcode.
+The missing private field-suffix carrier does require the exact amendment below.
+
+### Source and Bound selection
+
+Support plain assignment through one intrinsic array path followed by a
+nonempty path of declared inline Copy fields: `values[i].Low`,
+`rows[i][j].Inner.Low`, and an already admitted real array-field base such
+as `holder.Values[i].Low`. No new grammar, property/indexer invocation,
+pointer dereference, managed/owning path or temporary-to-place conversion is
+selected. More generally interleaved array/field paths retain their independent
+admission; this is not a general place codec.
+
+**Exact Bound candidate:** retain the existing
+`BoundNativeFixedArrayPathWrite(Variable, Projections, Value, Span)` and its
+optional captured array-field `FieldPlace` base; add
+`ImmutableArray<BoundNativeFixedArrayFieldProjection> LeafFields = []`, with
+`BoundNativeFixedArrayFieldProjection(PrimitiveType OwnerType, int Field)`
+identifying each complete nominal owner and declared field ordinal in order.
+Add source-checked `IsUnsafeAuthorized` as an in-memory obligation, not a
+serialized permission. Empty LeafFields preserves whole-leaf replacement
+unchanged. A nonempty suffix requires Value's exact type to be the final
+field type, **not** the final array element type. Reject default/malformed
+paths or owner/field mismatches; derive offsets/alignment from actual layouts,
+not names or equal-sized types.
+
+Traversal evaluates the array-field base if present, each original index
+in outer-to-inner order, then Value, once each. Field steps are declaration
+facts, not value-producing operands. Rewriting remaps their owners/fields
+and revalidates the path and terminal type; it must not lose the suffix or
+lower it to an element-valued temporary.
+
+1. Require complete live array backing, writable root and every containing
+   field/loan, and the selected field's mutation permission. Capture the
+   root storage generation and each **evaluated index value** before the RHS;
+   check each original numeric bound before narrowing/offset computation.
+   Failed outer selection skips later indices and RHS. A rebound index or
+   source name does not retarget the store. Preserve alias/loan/backing
+   obligations; a captured place grants no new exclusivity or lifetime.
+2. Crossing any raw-Union alternative needs an explicit unsafe scope covering
+   the target store. An unsafe declaration or unsafe RHS alone is insufficient.
+   Intermediate projections require their complete-child/typed-validity facts;
+   a final whole-alternative store follows R1's live-U rules without reading
+   the old alternative or inventing per-alternative liveness. Ordinary fields
+   retain their ordinary availability rules. This does not initialize a
+   vacant array element piecemeal or grant compound-update/read authority.
+3. Stage the complete Copy RHS once. Failed RHS commits nothing, but preserves
+   its actual earlier effects. At commitment, use the captured target and the
+   **current post-RHS** content facts, not an old byte snapshot. Apply R1's
+   `W=[offset, offset+sizeof(field))` kill/install rule, including that field's
+   padding, to every affected containing interpretation. Retain bytes outside
+   W, invalidating overlapping typed validity/provenance even when D stays full.
+   No whole-element rewrite, old Wide read or padding default is permitted.
+4. For unknown indices, meet each feasible target's unchanged state with its
+   W-transfer result, recursively over templates and sparse overrides. A Low
+   byte store into Wide-defined Word retains the seven untouched bytes and
+   hence Wide coverage; it does not strengthen a Low-only seed. Pointer
+   validity/backing cannot be inferred from that coverage. Keep the earlier
+   common-D, guarded-join and capture/publication rules unchanged.
+
+### Standard composition: no successor amendment
+
+Use the **unchanged A2R1+Repeat schema** and existing record `04`/D8 (`91`)
+to select each array element place, followed by each field place. For the
+first field after an element, the 24-byte record is:
+
+```text
+u8 recordKind=0x04, u8 flags=0, u16 reserved=0
+u8 targetKind=2, u8 accessKind=2, u8 destinationKind=1, u8 baseKind=1
+u16 destinationIndex=F, u16 baseIndex=P
+u8 indexKind=0, u8 targetRefKind=1, u16 indexIndex=0
+u32 targetRef=fieldDefRow
+u16 referentTypeMapIndex=fieldType, u16 flags=0
+```
+
+P is R0..R13 holding the captured **Element PlaceHandle**, whose complete
+referent matches the FieldDef's owner. Further fields use the preceding field
+handle. Keep exact FieldDef/provider binding, actual alignment, generation,
+index and authority through the chain; a same-typed value register is not an
+eligible parent. Aliasing/reusing a register must preserve the captured
+selection instance, not reconstruct the target from its later binding.
+
+Finish with ordinary SemanticStore `05`, `placeKind=1`,
+`sourceKind=1|2`, `transition=2=Replace`, `sourceUse=1=copy/read`,
+`placeIndex=F`, and the already evaluated exact field value; unused formal/
+dependency fields remain zero. For a raw-Union alternative this is R1's
+store into live U, not a claim that the alternative has independently tracked
+live state. Use D9/control zero or `92` as before. No sourceUse 6 repetition,
+new flag, record, opcode, Feature or on-wire schema meaning is introduced.
+Reconstruction must retain Element-to-Field parent facts and the field suffix;
+fixing only the reader's discriminator without preserving that path is incomplete.
+Mandatory structural/binding checks and producer truth retain their existing roles.
+
+### Private 102+FieldWrites: exact tag 48
+
+Select the **unapproved amended whole-schema agreement**
+**`terrum/private-semantic-102-fixed-array-repeat-initialization-field-path-writes-1`**,
+shorthand **102+FieldWrites**. It composes the repeat-only 102 candidate above
+with only this field-write/backing admission. Header i32 102, tag 47 and all
+existing payloads remain unchanged; the repeat-only agreement remains the
+unchanged base, **not an alias for this composition**.
+
+Tag 46 still represents one flat **whole element** value. Existing private
+field-assignment statement tag 9 has no indexed path; neither can encode this
+operation by changing the RHS type. Assign **expression tag 48 (`30` hex)**:
+
+```text
+u8 kind=48, i32 type=0 /* exact void */, i32 spanStart, i32 spanLength
+i32 variable
+i32 projectionCount=P
+repeat P: i32 parentArrayType, Expression index
+i32 fieldCount=F
+repeat F: i32 fieldOrdinal
+Expression value
+```
+
+All multibyte fields are little-endian, without padding. `P>=1`, `F>=1`,
+`P+F<=128`, subject to stricter inherited expression/depth/node/byte budgets.
+Each array entry reuses the existing parent-type/original-index shape;
+validate continuity from the root local's array type through each immediate E.
+Derive each field owner/type from the final E and preceding field, resolve its
+ordinal, and reconstruct the corresponding OwnerType/Field pair. Serialize no
+duplicate field-owner type, layout, offset, byte mask or authorization bit.
+The extent is **`25 + sum(4 + indexExtent) + 4*F + valueExtent`**:
+one index and one field with inherited 21-byte constants give **75 bytes**.
+F=0 is invalid, not an alias for tag 46 or an escape for excluded whole-leaf
+nested replacement.
+
+This bounded private route requires a direct local root (`FieldPlace=null`);
+array-field-rooted private storage remains an explicit independent gap.
+Admit complete nested direct-local constructor trees (43/47, with exact types
+and all valid counts) as backing for **field-suffixed writes**, inherited
+lawful address uses and lexical retirement. This explicitly supersedes the
+base's address-only nested-use exclusion for that role, without admitting
+array-valued reads/calls/casts, whole-inner-array replacement or per-element
+vacant construction. Zero-count paths still fail before the RHS. Terminal
+fields and all children need the inherited independently admitted Copy/private
+value representation; new syntax/framing does not add another value codec.
+Source/private production checks actual unsafe scope; reconstruction derives
+the obligation from owner/layout/field facts and the enclosing unsafe scope,
+not a stored IsUnsafeAuthorized bit.
+
+Private entry points select **one current exact 102 agreement**. Integrating
+this amendment replaces their selected repeat-only agreement; it does not
+add decoder modes. Regenerate all private peers/contracts/packages to the
+amended agreement. Equal i32 102, outer version 3 or absence/presence of tag 48
+does not select a schema. A repeat-only reader rejects tag 48; header-only
+checks cannot distinguish every unlabelled stream of the two 102 agreements.
+No automatic old-102 detection, compatible alias or fallback is claimed.
+Existing exact-101/unknown-version rejection, full-source-free closure,
+TNPK/TNSP/TNGP embedding, resource and R/C-representation boundaries remain.
+
+### Field-write acceptance gates
+
+These are future producer/consumer/native tests, not evidence run here:
+
+| Gate | Required outcome |
+|---|---|
+| Source/D | Mutable Word Low/Wide fields; known and uint64 unknown `values[i].Low = value` preserve Wide-defined tail/common D. Repeat Low-only, padded and pointer-bearing seeds; Low writes cannot invent Wide/provenance, while whole padded-field writes kill their padding holes. Include nested arrays and `Inner.Low` suffixes. |
+| Authority/order/aliases | Reject missing target unsafe scope, immutable roots/fields, invalid intermediate typed views and getter/temporary roots. Count base/index/RHS effects once; N/negative/too-wide indices suppress later work. RHS index rebinding does not retarget; RHS alias mutations are reflected at commitment, failed RHS preserves actual precommit state, and conflicting loans/lifetime loss reject. |
+| Standard | Emit/load/re-emit Element-to-Field and nested field chains in unchanged A2R1+Repeat. Exercise place-register aliases, overwritten/reused registers, cross-block captured places and wrong owner/type/authority/base-carrier rejection. Permute FieldDef/TypeDef/Import/layout/Home/record indexes without losing original provider expectations or D. |
+| Private | Independent 75-byte tag-48 vector, P/F/type/root/ordinal/truncation/resource rejection and tag-46/47 byte invariants. Source-free direct/nested-root construction, field stores and re-emission retain one index evaluation and exact field effects. Repeat-only 102 rejects 48; amended peers explicitly agree before exchange. Array-field roots and unsupported value/R/C crossings retain negative gates. |
+| Native/resources | On small source and source-free Standard/private/set/package fixtures, verify Low changes only its selected byte, Wide's other bytes and neighboring elements survive, and packed/overaligned stores use exact extent/alignment. Nested private fixtures use admitted scalar-leaf readback/address consumers, not a new array ABI. Re-test changed provider/field mappings. Huge-count semantic D updates remain template/sparse; existing frame limits still decline huge native materialization. |
+
 ## Integration, resources and native boundaries
 
 * **Exact proposed Bound representation:** add
@@ -455,6 +637,7 @@ Current implementation observations, not newly run qualification:
 | [`RawUnionArrayElementState`](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs) | It stores GuaranteedBytes plus sparse `Dictionary<ulong, byte[]>` overrides. Known access, Copy and Common visit stored keys, but it cannot install a richer uniform seed; unknown writes currently update overrides and Merge requires equal defaults. Generalize per-instance templates, nested/default path coverage and guarded provenance without changing type G or allocating extent-sized masks. |
 | [Standard writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs) and [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs) | The writer visits list elements and the reader accumulates an element list until N is complete. Add exact successor selection, record reader/writer/validation and compact reconstruction/remapping; existing index-counter Homes are not a repeat/completion carrier. |
 | [Private codec](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs) and [array admission/remapping](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.NativeFixedArrays.cs) | Exact 101 has no repeat tag. Implement the selected 102/tag-47 route, coherent header/snapshot/embedding selection, seed closure/remapping and the scoped nested-backing constructor amendment. Required private source-free/re-emission tests are not replaceable by Standard evidence; unsupported broader private values/paths or published facts remain separate gaps. |
+| [Field binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs), [path verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.NativeSampleArray.cs) and [Standard place reconstruction](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs) | Indexed field targets currently reject as temporaries; PathWrite verifies Value against the whole leaf E and Standard Field/register-base reconstruction accepts only a prior Field. Integrate the field suffix, captured target/post-RHS W transfer and Element-to-Field composition. Private 102+FieldWrites/tag 48 is the separate selected transport, not tag-46 reinterpretation. |
 | [Layout](../../sources/Terrum.CodeAnalysis/Semantics/NativeFixedArrayContract.cs), [VerifyCore](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs), [support inventory](../implementation.md) and [CG-004](../implementation/conformance-gaps.md#cg-004-native-declaration-and-body-integration) | Checked count-times-stride can exceed int/u32 while fitting target nuint. Array formals/results still reject; struct-field size/mask and native frame representations have narrower implementation limits. Those do not redefine layout validity or justify an ABI/test-state bypass. Keep huge qualification in supported local/nested semantic paths and report remaining field/storage gates separately. |
 
 Upon adoption, grammar/construction own the new expression, initialization/
@@ -463,12 +646,16 @@ registry chapters own record-05 value 6 under the exact successor.
 This proposal owns private 102/tag 47 and its scoped 101 supersession; private
 codec documentation must describe that independently selected implementation
 route, not turn it into normative TRRM.
+The field-write amendment owns the Bound suffix and exact 102+FieldWrites/tag
+48 composition; Standard place composition needs implementation, not new
+normative allocations. Repeat-only schema directions remain their unchanged bases.
 Complete types, layout/ABI, A2 Copy and A2R1 remain the referenced owners of
 unchanged rules; resource recipes and conformance cases integrate through
 their existing owners. No owner is amended by this proposal.
 
 **Remaining user decision:** approve, amend or reject this repeat contract
-and its exact Standard/private successors; they remain unapproved and only provisional
+and its exact Standard/private successors, including the field-write composition;
+they remain unapproved and only provisional
 under the quoted authorization. No in-scope evaluation, zero-count, Copy,
 coverage or wire sub-decision is left to implementation. Whole-array ABI,
 general generators/owning arrays, other target/schema compositions and wider
