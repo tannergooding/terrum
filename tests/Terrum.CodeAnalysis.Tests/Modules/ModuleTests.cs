@@ -1012,6 +1012,146 @@ public sealed class ModuleTests
     }
 
     [Test]
+    public async Task PrivateFieldPathCapturesIndexBeforeRhsAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string producerSource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct TaggedValue {
+                public mut uint32 Tag;
+                public TaggedValue(uint32 tag) { Tag = tag; }
+            }
+
+            uint32 GetValue() {
+                return uint32(99);
+            }
+
+            public int32 Observe() {
+                mut int32 index = 1;
+                mut [TaggedValue; 2] values = [
+                    new TaggedValue(uint32(10)),
+                    new TaggedValue(uint32(20))];
+                unsafe {
+                    values[index++].Tag = GetValue();
+                }
+                return int32(values[0].Tag)
+                    + int32(values[1].Tag) * 100
+                    + index;
+            }
+            """;
+        var producerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(producerSource), BoundRuntimePolicy.FailFast);
+        Assert.That(producerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            producerCompilation.Program!, ["Observe"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(102));
+
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                int32 Main() {
+                    return Observe() == 9912 ? 0 : 1;
+                }
+                """),
+            ModuleCompiler.CreateReference(producer),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var linked = ModuleCompiler.Link(
+            ModuleCompiler.CreateConsumer(
+                consumerCompilation.Program!, producer),
+            producer);
+        Assert.That(NativeJit.Execute(linked,
+            NativeRuntimePolicy.FailFast), Is.Zero);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked,
+                NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.Zero);
+
+        var reemittedProducer = ModuleCompiler.CreateProducer(linked,
+            ["Observe"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            reemittedProducer.AsSpan(sizeof(int), sizeof(int))),
+            Is.EqualTo(102));
+        var reemittedConsumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, reemittedProducer);
+        Assert.That(NativeJit.Execute(
+            ModuleCompiler.Link(reemittedConsumer, reemittedProducer),
+            NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public async Task PrivateFieldPathFailureDoesNotPublishTheTargetAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string producerSource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct TaggedValue {
+                public mut uint32 Tag;
+                public TaggedValue(uint32 tag) { Tag = tag; }
+            }
+
+            uint32 FailValue() {
+                require false;
+                return uint32(99);
+            }
+
+            public int32 ObserveFailure() {
+                mut int32 index = 1;
+                mut [TaggedValue; 2] values = [
+                    new TaggedValue(uint32(10)),
+                    new TaggedValue(uint32(20))];
+                unsafe {
+                    try {
+                        values[index++].Tag = FailValue();
+                    } catch {
+                    }
+                }
+                return int32(values[0].Tag)
+                    + int32(values[1].Tag) * 100
+                    + index;
+            }
+            """;
+        var producerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(producerSource),
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(producerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            producerCompilation.Program!, ["ObserveFailure"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(102));
+
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                int32 Main() {
+                    return ObserveFailure() == 2012 ? 0 : 1;
+                }
+                """),
+            ModuleCompiler.CreateReference(producer),
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var linked = ModuleCompiler.Link(
+            ModuleCompiler.CreateConsumer(
+                consumerCompilation.Program!, producer),
+            producer);
+        var nativePolicy = NativeRuntimePolicy.CheckedExceptions;
+        Assert.That(NativeJit.Execute(linked, nativePolicy), Is.Zero);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked,
+                nativePolicy)).ConfigureAwait(true),
+            Is.Zero);
+    }
+
+    [Test]
     public async Task InternalGenericAliasesEraseBeforeModulePublicationAsync()
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(
