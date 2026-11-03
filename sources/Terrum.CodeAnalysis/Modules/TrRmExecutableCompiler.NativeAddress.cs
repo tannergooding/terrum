@@ -1100,6 +1100,25 @@ public static partial class TrRmExecutableCompiler
             return count;
         }
 
+        int CountNativeFixedArrayFieldReadTypeMapTokens(
+            BoundExpression expression)
+        {
+            if (!TrySplitNativeFixedArrayFieldRead(expression,
+                    out var arrayRead, out var fieldReads))
+            {
+                return 0;
+            }
+
+            var fieldPlace = arrayRead switch {
+                BoundNativeFixedArrayElement element => element.FieldPlace,
+                BoundNativeFixedArrayPathElement pathElement =>
+                    pathElement.FieldPlace,
+                _ => null,
+            };
+            return checked(CountFieldPlaceTypeMapTokens(fieldPlace)
+                + fieldReads.Length);
+        }
+
         var fieldTypeMapTokenCount = 0;
         if (storageCall is not null)
         {
@@ -1117,6 +1136,23 @@ public static partial class TrRmExecutableCompiler
                                 elementWrite.FieldPlace),
                         _ => 0,
                     }));
+            }
+            if (!BoundTreeTraversal.VisitStatements(caller.Body,
+                statement =>
+                {
+                    if (statement is BoundLocal {
+                        Initializer: BoundFieldRead fieldRead,
+                    })
+                    {
+                        fieldTypeMapTokenCount = checked(
+                            fieldTypeMapTokenCount
+                                + CountNativeFixedArrayFieldReadTypeMapTokens(
+                                    fieldRead));
+                    }
+                }))
+            {
+                throw Unsupported(
+                    "The A2 field-read Body cannot be traversed for type maps.");
             }
 
             if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
@@ -1327,6 +1363,37 @@ public static partial class TrRmExecutableCompiler
                         AddFieldPlaceTypeMapTokens(elementWrite.FieldPlace);
                         break;
                 }
+            }
+
+            if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
+                {
+                    if (statement is not BoundLocal {
+                        Initializer: BoundFieldRead fieldRead,
+                    } || !TrySplitNativeFixedArrayFieldRead(fieldRead,
+                        out var arrayRead, out var fields))
+                    {
+                        return;
+                    }
+
+                    var fieldPlace = arrayRead switch {
+                        BoundNativeFixedArrayElement element =>
+                            element.FieldPlace,
+                        BoundNativeFixedArrayPathElement pathElement =>
+                            pathElement.FieldPlace,
+                        _ => null,
+                    };
+                    AddFieldPlaceTypeMapTokens(fieldPlace);
+                    foreach (var field in fields)
+                    {
+                        AddA3Staged(typeMapTokens,
+                            CreateStandardBodyTypeMapToken(
+                                GetSignatureTypeSpecRef(field.Type)),
+                            a3LayoutResourceLedger);
+                    }
+                }))
+            {
+                throw Unsupported(
+                    "The A2 field-read Body cannot be traversed for type maps.");
             }
 
             if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
@@ -3127,7 +3194,7 @@ public static partial class TrRmExecutableCompiler
             BoundUpdate { Place: BoundRead read } => read.Variable,
             _ => -1,
         };
-        if ((uint)variable >= (uint)caller.Variables.Length
+        if (variable < 0 || variable >= caller.Variables.Length
             || (variable >= caller.ParameterCount
                 && !localVariables.Contains(variable)))
         {
@@ -3154,6 +3221,22 @@ public static partial class TrRmExecutableCompiler
     private static bool IsSupportedNativeFixedArrayRead(
         BoundExpression expression, BoundFunction caller,
         BoundProgram program, HashSet<int> localVariables)
+    {
+        if (expression is BoundFieldRead
+            && TryGetNativeFixedArrayFieldRead(expression, caller, program,
+                localVariables, out _, out _))
+        {
+            return true;
+        }
+
+        return IsSupportedNativeFixedArrayReadPath(expression, caller,
+            program, localVariables, requireValueType: true);
+    }
+
+    private static bool IsSupportedNativeFixedArrayReadPath(
+        BoundExpression expression, BoundFunction caller,
+        BoundProgram program, HashSet<int> localVariables,
+        bool requireValueType)
     {
         int variable;
         PrimitiveType elementType;
@@ -3225,7 +3308,93 @@ public static partial class TrRmExecutableCompiler
             && (fieldPlace is not null
                 || NativeFixedArrayTypes.IsType(
                     caller.Variables[variable].Type))
-            && IsSupportedNativeAddressValueType(elementType);
+            && (!requireValueType
+                || IsSupportedNativeAddressValueType(elementType));
+    }
+
+    private static bool TryGetNativeFixedArrayFieldRead(
+        BoundExpression expression, BoundFunction caller,
+        BoundProgram program, HashSet<int> localVariables,
+        out BoundExpression arrayRead,
+        out ImmutableArray<BoundNativeFixedArrayFieldProjection> fields)
+    {
+        fields = [];
+        if (!TrySplitNativeFixedArrayFieldRead(expression,
+                out arrayRead, out var fieldReads)
+            || !IsSupportedNativeFixedArrayReadPath(arrayRead, caller,
+                program, localVariables, requireValueType: false))
+        {
+            arrayRead = expression;
+            return false;
+        }
+
+        var ownerType = arrayRead.Type;
+        var result = ImmutableArray.CreateBuilder<
+            BoundNativeFixedArrayFieldProjection>(fieldReads.Length);
+        foreach (var fieldRead in fieldReads)
+        {
+            var ownerIndex = (int)ownerType - 100;
+            if (fieldRead.Receiver.Type != ownerType
+                || (uint)ownerIndex >= (uint)program.Structures.Length
+                || (uint)fieldRead.Field
+                    >= (uint)program.Structures[ownerIndex].Fields.Length)
+            {
+                arrayRead = expression;
+                fields = [];
+                return false;
+            }
+
+            var structure = program.Structures[ownerIndex];
+            var field = structure.Fields[fieldRead.Field];
+            if (field.Type != fieldRead.Type
+                || ((field.RequiresUnsafeCaller || structure.IsUnion)
+                    && !fieldRead.IsUnsafeAuthorized))
+            {
+                arrayRead = expression;
+                fields = [];
+                return false;
+            }
+
+            result.Add(new BoundNativeFixedArrayFieldProjection(
+                ownerType, fieldRead.Field));
+            ownerType = field.Type;
+        }
+
+        if (ownerType != expression.Type
+            || !IsSupportedNativeAddressValueType(ownerType))
+        {
+            arrayRead = expression;
+            fields = [];
+            return false;
+        }
+
+        fields = result.MoveToImmutable();
+        return true;
+    }
+
+    private static bool TrySplitNativeFixedArrayFieldRead(
+        BoundExpression expression, out BoundExpression arrayRead,
+        out ImmutableArray<BoundFieldRead> fields)
+    {
+        var reversed = new List<BoundFieldRead>();
+        arrayRead = expression;
+        while (arrayRead is BoundFieldRead fieldRead)
+        {
+            reversed.Add(fieldRead);
+            arrayRead = fieldRead.Receiver;
+        }
+        if (reversed.Count == 0
+            || arrayRead is not (BoundNativeFixedArrayElement
+                or BoundNativeFixedArrayPathElement))
+        {
+            arrayRead = expression;
+            fields = [];
+            return false;
+        }
+
+        reversed.Reverse();
+        fields = [.. reversed];
+        return true;
     }
 
     private static bool IsSupportedNativeUnitInitializerCall(
@@ -4805,6 +4974,26 @@ public static partial class TrRmExecutableCompiler
             => checked((long)CountArrayFieldPlaceSelections(fieldPlace)
                 + projectionCount + leafFieldCount + 1);
 
+        long CountNativeFixedArrayFieldReadSelections(
+            BoundFieldRead fieldRead)
+        {
+            if (!TrySplitNativeFixedArrayFieldRead(fieldRead,
+                    out var arrayRead, out var fields))
+            {
+                return 0;
+            }
+
+            var (fieldPlace, projectionCount) = arrayRead switch {
+                BoundNativeFixedArrayElement element =>
+                    (element.FieldPlace, 1),
+                BoundNativeFixedArrayPathElement pathElement =>
+                    (pathElement.FieldPlace, pathElement.Projections.Length),
+                _ => (null, 0),
+            };
+            return checked((long)CountArrayFieldPlaceSelections(fieldPlace)
+                + projectionCount + fields.Length);
+        }
+
         long CountArrayInitializationRecords(BoundStatement statement)
         {
             using var frame = resourceLedger?.EnterFrame();
@@ -4823,6 +5012,10 @@ public static partial class TrRmExecutableCompiler
                 {
                     Initializer: BoundNativeFixedArrayPathElement pathElement,
                 } => pathElement.Projections.Length,
+                BoundLocal
+                {
+                    Initializer: BoundFieldRead fieldRead,
+                } => CountNativeFixedArrayFieldReadSelections(fieldRead),
                 BoundAssignment assignment
                     when IsSupportedA2EEmptyArrayInitialization(
                         assignment, caller, program, schema, out _) => 2,
@@ -6217,13 +6410,38 @@ public static partial class TrRmExecutableCompiler
         void AppendNativeFixedArrayRead(BoundExpression expression,
             int destinationHome)
         {
-            var variable = expression switch {
+            var arrayExpression = expression;
+            var fieldSuffix
+                = ImmutableArray<BoundNativeFixedArrayFieldProjection>.Empty;
+            if (expression is BoundFieldRead
+                && TrySplitNativeFixedArrayFieldRead(expression,
+                    out arrayExpression, out var fieldReads))
+            {
+                var fieldBuilder
+                    = ImmutableArray.CreateBuilder<
+                        BoundNativeFixedArrayFieldProjection>(
+                            fieldReads.Length);
+                foreach (var fieldRead in fieldReads)
+                {
+                    fieldBuilder.Add(
+                        new BoundNativeFixedArrayFieldProjection(
+                            fieldRead.Receiver.Type, fieldRead.Field));
+                }
+                fieldSuffix = fieldBuilder.MoveToImmutable();
+            }
+            else if (expression is BoundFieldRead)
+            {
+                throw Unsupported(
+                    "The A2 field read is outside the fixed-array PlaceLoad subset.");
+            }
+
+            var variable = arrayExpression switch {
                 BoundNativeFixedArrayElement element => element.Variable,
                 BoundNativeFixedArrayPathElement pathElement =>
                     pathElement.Variable,
                 _ => -1,
             };
-            var projections = expression switch {
+            var projections = arrayExpression switch {
                 BoundNativeFixedArrayElement element =>
                     [new BoundNativeFixedArrayProjection(element.Layout,
                         element.Index)],
@@ -6231,7 +6449,7 @@ public static partial class TrRmExecutableCompiler
                     pathElement.Projections,
                 _ => [],
             };
-            var fieldPlace = expression switch {
+            var fieldPlace = arrayExpression switch {
                 BoundNativeFixedArrayElement element => element.FieldPlace,
                 BoundNativeFixedArrayPathElement pathElement =>
                     pathElement.FieldPlace,
@@ -6260,27 +6478,30 @@ public static partial class TrRmExecutableCompiler
 
             if (projections.Length == 1)
             {
-                if (expression is not BoundNativeFixedArrayElement element
+                if (arrayExpression
+                        is not BoundNativeFixedArrayElement element
                     || element.Layout.CarrierType
                         != rootArrayType
                     || !NativeFixedArrayContract.MatchesLayout(
                         element.Layout, program)
-                    || element.Layout.ElementType != expression.Type
-                    || !IsSupportedNativeAddressValueType(
-                        element.Layout.ElementType))
+                    || element.Layout.ElementType != arrayExpression.Type
+                    || (fieldSuffix.IsEmpty
+                        && !IsSupportedNativeAddressValueType(
+                            element.Layout.ElementType)))
                 {
                     throw Unsupported(
                         "The A2 array read is outside the scalar PlaceLoad subset.");
                 }
             }
-            else if (expression
+            else if (arrayExpression
                         is not BoundNativeFixedArrayPathElement pathElement
                     || !NativeFixedArrayContract.MatchesPath(
                             rootArrayType, projections,
                         program, out _, out var leafLayout)
                     || pathElement.Type != leafLayout.ElementType
-                    || !IsSupportedNativeAddressValueType(
-                        leafLayout.ElementType))
+                    || (fieldSuffix.IsEmpty
+                        && !IsSupportedNativeAddressValueType(
+                            leafLayout.ElementType)))
             {
                 throw Unsupported(
                     "The A2 nested array read is outside the scalar PlaceLoad subset.");
@@ -6417,15 +6638,66 @@ public static partial class TrRmExecutableCompiler
                                     projection.Layout.ElementType))),
                         schema, resourceLedger));
                 code.Add(projectionIndex + 1 == projections.Length
+                    && fieldSuffix.IsEmpty
                     ? (byte)0xDA : (byte)0xD8);
                 code.Add(destinationRegister);
                 code.Add(unchecked((byte)placeSelectionIndex));
                 code.Add((byte)(placeSelectionIndex >> 8));
             }
 
-            AppendHomeStore(code,
-                checked((byte)((projections.Length - 1) % 2)),
-                destinationHome);
+            var selectedRegister
+                = checked((byte)((projections.Length - 1) % 2));
+            for (var fieldIndex = 0;
+                fieldIndex < fieldSuffix.Length; fieldIndex++)
+            {
+                resourceLedger?.ConsumeWork();
+                var fieldProjection = fieldSuffix[fieldIndex];
+                var ownerIndex = (int)fieldProjection.OwnerType - 100;
+                if ((uint)ownerIndex >= (uint)fieldFirstByStructure.Length
+                    || fieldFirstByStructure[ownerIndex] <= 0
+                    || (uint)fieldProjection.Field
+                        >= (uint)program.Structures[ownerIndex]
+                            .Fields.Length)
+                {
+                    throw Unsupported(
+                        "The A2 field read has an invalid FieldDef identity.");
+                }
+
+                var field = program.Structures[ownerIndex].Fields[
+                    fieldProjection.Field];
+                var fieldDefRow = checked(fieldFirstByStructure[ownerIndex]
+                    + fieldProjection.Field);
+                var destinationRegister = checked(
+                    (byte)((selectedRegister + 1) % 2));
+                if (fieldDefRow is <= 0 or > 0xFF_FFFF)
+                {
+                    throw Unsupported(
+                        "The A2 field read exceeds a FieldDef index domain.");
+                }
+
+                var fieldSelectionIndex
+                    = checked((ushort)records.Count);
+                records.Add(
+                    TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                        targetKind: 2, accessKind: 1, destinationKind: 1,
+                        baseKind: 1,
+                        destinationIndex: destinationRegister,
+                        baseIndex: selectedRegister, indexKind: 0,
+                        targetRefKind: 1, indexIndex: 0,
+                        targetRef: checked((uint)fieldDefRow),
+                        referentTypeMapIndex: maps.GetTypeMapIndex(
+                            CreateStandardBodyTypeMapToken(
+                                getSignatureTypeSpecRef(field.Type))),
+                        schema, resourceLedger));
+                code.Add(fieldIndex + 1 == fieldSuffix.Length
+                    ? (byte)0xDA : (byte)0xD8);
+                code.Add(destinationRegister);
+                code.Add(unchecked((byte)fieldSelectionIndex));
+                code.Add((byte)(fieldSelectionIndex >> 8));
+                selectedRegister = destinationRegister;
+            }
+
+            AppendHomeStore(code, selectedRegister, destinationHome);
         }
 
         void AppendUnitInitializerLocal(BoundLocal local)
@@ -7749,7 +8021,8 @@ public static partial class TrRmExecutableCompiler
 
                     if (local.Initializer
                         is BoundNativeFixedArrayElement or
-                            BoundNativeFixedArrayPathElement)
+                            BoundNativeFixedArrayPathElement
+                            or BoundFieldRead)
                     {
                         AppendNativeFixedArrayRead(local.Initializer,
                             homeIndex);

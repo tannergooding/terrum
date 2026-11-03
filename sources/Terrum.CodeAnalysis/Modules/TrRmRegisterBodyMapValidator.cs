@@ -2598,7 +2598,7 @@ internal static class TrRmRegisterBodyMapValidator
         var isScalar = TrRmNativeImportTypeContract.TryGetScalarType(
                 typeSpecs, selectedTypeSpecRef, out var elementType)
             && DirectNativeImportContract.IsScalar(elementType);
-        if (ReadByte(body, selection, 0) != 3
+        if (ReadByte(body, selection, 0) is not (2 or 3)
             || ReadByte(body, selection, 1) != 1
             || ReadByte(body, selection, 2) != 1
             || ReadUInt16(body, selection, 4) != destination

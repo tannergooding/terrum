@@ -3603,6 +3603,37 @@ public static partial class TrRmExecutableCompiler
                             placeSelectionsByRegister);
                     readSelection = CaptureNativeArrayPlaceSelectionPath(
                         readSelection, placeSelectionsByRegister);
+                    if (readSelection.TargetKind == 2)
+                    {
+                        if (readSelection.AccessKind != 1
+                            || readSelection.FieldPlace
+                                is not BoundFieldRead fieldRead
+                            || !IsSupportedNativeAddressValueType(
+                                fieldRead.Type))
+                        {
+                            throw Unsupported(
+                                "The F+S field PlaceLoad is outside the scalar read subset.");
+                        }
+
+                        foreach (var pathSelection
+                            in GetNativeArrayPlaceSelectionPath(readSelection))
+                        {
+                            if (placeSelectionsByRegister.TryGetValue(
+                                    pathSelection.DestinationRegister,
+                                    out var selectedParent)
+                                && selectedParent.SelectionInstanceKey
+                                    == pathSelection.SelectionInstanceKey)
+                            {
+                                _ = placeSelectionsByRegister.Remove(
+                                    pathSelection.DestinationRegister);
+                            }
+                        }
+
+                        _ = registerConstants.Remove(instruction.Register);
+                        registerExpressions[instruction.Register] = fieldRead;
+                        break;
+                    }
+
                     var readPath = ReconstructNativeArrayPlacePath(
                         readSelection, body, nativeFixedArrayTypes,
                         formalOrdinalByHome, localVariableByHome,
