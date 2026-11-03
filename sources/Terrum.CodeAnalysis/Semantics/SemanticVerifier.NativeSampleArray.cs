@@ -128,8 +128,10 @@ public static partial class SemanticVerifier
             {
                 var elementProjection = StorageProjection.ForArrayIndex(
                     (ulong)index);
-                evaluationContinues = element is BoundNativeFixedArrayInitialization nested
-                    ? EvaluateNestedNativeFixedArrayInitialization(nested,
+                evaluationContinues = element
+                    is BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization
+                    ? EvaluateNestedNativeFixedArrayConstruction(element,
                         variable, elementProjection, initialized, fieldMasks,
                         declarations, function, program, true, ref remaining,
                         depth + 1, failures)
@@ -137,7 +139,8 @@ public static partial class SemanticVerifier
                         declarations, function, program, ref remaining,
                         depth + 1, failures);
                 if (evaluationContinues
-                    && element is not BoundNativeFixedArrayInitialization
+                    && element is not (BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization)
                     && CarriesRawUnionPayloadFacts(
                         program, initialization.Layout.ElementType))
                 {
@@ -149,7 +152,8 @@ public static partial class SemanticVerifier
                             initialized, function, program));
                 }
                 if (evaluationContinues
-                    && element is not BoundNativeFixedArrayInitialization
+                    && element is not (BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization)
                     && CarriesNativePointer(initialization.Layout.ElementType, program)
                     && initialized.Dependencies is BackingDependencies facts)
                 {
@@ -165,9 +169,10 @@ public static partial class SemanticVerifier
                 var unreachableMasks = (uint[])fieldMasks.Clone();
                 var elementProjection = StorageProjection.ForArrayIndex(
                     (ulong)index);
-                if (element is BoundNativeFixedArrayInitialization nested)
+                if (element is BoundNativeFixedArrayInitialization
+                    or BoundNativeFixedArrayRepeatInitialization)
                 {
-                    _ = EvaluateNestedNativeFixedArrayInitialization(nested,
+                    _ = EvaluateNestedNativeFixedArrayConstruction(element,
                         variable, elementProjection, unreachableState,
                         unreachableMasks, declarations, function, program,
                         false, ref remaining, depth + 1, null);
@@ -259,8 +264,9 @@ public static partial class SemanticVerifier
             if (evaluationContinues)
             {
                 evaluationContinues = element
-                    is BoundNativeFixedArrayInitialization nested
-                        ? EvaluateNestedNativeFixedArrayInitialization(nested,
+                    is BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization
+                        ? EvaluateNestedNativeFixedArrayConstruction(element,
                             variable, elementProjection, initialized,
                             fieldMasks, declarations, function, program,
                             trackPointerFacts, ref remaining, depth + 1,
@@ -270,7 +276,8 @@ public static partial class SemanticVerifier
                             depth + 1, failures);
                 if (evaluationContinues
                     && trackPointerFacts
-                    && element is not BoundNativeFixedArrayInitialization
+                    && element is not (BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization)
                     && CarriesRawUnionPayloadFacts(program,
                         layout.ElementType))
                 {
@@ -282,7 +289,8 @@ public static partial class SemanticVerifier
                 }
                 if (evaluationContinues
                     && trackPointerFacts
-                    && element is not BoundNativeFixedArrayInitialization
+                    && element is not (BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization)
                     && CarriesNativePointer(layout.ElementType, program)
                     && initialized.Dependencies is BackingDependencies facts)
                 {
@@ -295,9 +303,10 @@ public static partial class SemanticVerifier
             {
                 var unreachableState = initialized.Clone();
                 var unreachableMasks = (uint[])fieldMasks.Clone();
-                if (element is BoundNativeFixedArrayInitialization nested)
+                if (element is BoundNativeFixedArrayInitialization
+                    or BoundNativeFixedArrayRepeatInitialization)
                 {
-                    _ = EvaluateNestedNativeFixedArrayInitialization(nested,
+                    _ = EvaluateNestedNativeFixedArrayConstruction(element,
                         variable, elementProjection, unreachableState,
                         unreachableMasks, declarations, function, program,
                         false, ref remaining, depth + 1, null);
@@ -312,6 +321,185 @@ public static partial class SemanticVerifier
         }
 
         return evaluationContinues;
+    }
+
+    private static bool EvaluateNestedNativeFixedArrayConstruction(
+        BoundExpression construction, int variable,
+        StorageProjection destinationPrefix,
+        InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function,
+        BoundProgram program, bool trackPointerFacts,
+        ref int remaining, int depth, FailureEdges? failures)
+        => construction switch {
+            BoundNativeFixedArrayInitialization initialization =>
+                EvaluateNestedNativeFixedArrayInitialization(
+                    initialization, variable, destinationPrefix,
+                    initialized, fieldMasks, declarations, function, program,
+                    trackPointerFacts, ref remaining, depth, failures),
+            BoundNativeFixedArrayRepeatInitialization repeat =>
+                EvaluateNestedNativeFixedArrayRepeatInitialization(
+                    repeat, variable, destinationPrefix, initialized,
+                    fieldMasks, declarations, function, program,
+                    trackPointerFacts, ref remaining, depth, failures),
+            _ => throw InvalidEffect(construction?.Span ?? default,
+                "NativeImport"),
+        };
+
+    private static bool EvaluateNestedNativeFixedArrayRepeatInitialization(
+        BoundNativeFixedArrayRepeatInitialization initialization,
+        int variable, StorageProjection destinationPrefix,
+        InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function,
+        BoundProgram program, bool trackPointerFacts,
+        ref int remaining, int depth, FailureEdges? failures)
+    {
+        Count(ref remaining, depth);
+        var layout = initialization.Layout;
+        if (!NativeFixedArrayContract.MatchesProgram(program)
+            || initialization.Type != layout.CarrierType
+            || !NativeFixedArrayContract.IsCarrier(layout.CarrierType)
+            || !NativeFixedArrayContract.MatchesLayout(layout, program)
+            || initialization.Seed is null
+            || initialization.Seed.Type != layout.ElementType
+            || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                layout.ElementType, program.Structures,
+                program.NativeFixedArrayTypes))
+        {
+            throw InvalidEffect(initialization.Span, "NativeImport");
+        }
+
+        var hasElements = layout.ElementCount != 0;
+        var elementPrefix = hasElements
+            ? StorageProjection.Combine(destinationPrefix,
+                StorageProjection.ForArrayRange(0, layout.ElementCount))
+            : destinationPrefix;
+        var seedCompletes = EvaluateNativeFixedArrayRepeatSeed(
+            initialization.Seed, layout.ElementType, variable,
+            elementPrefix, initialized, fieldMasks, declarations,
+            function, program, trackPointerFacts && hasElements,
+            ref remaining, depth + 1, failures);
+        if (!seedCompletes)
+        {
+            return false;
+        }
+
+        if (!trackPointerFacts)
+        {
+            return true;
+        }
+        if (!hasElements)
+        {
+            initialized.ClearRawUnionArrayFacts(variable,
+                destinationPrefix);
+            return true;
+        }
+
+        if (CarriesRawUnionPayloadFacts(program, layout.ElementType))
+        {
+            var initializedBytes = InitializedPayloadBytesOfExpression(
+                initialization.Seed, layout.ElementType, initialized,
+                function, program);
+            initialized.ClearRawUnionArrayFacts(variable,
+                destinationPrefix);
+            initialized.SetRawUnionArrayTemplateBytes(variable,
+                destinationPrefix, layout, initializedBytes);
+        }
+        if (CarriesNativePointer(layout.ElementType, program)
+            && initialized.Dependencies is BackingDependencies facts)
+        {
+            SetNativePointerFieldValuesFromExpression(variable,
+                elementPrefix, layout.ElementType, initialization.Seed,
+                facts, function, program, ref remaining, depth + 1);
+        }
+        return true;
+    }
+
+    private static bool EvaluateNativeFixedArrayRepeatSeed(
+        BoundExpression seed, PrimitiveType elementType, int variable,
+        StorageProjection elementPrefix,
+        InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function,
+        BoundProgram program, bool trackPointerFacts,
+        ref int remaining, int depth, FailureEdges? failures)
+    {
+        if (seed.Type != elementType)
+        {
+            throw InvalidEffect(seed.Span, "NativeImport");
+        }
+
+        if (NativeFixedArrayTypes.IsType(elementType)
+            && seed is BoundRead arrayRead)
+        {
+            if ((uint)arrayRead.Variable >= (uint)function.Variables.Length
+                || !declarations.Contains(arrayRead.Variable)
+                || !initialized[arrayRead.Variable]
+                || function.Variables[arrayRead.Variable].Type
+                    != elementType)
+            {
+                throw InvalidEffect(seed.Span, "NativeImport");
+            }
+            if (trackPointerFacts)
+            {
+                CopyRawUnionArrayFactsOfExpression(seed, variable,
+                    elementPrefix, initialized, function, program);
+            }
+            return true;
+        }
+
+        if (seed is BoundNativeFixedArrayInitialization
+                or BoundNativeFixedArrayRepeatInitialization)
+        {
+            return EvaluateNestedNativeFixedArrayConstruction(seed,
+                variable, elementPrefix, initialized, fieldMasks,
+                declarations, function, program, trackPointerFacts,
+                ref remaining, depth + 1, failures);
+        }
+
+        var seedCompletes = EvaluateExpression(seed, initialized,
+            fieldMasks, declarations, function, program, ref remaining,
+            depth + 1, failures);
+        if (seedCompletes && trackPointerFacts
+            && (NativeFixedArrayTypes.IsType(elementType)
+                || NativeFixedArrayContract.HasInlineFixedArrayFieldStorage(
+                    elementType, program.Structures,
+                    program.NativeFixedArrayTypes)))
+        {
+            CopyRawUnionArrayFactsOfExpression(seed, variable,
+                elementPrefix, initialized, function, program);
+        }
+        return seedCompletes;
+    }
+
+    private static void CopyRawUnionArrayFactsOfExpression(
+        BoundExpression expression, int destinationVariable,
+        StorageProjection destinationPrefix,
+        InitializationState initialized, BoundFunction function,
+        BoundProgram program)
+    {
+        if (expression is BoundRead read)
+        {
+            _ = initialized.CopyRawUnionArrayFacts(destinationVariable,
+                destinationPrefix, read.Variable,
+                StorageProjection.WholeObject);
+            return;
+        }
+        if (expression is BoundMove move)
+        {
+            _ = initialized.CopyRawUnionArrayFacts(destinationVariable,
+                destinationPrefix, move.Variable,
+                StorageProjection.WholeObject);
+            return;
+        }
+        if (expression is BoundFieldRead fieldRead
+            && TryGetFieldProjectionPath(fieldRead, function, program,
+                out var sourceVariable, out var fieldPath))
+        {
+            _ = initialized.CopyRawUnionArrayFacts(destinationVariable,
+                destinationPrefix, sourceVariable,
+                StorageProjection.ForFieldPath(fieldPath));
+            return;
+        }
+        throw InvalidEffect(expression.Span, "NativeImport");
     }
 
     private static void VerifyNativeFixedArrayElement(BoundNativeFixedArrayElement element,
@@ -948,11 +1136,12 @@ public static partial class SemanticVerifier
         if (!EvaluateExpression(write.Index, initialized, fieldMasks, declarations, function,
             program, ref remaining, depth + 1, failures))
         {
-            if (write.Value is BoundNativeFixedArrayInitialization nested)
+            if (write.Value is BoundNativeFixedArrayInitialization
+                or BoundNativeFixedArrayRepeatInitialization)
             {
                 var unreachableState = initialized.Clone();
                 var unreachableMasks = (uint[])fieldMasks.Clone();
-                _ = EvaluateNestedNativeFixedArrayInitialization(nested,
+                _ = EvaluateNestedNativeFixedArrayConstruction(write.Value,
                     write.Variable,
                     GetNativeFixedArrayElementPrefix(arrayPrefix,
                         write.Layout, write.Index),
@@ -968,8 +1157,9 @@ public static partial class SemanticVerifier
             return;
         }
         var valueCompletes = write.Value
-            is BoundNativeFixedArrayInitialization nestedValue
-                ? EvaluateNestedNativeFixedArrayInitialization(nestedValue,
+            is BoundNativeFixedArrayInitialization
+                or BoundNativeFixedArrayRepeatInitialization
+                ? EvaluateNestedNativeFixedArrayConstruction(write.Value,
                     write.Variable,
                     GetNativeFixedArrayElementPrefix(arrayPrefix,
                         write.Layout, write.Index),
@@ -1012,9 +1202,22 @@ public static partial class SemanticVerifier
     {
         Count(ref remaining, depth);
         var hasFieldPlace = write.FieldPlace is not null;
+        var hasLeafFields = !write.LeafFields.IsDefaultOrEmpty;
+        var targetType = PrimitiveType.Void;
+        var fieldOffset = 0;
+        var fieldSize = 0;
+        var fieldRequiresUnsafe = false;
         if (!IsValidNativeFixedArrayPath(write.Variable,
                 write.Projections, function, program, out var leafLayout,
                 write.FieldPlace)
+            || write.LeafFields.IsDefault
+            || write.Projections.Length + write.LeafFields.Length
+                > MaximumDepth
+            || (hasLeafFields
+                && !TryGetNativeFixedArrayLeafFieldPath(
+                    leafLayout.ElementType, write.LeafFields, program,
+                    out targetType, out _, out fieldOffset,
+                    out fieldSize, out fieldRequiresUnsafe))
             || (!hasFieldPlace
                 && !function.Variables[write.Variable].IsMutable)
             || (hasFieldPlace
@@ -1024,7 +1227,12 @@ public static partial class SemanticVerifier
                 write.Projections[0].Layout)
             || !declarations.Contains(write.Variable)
             || (!hasFieldPlace && !initialized[write.Variable])
-            || write.Value.Type != leafLayout.ElementType)
+            || write.Value.Type != (hasLeafFields
+                ? targetType : leafLayout.ElementType)
+            || ((fieldRequiresUnsafe
+                    || NativeFixedArrayFieldPlaceRequiresUnsafe(
+                        write.FieldPlace, function, program))
+                && !write.IsUnsafeAuthorized))
         {
             throw InvalidEffect(write.Span, "NativeImport");
         }
@@ -1056,13 +1264,15 @@ public static partial class SemanticVerifier
             fieldMasks, declarations, function, program, ref remaining,
             depth + 1, failures))
         {
-            if (write.Value is BoundNativeFixedArrayInitialization nested)
+            if (write.Value is BoundNativeFixedArrayInitialization
+                or BoundNativeFixedArrayRepeatInitialization)
             {
                 var unreachableState = initialized.Clone();
                 var unreachableMasks = (uint[])fieldMasks.Clone();
-                var destinationPrefix = GetNativeFixedArrayPathPrefix(
-                    fieldArrayPrefix, write.Projections);
-                _ = EvaluateNestedNativeFixedArrayInitialization(nested,
+                var destinationPrefix = NativeFixedArrayPathWriteDestination(
+                    fieldArrayPrefix, write.Projections,
+                    write.LeafFields);
+                _ = EvaluateNestedNativeFixedArrayConstruction(write.Value,
                     write.Variable, destinationPrefix,
                     unreachableState, unreachableMasks, declarations,
                     function, program, false, ref remaining, depth + 1, null);
@@ -1076,11 +1286,12 @@ public static partial class SemanticVerifier
             return;
         }
         var valueCompletes = write.Value
-            is BoundNativeFixedArrayInitialization nestedValue
-                ? EvaluateNestedNativeFixedArrayInitialization(nestedValue,
+            is BoundNativeFixedArrayInitialization
+                or BoundNativeFixedArrayRepeatInitialization
+                ? EvaluateNestedNativeFixedArrayConstruction(write.Value,
                     write.Variable,
-                    GetNativeFixedArrayPathPrefix(fieldArrayPrefix,
-                        write.Projections),
+                    NativeFixedArrayPathWriteDestination(fieldArrayPrefix,
+                        write.Projections, write.LeafFields),
                     initialized, fieldMasks, declarations, function, program,
                     false, ref remaining, depth + 1, failures)
                 : EvaluateExpression(write.Value, initialized, fieldMasks,
@@ -1099,11 +1310,26 @@ public static partial class SemanticVerifier
                 = NativeFixedArrayContract.TryGetUnsignedIndex(
                     write.Projections[^1].Index, out var index)
                     ? index : (ulong?)null;
-            initialized.SetRawUnionArrayElementBytes(write.Variable,
-                arrayPrefix, leafLayout, selectedIndex,
-                InitializedPayloadBytesOfExpression(write.Value,
-                    leafLayout.ElementType, initialized, function,
-                    program));
+            if (hasLeafFields)
+            {
+                var initializedBytes = InitializedPayloadBytesOfExpression(
+                    write.Value, targetType, initialized, function, program);
+                if (initializedBytes.Length != fieldSize)
+                {
+                    throw Invalid(write.Span);
+                }
+                initialized.WriteRawUnionArrayElementByteRange(
+                    write.Variable, arrayPrefix, leafLayout, selectedIndex,
+                    fieldOffset, initializedBytes);
+            }
+            else
+            {
+                initialized.SetRawUnionArrayElementBytes(write.Variable,
+                    arrayPrefix, leafLayout, selectedIndex,
+                    InitializedPayloadBytesOfExpression(write.Value,
+                        leafLayout.ElementType, initialized, function,
+                        program));
+            }
         }
         if (valueCompletes
             && CarriesNativePointer(leafLayout.ElementType, program)
@@ -1115,5 +1341,117 @@ public static partial class SemanticVerifier
                 function.Variables[write.Variable].Type, facts, program,
                 ref remaining, depth + 1);
         }
+    }
+
+    private static StorageProjection NativeFixedArrayPathWriteDestination(
+        StorageProjection arrayPrefix,
+        ImmutableArray<BoundNativeFixedArrayProjection> projections,
+        ImmutableArray<BoundNativeFixedArrayFieldProjection> leafFields)
+    {
+        var destination = GetNativeFixedArrayPathPrefix(arrayPrefix,
+            projections);
+        foreach (var field in leafFields)
+        {
+            destination = destination.AppendField(field.OwnerType,
+                field.Field);
+        }
+        return destination;
+    }
+
+    private static bool TryGetNativeFixedArrayLeafFieldPath(
+        PrimitiveType elementType,
+        ImmutableArray<BoundNativeFixedArrayFieldProjection> leafFields,
+        BoundProgram program, out PrimitiveType fieldType,
+        out FieldProjectionPath fieldPath, out int fieldOffset,
+        out int fieldSize, out bool requiresUnsafe)
+    {
+        fieldType = PrimitiveType.Void;
+        fieldPath = default;
+        fieldOffset = 0;
+        fieldSize = 0;
+        requiresUnsafe = false;
+        if (leafFields.IsDefaultOrEmpty
+            || !IsInlineStructStorage(elementType, program)
+            || IsUnique(program, elementType)
+            || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                elementType, program.Structures,
+                program.NativeFixedArrayTypes))
+        {
+            return false;
+        }
+
+        var ownerType = elementType;
+        foreach (var projection in leafFields)
+        {
+            if (projection.OwnerType != ownerType
+                || !IsInlineStructStorage(ownerType, program)
+                || IsUnique(program, ownerType)
+                || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                    ownerType, program.Structures,
+                    program.NativeFixedArrayTypes)
+                || !HasFields(program, ownerType)
+                || (uint)projection.Field >= (uint)Fields(program,
+                    ownerType).Length)
+            {
+                return false;
+            }
+
+            var field = Fields(program, ownerType)[projection.Field];
+            if (!field.IsMutable)
+            {
+                return false;
+            }
+            requiresUnsafe |= RequiresUnsafeFieldAccess(program, ownerType,
+                field);
+            fieldPath = fieldPath.Append(ownerType, projection.Field);
+            ownerType = field.Type;
+            fieldSize = field.Size;
+        }
+
+        var elementSize = ValueLayout.Size(elementType, program.Structures,
+            program.CheckedReferenceTypes, program.NativeLoweringAgreement);
+        if (fieldSize < 0 || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                ownerType, program.Structures,
+                program.NativeFixedArrayTypes)
+            || !TryGetFieldPathByteOffset(elementType, fieldPath, program,
+                out fieldOffset)
+            || elementSize < 0 || fieldOffset > elementSize
+            || fieldSize > elementSize - fieldOffset)
+        {
+            return false;
+        }
+
+        fieldType = ownerType;
+        return true;
+    }
+
+    private static bool NativeFixedArrayFieldPlaceRequiresUnsafe(
+        BoundExpression? fieldPlace, BoundFunction function,
+        BoundProgram program)
+    {
+        if (fieldPlace is null)
+        {
+            return false;
+        }
+        if (fieldPlace is not BoundFieldRead place
+            || !TryGetFieldProjectionPath(place, function, program,
+                out _, out var fieldPath))
+        {
+            throw Invalid(fieldPlace.Span);
+        }
+
+        foreach (var segment in fieldPath.Segments)
+        {
+            if (segment.OwnerType != PrimitiveType.Void
+                && HasFields(program, segment.OwnerType)
+                && (uint)segment.Field
+                    < (uint)Fields(program, segment.OwnerType).Length
+                && RequiresUnsafeFieldAccess(program, segment.OwnerType,
+                    Fields(program, segment.OwnerType)[segment.Field]))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

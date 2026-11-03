@@ -6948,14 +6948,9 @@ internal sealed partial class Binder
                     }
 
                     var diagnosticsBeforeInitializer = DiagnosticCount;
-                    var fixedArrayInitializer = initializerNode.Kind
-                        == SyntaxKind.ArrayInitializerExpression
-                            ? BindNativeFixedArrayInitializer(
-                                initializerNode, arrayAliasType,
-                                fixedArrayLayout.ElementType,
-                                fixedArrayLayout.ElementCount)
-                            : BindNativeFixedArrayValue(initializerNode,
-                                arrayAliasType);
+                    var fixedArrayInitializer
+                        = BindNativeFixedArrayValueOrInitializer(
+                            initializerNode, arrayAliasType);
                     if (fixedArrayInitializer.Type != arrayAliasType)
                     {
                         if (DiagnosticCount == diagnosticsBeforeInitializer)
@@ -7183,7 +7178,7 @@ internal sealed partial class Binder
                     }
                     var fixedArrayValue = NativeFixedArrayTypes.IsType(
                         leaf.Layout.ElementType)
-                            ? BindNativeFixedArrayValue(valueNode,
+                            ? BindNativeFixedArrayValueOrInitializer(valueNode,
                                 leaf.Layout.ElementType)
                             : BindExpression(valueNode, leaf.Layout.ElementType);
                     if (projections.Length > 1)
@@ -7284,13 +7279,8 @@ internal sealed partial class Binder
                     }
                     else
                     {
-                        value = valueNode.Kind
-                            == SyntaxKind.ArrayInitializerExpression
-                                ? BindNativeFixedArrayInitializer(valueNode,
-                                    arrayType, arrayLayout.ElementType,
-                                    arrayLayout.ElementCount)
-                                : BindNativeFixedArrayValue(valueNode,
-                                    arrayType);
+                        value = BindNativeFixedArrayValueOrInitializer(
+                            valueNode, arrayType);
                     }
                 }
                 else
@@ -7694,6 +7684,13 @@ internal sealed partial class Binder
                 root = (SyntaxNode)root.Children[0];
             }
         }
+        if (root.Kind == SyntaxKind.IndexExpression
+            && TryBindNativeFixedArrayAccessPath(root, out var arrayVariable,
+                out var arrayFieldPlace, out var arrayProjections))
+        {
+            return BindNativeFixedArrayPathFieldAssignment(arrayVariable,
+                arrayFieldPlace, arrayProjections, members, value, span);
+        }
         var fields = ImmutableArray.CreateBuilder<int>();
         var variable = -1;
         if (root.Kind == SyntaxKind.NameExpression)
@@ -7765,14 +7762,93 @@ internal sealed partial class Binder
             path.RemoveAt(0), value, type, span, isUnsafeAuthorized);
     }
 
+    private BoundStatement BindNativeFixedArrayPathFieldAssignment(
+        int variable, BoundExpression? arrayFieldPlace,
+        ImmutableArray<BoundNativeFixedArrayProjection> projections,
+        Stack<SyntaxToken> members, SyntaxNode value, TextSpan span)
+    {
+        var rootLayout = projections[0].Layout;
+        if ((arrayFieldPlace is null && !_variables[variable].IsMutable)
+            || !NativeFixedArrayContract.AllowsElementWrites(rootLayout))
+        {
+            Report("TRM3008",
+                "The selected fixed-array local does not permit element writes.",
+                span);
+        }
+        if (arrayFieldPlace is BoundFieldRead fieldPlace)
+        {
+            CheckUpdateFieldPlace(fieldPlace);
+        }
+
+        var ownerType = projections[^1].Layout.ElementType;
+        var leafFields = ImmutableArray.CreateBuilder<
+            BoundNativeFixedArrayFieldProjection>(members.Count);
+        var isUnsafeAuthorized = false;
+        if (arrayFieldPlace is BoundFieldRead arrayBaseField)
+        {
+            BoundExpression? receiver = arrayBaseField;
+            while (receiver is BoundFieldRead fieldRead)
+            {
+                isUnsafeAuthorized |= fieldRead.IsUnsafeAuthorized;
+                receiver = fieldRead.Receiver;
+            }
+        }
+
+        foreach (var member in members)
+        {
+            if (!IsStruct(ownerType)
+                || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                    ownerType, _structs, _nativeFixedArrayTypes)
+                || !TryFindField(ownerType, member.Name, out var field))
+            {
+                Report("TRM3008",
+                    $"Unknown inline Copy field '{member.Text}' in assignment target.",
+                    member.Span);
+                _ = BindExpression(value, null);
+                return new BoundBlock([], span);
+            }
+
+            var declaration = GetField(ownerType, field);
+            isUnsafeAuthorized |= CheckFieldAccess(ownerType, field,
+                member.Span);
+            CheckFieldMutation(ownerType, field, false, member.Span);
+            leafFields.Add(new BoundNativeFixedArrayFieldProjection(
+                ownerType, field));
+            ownerType = declaration.Type;
+        }
+
+        if (!NativeFixedArrayContract.IsRootlessCopyFieldType(ownerType,
+                _structs, _nativeFixedArrayTypes))
+        {
+            Report("TRM3008",
+                "The selected field path must end in an inline Copy value.",
+                span);
+            _ = BindExpression(value, null);
+            return new BoundBlock([], span);
+        }
+
+        var boundValue = NativeFixedArrayTypes.IsType(ownerType)
+            ? BindNativeFixedArrayValueOrInitializer(value, ownerType)
+            : BindExpression(value, ownerType);
+        return new BoundExpressionStatement(
+            new BoundNativeFixedArrayPathWrite(variable, projections,
+                boundValue, span) {
+                FieldPlace = arrayFieldPlace,
+                LeafFields = leafFields.MoveToImmutable(),
+                IsUnsafeAuthorized = isUnsafeAuthorized,
+            },
+            span);
+    }
+
     private BoundStatement BindFieldAssignmentValue(int variable, int field,
         ImmutableArray<int> nestedFields, SyntaxNode value,
         PrimitiveType type, TextSpan span, bool isUnsafeAuthorized)
     {
         var boundValue = NativeFixedArrayTypes.IsType(type)
-            ? BindNativeFixedArrayValue(value, type)
+            ? BindNativeFixedArrayValueOrInitializer(value, type)
             : BindExpression(value, type);
-        if (boundValue is not BoundNativeFixedArrayInitialization initialization)
+        if (boundValue is not (BoundNativeFixedArrayInitialization
+            or BoundNativeFixedArrayRepeatInitialization))
         {
             return new BoundFieldAssignment(variable, field, boundValue, span) {
                 NestedFields = nestedFields,
@@ -7789,7 +7865,7 @@ internal sealed partial class Binder
                 IsUnsafeAuthorized = isUnsafeAuthorized,
             };
         return new BoundBlock([
-            new BoundLocal(temporary, initialization, span),
+            new BoundLocal(temporary, boundValue, span),
             assignment,
         ], span);
     }
