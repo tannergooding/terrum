@@ -715,11 +715,28 @@ public static partial class TrRmExecutableCompiler
             var materializedTypeDefRows = new HashSet<int>();
             var materializedTypeDefs
                 = new bool[tables.TypeDefs.Count + 1];
-            if (!tables.TargetProfiles.TryGetProfile(
-                    TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
-                    TrRmTargetProfileTableReader
-                        .WindowsX64NativeProfileRuleRevision,
-                    out var profileRow))
+            var requiresWindowsX64Profile
+                = includedTypeDefRows.Count != 0
+                    || tables.FixedArrayLayouts.Count != 0;
+            for (var row = 1;
+                !requiresWindowsX64Profile
+                    && row <= tables.TypeSpecs.Count; row++)
+            {
+                var typeSpec = tables.TypeSpecs.GetTypeSpecRef(
+                    checked((uint)row));
+                if (typeSpec.IsRow && typeSpec.Form == 0x11)
+                {
+                    requiresWindowsX64Profile = true;
+                    break;
+                }
+            }
+
+            var hasWindowsX64Profile = tables.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision,
+                out var profileRow);
+            if (!hasWindowsX64Profile && requiresWindowsX64Profile)
             {
                 throw Invalid(
                     "The A2 fixed-array loader has no Windows x64 TargetProfile.");
@@ -3426,11 +3443,27 @@ public static partial class TrRmExecutableCompiler
                             placeSelectionsByRegister);
                     if (selection.IndexKind == 1)
                     {
-                        if (!registerExpressions.TryGetValue(
+                        var registerIndexConstant
+                            = registerExpressions.TryGetValue(
                                 selection.IndexRegister,
                                 out var registerIndexExpression)
-                            || registerIndexExpression
-                                is not BoundConstant registerIndexConstant
+                                && registerIndexExpression
+                                    is BoundConstant constant
+                                ? constant
+                                : null;
+                        if (registerIndexConstant is null
+                            && registerConstants.TryGetValue(
+                                selection.IndexRegister,
+                                out var exactRegisterConstant)
+                            && exactRegisterConstant.Type
+                                == PrimitiveType.Int32)
+                        {
+                            registerIndexConstant = new BoundConstant(
+                                unchecked((int)exactRegisterConstant.Bits),
+                                exactRegisterConstant.Type, default);
+                        }
+
+                        if (registerIndexConstant is null
                             || !NativeFixedArrayContract.IsIndexType(
                                 registerIndexConstant.Type)
                             || !NativeFixedArrayContract
