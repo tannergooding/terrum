@@ -4114,18 +4114,25 @@ public static partial class SemanticVerifier
                 {
                     initialized.ResetNestedOwnerSubtree(fieldAssignment.Variable,
                         fieldProjectionPath);
-                    if (IsRawUnionType(program, ownerType))
+                    var isRawUnion = IsRawUnionType(program, ownerType);
+                    var fullFieldMask = FullMask(program, ownerType);
+                    if (isRawUnion)
                     {
                         initialized[fieldAssignment.Variable] = true;
                     }
-                    fieldMasks[fieldAssignment.Variable] |= rootFieldBit;
+                    fieldMasks[fieldAssignment.Variable] = isRawUnion
+                        ? fullFieldMask
+                        : fieldMasks[fieldAssignment.Variable] | rootFieldBit;
                     initialized.SetPossibleFieldMask(fieldAssignment.Variable,
-                        initialized.PossibleFieldMask(fieldAssignment.Variable) | rootFieldBit);
-                    if (fieldMasks[fieldAssignment.Variable] == FullMask(program, ownerType))
+                        isRawUnion
+                            ? fullFieldMask
+                            : initialized.PossibleFieldMask(fieldAssignment.Variable)
+                                | rootFieldBit);
+                    if (fieldMasks[fieldAssignment.Variable] == fullFieldMask)
                     {
                         initialized[fieldAssignment.Variable] = true;
                     }
-                    else if (!IsRawUnionType(program, ownerType)
+                    else if (!isRawUnion
                         && (IsUnique(program, ownerType)
                             || CarriesRawUnionPayloadFacts(program, ownerType)
                             || NativeFixedArrayContract
@@ -7401,6 +7408,16 @@ public static partial class SemanticVerifier
             || (!initialized[rootVariable] && !initialized.HasPartialValue(rootVariable)))
         {
             throw InvalidEffect(place?.Span ?? default, "Ownership");
+        }
+
+        // A complete nested Union path is not observable before its parent is published.
+        if (function.Variables[rootVariable].IsInitializationLocal
+            && !initialized[rootVariable]
+            && fieldPath.Segments.Length > 1
+            && fieldPath.Segments.Any(segment =>
+                IsRawUnionType(program, segment.OwnerType)))
+        {
+            throw InvalidEffect(place.Span, "Ownership");
         }
 
         var segments = fieldPath.Segments;
