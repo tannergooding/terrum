@@ -30,7 +30,9 @@ public static partial class TrRmExecutableCompiler
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
-            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft))
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+            or TrRmArtifactSchema.LocalAggregateLayoutDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
@@ -55,8 +57,9 @@ public static partial class TrRmExecutableCompiler
                 "A2 Copy declaration emission requires a fail-fast library of supported struct declarations.");
         }
         if (!program.Functions.IsEmpty
-            && schema
-                != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
+            && schema is not (
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft))
         {
             throw Unsupported(
                 "Only the exact A2R1 schema publishes verified function return coverage.");
@@ -271,7 +274,9 @@ public static partial class TrRmExecutableCompiler
 
             layoutFirstByStructure[typeDefOrdinal] = layoutRows.Count + 1;
             var layoutKind = structure.LayoutKind;
-            var pack = layoutKind is 1 or 2 ? 16u : 0u;
+            var declaredAlignment = structure.DeclaredAlignment is int alignment
+                ? checked((uint)alignment) : 0u;
+            var pack = checked((uint)structure.Packing);
             for (var variant = 0; variant < 2; variant++)
             {
                 var layoutRow = layoutRows.Count + 1;
@@ -279,7 +284,8 @@ public static partial class TrRmExecutableCompiler
                 layoutRows.Add(new TrRmLayoutRow(typeDefOrdinal + 1,
                     variant == 0 ? 0u : 1u, layoutKind,
                     variant == 0 ? (byte)0 : (byte)1,
-                    0, pack, layoutFieldFirst, structure.Fields.Length));
+                    declaredAlignment, pack, layoutFieldFirst,
+                    structure.Fields.Length));
                 for (var field = 0; field < structure.Fields.Length; field++)
                 {
                     layoutFieldRows.Add(new TrRmLayoutFieldRow(layoutRow,
@@ -589,7 +595,14 @@ public static partial class TrRmExecutableCompiler
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections, schema);
-        var index = schema.UsesRawUnionValueCoverage()
+        var index = schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
+            ? TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact)
+            : schema
+                .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+                ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                    artifact)
+            : schema.UsesRawUnionValueCoverage()
             ? TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
                     artifact)
@@ -607,7 +620,14 @@ public static partial class TrRmExecutableCompiler
                         artifact)
                 : TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
-        if (schema.UsesRawUnionValueCoverage())
+        if (schema
+            .UsesForeignInvocationStorageFixedArrayRepeatInitialization())
+        {
+            _ = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    index);
+        }
+        else if (schema.UsesRawUnionValueCoverage())
         {
             _ = TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(

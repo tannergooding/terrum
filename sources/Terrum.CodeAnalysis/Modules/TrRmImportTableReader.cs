@@ -116,7 +116,10 @@ public readonly ref struct TrRmImportTableReader
             && (schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft);
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft);
         if (allowsTypeDefAliases)
         {
             resourceLedger?.ConsumeWork(
@@ -177,7 +180,7 @@ public readonly ref struct TrRmImportTableReader
                 throw InvalidImport();
             }
             _resourceLedger?.ConsumeWork(2);
-            if (profileAware && schema == TrRmArtifactSchema.CopyOriginDraft)
+            if (profileAware && schema.UsesCopyOrigin())
             {
                 var definitionKind = expected >> 24;
                 var contractOnlyIdentity = definitionKind is 0x13 or 0x14

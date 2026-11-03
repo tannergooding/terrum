@@ -76,7 +76,9 @@ public static partial class TrRmExecutableCompiler
                 or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
-                or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity))
+                or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
+                or StandardLocalAggregateLayoutSchemaIdentity))
         {
             throw Unsupported(
                 "Explicit TypeDef roots require the exact A2, A2E or A2EU schema.");
@@ -87,7 +89,9 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
-                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)))
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
+                    or StandardLocalAggregateLayoutSchemaIdentity)))
         {
             throw Unsupported(
                 "The bounded A2 type-reference projection requires A2, A2E or A2EU provider artifacts.");
@@ -124,7 +128,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft)
             || moduleRow <= 0 || moduleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd - typeDefStart
                 != program.Structures.Length
@@ -636,13 +641,17 @@ public static partial class TrRmExecutableCompiler
             || StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity))
+                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardLocalAggregateLayoutSchemaIdentity))
             || tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft)
             || program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty)
         {
@@ -681,7 +690,8 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
-                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity))
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                    or StandardLocalAggregateLayoutSchemaIdentity))
             {
                 throw Unsupported(
                     "Loaded A2 type origins require A2, A2E or A2EU provider snapshots.");

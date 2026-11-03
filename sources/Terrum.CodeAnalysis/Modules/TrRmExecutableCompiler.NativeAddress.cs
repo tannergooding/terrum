@@ -28,6 +28,7 @@ public static partial class TrRmExecutableCompiler
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+            or TrRmArtifactSchema.LocalAggregateLayoutDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
@@ -39,7 +40,8 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                    or TrRmArtifactSchema.LocalAggregateLayoutDraft)
                 || program.EntryPoint != -1 || !program.Functions.IsEmpty))
         {
             throw Unsupported(
@@ -70,7 +72,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft)
                 && program.EntryPoint < 0
                 && (program.Functions.IsEmpty
                     || (schema.UsesRawUnionValueCoverage()
@@ -89,7 +92,8 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                    or TrRmArtifactSchema.LocalAggregateLayoutDraft)
                 || program.Structures.Any(static structure =>
                     structure.StandardTypeOrigin is not null
                     || structure.BlittableTargetRequirement
@@ -674,7 +678,9 @@ public static partial class TrRmExecutableCompiler
             }
 
             var firstLayout = layoutRows.Count + 1;
-            var pack = structure.LayoutKind is 1 or 2 ? 16u : 0u;
+            var declaredAlignment = structure.DeclaredAlignment is int alignment
+                ? checked((uint)alignment) : 0u;
+            var pack = checked((uint)structure.Packing);
             for (var variant = 0; variant < 2; variant++)
             {
                 var layoutRow = layoutRows.Count + 1;
@@ -683,7 +689,7 @@ public static partial class TrRmExecutableCompiler
                 layoutRows.Add(new TrRmLayoutRow(structureIndex + 1,
                     variant == 0 ? 0u : 1u, structure.LayoutKind,
                     variant == 0 ? (byte)0 : (byte)1,
-                    0, pack, firstLayoutField,
+                    declaredAlignment, pack, firstLayoutField,
                     structure.Fields.Length));
                 for (var field = 0; field < structure.Fields.Length;
                     field++)

@@ -50,6 +50,10 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
     private const string StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
+    private const string StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
+    private const string StandardLocalAggregateLayoutSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-1";
     private const string StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private const string StandardRegisterExceptionRegionsSchemaIdentity
@@ -139,7 +143,11 @@ public static partial class TrRmExecutableCompiler
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity))
+                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardLocalAggregateLayoutSchemaIdentity))
         {
             throw Unsupported(
                 "Explicit source TypeDef exports require an exact selected fixed-array schema.");
@@ -180,6 +188,8 @@ public static partial class TrRmExecutableCompiler
                 or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
+                or StandardLocalAggregateLayoutSchemaIdentity
                 or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
             && moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
@@ -231,6 +241,17 @@ public static partial class TrRmExecutableCompiler
                     moduleIdentity,
                     TrRmArtifactSchema
                         .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft,
+                    sourceTypeExports),
+            StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft,
+                    sourceTypeExports),
+            StandardLocalAggregateLayoutSchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema.LocalAggregateLayoutDraft,
                     sourceTypeExports),
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
@@ -613,14 +634,16 @@ public static partial class TrRmExecutableCompiler
             structureLayoutFirst[index] = layoutRows.Count + 1;
             structureLayoutCount[index] = 2;
             var layoutKind = structure.LayoutKind;
-            var pack = layoutKind is 1 or 2 ? 16u : 0u;
+            var declaredAlignment = structure.DeclaredAlignment is int alignment
+                ? checked((uint)alignment) : 0u;
+            var pack = checked((uint)structure.Packing);
             for (var variant = 0; variant < 2; variant++)
             {
                 var layoutRow = layoutRows.Count + 1;
                 var fieldFirst = structure.Fields.IsEmpty ? 0 : layoutFieldRows.Count + 1;
                 layoutRows.Add(new TrRmLayoutRow(index + 1,
                     variant == 0 ? 0u : 1u, layoutKind, variant == 0 ? (byte)0 : (byte)1,
-                    0, pack, fieldFirst, structure.Fields.Length));
+                    declaredAlignment, pack, fieldFirst, structure.Fields.Length));
                 for (var field = 0; field < structure.Fields.Length; field++)
                 {
                     layoutFieldRows.Add(new TrRmLayoutFieldRow(layoutRow, field,
@@ -3366,11 +3389,14 @@ public static partial class TrRmExecutableCompiler
             var flags = typeDefs.GetFlags(row);
             var layoutRow = layouts.GetLayoutForProfile(row, checked((uint)windowsX64ProfileRow));
             var layoutKind = layouts.GetLayoutKind(layoutRow);
-            var pack = layoutKind is 1 or 2 ? 16u : 0u;
+            var pack = layouts.GetPack(layoutRow);
+            var alignment = layouts.GetAlignment(layoutRow);
             if (layouts.GetTargetProfileRef(layoutRow) != windowsX64ProfileRow
                 || layoutKind is not (1 or 2 or 3)
                 || layouts.GetFlags(layoutRow) != 1
-                || layouts.GetAlignment(layoutRow) != 0 || layouts.GetPack(layoutRow) != pack)
+                || (layoutKind is 1 or 2
+                    ? pack is not (1 or 2 or 4 or 8 or 16)
+                    : pack != 0 || alignment != 0))
             {
                 throw Invalid("A native Blittable Layout uses an unsupported Windows x64 variant.");
             }
@@ -3394,6 +3420,9 @@ public static partial class TrRmExecutableCompiler
                 BlittableTargetRequirement = selectedTypeDefRows is null
                     || selectedTypeDefRows.Contains(row)
                     ? FixedLayoutStorage.WindowsX64TargetRequirement : 0,
+                Packing = layoutKind is 1 or 2 ? checked((int)pack) : 0,
+                DeclaredAlignment = alignment == 0 ? null
+                    : checked((int)alignment),
                 IsPrivate = (flags & 3) == 0,
                 IsInternal = (flags & 3) == 1,
             });

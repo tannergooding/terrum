@@ -220,6 +220,8 @@ public static partial class TrRmExecutableCompiler
         var index = a3LayoutResourceLedger is not null
             ? new TrRmArtifactIndex(artifact, schema,
                 a3LayoutResourceLedger)
+            : schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
+                ? TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact)
             : schema
                 .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
                 ? TrRmArtifactIndex
@@ -346,7 +348,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft)
             && tables.TypeDefs.Count != 0 && methodEnd == methodStart
             && selectedModuleImports is null)
         {
@@ -585,14 +588,16 @@ public static partial class TrRmExecutableCompiler
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft))
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                        or TrRmArtifactSchema.LocalAggregateLayoutDraft))
                 && !((schema
                         is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                            or TrRmArtifactSchema.LocalAggregateLayoutDraft)
                     && tables.TypeDefs.Count != 0
                     && (kind == 0x0013 || kind == 0x0014
                         || kind == 0x0015 || kind == 0x0023))
@@ -605,7 +610,8 @@ public static partial class TrRmExecutableCompiler
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)))
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                        or TrRmArtifactSchema.LocalAggregateLayoutDraft)))
             {
                 throw Unsupported(
                     $"Section 0x{kind:X4} is outside the bounded foreign-invocation source-free loader.");
@@ -6777,7 +6783,8 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft)
             || selectedModuleRow <= 0
             || selectedModuleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd <= typeDefStart

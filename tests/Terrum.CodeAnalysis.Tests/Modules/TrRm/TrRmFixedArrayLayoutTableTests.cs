@@ -14,6 +14,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -23,6 +24,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 {
     private const string A2R1SchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
+    private const string LocalAggregateLayoutSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-1";
 
     private sealed class TrackingMemoryManager(int length)
         : MemoryManager<byte>
@@ -154,6 +157,73 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         => VerifyRawUnionArrayTypeLibrary(A2R1SchemaIdentity);
 
     [Test]
+    [TestCase(A2R1SchemaIdentity)]
+    [TestCase(LocalAggregateLayoutSchemaIdentity)]
+    public void StandardSourceFreeRoundTripsPackingAlignmentAndArrayStride(
+        string schemaIdentity)
+    {
+        const string moduleIdentity = "packed-layout-provider";
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Alignment: 32)]
+            public struct Element {
+                public uint8 Tag;
+                public uint32 Value;
+            }
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Packing: 1)]
+            public struct Holder {
+                public uint8 Prefix;
+                public [Element; 2] Values;
+                public uint16 Suffix;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program! with { Functions = [] };
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1);
+        if (StringComparer.Ordinal.Equals(schemaIdentity,
+                LocalAggregateLayoutSchemaIdentity))
+        {
+            Assert.Throws<NotSupportedException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                    moduleIdentity,
+                    [new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                        artifact)]));
+        }
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var element = loaded.Structures.Single(static structure =>
+            structure.Name == "Element");
+        var holder = loaded.Structures.Single(static structure =>
+            structure.Name == "Holder");
+        var array = global::System.Linq.Enumerable.Single(
+            loaded.NativeFixedArrayTypes);
+
+        Assert.That((element.Packing, element.DeclaredAlignment,
+            element.Alignment, element.RequiredAlignment),
+            Is.EqualTo((16, (int?)32, 32, 32)));
+        Assert.That((holder.Packing, holder.DeclaredAlignment,
+            holder.Alignment, holder.RequiredAlignment),
+            Is.EqualTo((1, (int?)null, 32, 32)));
+        Assert.That((holder.Fields[1].Offset, holder.Fields[1].Size,
+            holder.Fields[2].Offset), Is.EqualTo((32, 64, 96)));
+        Assert.That((array.ElementStride, array.ByteExtent,
+            array.Alignment, array.RequiredAlignment),
+            Is.EqualTo((32UL, 64UL, 32UL, 32UL)));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
+    [Test]
     public void StandardA2R1EmitsVerifiedRawUnionReturnCoverage()
     {
         const string source = """
@@ -176,7 +246,11 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             }
             """;
         var compilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(source), new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -240,7 +314,11 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             }
             """;
         var compilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(source), new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -356,7 +434,11 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             }
             """;
         var compilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(source), new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
@@ -1363,7 +1445,10 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             public struct Envelope {
                 public Container Value;
             }
-            """), reference);
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(sourceConsumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
     }
@@ -1421,7 +1506,10 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             public struct Consumer {
                 public Container Value;
             }
-            """), reference);
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(sourceConsumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
         var hiddenImport = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -1429,7 +1517,10 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             public struct Consumer {
                 public Pair Value;
             }
-            """), reference);
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(hiddenImport.HasErrors, Is.True);
 
         var relocatedProvider = CreateCopyProviderArtifact(

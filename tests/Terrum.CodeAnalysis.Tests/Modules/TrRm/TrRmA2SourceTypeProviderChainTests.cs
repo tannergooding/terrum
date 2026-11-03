@@ -9,6 +9,7 @@ using System.Linq;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -22,6 +23,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
     private const string EmptyUnitInitializationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+    private const string LocalAggregateLayoutSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-1";
 
     [Test]
     public void StandardA2EConsumerBindsA2TypeProviders()
@@ -80,6 +83,46 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             static structure => structure.Name == "Pair")
             .StandardTypeOrigin!.Provider.ModuleIdentity,
             Is.EqualTo("Provider"));
+    }
+
+    [Test]
+    public void StandardL1ConsumerBindsOnlyL1TypeProviders()
+    {
+        var schema = TrRmArtifactSchema.LocalAggregateLayoutDraft;
+        var rootArtifact = CreateRootArtifact(schema: schema);
+        var providerArtifact = CreateProviderArtifact(schema: schema);
+        var leafArtifact = CreateLeafProviderArtifact(schema: schema);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(LocalAggregateLayoutSchemaIdentity,
+                rootArtifact),
+            "Root",
+            [
+                new TrRmStandardArtifactInput(
+                    LocalAggregateLayoutSchemaIdentity, providerArtifact),
+                new TrRmStandardArtifactInput(
+                    LocalAggregateLayoutSchemaIdentity, leafArtifact),
+            ],
+            ["ContainerKey"]);
+
+        Assert.That(reference.Structures.Single(static structure
+                => structure.Name == "Pair")
+            .StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo("Provider"));
+
+        var mixedProviderException = Assert.Throws<NotSupportedException>(
+            () => TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    LocalAggregateLayoutSchemaIdentity, rootArtifact),
+                "Root",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        providerArtifact),
+                    new TrRmStandardArtifactInput(
+                        LocalAggregateLayoutSchemaIdentity, leafArtifact),
+                ],
+                ["ContainerKey"]));
+        Assert.That(mixedProviderException!.Message,
+            Does.Contain("root and every provider artifact"));
     }
 
     [Test]
@@ -217,7 +260,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 public Container Value;
                 public [Container; 2] Values;
             }
-            """), reference);
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(sourceConsumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
         var hiddenDependency = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -225,7 +271,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             public struct Consumer {
                 public Leaf Value;
             }
-            """), reference);
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(hiddenDependency.HasErrors, Is.True);
 
         var sourceProgram = sourceConsumer.Program!;
@@ -374,7 +423,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 public struct Consumer {
                     public Container Value;
                 }
-                """), consumerReference);
+                """), consumerReference, new CompilationOptions {
+                    LayoutCoreRegistration =
+                        LayoutCoreRegistrationTestData.Create(),
+                });
         Assert.That(hiddenReencodedDependency.HasErrors, Is.True);
 
         var secondSourceConsumer = Compilation.CreateLibrary(
@@ -383,7 +435,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 public struct Consumer2 {
                     public Consumer Value;
                 }
-                """), consumerReference);
+                """), consumerReference, new CompilationOptions {
+                    LayoutCoreRegistration =
+                        LayoutCoreRegistrationTestData.Create(),
+                });
         Assert.That(secondSourceConsumer.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 secondSourceConsumer.Diagnostics));
@@ -474,7 +529,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             public struct Consumer {
                 public Container Value;
             }
-            """), reference);
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(sourceConsumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -559,7 +617,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                     }
                     """;
             var compilation = Compilation.CreateLibrary(
-                SyntaxTree.Parse(source));
+                SyntaxTree.Parse(source), new CompilationOptions {
+                    LayoutCoreRegistration =
+                        LayoutCoreRegistrationTestData.Create(),
+                });
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             return TrRmExecutableCompiler.EmitStandard(
@@ -1072,7 +1133,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 public ContainerA Value;
                 public [ContainerA; 2] Values;
             }
-            """), providerReference);
+            """), providerReference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -1164,7 +1228,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
     }
 
     private static byte[] CreateRootArtifact(bool duplicatePairAlias = false,
-        bool multiplePairViews = false)
+        bool multiplePairViews = false,
+        TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Root", 0), ("Provider", 0), ("LeafProvider", 0),
@@ -1176,9 +1242,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var strings = new TrRmStringTableReader(stringsBytes, 16);
         var featuresBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.RootlessNativeValues,
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
         var features = new TrRmFeatureTableReader(featuresBytes, 1,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeDefCount = multiplePairViews ? 4 : 3;
         var fieldCount = multiplePairViews ? 5 : 3;
         var layoutCount = typeDefCount * 2;
@@ -1206,10 +1272,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         }
         var typeSpecsBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             typeDefCount, 3, 0, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecsBytes,
             typeSpecRows.Count, typeDefCount, 3, 0, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeDefRows = multiplePairViews
             ? new[] {
                 new TrRmTypeDefRow(1, 5, 0x26, 1, 1, 0, 0, 1, 2, 0, 0),
@@ -1224,10 +1290,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             ];
         var typeDefsBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
             strings, modules, fieldCount, 0, layoutCount, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefsBytes,
             typeDefCount, strings, modules, fieldCount, 0, layoutCount, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var fieldRows = multiplePairViews
             ? new[] {
                 new TrRmFieldDefRow(1, 11, 3, 0),
@@ -1247,10 +1313,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             typeDefs, typeSpecs);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
         var targetProfiles = new TrRmTargetProfileTableReader(
-            targetProfilesBytes, 1,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            targetProfilesBytes, 1, schema);
         var (layoutBytes, layoutFieldBytes)
             = CreateSingleFieldLayouts(typeDefs, fields, targetProfiles,
                 typeDefCount);
@@ -1271,11 +1336,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             new TrRmImportRow(2, 9, leafExpected),
         ], strings, moduleRefs, typeDefs, default, default, default, default,
             fields, features, modules,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var imports = new TrRmImportTableReader(importsBytes, 3, strings,
             moduleRefs, typeDefs, default, default, default, default, fields,
-            features, modules,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            features, modules, schema);
         var exportsBytes = TrRmExportTableWriter.Encode([
             new TrRmExportRow(0x1300_0000u | (uint)typeDefCount, 13),
         ], strings, typeDefs, default, default, imports);
@@ -1295,11 +1359,13 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             new TrRmSection(0x0023, 0, (uint)layoutFieldCount,
                 layoutFieldBytes),
             new TrRmSection(0x0048, 0, 1, targetProfilesBytes),
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
     }
 
     private static byte[] CreateProviderArtifact(bool coLocateLeafProvider = false,
-        bool splitPairAlias = false, bool relocatePair = false)
+        bool splitPairAlias = false, bool relocatePair = false,
+        TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Provider", 0), ("LeafProvider", 0), ("Pair", 0),
@@ -1310,7 +1376,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var strings = new TrRmStringTableReader(stringsBytes, 12);
         var featuresBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.RootlessNativeValues,
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
         TrRmModuleRow[] moduleRows = coLocateLeafProvider
             ? [
                 new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
@@ -1337,10 +1403,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             TrRmTypeSpecTableWriter.Builtin(0x0D),
             TrRmTypeSpecTableWriter.Reference(0x03, 1),
         ], typeDefCount, 1, 0, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecsBytes, 2,
             typeDefCount, 1, 0, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeDefRows = new List<TrRmTypeDefRow>();
         var fieldRows = new List<TrRmFieldDefRow>();
         if (relocatePair)
@@ -1380,20 +1446,19 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var layoutCount = typeDefCount * 2;
         var typeDefsBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
             strings, modules, fieldRows.Count, 0, layoutCount, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefsBytes, typeDefCount,
             strings, modules, fieldRows.Count, 0, layoutCount, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var fieldsBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
             typeDefs, typeSpecs);
         var fields = new TrRmFieldDefTableReader(fieldsBytes, fieldRows.Count,
             strings, typeDefs, typeSpecs);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
         var targetProfiles = new TrRmTargetProfileTableReader(
-            targetProfilesBytes, 1,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            targetProfilesBytes, 1, schema);
         var (layoutBytes, layoutFieldBytes)
             = CreateSingleFieldLayouts(typeDefs, fields, targetProfiles,
                 typeDefCount);
@@ -1436,10 +1501,12 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 exportsBytes),
             new TrRmSection(0x0023, 0, (uint)layoutCount, layoutFieldBytes),
             new TrRmSection(0x0048, 0, 1, targetProfilesBytes),
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
     }
 
-    private static byte[] CreateLeafProviderArtifact(uint pack = 16)
+    private static byte[] CreateLeafProviderArtifact(uint pack = 16,
+        TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("LeafProvider", 0), ("Leaf", 0), ("Data", 0),
@@ -1448,7 +1515,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var strings = new TrRmStringTableReader(stringsBytes, 6);
         var featuresBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.RootlessNativeValues,
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
         var modulesBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
                 FeatureFirst: 1, FeatureCount: 1),
@@ -1458,16 +1525,16 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var typeSpecsBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(0x0D),
         ], 1, 0, 0, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecsBytes, 1, 1, 0,
-            0, 0, TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            0, 0, schema);
         var typeDefsBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(1, 3, 0x26, 1, 1, 0, 0, 1, 2, 0, 0),
         ], strings, modules, 1, 0, 2, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefsBytes, 1, strings,
             modules, 1, 0, 2, 0,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            schema);
         var fieldsBytes = TrRmFieldDefTableWriter.Encode([
             new TrRmFieldDefRow(1, 4, 1, 0),
         ], strings, typeDefs, typeSpecs);
@@ -1475,10 +1542,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             typeDefs, typeSpecs);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
         var targetProfiles = new TrRmTargetProfileTableReader(
-            targetProfilesBytes, 1,
-            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            targetProfilesBytes, 1, schema);
         var (layoutBytes, layoutFieldBytes)
             = CreateSingleFieldLayouts(typeDefs, fields, targetProfiles, 1,
                 pack);
@@ -1502,7 +1568,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             new TrRmSection(0x001D, 0, 2, exportsBytes),
             new TrRmSection(0x0023, 0, 2, layoutFieldBytes),
             new TrRmSection(0x0048, 0, 1, targetProfilesBytes),
-        ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        ], schema);
     }
 
     private static (byte[] LayoutBytes, byte[] LayoutFieldBytes)
