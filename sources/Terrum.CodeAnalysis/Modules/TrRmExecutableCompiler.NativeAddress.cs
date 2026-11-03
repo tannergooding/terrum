@@ -6826,6 +6826,26 @@ public static partial class TrRmExecutableCompiler
                     return;
 
                 case BoundExpressionStatement
+                    { Expression: BoundNativeFixedArrayPathWrite pathWrite }:
+                    AppendNativeFixedArrayPathWrite(pathWrite.Variable,
+                        pathWrite.FieldPlace, pathWrite.Projections,
+                        pathWrite.LeafFields, pathWrite.Value,
+                        pathWrite.IsUnsafeAuthorized, pathWrite);
+                    return;
+
+                case BoundExpressionStatement
+                    { Expression: BoundNativeFixedArrayWrite arrayWrite }:
+                    AppendNativeFixedArrayPathWrite(arrayWrite.Variable,
+                        arrayWrite.FieldPlace, [
+                            new BoundNativeFixedArrayProjection(
+                                arrayWrite.Layout, arrayWrite.Index),
+                        ], [], arrayWrite.Value,
+                        RequiresUnsafeNativeArrayFieldPlace(
+                            arrayWrite.FieldPlace, program),
+                        arrayWrite);
+                    return;
+
+                case BoundExpressionStatement
                     { Expression: BoundConditional conditional }:
                     AppendUnitInitializerExpression(conditional);
                     return;
@@ -7579,7 +7599,8 @@ public static partial class TrRmExecutableCompiler
                     case BoundConstant indexConstant:
                         if (TryGetContextualInitializationRegister(
                                 indexConstant, projection.Index.Type, schema,
-                                out var contextualIndexRegister))
+                                out var contextualIndexRegister)
+                            && contextualIndexRegister <= 13)
                         {
                             indexKind = 1;
                             indexIndex = contextualIndexRegister;
