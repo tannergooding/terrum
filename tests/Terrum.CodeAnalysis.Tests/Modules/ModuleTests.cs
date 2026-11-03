@@ -412,6 +412,196 @@ public sealed class ModuleTests
     }
 
     [Test]
+    public void PrivateFieldPathRejectsInvalidRootsAuthorityAndZeroLengthSelection()
+    {
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public mut Word Inner;
+                public mut uint32 Tag;
+                public Container(Word inner) {
+                    Inner = inner;
+                    Tag = 0;
+                }
+            }
+
+            public int32 WriteField() {
+                init mut Word word;
+                unsafe { word.Wide = uint32(0x11223344); }
+                Container seed = new Container(word);
+                mut [Container; 2] values = [seed; 2];
+                [Container; 2] readonlyValues = [seed; 2];
+                mut [Container; 0] emptyValues = [];
+                unsafe { values[1].Inner.Low = uint8(0xAA); }
+                return 0;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var producer = ModuleCompiler.CreateProducer(program, ["WriteField"]);
+        var function = program.Functions.Single(
+            static item => item.Name == "WriteField");
+        BoundNativeFixedArrayPathWrite? pathWrite = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayPathWrite write)
+                {
+                    pathWrite = write;
+                }
+            }), Is.True);
+        Assert.That(pathWrite, Is.Not.Null);
+        var expressionOffset = FindPrivateExpressionOffset(producer, 48,
+            pathWrite!.Type, pathWrite.Span);
+        var readonlyVariable = Enumerable.Range(0,
+            function.Variables.Length).Single(index =>
+                function.Variables[index].Name == "readonlyValues");
+        var emptyVariable = Enumerable.Range(0,
+            function.Variables.Length).Single(index =>
+                function.Variables[index].Name == "emptyValues");
+        var emptyType = function.Variables[emptyVariable].Type;
+
+        var invalidRoot = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            invalidRoot.AsSpan(expressionOffset + 13), -1);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidRoot));
+
+        var immutableRoot = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            immutableRoot.AsSpan(expressionOffset + 13), readonlyVariable);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(immutableRoot));
+
+        var zeroLengthSelection = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            zeroLengthSelection.AsSpan(expressionOffset + 13),
+            emptyVariable);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            zeroLengthSelection.AsSpan(expressionOffset + 21),
+            (int)emptyType);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(zeroLengthSelection));
+
+        BoundUnsafe? pathWriteUnsafeScope = null;
+        Assert.That(BoundTreeTraversal.VisitStatements(function.Body,
+            statement =>
+            {
+                if (statement is not BoundUnsafe unsafeBlock)
+                {
+                    return;
+                }
+
+                var containsPathWrite = false;
+                _ = BoundTreeTraversal.VisitExpressions(unsafeBlock.Body,
+                    expression =>
+                    {
+                        if (expression
+                            is BoundNativeFixedArrayPathWrite write
+                            && write.Span == pathWrite.Span)
+                        {
+                            containsPathWrite = true;
+                        }
+                    });
+                if (containsPathWrite)
+                {
+                    pathWriteUnsafeScope = unsafeBlock;
+                }
+            }), Is.True);
+        Assert.That(pathWriteUnsafeScope, Is.Not.Null);
+        var withoutPathWriteUnsafeScope = RemovePrivateUnsafeWrapper(
+            producer, pathWriteUnsafeScope!);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(withoutPathWriteUnsafeScope));
+    }
+
+    [Test]
+    public void PrivateNestedFieldPathRejectsDiscontinuousProjectionAndOwner()
+    {
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public mut Word Inner;
+                public mut uint32 Tag;
+                public Container(Word inner) {
+                    Inner = inner;
+                    Tag = 0;
+                }
+            }
+
+            public int32 WriteNestedField() {
+                init mut Word word;
+                unsafe { word.Wide = uint32(0x11223344); }
+                Container seed = new Container(word);
+                mut [[Container; 2]; 2] values = [[seed; 2]; 2];
+                unsafe {
+                    values[1][1].Inner.Low = uint8(0xAA);
+                }
+                return 0;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var producer = ModuleCompiler.CreateProducer(program,
+            ["WriteNestedField"]);
+        var function = program.Functions.Single(
+            static item => item.Name == "WriteNestedField");
+        BoundNativeFixedArrayPathWrite? pathWrite = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayPathWrite write)
+                {
+                    pathWrite = write;
+                }
+            }), Is.True);
+        Assert.That(pathWrite, Is.Not.Null);
+        Assert.That(pathWrite!.Projections, Has.Length.EqualTo(2));
+        Assert.That(pathWrite.LeafFields, Has.Length.EqualTo(2));
+        var expressionOffset = FindPrivateExpressionOffset(producer, 48,
+            pathWrite.Type, pathWrite.Span);
+
+        var discontinuousProjection = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            discontinuousProjection.AsSpan(expressionOffset + 46),
+            (int)pathWrite.Projections[0].Layout.CarrierType);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(discontinuousProjection));
+
+        var discontinuousFieldOwner = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            discontinuousFieldOwner.AsSpan(expressionOffset + 75), 1);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(discontinuousFieldOwner));
+    }
+
+    [Test]
     public void PrivateFieldPathKeepsExcludedFieldRootsAndWholeLeafWritesRejected()
     {
         static void AssertPrivateRejection(string source)
@@ -3082,6 +3272,37 @@ public sealed class ModuleTests
         BinaryPrimitives.WriteInt32LittleEndian(prefix.AsSpan(5),
             span.Start);
         BinaryPrimitives.WriteInt32LittleEndian(prefix.AsSpan(9),
+            span.Length);
+        var offset = artifact.AsSpan().IndexOf(prefix);
+        Assert.That(offset, Is.GreaterThanOrEqualTo(0));
+        return offset;
+    }
+
+    private static byte[] RemovePrivateUnsafeWrapper(byte[] artifact,
+        BoundUnsafe unsafeBlock)
+    {
+        var offset = FindPrivateStatementOffset(artifact, 11,
+            unsafeBlock.Span);
+        var headerLength = 1 + (2 * sizeof(int));
+        var bodyOffset = offset + headerLength;
+        Assert.That(artifact[bodyOffset], Is.EqualTo((byte)1));
+        var result = new byte[artifact.Length - headerLength];
+        artifact.AsSpan(0, offset).CopyTo(result);
+        artifact.AsSpan(bodyOffset, headerLength)
+            .CopyTo(result.AsSpan(offset));
+        artifact.AsSpan(bodyOffset + headerLength)
+            .CopyTo(result.AsSpan(offset + headerLength));
+        return result;
+    }
+
+    private static int FindPrivateStatementOffset(byte[] artifact,
+        byte kind, TextSpan span)
+    {
+        var prefix = new byte[1 + (2 * sizeof(int))];
+        prefix[0] = kind;
+        BinaryPrimitives.WriteInt32LittleEndian(prefix.AsSpan(1),
+            span.Start);
+        BinaryPrimitives.WriteInt32LittleEndian(prefix.AsSpan(5),
             span.Length);
         var offset = artifact.AsSpan().IndexOf(prefix);
         Assert.That(offset, Is.GreaterThanOrEqualTo(0));
