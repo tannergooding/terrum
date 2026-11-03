@@ -3754,22 +3754,18 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public void StandardA2EmitsAndReconstructsArrayFieldStorageAddress()
+    public async Task StandardA2EUEmitsAndReconstructsArrayFieldStorageAddress()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
-        const string moduleIdentity = "a2-array-field-storage-address";
-        var options = new CompilationOptions {
-            RuntimePolicy = BoundRuntimePolicy.FailFast,
-            NativeCoreRegistration
-                = NativeCoreRegistrationTests.CreateRegistration(),
-        };
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        const string moduleIdentity = "a2eu-array-field-storage-address";
+        const string source = """
             [Blittable] [Layout(Sequential)]
             public struct Holder {
                 public mut [int32; 2] Values;
+                public mut [int32; 1] Sibling;
             }
 
             [Terrum.Interop.NativeImport(
@@ -3785,29 +3781,44 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
             int32 Main() {
                 int32 zeroIndex = 0;
-                [int32; 2] source = [-1, 0];
+                int32 oneIndex = 1;
+                [int32; 2] initial = [-1, 0];
+                [int32; 1] sibling = [-1];
+                mut int32 replacement = 42;
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
                 init mut Holder holder;
-                holder.Values = source;
-                mut int32 output = holder.Values[zeroIndex];
-                uint64 byteCount = 0;
+                holder.Values = initial;
+                holder.Sibling = sibling;
                 unsafe {
+                    RtlMoveMemory(&holder.Values[oneIndex],
+                        &replacement, byteCount);
                     var callback = &RtlMoveMemory;
-                    callback(&output, &holder.Values[zeroIndex], byteCount);
+                    callback(&observed,
+                        &holder.Sibling[zeroIndex], byteCount);
                 }
-                return output;
+                return observed;
             }
-            """), options);
+            """;
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(source), options);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, schemaIdentity, 1);
         var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
                 TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                        artifact));
         Assert.That(tables.TypeDefs.Count, Is.EqualTo(1));
-        Assert.That(tables.Fields.Count, Is.EqualTo(1));
-        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(1));
+        Assert.That(tables.Fields.Count, Is.EqualTo(2));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(2));
 
         var callerRow = 0;
         for (var row = 1; row <= tables.Methods.Count; row++)
@@ -3822,6 +3833,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         tables.ValidateRegisterBodyMapsForMethod(callerRow);
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        Assert.That(body.ConstantCount, Is.EqualTo(3));
         var sawFieldSelection = false;
         var sawElementSelection = false;
         for (var recordIndex = 0; recordIndex < body.RecordCount;
@@ -3870,18 +3882,146 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     storageAddresses.Add(address);
                 }
             }), Is.True);
-        Assert.That(fieldAssignments, Has.Count.EqualTo(1));
-        Assert.That(fieldAssignments[0].NestedFields, Is.Empty);
-        Assert.That(fieldAssignments[0].Value, Is.TypeOf<BoundRead>());
-        var fieldAddress = storageAddresses.Single(address =>
-            NativeFixedArrayTypes.IsType(address.CarrierType));
-        Assert.That(fieldAddress.FieldPlace, Is.TypeOf<BoundFieldRead>());
-        Assert.That(fieldAddress.ElementType, Is.EqualTo(PrimitiveType.Int32));
-        Assert.That(fieldAddress.Projections, Is.Empty);
+        Assert.That(fieldAssignments, Has.Count.EqualTo(2));
+        Assert.That(fieldAssignments.All(static assignment =>
+            NativeFixedArrayTypes.IsType(assignment.Value.Type)
+                && assignment.NestedFields.IsEmpty
+                && assignment.Value is BoundRead), Is.True);
+        var fieldAddresses = storageAddresses.Where(static address =>
+            address.FieldPlace is not null).ToArray();
+        Assert.That(fieldAddresses, Has.Length.EqualTo(2));
+        Assert.That(fieldAddresses.All(static address =>
+            address.FieldPlace is BoundFieldRead
+                && address.ElementType == PrimitiveType.Int32
+                && address.Projections.IsEmpty), Is.True);
         Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
-        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
-            Is.EqualTo(-1));
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            source, -1, "positive-extent field mutation and sibling preservation")
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task StandardA2EUFieldArrayNativeAddressFailsFastOutOfBounds()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        const string moduleIdentity = "a2eu-array-field-storage-bounds";
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            public struct Holder {
+                public mut [int32; 2] Values;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut int32 selectedIndex = 2;
+                [int32; 2] initial = [-1, 0];
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
+                init mut Holder holder;
+                holder.Values = initial;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&observed,
+                        &holder.Values[selectedIndex], byteCount);
+                }
+                return observed;
+            }
+            """;
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        const int expectedStatus = unchecked((int)0xE0540004);
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            source, expectedStatus, "field-array address fast-fail bounds check",
+            runJit: false).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task StandardA2EUFieldArrayNativeAccessUsesPositiveDynamicExtent()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        const string moduleIdentity = "a2eu-array-field-positive-native-extent";
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            public struct Holder {
+                public mut [int32; 2] Values;
+                public mut [int32; 1] Sibling;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut uint64 index = 0;
+                [int32; 2] initial = [-1, 0];
+                [int32; 1] sibling = [-1];
+                int32 replacement = 0;
+                mut int32 observed = 0;
+                init mut Holder holder;
+                holder.Values = initial;
+                holder.Sibling = sibling;
+                unsafe {
+                    RtlMoveMemory(&holder.Values[++index],
+                        &replacement, index);
+                    var callback = &RtlMoveMemory;
+                    callback(&observed,
+                        &holder.Sibling[zeroIndex], index);
+                }
+                return observed;
+            }
+            """;
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            source, 255, "positive dynamic field extent and sibling preservation")
+            .ConfigureAwait(true);
     }
 
     [Test]

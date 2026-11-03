@@ -2026,6 +2026,7 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        var usesScalarFrozenValues = false;
         foreach (var declaration in localDeclarations)
         {
             if (declaration.Variable < function.ParameterCount
@@ -2148,10 +2149,18 @@ public static partial class TrRmExecutableCompiler
                     program, localVariables))
             {
             }
-            else if (declaration.Initializer is not BoundConstant constant
-                || constant.Type != variable.Type
-                || !TryGetContextualInitializationRegister(constant,
-                    variable.Type, schema, out _))
+            else if (declaration.Initializer is BoundConstant constant
+                && constant.Type == variable.Type
+                && IsSupportedNativeAddressScalarConstant(constant,
+                    variable.Type, schema))
+            {
+                if (!TryGetContextualInitializationRegister(constant,
+                        variable.Type, schema, out _))
+                {
+                    usesScalarFrozenValues = true;
+                }
+            }
+            else
             {
                 return false;
             }
@@ -2276,7 +2285,6 @@ public static partial class TrRmExecutableCompiler
         var nextUnitCallResultHome
             = function.Variables.Length - function.ParameterCount;
         var conditionalEdgeCount = 0;
-        var usesScalarFrozenValues = false;
         bool AddUnitInitializerCall(BoundCall unitCall,
             int initializerArrayVariable, int resultVariable)
         {
@@ -3601,6 +3609,15 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static bool IsSupportedNativeAddressScalarConstant(
+        BoundConstant constant, PrimitiveType type,
+        TrRmArtifactSchema schema)
+        => constant.Type == type
+            && (TryGetContextualInitializationRegister(constant, type,
+                    schema, out _)
+                || (schema.UsesScalarFrozenValues()
+                    && IsSupportedNativeUnitConditionalLiteralType(type)));
+
     private static uint CreateStandardBodyTypeMapToken(uint typeSpecRef)
     {
         var encoding = (byte)(typeSpecRef >> 24);
@@ -4254,6 +4271,29 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(0x1100_0001), resourceLedger));
         ReserveA3Collection(resourceLedger, 0);
         var code = new TrRmA3StagedList<byte>(resourceLedger);
+        void AppendScalarHomeInitialization(BoundConstant constant,
+            int homeIndex)
+        {
+            if (TryGetContextualInitializationRegister(constant,
+                    constant.Type, schema, out var sourceRegister))
+            {
+                AppendHomeStore(code, sourceRegister, homeIndex);
+                return;
+            }
+
+            if (scalarValues is null
+                || !IsSupportedNativeUnitConditionalLiteralType(
+                    constant.Type))
+            {
+                throw Unsupported(
+                    "The selected schema has no typed scalar Home initializer.");
+            }
+
+            AppendConstantMapLoad(code, 13,
+                GetConstantMapIndex(constant));
+            AppendHomeStore(code, 13, homeIndex);
+        }
+
         ReserveA3Collection(resourceLedger, 0);
         var blocks = new TrRmA3StagedList<TrRmRegisterBodyBlock>(
             resourceLedger);
@@ -4541,9 +4581,13 @@ public static partial class TrRmExecutableCompiler
                     {
                         var captureHome
                             = projectionCaptureHomes[projectionIndex];
+                        var indexValueRegister
+                            = projectionIndex == 0
+                                && selectedArrayBaseKind == 1
+                                ? (byte)13
+                                : checked((byte)projectionIndex);
                         indexHome = AppendNativeAddressIndexUpdate(update,
-                            captureHome,
-                            checked((byte)projectionIndex));
+                            captureHome, indexValueRegister);
                     }
                     else
                     {
@@ -5689,11 +5733,10 @@ public static partial class TrRmExecutableCompiler
             }
 
             if (local.Initializer is BoundConstant constant
-                && TryGetContextualInitializationRegister(constant,
-                    caller.Variables[local.Variable].Type, schema,
-                    out var sourceRegister))
+                && IsSupportedNativeAddressScalarConstant(constant,
+                    caller.Variables[local.Variable].Type, schema))
             {
-                AppendHomeStore(code, sourceRegister, homeIndex);
+                AppendScalarHomeInitialization(constant, homeIndex);
                 return;
             }
 
@@ -6502,15 +6545,14 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     if (local.Initializer is not BoundConstant constant
-                        || !TryGetContextualInitializationRegister(constant,
-                            caller.Variables[local.Variable].Type, schema,
-                            out var sourceRegister))
+                        || !IsSupportedNativeAddressScalarConstant(constant,
+                            caller.Variables[local.Variable].Type, schema))
                     {
                         throw Unsupported(
                             "F+S local initialization requires an admitted typed contextual constant.");
                     }
 
-                    AppendHomeStore(code, sourceRegister, homeIndex);
+                    AppendScalarHomeInitialization(constant, homeIndex);
                     break;
 
                 case BoundExpressionStatement
@@ -6647,6 +6689,30 @@ public static partial class TrRmExecutableCompiler
         code.Add((byte)(0x10 | sourceRegister));
         code.Add(unchecked((byte)homeIndex));
         code.Add((byte)(homeIndex >> 8));
+    }
+
+    private static void AppendConstantMapLoad(
+        TrRmA3StagedList<byte> code, byte destinationRegister,
+        ushort constantMapIndex)
+    {
+        if (destinationRegister >= 14)
+        {
+            throw Unsupported(
+                "The F+S ConstantMap destination register is invalid.");
+        }
+
+        if (constantMapIndex < 16)
+        {
+            code.Add(0x16);
+            code.Add((byte)((constantMapIndex << 4)
+                | destinationRegister));
+            return;
+        }
+
+        code.Add(0xD4);
+        code.Add(destinationRegister);
+        code.Add(unchecked((byte)constantMapIndex));
+        code.Add((byte)(constantMapIndex >> 8));
     }
 
     private static void AppendHomeLoad(TrRmA3StagedList<byte> code,
