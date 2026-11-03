@@ -5,6 +5,12 @@ missing-contract workflow.** This selects a candidate schema boundary, not
 normative adoption, implementation support or execution evidence. It changes
 no accepted assignment and approves no additional source or runtime contract.
 
+The [integrated GC runtime proposal](integrated-gc-runtime-boundary.md)
+supersedes the linked separate-provider runtime/deployment recommendation.
+It does not reinterpret this exact schema snapshot, assign a common-runtime
+ABI or widen composition. A successor needs explicit runtime/target and
+whole-schema agreement; equal draft bytes or candidate numbers do not select it.
+
 ## Decision and evidence
 
 Recommend one separately selected **B + RootPin** whole-artifact schema.

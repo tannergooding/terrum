@@ -1,9 +1,18 @@
 # RootPin runtime provider deployment
 
-**Status: unapproved; provisional direction under the user's authorized
-missing-contract workflow.** This recommendation does not amend normative
-specifications, approve Profile `(2,1)`, or establish implementation support.
-It completes only the physical provider-selection boundary of the
+**Status: superseded unapproved deployment recommendation.**
+The [integrated GC runtime proposal](integrated-gc-runtime-boundary.md)
+supersedes this document's separate-provider recommendation, including the
+RootPin DLL/export bundle and absolute path in AOT imports/JIT selection.
+The path/loading recipes and alternatives below describe the prior candidate,
+not required deployment of the proposed common GC runtime. Exact selected
+runtime/domain identity, no fallback and retained origins remain obligations
+under the successor recommendation. Supersession does not approve an ABI,
+migrate the prototype or establish support.
+
+This prior recommendation does not amend normative specifications, approve
+Profile `(2,1)`, or establish implementation support. It addressed only the
+physical provider-selection boundary of the
 [RootPin runtime candidate](reference-root-pin-runtime.md#candidate-provider-discovery-and-domain-sharing).
 
 ## Decision and scope

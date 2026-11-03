@@ -1,10 +1,18 @@
 # RootPin loaded-method descriptor admission
 
-**Status: unapproved; provisionally actionable only under the user's
-authorized missing-contract direction.** This candidate specifies the
-`LoadedMethod*` admission and lifetime boundary. A provider-side prototype has
-been implemented and qualified under this direction; that partial evidence
-does not constitute normative adoption or end-to-end loader/compiler support.
+**Status: unapproved; provider-specific interface packaging superseded.**
+The [integrated GC runtime proposal](integrated-gc-runtime-boundary.md)
+replaces the same-RootPin-provider export and frozen runtime-info/table
+dependency with common runtime/loader admission. Complete method/entry
+identity, typed support maps, atomic publication and retained code/unwind
+origins remain reusable obligations. The exact supplementary export/records
+below describe the prior candidate, not a required successor ABI.
+No adoption, migration or new support is implied.
+
+This prior candidate specifies the `LoadedMethod*` admission and lifetime
+boundary. Its provider-side prototype has scoped qualification evidence;
+that does not constitute normative adoption, end-to-end loader/compiler
+support or qualification of the common GC runtime.
 
 ## Decision and preserved boundaries
 

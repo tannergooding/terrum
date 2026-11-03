@@ -4,8 +4,14 @@
 authorized missing-contract direction.** This remains a separate fixed-array
 descriptor decision for
 [RootPin loaded-type admission](reference-root-pin-loaded-type-descriptors.md).
-The loaded-type proposal is the sole complete ABI/candidate owner; this file
-records the array amendment and its independent approval boundary.
+The loaded-type proposal is the sole complete prior loaded-types/2 candidate
+owner; this file records the array amendment and its independent approval
+boundary.
+
+The [integrated GC runtime proposal](integrated-gc-runtime-boundary.md)
+supersedes the separate-provider and frozen runtime-info/table dependencies
+below, not the typed FixedArray validation/traversal analysis. Exact V2 records
+remain the prior candidate; they are not automatically the common runtime ABI.
 
 ## Decision and exact replacement
 

@@ -1,7 +1,15 @@
 # RootPin loaded-type descriptor admission
 
-**Status: unapproved; provisionally actionable only under the user's
-authorized missing-contract direction.** This is a candidate compiler/loader
+**Status: unapproved; provider-specific interface packaging superseded.**
+The [integrated GC runtime proposal](integrated-gc-runtime-boundary.md)
+replaces the same-RootPin-provider export and frozen runtime-info/table
+dependency with admission through the common runtime/loader boundary.
+Typed identity/layout/traversal, transactional interning and retained
+retirement/code origins remain reusable obligations. The exact supplementary
+export/records below are the prior candidate, not a required successor ABI
+or compatibility interface. No adoption, migration or new support is implied.
+
+This is a candidate compiler/loader
 handoff, not normative adoption, implementation support or runtime evidence.
 It supplements [the RootPin runtime candidate](reference-root-pin-runtime.md)
 without changing its operations, value envelopes or function table, and

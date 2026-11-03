@@ -1,7 +1,15 @@
 # Exact-place roots and explicit pin runtime
 
-**Status: unapproved; provisionally actionable solely under the user's
-authorized missing-contract direction.** Every new ABI, helper, operation,
+**Status: unapproved; runtime interface/deployment recommendation superseded.**
+The [integrated GC runtime proposal](integrated-gc-runtime-boundary.md)
+replaces the separate RootPin DLL/discovery, runtime-info/table and deployment
+boundary with one common GC runtime interface. Those physical assignments
+below describe the prior candidate, not the current integration recommendation.
+Exact-place, explicit-pin, cell/support, provenance, failure and cleanup
+analysis remains reusable, with its own approval and ABI gates; no compiler
+migration or support is implied.
+
+Every new ABI, helper, operation,
 registration and numeric assignment below is a candidate, not an accepted
 contract or implementation claim. This document does not revise
 [reference provenance carriers](reference-provenance-carriers.md): its
