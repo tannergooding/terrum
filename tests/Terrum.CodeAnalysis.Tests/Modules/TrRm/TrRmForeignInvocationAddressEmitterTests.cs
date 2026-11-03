@@ -27,9 +27,482 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 {
     private const string A2EUScalarFrozenValuesSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+    private const string A2R1RepeatInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int NativeAddressExport();
+
+    [Test]
+    public async Task A2R1RepeatRoundTripsCapturedArrayFieldWrites()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2r1-repeat-array-field-write";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<uint32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11); }
+                mut [Word; 2] values = [seed; 2];
+                unsafe { values[1].Low = uint8(0xAA); }
+                mut int32 result = 0;
+                uint32 source = 0x5A;
+                uint64 byteCount = 4;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&result, &source, byteCount);
+                }
+                return result;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, A2R1RepeatInitializationSchemaIdentity, 1);
+        AssertA2R1RepeatBodyRecords(artifact, moduleIdentity,
+            expectedRepeatCopies: 1);
+        var input = new TrRmStandardArtifactInput(
+            A2R1RepeatInitializationSchemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, A2R1RepeatInitializationSchemaIdentity, 1),
+            Is.EqualTo(artifact));
+
+        var fieldWrites = new List<BoundNativeFixedArrayPathWrite>();
+        var loadedCaller = loaded.Functions.Single(
+            static function => function.Name == "Main");
+        Assert.That(BoundTreeTraversal.VisitStatements(
+            loadedCaller.Body, statement =>
+            {
+                if (statement is BoundExpressionStatement {
+                    Expression: BoundNativeFixedArrayPathWrite fieldWrite,
+                })
+                {
+                    fieldWrites.Add(fieldWrite);
+                }
+            }), Is.True);
+        var fieldWrite = fieldWrites.Single();
+        Assert.That(fieldWrite.Projections.Length, Is.EqualTo(1));
+        Assert.That(fieldWrite.LeafFields.Length, Is.EqualTo(1));
+        Assert.That(fieldWrite.Value.Type, Is.EqualTo(PrimitiveType.UInt8));
+        Assert.That(fieldWrite.IsUnsafeAuthorized, Is.True);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "RtlMoveMemory").DirectNativeImport,
+            Is.Not.Null);
+        var jitResult = NativeJit.Execute(loaded,
+            NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2R1+Repeat source-free JIT: schema={A2R1RepeatInitializationSchemaIdentity}; module={moduleIdentity}; expected=0x5A; actual=0x{jitResult:X}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={typeof(TrRmExecutableCompiler).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(TrRmExecutableCompiler).Assembly.Location)))}.");
+        Assert.That(jitResult, Is.EqualTo(0x5A));
+
+        await AssertNativeImageExitCodeAsync(
+            NativeEmitter.EmitWithNativeImports(program,
+                NativeRuntimePolicy.FailFast),
+            $"{moduleIdentity}-source", 0x5A).ConfigureAwait(true);
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        Assert.That(image, Is.Not.Empty);
+        await AssertNativeImageExitCodeAsync(image, moduleIdentity, 0x5A)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task A2R1RepeatRoundTripsNestedCapturedArrayFieldWrites()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2r1-repeat-nested-array-field-write";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<uint32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11); }
+                mut [Word; 2] row = [seed; 2];
+                mut [[Word; 2]; 2] values = [row; 2];
+                unsafe { values[1][1].Low = uint8(0xAA); }
+                mut int32 result = 0;
+                uint32 source = 0x5A;
+                uint64 byteCount = 4;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&result, &source, byteCount);
+                }
+                return result;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, A2R1RepeatInitializationSchemaIdentity, 1);
+        AssertA2R1RepeatBodyRecords(artifact, moduleIdentity,
+            expectedRepeatCopies: 2);
+        var input = new TrRmStandardArtifactInput(
+            A2R1RepeatInitializationSchemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, A2R1RepeatInitializationSchemaIdentity, 1),
+            Is.EqualTo(artifact));
+
+        var fieldWrites = new List<BoundNativeFixedArrayPathWrite>();
+        var loadedCaller = loaded.Functions.Single(
+            static function => function.Name == "Main");
+        Assert.That(BoundTreeTraversal.VisitStatements(
+            loadedCaller.Body, statement =>
+            {
+                if (statement is BoundExpressionStatement {
+                    Expression: BoundNativeFixedArrayPathWrite fieldWrite,
+                })
+                {
+                    fieldWrites.Add(fieldWrite);
+                }
+            }), Is.True);
+        var fieldWrite = fieldWrites.Single();
+        Assert.That(fieldWrite.Projections.Length, Is.EqualTo(2));
+        Assert.That(fieldWrite.LeafFields.Length, Is.EqualTo(1));
+        Assert.That(fieldWrite.Value.Type, Is.EqualTo(PrimitiveType.UInt8));
+
+        var jitResult = NativeJit.Execute(loaded,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(jitResult, Is.EqualTo(0x5A));
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        await AssertNativeImageExitCodeAsync(image, moduleIdentity, 0x5A)
+            .ConfigureAwait(true);
+    }
+
+    private static void AssertA2R1RepeatBodyRecords(byte[] artifact,
+        string moduleIdentity, int expectedRepeatCopies)
+    {
+        const string previousSchemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(previousSchemaIdentity,
+                    artifact),
+                moduleIdentity, []));
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        var repeatCopyCount = 0;
+        var fieldReplacementCount = 0;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record.Length != 20 || record[0] != 0x05)
+            {
+                continue;
+            }
+
+            var payload = record[4..];
+            repeatCopyCount += payload[0] == 1
+                && payload[2] == 1 && payload[3] == 6 ? 1 : 0;
+            fieldReplacementCount += payload[0] == 1
+                && payload[2] == 2 && payload[3] == 1 ? 1 : 0;
+        }
+
+        Assert.That(repeatCopyCount, Is.EqualTo(expectedRepeatCopies));
+        Assert.That(fieldReplacementCount, Is.EqualTo(1));
+    }
+
+    private static async Task AssertNativeImageExitCodeAsync(byte[] image,
+        string moduleIdentity, int expectedExitCode)
+    {
+        var imagePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-{moduleIdentity}-{Guid.NewGuid():N}.exe");
+        Process? process = null;
+        try
+        {
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            process = Process.Start(new ProcessStartInfo(imagePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }) ?? throw new InvalidOperationException(
+                "The Standard Repeat executable was not started.");
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException exception)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw new TimeoutException(
+                    $"Standard Repeat executable exceeded its 10-second deadline. {await stdout.ConfigureAwait(true)}{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                    exception);
+            }
+
+            var output = await stdout.ConfigureAwait(true);
+            var error = await stderr.ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"Native AOT: module={moduleIdentity}; pid={process.Id}; expected=0x{expectedExitCode:X}; actual=0x{process.ExitCode:X}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+            Assert.That(output, Is.Empty);
+            Assert.That(error, Is.Empty);
+            Assert.That(process.ExitCode, Is.EqualTo(expectedExitCode),
+                $"Native image {moduleIdentity} exited with 0x{process.ExitCode:X8}.");
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                process.Dispose();
+            }
+
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task NativeImageExecutesRepeatedArrayFieldReplacement()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            int32 Main() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11); }
+                mut [Word; 2] values = [seed; 2];
+                unsafe { values[1].Low = uint8(0xAA); }
+                mut int32 result = 0;
+                unsafe { result = int32(values[1].Low); }
+                return result;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        await AssertNativeImageExitCodeAsync(
+            NativeEmitter.EmitWithNativeImports(program,
+                NativeRuntimePolicy.FailFast),
+            "native-repeat-array-field-replacement", 0xAA)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task NativeImageExecutesScalarRepeatInitialization()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut [uint32; 2] values = [uint32(0x5A); 2];
+                return int32(values[1]);
+            }
+            """), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        await AssertNativeImageExitCodeAsync(
+            NativeEmitter.EmitWithNativeImports(program,
+                NativeRuntimePolicy.FailFast),
+            "native-scalar-repeat-initialization", 0x5A)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task NativeImageExecutesNestedRepeatedArrayFieldReplacement()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            int32 Main() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11); }
+                mut [[Word; 2]; 2] values = [[seed; 2]; 2];
+                unsafe { values[1][1].Low = uint8(0xAA); }
+                mut int32 result = 0;
+                unsafe { result = int32(values[1][1].Low); }
+                return result;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        await AssertNativeImageExitCodeAsync(
+            NativeEmitter.EmitWithNativeImports(program,
+                NativeRuntimePolicy.FailFast),
+            "native-nested-repeat-array-field-replacement", 0xAA)
+            .ConfigureAwait(true);
+    }
+
+    [TestCase(0, 1)]
+    [TestCase(2, 101)]
+    public async Task NativeImageEvaluatesRepeatedArraySeedExactlyOnce(
+        int elementCount, int expectedResult)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var repeatBody = elementCount == 0
+            ? "mut [Word; 0] values = [NextSeed(); 0];"
+            : """
+                mut [Word; 2] values = [NextSeed(); 2];
+                mut int32 result = 0;
+                unsafe { result = int32(values[1].Wide); }
+                """;
+        var returnExpression = elementCount == 0
+            ? "int32(calls)"
+            : "int32(calls) * 100 + result";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint32 Wide;
+            }
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetLastError")]
+            internal extern uint32 GetLastError();
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "SetLastError")]
+            internal extern void SetLastError(uint32 value);
+
+            Word NextSeed() {
+                mut uint32 value = 0;
+                unsafe { value = GetLastError() + 1; SetLastError(value); }
+                init mut Word seed;
+                unsafe { seed.Wide = value; }
+                return seed;
+            }
+
+            int32 Main() {
+                unsafe { SetLastError(0); }
+                {{repeatBody}}
+                mut uint32 calls = 0;
+                unsafe { calls = GetLastError(); }
+                return {{returnExpression}};
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        await AssertNativeImageExitCodeAsync(
+            NativeEmitter.EmitWithNativeImports(program,
+                NativeRuntimePolicy.FailFast),
+            $"native-repeat-seed-evaluated-once-{elementCount}",
+            expectedResult)
+            .ConfigureAwait(true);
+    }
 
     private static void AssertHomeFirstUseTypeMap(
         TrRmRegisterBodyReader body)

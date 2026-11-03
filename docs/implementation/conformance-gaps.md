@@ -761,6 +761,26 @@ separate unapproved
 records that provisional boundary without adding type-only exports or
 relaxing other runtime exclusions.
 
+The separate unapproved
+[repeat-initialization proposal](../proposals/standard-native-fixed-array-repeat-initialization.md)
+selects target-typed `[seed; N]`, exactly-once seed evaluation including
+`N = 0`, and a distinct Standard A2R1+Repeat profile. The source/bound node is
+now lowered by materializing the seed once and copying its typed representation
+with a bounded element loop; scalar and Union values, nested repeats, zero-count
+effects and once-only side effects have supervised native-image coverage.
+Five-billion-element local storage is rejected at native frame planning before
+an image is produced. The Standard A2R1+Repeat producer, source-free reader,
+byte-identical re-emission, JIT and supervised AOT also cover RepeatCopy and a
+captured Element-to-Field replacement. This does not approve the proposal or
+establish broad provider/remapping support. Source-only execution observes the
+written Union field value; the current Standard runtime fixture executes the
+replacement but does not yet expose its bytes as a result. Malformed-record,
+cross-block and provider-permutation cases, exact persisted-byte observations,
+private revision 102+FieldWrites/tag 48, complete provenance/alias transfer,
+and sparse resource bounds remain open. The Standard nested-repeat regression
+uses an explicitly materialized row Home; a directly nested Repeat seed
+expression is not yet encoded by this producer.
+
 **Routes/gate:** migrate declaration producers/readers, structural signature
 identity, unsafe regions, pointer/dependency facts, dependency materialization
 and all emitters together. Cover imported addresses without proxy-body offsets;

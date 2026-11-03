@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
@@ -668,10 +669,10 @@ public static partial class TrRmExecutableCompiler
             || consumer.Signatures.GetGenericCount(expectedSignatureRow) != 0
             || provider.Signatures.GetGenericCount(providerSignatureRow) != 0
             || expectedParameterCount != providerParameterCount
-            || !consumer.TypeSpecs.GetTypeSpecBytes(
-                consumer.Signatures.GetResultTypeSpec(expectedSignatureRow))
-                .SequenceEqual(provider.TypeSpecs.GetTypeSpecBytes(
-                    provider.Signatures.GetResultTypeSpec(providerSignatureRow)))
+            || !AreEquivalentProviderTypeSpecs(consumer.TypeSpecs,
+                consumer.Signatures.GetResultTypeSpec(expectedSignatureRow),
+                provider.TypeSpecs,
+                provider.Signatures.GetResultTypeSpec(providerSignatureRow))
             || consumer.Contracts.GetEffectsMask(expectedMethodRow) != 4
             || provider.Contracts.GetEffectsMask(providerMethodRow) != 4
             || !consumer.Contracts.GetNativeOutputs(expectedMethodRow).IsEmpty
@@ -688,10 +689,10 @@ public static partial class TrRmExecutableCompiler
             var providerParameterRow = providerParameterFirst + ordinal;
             if (consumer.Parameters.GetMode(expectedParameterRow)
                     != provider.Parameters.GetMode(providerParameterRow)
-                || !consumer.TypeSpecs.GetTypeSpecBytes(
-                    consumer.Parameters.GetTypeSpec(expectedParameterRow))
-                    .SequenceEqual(provider.TypeSpecs.GetTypeSpecBytes(
-                        provider.Parameters.GetTypeSpec(providerParameterRow))))
+                || !AreEquivalentProviderTypeSpecs(consumer.TypeSpecs,
+                    consumer.Parameters.GetTypeSpec(expectedParameterRow),
+                    provider.TypeSpecs,
+                    provider.Parameters.GetTypeSpec(providerParameterRow)))
             {
                 throw Invalid("The selected provider has an incompatible NativeImport formal.");
             }
@@ -720,6 +721,45 @@ public static partial class TrRmExecutableCompiler
         }
 
         return (providerMethodRow, providerLibraryName, providerExportName);
+    }
+
+    private static bool AreEquivalentProviderTypeSpecs(
+        TrRmTypeSpecTableReader leftTypeSpecs, uint leftTypeSpecRef,
+        TrRmTypeSpecTableReader rightTypeSpecs, uint rightTypeSpecRef)
+    {
+        var maximumDepth = Math.Max(leftTypeSpecs.Count,
+            rightTypeSpecs.Count) + 1;
+        for (var depth = 0; depth < maximumDepth; depth++)
+        {
+            var left = leftTypeSpecs.GetTypeSpecRef(leftTypeSpecRef);
+            var right = rightTypeSpecs.GetTypeSpecRef(rightTypeSpecRef);
+            if (left.Form != right.Form
+                || left.Qualifiers != right.Qualifiers
+                || left.TypeCode != right.TypeCode)
+            {
+                return false;
+            }
+
+            if (left.IsRow && right.IsRow
+                && left.Form == 0x0C && left.TypeCode == 0x8C)
+            {
+                var leftRow = leftTypeSpecs.GetRow(left.Row);
+                var rightRow = rightTypeSpecs.GetRow(right.Row);
+                leftTypeSpecRef
+                    = BinaryPrimitives.ReadUInt32LittleEndian(
+                        leftRow[3..]);
+                rightTypeSpecRef
+                    = BinaryPrimitives.ReadUInt32LittleEndian(
+                        rightRow[3..]);
+                continue;
+            }
+
+            return leftTypeSpecs.GetTypeSpecBytes(leftTypeSpecRef)
+                .SequenceEqual(rightTypeSpecs.GetTypeSpecBytes(
+                    rightTypeSpecRef));
+        }
+
+        return false;
     }
 
     private readonly record struct StandardProviderImportEdge(
@@ -1369,6 +1409,9 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity,
                 resourceLedger)
             || IsSelectedStandardSchemaIdentity(identity,
+                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
                 StandardForeignInvocationStorageGenericFixedArraySchemaIdentity,
                 resourceLedger)
             || IsSelectedStandardSchemaIdentity(identity,
@@ -1417,6 +1460,7 @@ public static partial class TrRmExecutableCompiler
             or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+            or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
             or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
             or StandardRegisterExceptionRegionsSchemaIdentity))
         {
@@ -1464,6 +1508,9 @@ public static partial class TrRmExecutableCompiler
             StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                 => TrRmArtifactSchema
                     .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft,
+            StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
+                => TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft,
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
             StandardRegisterExceptionRegionsSchemaIdentity
@@ -1486,6 +1533,14 @@ public static partial class TrRmExecutableCompiler
         if (schema.UsesRegisterExceptionRegions())
         {
             return TrRmArtifactIndex.ForRegisterExceptionRegionsDraft(artifact);
+        }
+
+        if (schema
+            .UsesForeignInvocationStorageFixedArrayRepeatInitialization())
+        {
+            return TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                    artifact);
         }
 
         if (schema.UsesRawUnionValueCoverage())
@@ -1526,7 +1581,12 @@ public static partial class TrRmExecutableCompiler
             TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
             bool createA3ResourceLedger = true)
         => GetForeignInvocationSchema(schemaIdentity)
-            .UsesRawUnionValueCoverage()
+            .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    index)
+            : GetForeignInvocationSchema(schemaIdentity)
+                .UsesRawUnionValueCoverage()
             ? TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
                     index)
@@ -1619,15 +1679,20 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
-                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity;
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity;
                 var supportsScalarFrozenValues
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)
                     || StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity);
+                        StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity);
                 var supportsCopyOriginAndUnionCoverage
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity);
+                        StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity);
                 var supportsRegisterExceptionRegions
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardRegisterExceptionRegionsSchemaIdentity);
@@ -1682,7 +1747,8 @@ public static partial class TrRmExecutableCompiler
                         or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                         or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                         or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
-                        or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+                        or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                        or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
                     && methodEnd == methodStart && typeEnd > typeStart;
                 if (!isSelectedRoot && moduleRefEnd != moduleRefStart
                     && !isA2TypeOnlyModule && !includesFProviderClosure)
@@ -1764,7 +1830,8 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
-                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
                 && rootMethodStart == rootMethodEnd
                 && rootTypeStart < rootTypeEnd
                 && tables.Modules.GetEntryMethod(rootModuleRow) == 0;

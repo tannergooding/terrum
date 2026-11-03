@@ -2046,6 +2046,31 @@ internal static class TrRmRegisterBodyMapValidator
                     registerTypes, methods.GetOwnerModule(methodDefRow),
                     typeSpecs, constantValues);
             }
+            else if (body.Schema
+                    .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+                && ReadByte(body, store, 3) == 6)
+            {
+                ValidateRepeatCopyStore(body, store, registerTypes,
+                    typeSpecs);
+            }
+            else if (body.Schema
+                    .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+                && ReadByte(body, store, 2) == 2
+                && ReadByte(body, store, 3) == 1)
+            {
+                ValidateArrayFieldReplacementStore(body, store,
+                    registerTypes, fields, typeSpecs, 2, 2);
+            }
+            else if (body.Schema
+                    .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+                && ReadByte(body, store, 2) == 1
+                && ReadByte(body, store, 3) == 1
+                && IsScalarFieldInitializationSelection(body, store,
+                    registerTypes, fields, typeSpecs))
+            {
+                ValidateArrayFieldReplacementStore(body, store,
+                    registerTypes, fields, typeSpecs, 1, 3);
+            }
             else if (IsUnitTypeSpecRef(typeSpecs,
                          GetRegisterTypeSpecRef(body, GetRegisterTypeState(
                              body, registerTypes,
@@ -2973,7 +2998,9 @@ internal static class TrRmRegisterBodyMapValidator
                 typeSpecRef, referentTypeSpecRef)
             || !type.IsRow || type.Form != 0x11
             || !typeSpecs.TryGetFixedInlineArray(typeSpecRef, out _, out var count)
-            || count != 0
+            || (!body.Schema
+                    .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+                && count != 0)
             || !TrRmFeatureManifestValidator.Requires(
                 constantValues.Features, constantValues.Modules,
                 ownerModule,
@@ -2995,7 +3022,9 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         var layout = constantValues.FixedArrayLayouts.GetRow(layoutRow);
-        if (layout.OwnerModuleRow != ownerModule || layout.ByteExtent != 0
+        if (layout.OwnerModuleRow != ownerModule
+            || layout.ArrayTypeSpecRow != type.Row
+            || (count == 0 && layout.ByteExtent != 0)
             || layout.Alignment == 0)
         {
             throw InvalidMap();
@@ -3307,6 +3336,203 @@ internal static class TrRmRegisterBodyMapValidator
         {
             throw InvalidMap();
         }
+    }
+
+    private static void ValidateRepeatCopyStore(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
+        RegisterTypeState[] registerTypes,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        var placeIndex = ReadUInt16(body, payload, 4);
+        var sourceIndex = ReadUInt16(body, payload, 6);
+        var sourceKind = ReadByte(body, payload, 1);
+        if (!body.Schema
+                .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+            || payload.Length != 16
+            || ReadByte(body, payload, 0) != 1
+            || sourceKind is not (1 or 2)
+            || ReadByte(body, payload, 2) != 1
+            || ReadByte(body, payload, 3) != 6
+            || placeIndex > 13
+            || (sourceKind == 1
+                ? sourceIndex > 15 : sourceIndex >= body.HomeCount)
+            || ReadUInt32(body, payload, 8) != 0
+            || ReadByte(body, payload, 12) != 0
+            || ReadByte(body, payload, 13) != 0
+            || ReadUInt16(body, payload, 14) != 0)
+        {
+            throw InvalidMap();
+        }
+
+        var place = GetRegisterTypeState(body, registerTypes, placeIndex);
+        if (!place.IsPlaceHandle || place.AccessKind != 3
+            || place.PlaceOrigins.Length == 0
+            || place.PlaceSelectionRecordIndex < 0)
+        {
+            throw InvalidMap();
+        }
+
+        var arrayTypeSpecRef = GetRegisterTypeSpecRef(body, place);
+        var arrayType = typeSpecs.GetTypeSpecRef(arrayTypeSpecRef);
+        if (!arrayType.IsRow || arrayType.Form != 0x11
+            || !typeSpecs.TryGetFixedInlineArray((uint)arrayType.Row,
+                out var elementTypeSpecRef, out _))
+        {
+            throw InvalidMap();
+        }
+
+        var selection = GetRecordPayload(body,
+            place.PlaceSelectionRecordIndex);
+        if (ReadByte(body, selection, 0) != 1
+            || ReadByte(body, selection, 1) != 3
+            || ReadByte(body, selection, 2) != 1
+            || ReadByte(body, selection, 3) != 0
+            || ReadUInt16(body, selection, 4) != placeIndex
+            || ReadByte(body, selection, 8) != 0
+            || ReadByte(body, selection, 9) != 0
+            || ReadUInt16(body, selection, 10) != 0
+            || ReadUInt32(body, selection, 12) >= (uint)body.HomeCount
+            || !typeSpecs.AreEquivalentTypeSpecRefs(arrayTypeSpecRef,
+                GetTypeMapTypeSpecRef(body,
+                    ReadUInt16(body, selection, 16))))
+        {
+            throw InvalidMap();
+        }
+
+        if (sourceKind == 1 && sourceIndex >= 14)
+        {
+            return;
+        }
+
+        var sourceTypeSpecRef = sourceKind == 1
+            ? GetRegisterTypeSpecRef(body,
+                GetRegisterTypeState(body, registerTypes, sourceIndex))
+            : GetTypeMapTypeSpecRef(body,
+                ReadUInt16(body, GetHomeMapEntry(body, sourceIndex), 2));
+        if (sourceKind == 1
+            && GetRegisterTypeState(body, registerTypes, sourceIndex)
+                .IsPlaceHandle)
+        {
+            throw InvalidMap();
+        }
+
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(sourceTypeSpecRef,
+                elementTypeSpecRef))
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static void ValidateArrayFieldReplacementStore(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
+        RegisterTypeState[] registerTypes,
+        TrRmFieldDefTableReader fields,
+        TrRmTypeSpecTableReader typeSpecs, byte transition,
+        byte accessKind)
+    {
+        var placeIndex = ReadUInt16(body, payload, 4);
+        var sourceIndex = ReadUInt16(body, payload, 6);
+        var sourceKind = ReadByte(body, payload, 1);
+        if (!body.Schema
+                .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+            || payload.Length != 16
+            || ReadByte(body, payload, 0) != 1
+            || sourceKind is not (1 or 2)
+            || ReadByte(body, payload, 2) != transition
+            || ReadByte(body, payload, 3) != 1
+            || placeIndex > 13
+            || (sourceKind == 1
+                ? sourceIndex > 15 : sourceIndex >= body.HomeCount)
+            || ReadUInt32(body, payload, 8) != 0
+            || ReadByte(body, payload, 12) != 0
+            || ReadByte(body, payload, 13) != 0
+            || ReadUInt16(body, payload, 14) != 0)
+        {
+            throw InvalidMap();
+        }
+
+        var place = GetRegisterTypeState(body, registerTypes, placeIndex);
+        if (!place.IsPlaceHandle || place.AccessKind != accessKind
+            || place.PlaceOrigins.Length == 0
+            || place.PlaceSelectionRecordIndex < 0)
+        {
+            throw InvalidMap();
+        }
+
+        var selection = GetRecordPayload(body,
+            place.PlaceSelectionRecordIndex);
+        var fieldRow = ReadUInt32(body, selection, 12);
+        if (ReadByte(body, selection, 0) != 2
+            || ReadByte(body, selection, 1) != accessKind
+            || ReadByte(body, selection, 2) != 1
+            || fieldRow is 0 or > 0xFF_FFFF
+            || fieldRow > (uint)fields.Count)
+        {
+            throw InvalidMap();
+        }
+
+        var placeTypeSpecRef = GetRegisterTypeSpecRef(body, place);
+        var fieldTypeSpecRef = fields.GetTypeSpecRef(checked((int)fieldRow));
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(placeTypeSpecRef,
+                GetTypeMapTypeSpecRef(body,
+                    ReadUInt16(body, selection, 16)))
+            || !typeSpecs.AreEquivalentTypeSpecRefs(placeTypeSpecRef,
+                fieldTypeSpecRef))
+        {
+            throw InvalidMap();
+        }
+
+        if (sourceKind == 1 && sourceIndex >= 14)
+        {
+            return;
+        }
+
+        var sourceTypeSpecRef = sourceKind == 1
+            ? GetRegisterTypeSpecRef(body,
+                GetRegisterTypeState(body, registerTypes, sourceIndex))
+            : GetTypeMapTypeSpecRef(body,
+                ReadUInt16(body, GetHomeMapEntry(body, sourceIndex), 2));
+        if (sourceKind == 1
+            && GetRegisterTypeState(body, registerTypes, sourceIndex)
+                .IsPlaceHandle)
+        {
+            throw InvalidMap();
+        }
+
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(sourceTypeSpecRef,
+                placeTypeSpecRef))
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static bool IsScalarFieldInitializationSelection(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
+        RegisterTypeState[] registerTypes, TrRmFieldDefTableReader fields,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        var placeIndex = ReadUInt16(body, payload, 4);
+        if (placeIndex > 13)
+        {
+            return false;
+        }
+
+        var place = GetRegisterTypeState(body, registerTypes, placeIndex);
+        if (!place.IsPlaceHandle || place.PlaceSelectionRecordIndex < 0)
+        {
+            return false;
+        }
+
+        var selection = GetRecordPayload(body,
+            place.PlaceSelectionRecordIndex);
+        var fieldRow = ReadUInt32(body, selection, 12);
+        return ReadByte(body, selection, 0) == 2
+            && ReadByte(body, selection, 1) == 3
+            && fieldRow is > 0 and <= 0xFF_FFFF
+            && fieldRow <= (uint)fields.Count
+            && TrRmNativeImportTypeContract.TryGetScalarType(typeSpecs,
+                fields.GetTypeSpecRef(checked((int)fieldRow)), out var fieldType)
+            && DirectNativeImportContract.IsScalar(fieldType);
     }
 
     private static bool IsNativeDataPointerTypeSpecRef(

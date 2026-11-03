@@ -280,6 +280,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                     or TrRmArtifactSchema.ScalarFrozenValuesDraft
                     or TrRmArtifactSchema.NominalEnumsDraft
@@ -738,6 +739,12 @@ public static class TrRmStructuralMetadataValidator
             foreignInvocationStorageFixedArrayCopyReturnCoverageDraft: true);
 
     internal static ValidatedExecutionTables
+        ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft: true);
+
+    internal static ValidatedExecutionTables
         ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
         TrRmArtifactIndex index,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
@@ -1092,6 +1099,7 @@ public static class TrRmStructuralMetadataValidator
         bool foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft = false,
         bool foreignInvocationStorageFixedArrayCopyReturnCoverageDraft = false,
+        bool foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayGenericDraft = false,
         bool registerExceptionRegionsDraft = false,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
@@ -1100,6 +1108,9 @@ public static class TrRmStructuralMetadataValidator
             ? TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             : developmentProfile
             ? TrRmArtifactSchema.Development
+            : foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                ? TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
             : foreignInvocationStorageFixedArrayCopyReturnCoverageDraft
                 ? TrRmArtifactSchema
                     .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
@@ -1138,9 +1149,11 @@ public static class TrRmStructuralMetadataValidator
             throw InvalidMetadata();
         }
         var selectedA3LayoutResourceLedger = a3LayoutResourceLedger;
-        copyOriginDraft |= foreignInvocationStorageFixedArrayCopyReturnCoverageDraft;
+        copyOriginDraft |= foreignInvocationStorageFixedArrayCopyReturnCoverageDraft
+            || foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft;
         foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft
-            |= foreignInvocationStorageFixedArrayCopyReturnCoverageDraft;
+            |= foreignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                || foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft;
         scalarFrozenValuesDraft
             |= foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft;
         foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft
@@ -2028,7 +2041,10 @@ public static class TrRmStructuralMetadataValidator
                 nativeImportCount, strings, methods, signatures, parameters,
                 typeSpecs, contracts, layouts)
             : default;
-        var standardNativeImports = !developmentProfile && !copyOriginDraft
+        var standardNativeImports = !developmentProfile
+            && (!copyOriginDraft
+                || foreignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                || foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft)
             ? new TrRmNativeImportTableReader(standardNativeImportBytes,
                 standardNativeImportCount, strings, methods, fields, types, imports,
                 modules, signatures, parameters, typeSpecs, contracts, layouts,

@@ -218,11 +218,17 @@ internal static class TrRmRegisterBodyRecordWriter
 
     internal static byte[] EncodeSemanticStore(byte placeKind,
         byte sourceKind, byte transition, byte sourceUse, ushort placeIndex,
-        ushort sourceIndex)
+        ushort sourceIndex, TrRmArtifactSchema schema)
     {
         if (placeKind != 1 || sourceKind is not (1 or 2)
-            || transition != 1 || sourceUse != 1 || placeIndex > 13
-            || (sourceKind == 1 && sourceIndex > 15))
+            || transition is not (1 or 2) || sourceUse is not (1 or 6)
+            || placeIndex > 13
+            || (sourceKind == 1 && sourceIndex > 15)
+            || ((transition == 2 || sourceUse == 6)
+                && !schema
+                    .UsesForeignInvocationStorageFixedArrayRepeatInitialization())
+            || (sourceUse == 6 && transition != 1)
+            )
         {
             throw new ArgumentOutOfRangeException(nameof(placeKind));
         }

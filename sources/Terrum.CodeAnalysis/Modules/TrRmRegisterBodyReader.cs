@@ -50,6 +50,7 @@ internal readonly ref struct TrRmRegisterBodyReader
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
@@ -1101,16 +1102,26 @@ internal readonly ref struct TrRmRegisterBodyReader
                     && ReadUInt32(payload, 8) == 0
                     && payload[12] == 0 && payload[13] == 0
                     && ReadUInt16(payload, 14) == 0;
+                var isRepeatCopy
+                    = _schema
+                        .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
+                        && payload.Length == 16 && payload[0] == 1
+                        && payload[1] is 1 or 2 && payload[2] == 1
+                        && payload[3] == 6
+                        && ReadUInt32(payload, 8) == 0
+                        && payload[12] == 0 && payload[13] == 0
+                        && ReadUInt16(payload, 14) == 0;
                 if (payload.Length != 16 || payload[0] is < 1 or > 2
                     || payload[1] > 2
                     || payload[2] is < 1 or > 3
-                    || payload[3] > 5
+                    || (payload[3] > 5 && !isRepeatCopy)
                     || payload[12] > 1 || payload[13] != 0
                     || !IsValidSelector(payload[0], ReadUInt16(payload, 4))
                     || !IsValidSelector(payload[1], ReadUInt16(payload, 6))
                     || (payload[1] == 0
                         ? !isEmptyArrayInitialization
-                        : payload[3] is < 1 or > 5)
+                        : ((payload[3] is < 1 or > 5)
+                            && !isRepeatCopy))
                     || (payload[12] == 0
                         && (ReadUInt16(payload, 14) != 0
                             || ReadUInt32(payload, 8) != 0))

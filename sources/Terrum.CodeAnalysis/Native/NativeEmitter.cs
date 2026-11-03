@@ -2366,6 +2366,11 @@ internal sealed partial class PeCompiler
                             ref maximumArguments));
                 }
                 return fixedArraySpills;
+            case BoundNativeFixedArrayRepeatInitialization repeat:
+                return checked(NativeFixedArrayScratchSlots(
+                        repeat.Layout.ElementType)
+                    + ExpressionSpills(repeat.Seed,
+                        ref maximumArguments));
             case BoundNativeFixedArrayElement fixedArrayElement:
                 return fixedArrayElement.FieldPlace is null
                     ? ExpressionSpills(fixedArrayElement.Index,
@@ -2841,6 +2846,9 @@ internal sealed partial class PeCompiler
                     {
                         VisitExpression(element);
                     }
+                    break;
+                case BoundNativeFixedArrayRepeatInitialization repeat:
+                    VisitExpression(repeat.Seed);
                     break;
                 case BoundNativeFixedArrayElement fixedArrayElement:
                     if (fixedArrayElement.FieldPlace is not null)
@@ -6030,6 +6038,12 @@ internal sealed partial class PeCompiler
                 if (local.Initializer is BoundNativeFixedArrayInitialization fixedArray)
                 {
                     EmitNativeFixedArrayInitialization(fixedArray,
+                        Slot(local.Variable), 0);
+                }
+                else if (local.Initializer
+                    is BoundNativeFixedArrayRepeatInitialization repeat)
+                {
+                    EmitNativeFixedArrayRepeatInitialization(repeat,
                         Slot(local.Variable), 0);
                 }
                 else

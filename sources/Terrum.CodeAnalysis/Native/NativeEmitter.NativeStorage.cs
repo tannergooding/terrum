@@ -847,6 +847,12 @@ internal sealed partial class PeCompiler
                 Spill(spill), spill + 1);
             return;
         }
+        if (write.Value is BoundNativeFixedArrayRepeatInitialization repeat)
+        {
+            EmitNativeFixedArrayRepeatInitializationAtAddress(repeat,
+                Spill(spill), spill + 1);
+            return;
+        }
         Expression(write.Value, spill + 1);
         if (Size(write.Value.Type) == 0)
         {
@@ -893,10 +899,49 @@ internal sealed partial class PeCompiler
     {
         EmitNativeFixedArrayPathAddress(write.Variable, write.Projections,
             spill, fieldPlace: write.FieldPlace);
+        var targetType = write.Projections[^1].Layout.ElementType;
+        var fieldOffset = 0;
+        foreach (var projection in write.LeafFields)
+        {
+            var ownerIndex = (int)targetType - 100;
+            if (projection.OwnerType != targetType
+                || (uint)ownerIndex >= (uint)_program.Structures.Length
+                || (uint)projection.Field
+                    >= (uint)_program.Structures[ownerIndex].Fields.Length)
+            {
+                throw new InvalidOperationException(
+                    "A fixed-array field write has an invalid field path.");
+            }
+
+            var field = _program.Structures[ownerIndex].Fields[
+                projection.Field];
+            if (field.Offset < 0)
+            {
+                throw new InvalidOperationException(
+                    "A fixed-array field write has an invalid field offset.");
+            }
+            fieldOffset = checked(fieldOffset + field.Offset);
+            targetType = field.Type;
+        }
+        if (targetType != write.Value.Type)
+        {
+            throw new InvalidOperationException(
+                "A fixed-array field write has a mismatched value type.");
+        }
+        if (fieldOffset != 0)
+        {
+            _code.PointerOffset(fieldOffset);
+        }
         _code.Store64(Spill(spill));
         if (write.Value is BoundNativeFixedArrayInitialization initialization)
         {
             EmitNativeFixedArrayInitializationAtAddress(initialization,
+                Spill(spill), spill + 1);
+            return;
+        }
+        if (write.Value is BoundNativeFixedArrayRepeatInitialization repeat)
+        {
+            EmitNativeFixedArrayRepeatInitializationAtAddress(repeat,
                 Spill(spill), spill + 1);
             return;
         }
@@ -943,6 +988,120 @@ internal sealed partial class PeCompiler
         }
     }
 
+    private void EmitNativeFixedArrayRepeatInitialization(
+        BoundNativeFixedArrayRepeatInitialization initialization,
+        int destinationOffset, int scratchSpill)
+    {
+        ValidateNativeFixedArrayRepeatInitialization(initialization);
+        var seedScratchOffset = Spill(scratchSpill);
+        EmitNativeFixedArraySeedAtAddress(initialization.Seed,
+            seedScratchOffset,
+            scratchSpill + NativeFixedArrayScratchSlots(
+                initialization.Layout.ElementType));
+        EmitNativeFixedArrayRepeatCopy(initialization.Layout, seedScratchOffset,
+            destinationOffset);
+    }
+
+    private void EmitNativeFixedArrayRepeatInitializationAtAddress(
+        BoundNativeFixedArrayRepeatInitialization initialization,
+        int destinationAddressSlot, int scratchSpill)
+    {
+        ValidateNativeFixedArrayRepeatInitialization(initialization);
+        var seedScratchOffset = Spill(scratchSpill);
+        EmitNativeFixedArraySeedAtAddress(initialization.Seed,
+            seedScratchOffset,
+            scratchSpill + NativeFixedArrayScratchSlots(
+                initialization.Layout.ElementType));
+        EmitNativeFixedArrayRepeatCopy(initialization.Layout,
+            seedScratchOffset, destinationAddressSlot,
+            destinationIsAddress: true);
+    }
+
+    private void EmitNativeFixedArraySeedAtAddress(BoundExpression seed,
+        int destinationOffset, int spill)
+    {
+        switch (seed)
+        {
+            case BoundNativeFixedArrayInitialization initialization:
+                EmitNativeFixedArrayInitialization(initialization,
+                    destinationOffset, spill);
+                return;
+            case BoundNativeFixedArrayRepeatInitialization repeat:
+                EmitNativeFixedArrayRepeatInitialization(repeat,
+                    destinationOffset, spill);
+                return;
+        }
+
+        Expression(seed, spill);
+        if (Size(seed.Type) == 0)
+        {
+            return;
+        }
+        if (IsIndirect(seed.Type))
+        {
+            _code.AddressToRdx(destinationOffset);
+            _code.CopyMemory(Size(seed.Type));
+        }
+        else
+        {
+            StoreValue(destinationOffset, seed.Type);
+        }
+    }
+
+    private void EmitNativeFixedArrayRepeatCopy(
+        BoundNativeFixedArrayLayout layout, int seedOffset,
+        int destinationOffset, bool destinationIsAddress = false)
+    {
+        var elementStride = checked((int)layout.ElementStride);
+        if (layout.ElementCount == 0 || elementStride == 0)
+        {
+            return;
+        }
+
+        _code.Address(seedOffset);
+        _code.Bytes(0x49, 0x89, 0xC3); // r11 = seed address
+        if (destinationIsAddress)
+        {
+            _code.Load64(destinationOffset);
+        }
+        else
+        {
+            _code.Address(destinationOffset);
+        }
+        _code.Bytes(0x49, 0x89, 0xC1); // r9 = destination address
+        _code.Bytes(0x49, 0xBA);
+        _code.Int64(unchecked((long)layout.ElementCount));
+        var loop = _code.Position;
+        _code.Bytes(0x4D, 0x85, 0xD2); // test r10,r10
+        var done = _code.JumpIf(0x84);
+        _code.Bytes(0x4C, 0x89, 0xD8); // rax = r11
+        _code.Bytes(0x4C, 0x89, 0xCA); // rdx = r9
+        _code.CopyMemory(elementStride);
+        _code.Bytes(0x49, 0x81, 0xC1); // add r9, element stride
+        _code.Int32(elementStride);
+        _code.Bytes(0x49, 0xFF, 0xCA); // dec r10
+        _code.PatchRelative(_code.Jump(), loop);
+        _code.PatchRelative(done, _code.Position);
+    }
+
+    private void ValidateNativeFixedArrayRepeatInitialization(
+        BoundNativeFixedArrayRepeatInitialization initialization)
+    {
+        if (initialization.Type != initialization.Layout.CarrierType
+            || initialization.Seed is null
+            || initialization.Seed.Type
+                != initialization.Layout.ElementType
+            || initialization.Layout.ElementStride
+                != (ulong)Size(initialization.Layout.ElementType))
+        {
+            throw new InvalidOperationException(
+                "A repeated fixed-array seed has an invalid target layout.");
+        }
+    }
+
+    private int NativeFixedArrayScratchSlots(PrimitiveType type)
+        => Math.Max(1, checked((int)(((long)Size(type) + 7) / 8)));
+
     private void EmitNativeFixedArrayInitializationAtAddress(
         BoundNativeFixedArrayInitialization initialization,
         int destinationAddressSlot, int scratchSpill)
@@ -961,6 +1120,13 @@ internal sealed partial class PeCompiler
             if (element is BoundNativeFixedArrayInitialization nested)
             {
                 EmitNativeFixedArrayInitializationAtAddress(nested,
+                    Spill(scratchSpill), scratchSpill + 1);
+                continue;
+            }
+            if (element
+                is BoundNativeFixedArrayRepeatInitialization repeat)
+            {
+                EmitNativeFixedArrayRepeatInitializationAtAddress(repeat,
                     Spill(scratchSpill), scratchSpill + 1);
                 continue;
             }
@@ -1023,6 +1189,13 @@ internal sealed partial class PeCompiler
             {
                 EmitNativeFixedArrayInitialization(nested, elementDestination,
                     spill);
+                continue;
+            }
+            if (element
+                is BoundNativeFixedArrayRepeatInitialization repeat)
+            {
+                EmitNativeFixedArrayRepeatInitialization(repeat,
+                    elementDestination, spill);
                 continue;
             }
 
