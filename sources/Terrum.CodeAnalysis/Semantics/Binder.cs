@@ -10907,6 +10907,7 @@ internal sealed partial class Binder
         fieldPlace = null;
         layout = default;
         if (node.Kind != SyntaxKind.MemberAccessExpression
+            || TryFindBuffer(node, out _)
             || BindExpression(node, null) is not BoundFieldRead place
             || !NativeFixedArrayContract.IsCarrier(place.Type)
             || !TryGetNativeFixedArrayLayout(place.Type, out layout)

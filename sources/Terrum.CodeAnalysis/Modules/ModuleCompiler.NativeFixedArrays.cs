@@ -400,7 +400,7 @@ public static partial class ModuleCompiler
     }
 
     private static bool IsAddressOnlyNestedBackingInitializer(
-        BoundNativeFixedArrayInitialization initializer,
+        BoundExpression initializer,
         PrimitiveType expectedType,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
@@ -408,8 +408,8 @@ public static partial class ModuleCompiler
         IReadOnlyList<NativeFunctionPointerSignatureDefinition>
             functionPointers)
     {
-        var pending = new Stack<(BoundNativeFixedArrayInitialization
-            Initializer, PrimitiveType ExpectedType, int Depth)>();
+        var pending = new Stack<(BoundExpression Initializer,
+            PrimitiveType ExpectedType, int Depth)>();
         pending.Push((initializer, expectedType, 1));
         var remaining = SemanticVerifier.MaximumAnalysisVisits;
         while (pending.TryPop(out var item))
@@ -426,38 +426,93 @@ public static partial class ModuleCompiler
                     structures, fixedArrays)
                 || layout.ElementCount == 0
                 || layout.ElementStride == 0
-                || layout.ByteExtent == 0
-                || item.Initializer.Elements.IsDefault
-                || (ulong)item.Initializer.Elements.Length
-                    != layout.ElementCount)
+                || layout.ByteExtent == 0)
             {
                 return false;
             }
 
             if (NativeFixedArrayTypes.IsType(layout.ElementType))
             {
-                foreach (var element in item.Initializer.Elements)
+                if (item.Initializer is BoundNativeFixedArrayInitialization
+                    initialization)
                 {
-                    if (--remaining < 0
-                        || element is not BoundNativeFixedArrayInitialization
-                            nested
-                        || nested.Type != layout.ElementType)
+                    if (initialization.Elements.IsDefault
+                        || (ulong)initialization.Elements.Length
+                            != layout.ElementCount)
                     {
                         return false;
                     }
 
-                    pending.Push((nested, layout.ElementType,
+                    foreach (var element in initialization.Elements)
+                    {
+                        if (--remaining < 0
+                            || element.Type != layout.ElementType)
+                        {
+                            return false;
+                        }
+
+                        pending.Push((element, layout.ElementType,
+                            item.Depth + 1));
+                    }
+                }
+                else if (item.Initializer
+                            is BoundNativeFixedArrayRepeatInitialization
+                                repeat
+                    && repeat.Layout == layout
+                    && repeat.Seed.Type == layout.ElementType
+                    && --remaining >= 0)
+                {
+                    pending.Push((repeat.Seed, layout.ElementType,
                         item.Depth + 1));
+                }
+                else
+                {
+                    return false;
                 }
                 continue;
             }
 
             if (!IsRevision100RuntimeArrayLayout(layout, structures,
-                    fixedArrays, pointerTypes, functionPointers)
-                || item.Initializer.Elements.Any(element =>
-                    element is null
-                    || element.Type != layout.ElementType
-                    || NativeFixedArrayTypes.IsType(element.Type)))
+                    fixedArrays, pointerTypes, functionPointers))
+            {
+                return false;
+            }
+
+            if (item.Initializer is BoundNativeFixedArrayInitialization
+                    leafInitialization)
+            {
+                if (leafInitialization.Elements.IsDefault
+                    || (ulong)leafInitialization.Elements.Length
+                        != layout.ElementCount)
+                {
+                    return false;
+                }
+
+                foreach (var element in leafInitialization.Elements)
+                {
+                    if (--remaining < 0
+                        || element.Type != layout.ElementType
+                        || NativeFixedArrayTypes.IsType(element.Type))
+                    {
+                        return false;
+                    }
+                }
+            }
+            else if (item.Initializer
+                        is BoundNativeFixedArrayRepeatInitialization
+                            leafRepeat)
+            {
+                if (--remaining < 0
+                    || leafRepeat.Layout != layout
+                    || leafRepeat.Seed is null
+                    || leafRepeat.Seed.Type != layout.ElementType
+                    || NativeFixedArrayTypes.IsType(
+                        leafRepeat.Seed.Type))
+                {
+                    return false;
+                }
+            }
+            else
             {
                 return false;
             }
@@ -523,7 +578,7 @@ public static partial class ModuleCompiler
         }
 
         var initializers
-            = new Dictionary<int, BoundNativeFixedArrayInitialization>(
+            = new Dictionary<int, BoundExpression>(
                 nestedBackingVariables.Count);
         var valid = true;
         var failure
@@ -535,9 +590,11 @@ public static partial class ModuleCompiler
                 {
                     case BoundLocal local when nestedBackingVariables.Contains(
                         local.Variable):
-                        if (local.Initializer
-                                is not BoundNativeFixedArrayInitialization
-                                    initializer
+                        var initializer = local.Initializer;
+                        if ((initializer is not
+                                BoundNativeFixedArrayInitialization
+                                && initializer is not
+                                    BoundNativeFixedArrayRepeatInitialization)
                             || !initializers.TryAdd(local.Variable,
                                 initializer)
                             || !IsAddressOnlyNestedBackingInitializer(
@@ -614,6 +671,44 @@ public static partial class ModuleCompiler
             nestedBackingVariables.Count);
         if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
             {
+                if (expression is BoundNativeFixedArrayPathWrite pathWrite
+                    && nestedBackingVariables.Contains(
+                        pathWrite.Variable))
+                {
+                    if (pathWrite.FieldPlace is null
+                        && !pathWrite.LeafFields.IsDefaultOrEmpty
+                        && NativeFixedArrayContract.MatchesPath(
+                            function.Variables[pathWrite.Variable].Type,
+                            pathWrite.Projections, program, out _,
+                            out var leafLayout)
+                        && IsRevision100RuntimeArrayLayout(leafLayout,
+                            program.Structures,
+                            program.NativeFixedArrayTypes,
+                            program.NativePointerTypes,
+                            program.NativeFunctionPointerSignatures)
+                        && TryGetPrivateFixedArrayLeafFieldType(
+                            leafLayout.ElementType, pathWrite.LeafFields,
+                            program.Structures,
+                            program.NativeFixedArrayTypes,
+                            program.NativePointerTypes,
+                            program.NativeFunctionPointerSignatures,
+                            out var terminalFieldType)
+                        && terminalFieldType == pathWrite.Value.Type)
+                    {
+                        permittedAddressUses[pathWrite.Variable]
+                            = permittedAddressUses.TryGetValue(
+                                pathWrite.Variable, out var pathWriteCount)
+                                ? pathWriteCount + 1 : 1;
+                    }
+                    else
+                    {
+                        valid = false;
+                        failure
+                            = "a nested field write is not an admitted local field-suffixed path";
+                    }
+                    return;
+                }
+
                 ImmutableArray<BoundExpression> arguments;
                 ImmutableArray<int> argumentParameterIndices;
                 BoundFunction? target = null;
@@ -773,12 +868,27 @@ public static partial class ModuleCompiler
                     case BoundNativeFixedArrayWrite arrayWrite
                         when nestedBackingVariables.Contains(
                             arrayWrite.Variable):
+                        valid = false;
+                        failure
+                            = "a nested array is used outside address or field-store adaptation";
+                        break;
                     case BoundNativeFixedArrayPathWrite pathWrite
                         when nestedBackingVariables.Contains(
                             pathWrite.Variable):
+                        if (pathWrite.FieldPlace is null
+                            && !pathWrite.LeafFields.IsDefaultOrEmpty)
+                        {
+                            addressOccurrences[pathWrite.Variable]
+                                = addressOccurrences.TryGetValue(
+                                    pathWrite.Variable,
+                                    out var pathWriteCount)
+                                    ? pathWriteCount + 1 : 1;
+                            break;
+                        }
+
                         valid = false;
                         failure
-                            = "a nested array is used outside address adaptation";
+                            = "a nested array is used outside address or field-store adaptation";
                         break;
                 }
             }))
@@ -840,7 +950,7 @@ public static partial class ModuleCompiler
                 out var functionName, out var reason))
         {
             throw new ModuleFormatException(
-                $"Module function '{functionName}' has nested fixed-array backing outside the revision-101 address-only profile: {reason}.");
+                $"Module function '{functionName}' has nested fixed-array backing outside the revision-102 nested-backing profile: {reason}.");
         }
     }
 
@@ -851,7 +961,7 @@ public static partial class ModuleCompiler
                 out var functionName, out var reason))
         {
             throw new ModuleContractException(
-                $"Function '{functionName}' has nested fixed-array backing outside the revision-101 address-only profile: {reason}.");
+                $"Function '{functionName}' has nested fixed-array backing outside the revision-102 nested-backing profile: {reason}.");
         }
     }
 

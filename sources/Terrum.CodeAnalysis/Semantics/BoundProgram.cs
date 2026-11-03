@@ -1284,6 +1284,20 @@ public sealed record BoundNativeFixedArrayInitialization(BoundNativeFixedArrayLa
         : this with { Elements = [.. Elements.Select(rewrite)] };
 }
 
+/// <summary>A compact fixed-array initialization that copies one completed seed value.</summary>
+public sealed record BoundNativeFixedArrayRepeatInitialization(
+    BoundNativeFixedArrayLayout Layout, BoundExpression Seed, TextSpan Span)
+    : BoundExpression(Layout.CarrierType, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Seed is not null && Seed.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Seed is null ? [] : [Seed];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Seed is null
+            ? this : this with { Seed = rewrite(Seed) };
+}
+
 /// <summary>A checked read of one initialized element from a bounded native fixed-array local.</summary>
 public sealed record BoundNativeFixedArrayElement(int Variable, BoundNativeFixedArrayLayout Layout,
     BoundExpression Index, TextSpan Span) : BoundExpression(Layout.ElementType, Span)
@@ -1304,6 +1318,9 @@ public sealed record BoundNativeFixedArrayElement(int Variable, BoundNativeFixed
 
 internal readonly record struct BoundNativeFixedArrayProjection(
     BoundNativeFixedArrayLayout Layout, BoundExpression Index);
+
+internal readonly record struct BoundNativeFixedArrayFieldProjection(
+    PrimitiveType OwnerType, int Field);
 
 /// <summary>A checked selection through multiple nested fixed-array dimensions.</summary>
 internal sealed record BoundNativeFixedArrayPathElement(int Variable,
@@ -1411,9 +1428,12 @@ internal sealed record BoundNativeFixedArrayPathWrite(int Variable,
         Span)
 {
     internal BoundExpression? FieldPlace { get; init; }
+    internal ImmutableArray<BoundNativeFixedArrayFieldProjection> LeafFields { get; init; } = [];
+    internal bool IsUnsafeAuthorized { get; init; }
     internal override bool HasValidNestedExpressions =>
         !Projections.IsDefaultOrEmpty
         && Projections.All(static projection => projection.Index is not null)
+        && !LeafFields.IsDefault
         && Value is not null
         && (FieldPlace is null || FieldPlace.HasValidNestedExpressions);
     internal override ImmutableArray<BoundExpression> NestedExpressions =>

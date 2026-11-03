@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -563,6 +564,410 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
             """);
         Assert.That(immutableArray.HasErrors, Is.True,
             string.Join(Environment.NewLine, immutableArray.Diagnostics));
+    }
+
+    [Test]
+    public void FieldWriteProvenanceUsesCapturedIndicesAndPreservesSiblings()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct PointerHolder {
+                public ptr<uint32> Value;
+                public mut uint32 Tag;
+                public unsafe PointerHolder(ptr<uint32> value) {
+                    Value = value;
+                    Tag = 0;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
+            internal extern int32 Observe(ptr<uint32> value);
+
+            uint32 SetTag(write ref<int32> index) {
+                *index = 0;
+                return uint32(99);
+            }
+
+            int32 Main() {
+                unsafe {
+                    [uint32; 3] values = [10, 20, 30];
+                    PointerHolder seed = new PointerHolder(&values[0]);
+                    mut [PointerHolder; 2] holders
+                        = [seed; 2];
+                    mut int32 index = 0;
+                    holders[index++].Tag = SetTag(ref index);
+                    return Observe(holders[0].Value);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void FieldPointerReplacementTransfersBackingToTheSelectedElement()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) {
+                    Value = value;
+                }
+            }
+
+            int32 Main() {
+                [uint32; 3] values = [10, 20, 30];
+                unsafe {
+                    mut [PointerHolder; 2] holders = [
+                        new PointerHolder(&values[0]); 2];
+                    holders[1].Value = &values[1];
+                    return int32(*holders[0].Value)
+                        + int32(*holders[1].Value) * 100;
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(2010));
+    }
+
+    [Test]
+    public void DynamicFieldPointerReplacementMergesPossibleBackings()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) {
+                    Value = value;
+                }
+            }
+
+            int32 Main() {
+                [uint32; 3] values = [10, 20, 30];
+                unsafe {
+                    mut [PointerHolder; 2] holders = [
+                        new PointerHolder(&values[0]); 2];
+                    mut int32 index = 1;
+                    holders[index].Value = &values[2];
+                    return int32(*holders[0].Value)
+                        + int32(*holders[1].Value) * 100;
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(3010));
+    }
+
+    [Test]
+    public void NestedArrayFieldPointerWritePreservesOtherElements()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) {
+                    Value = value;
+                }
+            }
+
+            int32 Main() {
+                [uint32; 3] values = [10, 20, 30];
+                unsafe {
+                    PointerHolder seed
+                        = new PointerHolder(&values[0]);
+                    mut [PointerHolder; 2] row = [seed; 2];
+                    mut [[PointerHolder; 2]; 2] rows = [row; 2];
+                    rows[1][1].Value = &values[2];
+                    return int32(*rows[0][0].Value)
+                        + int32(*rows[1][1].Value) * 100;
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(3010));
+    }
+
+    [Test]
+    public void RepeatedArrayFieldFunctionPointerWritePreservesCodeOrigin()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct CallbackBox {
+                public mut fnptr<NativeAbi, int32, int32> Callback;
+                public CallbackBox(fnptr<NativeAbi, int32, int32> callback) {
+                    Callback = callback;
+                }
+            }
+
+            unsafe fnptr<NativeAbi, int32, int32> Select(
+                fnptr<NativeAbi, int32, int32> original,
+                fnptr<NativeAbi, int32, int32> replacement, int32 index) {
+                CallbackBox seed = new CallbackBox(original);
+                mut [CallbackBox; 2] callbacks = [seed; 2];
+                unsafe {
+                    callbacks[index].Callback = replacement;
+                    return callbacks[index].Callback;
+                }
+            }
+
+            unsafe fnptr<NativeAbi, int32, int32> SelectKnown(
+                fnptr<NativeAbi, int32, int32> original,
+                fnptr<NativeAbi, int32, int32> replacement) {
+                CallbackBox seed = new CallbackBox(original);
+                mut [CallbackBox; 2] callbacks = [seed; 2];
+                unsafe {
+                    callbacks[1].Callback = replacement;
+                    return callbacks[1].Callback;
+                }
+            }
+
+            unsafe fnptr<NativeAbi, int32, int32> SelectExplicit(
+                fnptr<NativeAbi, int32, int32> original,
+                fnptr<NativeAbi, int32, int32> replacement) {
+                CallbackBox first = new CallbackBox(original);
+                CallbackBox second = new CallbackBox(replacement);
+                mut [CallbackBox; 2] callbacks = [first, second];
+                unsafe { return callbacks[1].Callback; }
+            }
+
+            [Terrum.Interop.NativeCallable]
+            int32 Increment(int32 value) { return 42; }
+
+            [Terrum.Interop.NativeCallable]
+            int32 Double(int32 value) { return 24; }
+
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> known
+                        = SelectKnown(&Increment, &Double);
+                    if (known(0) != 24) { return -1; }
+                    fnptr<NativeAbi, int32, int32> explicitValue
+                        = SelectExplicit(&Increment, &Double);
+                    if (explicitValue(0) != 24) { return -2; }
+                    fnptr<NativeAbi, int32, int32> selected
+                        = Select(&Increment, &Double, 1);
+                    return selected(21);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var select = compilation.Program!.Functions.Single(
+            static function => function.Name == "Select");
+        Assert.That(select.CopyOriginSummary, Is.Not.Null);
+        Assert.That(select.CopyOriginSummary!.Facts, Has.Length.EqualTo(1));
+        Assert.That(select.CopyOriginSummary.Facts[0].Origins
+            .Select(static origin => origin.SourceOrdinal),
+            Is.EquivalentTo(new[] { 0, 1 }));
+        var selectKnown = compilation.Program.Functions.Single(
+            static function => function.Name == "SelectKnown");
+        Assert.That(selectKnown.CopyOriginSummary, Is.Not.Null);
+        Assert.That(selectKnown.CopyOriginSummary!.Facts[0].Origins
+            .Select(static origin => origin.SourceOrdinal),
+            Is.EqualTo(new[] { 1 }));
+        var selectExplicit = compilation.Program.Functions.Single(
+            static function => function.Name == "SelectExplicit");
+        Assert.That(selectExplicit.CopyOriginSummary, Is.Not.Null);
+        Assert.That(selectExplicit.CopyOriginSummary!.Facts[0].Origins
+            .Select(static origin => origin.SourceOrdinal),
+            Is.EqualTo(new[] { 1 }));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(24));
+    }
+
+    [Test]
+    public void RepeatedArrayFieldWriteCannotExtendLocalPointerBacking()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) {
+                    Value = value;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            internal extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                unsafe {
+                    mut [PointerHolder; 1] holders
+                        = [new PointerHolder(null); 1];
+                    {
+                        mut [uint32; 1] local = [10];
+                        holders[0].Value = &local[0];
+                    }
+                    return Observe(holders[0].Value);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void NativeFieldWriteCapturesTheSelectedIndexBeforeRhs()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct TaggedValue {
+                public mut uint32 Tag;
+                public TaggedValue(uint32 tag) { Tag = tag; }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct Holder {
+                public mut [TaggedValue; 2] Values;
+            }
+
+            uint32 ChangeIndex(write ref<int32> index) {
+                *index = 0;
+                return uint32(99);
+            }
+
+            int32 Main() {
+                mut int32 index = 1;
+                init mut Holder holder;
+                holder.Values = [
+                    new TaggedValue(uint32(10)),
+                    new TaggedValue(uint32(20))];
+                unsafe {
+                    holder.Values[index++].Tag = ChangeIndex(ref index);
+                }
+                unsafe {
+                    return int32(holder.Values[0].Tag)
+                        + int32(holder.Values[1].Tag) * 100
+                        + index;
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(9910));
+    }
+
+    [Test]
+    public void FailedArrayFieldRhsDoesNotPublishTheReplacement()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct TaggedValue {
+                public mut uint32 Tag;
+                public TaggedValue(uint32 tag) { Tag = tag; }
+            }
+
+            uint32 FailAfterIndexMutation(write ref<int32> index) {
+                *index = 0;
+                require false;
+                return uint32(99);
+            }
+
+            int32 Main() {
+                mut int32 index = 1;
+                mut [TaggedValue; 2] values = [
+                    new TaggedValue(uint32(10)),
+                    new TaggedValue(uint32(20))];
+                unsafe {
+                    try {
+                        values[index++].Tag
+                            = FailAfterIndexMutation(ref index);
+                    } catch {
+                        return int32(values[0].Tag)
+                            + int32(values[1].Tag) * 100
+                            + index;
+                    }
+                }
+                return -1;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(2010));
+    }
+
+    [Test]
+    public void FieldWriteInvalidatesOverlappingUnionPointerProvenance()
+    {
+        static string CreateSource(string alternativeWrite) => $$"""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct PointerOrWide {
+                public mut write ptr<uint32> Pointer;
+                public mut uint64 Wide;
+                public PointerOrWide(write ptr<uint32> pointer) {
+                    unsafe { Pointer = pointer; }
+                }
+            }
+
+            int32 Main() {
+                mut uint32 data = 42;
+                unsafe {
+                    mut PointerOrWide seed
+                        = new PointerOrWide(&data);
+                    mut [PointerOrWide; 2] values = [seed; 2];
+                    {{alternativeWrite}}
+                    return int32(*values[1].Pointer);
+                }
+            }
+            """;
+
+        var preserved = Compilation.Create(
+            SyntaxTree.Parse(CreateSource(string.Empty)),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+        Assert.That(NativeJit.Execute(preserved.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+
+        var invalidated = Compilation.Create(
+            SyntaxTree.Parse(CreateSource(
+                "unsafe { values[1].Wide = uint64(0); }")),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
     }
 
     [Test]

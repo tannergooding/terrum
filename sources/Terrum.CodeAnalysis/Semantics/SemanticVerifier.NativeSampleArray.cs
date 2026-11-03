@@ -409,7 +409,8 @@ public static partial class SemanticVerifier
         {
             SetNativePointerFieldValuesFromExpression(variable,
                 elementPrefix, layout.ElementType, initialization.Seed,
-                facts, function, program, ref remaining, depth + 1);
+                facts, function, program, ref remaining, depth + 1,
+                allowArrayRangeTemplate: true);
         }
         return true;
     }
@@ -1207,32 +1208,37 @@ public static partial class SemanticVerifier
         var fieldOffset = 0;
         var fieldSize = 0;
         var fieldRequiresUnsafe = false;
-        if (!IsValidNativeFixedArrayPath(write.Variable,
-                write.Projections, function, program, out var leafLayout,
-                write.FieldPlace)
-            || write.LeafFields.IsDefault
-            || write.Projections.Length + write.LeafFields.Length
-                > MaximumDepth
-            || (hasLeafFields
-                && !TryGetNativeFixedArrayLeafFieldPath(
-                    leafLayout.ElementType, write.LeafFields, program,
-                    out targetType, out _, out fieldOffset,
-                    out fieldSize, out fieldRequiresUnsafe))
-            || (!hasFieldPlace
-                && !function.Variables[write.Variable].IsMutable)
-            || (hasFieldPlace
-                && !IsWritableNativeFixedArrayFieldPlace(write.Variable,
-                    write.FieldPlace, function, program))
-            || !NativeFixedArrayContract.AllowsMutableLocal(
-                write.Projections[0].Layout)
-            || !declarations.Contains(write.Variable)
-            || (!hasFieldPlace && !initialized[write.Variable])
-            || write.Value.Type != (hasLeafFields
-                ? targetType : leafLayout.ElementType)
-            || ((fieldRequiresUnsafe
-                    || NativeFixedArrayFieldPlaceRequiresUnsafe(
-                        write.FieldPlace, function, program))
-                && !write.IsUnsafeAuthorized))
+        var pathValid = IsValidNativeFixedArrayPath(write.Variable,
+            write.Projections, function, program, out var leafLayout,
+            write.FieldPlace);
+        var leafFieldsValid = !write.LeafFields.IsDefault;
+        if (pathValid && leafFieldsValid && hasLeafFields)
+        {
+            leafFieldsValid = TryGetNativeFixedArrayLeafFieldPath(
+                leafLayout.ElementType, write.LeafFields, program,
+                out targetType, out _, out fieldOffset, out fieldSize,
+                out fieldRequiresUnsafe);
+        }
+        var validDepth = write.Projections.Length
+            + write.LeafFields.Length <= MaximumDepth;
+        var mutableRoot = hasFieldPlace
+            || function.Variables[write.Variable].IsMutable;
+        var writableFieldPlace = !hasFieldPlace
+            || IsWritableNativeFixedArrayFieldPlace(write.Variable,
+                write.FieldPlace, function, program);
+        var mutableArray = NativeFixedArrayContract.AllowsMutableLocal(
+            write.Projections[0].Layout);
+        var isDeclared = declarations.Contains(write.Variable);
+        var rootInitialized = hasFieldPlace || initialized[write.Variable];
+        var validValueType = pathValid && write.Value.Type
+            == (hasLeafFields ? targetType : leafLayout.ElementType);
+        var requiresUnsafe = fieldRequiresUnsafe
+            || NativeFixedArrayFieldPlaceRequiresUnsafe(write.FieldPlace,
+                function, program);
+        if (!pathValid || !leafFieldsValid || !validDepth
+            || !mutableRoot || !writableFieldPlace || !mutableArray
+            || !isDeclared || !rootInitialized || !validValueType
+            || (requiresUnsafe && !write.IsUnsafeAuthorized))
         {
             throw InvalidEffect(write.Span, "NativeImport");
         }
@@ -1333,13 +1339,20 @@ public static partial class SemanticVerifier
         }
         if (valueCompletes
             && CarriesNativePointer(leafLayout.ElementType, program)
-            && initialized.Dependencies is BackingDependencies facts)
+            && initialized.Dependencies is BackingDependencies pointerFacts)
         {
             ApplyNativeFixedArrayPathWriteProvenance(write, leafLayout,
-                facts, function, program, ref remaining, depth + 1);
+                pointerFacts, function, program, ref remaining, depth + 1);
             RefreshNativePointerAggregateProvenance(write.Variable,
-                function.Variables[write.Variable].Type, facts, program,
+                function.Variables[write.Variable].Type, pointerFacts, program,
                 ref remaining, depth + 1);
+        }
+        if (valueCompletes
+            && CarriesCopyOrigin(leafLayout.ElementType, program)
+            && initialized.Dependencies is BackingDependencies copyOriginFacts)
+        {
+            ApplyNativeFixedArrayPathCopyOrigin(write, copyOriginFacts,
+                function, program, ref remaining, depth + 1);
         }
     }
 

@@ -42,6 +42,630 @@ public sealed class ModuleTests
             ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(42));
     }
 
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task PrivateFlatFixedArrayModuleRunsThroughCliAsync(
+        BoundRuntimePolicy policy)
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 ReadArray() {
+                mut [uint32; 3] values = [10, 20, 30];
+                values[1] = values[0] + 1;
+                unsafe {
+                    ptr<uint32> selected = &values[2];
+                    return int32(values[1] + *selected) - 41;
+                }
+            }
+            """), policy);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            providerCompilation.Program!, ["ReadArray"]);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return ReadArray(); }"),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"private-array-{Guid.NewGuid():N}.trm");
+        var producerPath = Path.ChangeExtension(consumerPath,
+            ".producer.trm");
+        var imagePath = Path.ChangeExtension(consumerPath, ".exe");
+        try
+        {
+            await File.WriteAllBytesAsync(consumerPath, consumer)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(producerPath, producer)
+                .ConfigureAwait(true);
+            var (exit, error) = await RunCliAsync("run-module",
+                consumerPath, producerPath, "--runtime",
+                policy == BoundRuntimePolicy.FailFast
+                    ? "fail-fast" : "checked-exceptions")
+                .ConfigureAwait(true);
+            Assert.That(exit, Is.Zero);
+            Assert.That(error, Is.Empty);
+            var (linkExit, linkError) = await RunCliAsync("link-module",
+                consumerPath, producerPath, "-o", imagePath, "--runtime",
+                policy == BoundRuntimePolicy.FailFast
+                    ? "fail-fast" : "checked-exceptions")
+                .ConfigureAwait(true);
+            Assert.That(linkExit, Is.Zero);
+            Assert.That(linkError, Is.Empty);
+            Assert.That(await ExecuteAsync(
+                await File.ReadAllBytesAsync(imagePath).ConfigureAwait(true))
+                .ConfigureAwait(true), Is.Zero);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(producerPath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public void PrivateRepeatTag47IsCompactForZeroOneAndLargeCounts()
+    {
+        const string source = """
+            public int32 BuildZero() {
+                mut [uint32; 0] values = [1; 0];
+                return 0;
+            }
+
+            public uint32 BuildOne() {
+                mut [uint32; 1] values = [1; 1];
+                return values[0];
+            }
+
+            public uint32 BuildLarge() {
+                mut [uint32; 5000000000] values = [1; 5000000000];
+                return values[0];
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var exports = new[] { "BuildZero", "BuildOne", "BuildLarge" };
+        var producer = ModuleCompiler.CreateProducer(program, exports);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(102));
+
+        var repeats = new List<BoundNativeFixedArrayRepeatInitialization>();
+        foreach (var function in program.Functions)
+        {
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression
+                        is BoundNativeFixedArrayRepeatInitialization repeat)
+                    {
+                        repeats.Add(repeat);
+                    }
+                }), Is.True);
+        }
+
+        foreach (var elementCount in new ulong[] { 0, 1, 5_000_000_000 })
+        {
+            var repeat = repeats.Single(item =>
+                item.Layout.ElementCount == elementCount);
+            Assert.That(repeat.Seed, Is.TypeOf<BoundConstant>());
+            var seed = (BoundConstant)repeat.Seed;
+            Assert.That(seed.Type, Is.EqualTo(PrimitiveType.UInt32));
+            var expressionOffset = FindPrivateExpressionOffset(producer, 47,
+                repeat.Type, repeat.Span);
+            var expected = new byte[34];
+            expected[0] = 47;
+            BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(1),
+                (int)repeat.Type);
+            BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(5),
+                repeat.Span.Start);
+            BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(9),
+                repeat.Span.Length);
+            expected[13] = 1;
+            BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(14),
+                (int)seed.Type);
+            BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(18),
+                seed.Span.Start);
+            BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(22),
+                seed.Span.Length);
+            BinaryPrimitives.WriteInt64LittleEndian(expected.AsSpan(26),
+                seed.Value);
+            Assert.That(producer.AsSpan(expressionOffset, expected.Length)
+                .ToArray(), Is.EqualTo(expected));
+        }
+
+        _ = ModuleCompiler.CreateReference(producer);
+        var firstRepeat = repeats.Single(item =>
+            item.Layout.ElementCount == 0);
+        var firstRepeatOffset = FindPrivateExpressionOffset(producer, 47,
+            firstRepeat.Type, firstRepeat.Span);
+        var wrongSeedType = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrongSeedType.AsSpan(firstRepeatOffset + 14),
+            (int)PrimitiveType.Int32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(wrongSeedType));
+        var truncatedRepeat = producer.AsSpan(0, producer.Length - 1)
+            .ToArray();
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(truncatedRepeat));
+    }
+
+    [Test]
+    public async Task PrivateFieldPathTag48UsesThe75ByteFlatVector()
+    {
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            public uint32 ReadWide() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11223344); }
+                mut [Word; 2] values = [seed; 2];
+                mut uint32 observed = 0;
+                unsafe {
+                    values[1].Low = uint8(0xAA);
+                    observed = values[1].Wide;
+                }
+                return observed;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var producer = ModuleCompiler.CreateProducer(program, ["ReadWide"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(102));
+
+        BoundNativeFixedArrayPathWrite? pathWrite = null;
+        var function = program.Functions.Single(
+            static item => item.Name == "ReadWide");
+        Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayPathWrite write)
+                {
+                    pathWrite = write;
+                }
+            }), Is.True);
+        Assert.That(pathWrite, Is.Not.Null);
+        Assert.That(pathWrite!.Projections, Has.Length.EqualTo(1));
+        Assert.That(pathWrite.LeafFields, Has.Length.EqualTo(1));
+        var index = pathWrite.Projections[0].Index as BoundConstant;
+        var value = pathWrite.Value as BoundConstant;
+        Assert.That(index, Is.Not.Null);
+        Assert.That(value, Is.Not.Null);
+
+        var expressionOffset = FindPrivateExpressionOffset(producer, 48,
+            pathWrite.Type, pathWrite.Span);
+        var expected = new byte[75];
+        expected[0] = 48;
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(1),
+            (int)pathWrite.Type);
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(5),
+            pathWrite.Span.Start);
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(9),
+            pathWrite.Span.Length);
+        var cursor = 13;
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(cursor),
+            pathWrite.Variable);
+        cursor += sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(cursor), 1);
+        cursor += sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(cursor),
+            (int)pathWrite.Projections[0].Layout.CarrierType);
+        cursor += sizeof(int);
+        WritePrivateConstantExpression(expected, ref cursor, index!);
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(cursor), 1);
+        cursor += sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(expected.AsSpan(cursor),
+            pathWrite.LeafFields[0].Field);
+        cursor += sizeof(int);
+        WritePrivateConstantExpression(expected, ref cursor, value!);
+        Assert.That(cursor, Is.EqualTo(expected.Length));
+        Assert.That(producer.AsSpan(expressionOffset, expected.Length)
+            .ToArray(), Is.EqualTo(expected));
+        _ = ModuleCompiler.CreateReference(producer);
+
+        var wrongVersion = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrongVersion.AsSpan(sizeof(int)), 101);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(wrongVersion));
+
+        var missingField = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            missingField.AsSpan(expressionOffset + 46), 0);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(missingField));
+
+        var invalidField = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            invalidField.AsSpan(expressionOffset + 50), 99);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidField));
+
+        var noProjections = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            noProjections.AsSpan(expressionOffset + 17), 0);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(noProjections));
+
+        var tooManyFields = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            tooManyFields.AsSpan(expressionOffset + 46), 128);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(tooManyFields));
+
+        var invalidArrayType = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            invalidArrayType.AsSpan(expressionOffset + 21),
+            (int)PrimitiveType.UInt32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidArrayType));
+
+        var mismatchedValueType = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mismatchedValueType.AsSpan(expressionOffset + 55),
+            (int)PrimitiveType.Int32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(mismatchedValueType));
+        var truncatedFieldPath = producer.AsSpan(0, producer.Length - 1)
+            .ToArray();
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(truncatedFieldPath));
+
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                int32 Main() {
+                    return ReadWide() == uint32(0x112233AA) ? 0 : 1;
+                }
+                """),
+            ModuleCompiler.CreateReference(producer),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.That(NativeJit.Execute(linked,
+            NativeRuntimePolicy.FailFast), Is.Zero);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked,
+                NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.Zero);
+
+        var reemittedProducer = ModuleCompiler.CreateProducer(linked,
+            ["ReadWide"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            reemittedProducer.AsSpan(sizeof(int), sizeof(int))),
+            Is.EqualTo(102));
+        var reemittedConsumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, reemittedProducer);
+        Assert.That(NativeJit.Execute(
+            ModuleCompiler.Link(reemittedConsumer, reemittedProducer),
+            NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public void PrivateFieldPathKeepsExcludedFieldRootsAndWholeLeafWritesRejected()
+    {
+        static void AssertPrivateRejection(string source)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.Throws<ModuleContractException>(() =>
+                ModuleCompiler.CreateProducer(compilation.Program!,
+                    ["PrivateFieldPathOperation"]));
+        }
+
+        AssertPrivateRejection("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Point {
+                public mut uint32 Value;
+                public Point(uint32 value) { Value = value; }
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [Point; 2] Values;
+            }
+
+            public int32 PrivateFieldPathOperation() {
+                mut Point seed = new Point(uint32(0x11223344));
+                init mut Holder holder;
+                holder.Values = [seed, seed];
+                holder.Values[1].Value = uint32(0xAA);
+                return 0;
+            }
+            """);
+
+        AssertPrivateRejection("""
+            [Blittable] [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            public int32 PrivateFieldPathOperation() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11223344); }
+                mut [[Word; 2]; 2] values = [[seed; 2]; 2];
+                unsafe { values[1] = [seed; 2]; }
+                return 0;
+            }
+            """);
+
+        AssertPrivateRejection("""
+            [Blittable] [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [Word; 2] Values;
+            }
+
+            public int32 PrivateFieldPathOperation() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11223344); }
+                init mut Holder holder;
+                holder.Values = [seed, seed];
+                unsafe { holder.Values[1].Wide = uint32(0xAA); }
+                return 0;
+            }
+            """);
+    }
+
+    [Test]
+    public async Task PrivateNestedFieldPathBackingRoundTripsAndExecutes()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string producerSource = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public mut Word Inner;
+                public Container(Word inner) { Inner = inner; }
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveContainer(
+                write ptr<uint32> destination,
+                ptr<Container> source,
+                uint64 byteCount);
+
+            public int32 ReadNested() {
+                init mut Word word;
+                unsafe { word.Wide = uint32(0x11223344); }
+                mut Container seed = new Container(word);
+                mut [[Container; 2]; 2] values = [[seed; 2]; 2];
+                mut uint32 observed = 0;
+                mut uint32 observedNeighbor = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    values[1][1].Inner.Low = uint8(0xAA);
+                    RtlMoveContainer(&observed, &values[1][1], byteCount);
+                    RtlMoveContainer(&observedNeighbor,
+                        &values[1][0], byteCount);
+                }
+                if (observed != uint32(0x112233AA)) { return 1; }
+                if (observedNeighbor != uint32(0x11223344)) {
+                    return 2;
+                }
+                return 0;
+            }
+            """;
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        };
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(producerSource), options);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var exports = new[] { "ReadNested" };
+        var producer = ModuleCompiler.CreateProducer(providerProgram,
+            exports);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(102));
+
+        var writes = new List<BoundNativeFixedArrayPathWrite>();
+        var sourceFunction = providerProgram.Functions.Single(
+            static item => item.Name == "ReadNested");
+        Assert.That(BoundTreeTraversal.VisitExpressions(sourceFunction.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayPathWrite write)
+                {
+                    writes.Add(write);
+                }
+            }), Is.True);
+        Assert.That(writes, Has.Count.EqualTo(1));
+        Assert.That(writes[0].Projections, Has.Length.EqualTo(2));
+        Assert.That(writes[0].LeafFields, Has.Length.EqualTo(2));
+
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                struct Marker {
+                    public mut int32 Value;
+                    public Marker(int32 value) { Value = value; }
+                }
+
+                int32 Main() {
+                    mut Marker marker = new Marker(1);
+                    mut [uint32; 1] localValues = [1];
+                    if (ReadNested() != 0) { return 1; }
+                    if (marker.Value != 1) { return 2; }
+                    return localValues[0] == 1 ? 0 : 3;
+                }
+                """),
+            ModuleCompiler.CreateReference(producer),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.That(NativeJit.Execute(linked,
+            NativeRuntimePolicy.FailFast), Is.Zero);
+        var image = NativeEmitter.EmitWithNativeImports(linked,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(await ExecuteAsync(image).ConfigureAwait(true),
+            Is.Zero);
+
+        var anchorCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public uint32 Anchor() { return 1; }"),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(anchorCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, anchorCompilation.Diagnostics));
+        var anchor = NativeModuleCompiler.CreateProducer(
+            anchorCompilation.Program!, ["Anchor"], "FieldPathAnchor",
+            NativeRuntimePolicy.FailFast);
+        var nativeProducer = NativeModuleCompiler.CreateProducer(
+            providerProgram, exports, "PrivateFieldSet",
+            NativeRuntimePolicy.FailFast);
+        var setCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                struct Marker {
+                    public mut int32 Value;
+                    public Marker(int32 value) { Value = value; }
+                }
+
+                int32 Main() {
+                    mut Marker marker = new Marker(1);
+                    mut [uint32; 1] localValues = [1];
+                    if (ReadNested() != 0) { return 1; }
+                    if (Anchor() != 1) { return 2; }
+                    if (marker.Value != 1) { return 3; }
+                    return localValues[0] == 1 ? 0 : 4;
+                }
+                """),
+            NativeModuleCompiler.CreateReferenceSet(
+                [anchor, nativeProducer]),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(setCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var consumerSet = NativeModuleCompiler.CreateConsumerSet(
+            setCompilation.Program!, [anchor, nativeProducer],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
+            consumerSet, [anchor, nativeProducer],
+            TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.Zero);
+        var setReplacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(producerSource.Replace("uint8(0xAA)",
+                "uint8(0xBB)", StringComparison.Ordinal)), options);
+        Assert.That(setReplacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                setReplacementCompilation.Diagnostics));
+        var setReplacement = NativeModuleCompiler.CreateProducer(
+            setReplacementCompilation.Program!, exports, "PrivateFieldSet",
+            NativeRuntimePolicy.FailFast);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
+            consumerSet, [anchor, setReplacement],
+            TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(1));
+
+        var graphProviderSource = producerSource.Replace(
+            "word.Wide = uint32(0x11223344);",
+            "word.Wide = Anchor() + uint32(0x11223343);",
+            StringComparison.Ordinal);
+        Assert.That(graphProviderSource, Is.Not.EqualTo(producerSource));
+        var graphProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(graphProviderSource),
+            NativeModuleCompiler.CreateGraphReference([anchor]),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(graphProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                graphProviderCompilation.Diagnostics));
+        var graphProvider = NativeModuleCompiler.CreateGraphProducer(
+            graphProviderCompilation.Program!, exports,
+            "FieldPathProvider", [anchor],
+            NativeRuntimePolicy.FailFast);
+        var graphCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                struct Marker {
+                    public mut int32 Value;
+                    public Marker(int32 value) { Value = value; }
+                }
+
+                int32 Main() {
+                    mut Marker marker = new Marker(1);
+                    mut [uint32; 1] localValues = [1];
+                    if (ReadNested() != 0) { return 1; }
+                    if (Anchor() != 1) { return 2; }
+                    if (marker.Value != 1) { return 3; }
+                    return localValues[0] == 1 ? 0 : 4;
+                }
+                """),
+            NativeModuleCompiler.CreateGraphReference(
+                [anchor, graphProvider]),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(graphCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            graphCompilation.Program!, [anchor, graphProvider],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(
+            graphConsumer, [anchor, graphProvider],
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast)
+            .ConfigureAwait(true), Is.Zero);
+        var graphReplacementSource = graphProviderSource.Replace(
+            "uint8(0xAA)", "uint8(0xBB)", StringComparison.Ordinal);
+        var graphReplacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(graphReplacementSource),
+            NativeModuleCompiler.CreateGraphReference([anchor]),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(graphReplacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                graphReplacementCompilation.Diagnostics));
+        var graphReplacement = NativeModuleCompiler.CreateGraphProducer(
+            graphReplacementCompilation.Program!, exports,
+            "FieldPathProvider", [anchor],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(
+            graphConsumer, [anchor, graphReplacement],
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast)
+            .ConfigureAwait(true), Is.EqualTo(1));
+    }
+
     [Test]
     public async Task InternalGenericAliasesEraseBeforeModulePublicationAsync()
     {
@@ -107,7 +731,7 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(
             library.Program!, ["Consume", "RetireNested"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)),
-            Is.EqualTo(92));
+            Is.EqualTo(102));
         var fieldMoveStart = producerSource.IndexOf(
             fieldMoveText, StringComparison.Ordinal);
         Assert.That(fieldMoveStart, Is.GreaterThanOrEqualTo(0));
@@ -246,14 +870,14 @@ public sealed class ModuleTests
             """), policy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = library.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), ["Combine"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(102));
 
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Combine(sixth: 2, fifth: 4, first: 0, second: 0, third: 0, fourth: 0); }"),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(102));
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(
@@ -2399,6 +3023,39 @@ public sealed class ModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgradedProducer))!;
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 13);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer))!;
+    }
+
+    private static int FindPrivateExpressionOffset(byte[] artifact,
+        byte kind, PrimitiveType type, TextSpan span)
+    {
+        var prefix = new byte[1 + (3 * sizeof(int))];
+        prefix[0] = kind;
+        BinaryPrimitives.WriteInt32LittleEndian(prefix.AsSpan(1), (int)type);
+        BinaryPrimitives.WriteInt32LittleEndian(prefix.AsSpan(5),
+            span.Start);
+        BinaryPrimitives.WriteInt32LittleEndian(prefix.AsSpan(9),
+            span.Length);
+        var offset = artifact.AsSpan().IndexOf(prefix);
+        Assert.That(offset, Is.GreaterThanOrEqualTo(0));
+        return offset;
+    }
+
+    private static void WritePrivateConstantExpression(
+        Span<byte> destination, ref int offset, BoundConstant constant)
+    {
+        destination[offset++] = 1;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            destination.Slice(offset, sizeof(int)), (int)constant.Type);
+        offset += sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            destination.Slice(offset, sizeof(int)), constant.Span.Start);
+        offset += sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            destination.Slice(offset, sizeof(int)), constant.Span.Length);
+        offset += sizeof(int);
+        BinaryPrimitives.WriteInt64LittleEndian(
+            destination.Slice(offset, sizeof(long)), constant.Value);
+        offset += sizeof(long);
     }
 
     private static BoundProgram Compile(string source)
