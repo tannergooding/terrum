@@ -187,14 +187,38 @@ public sealed class ModuleTests
             item.Layout.ElementCount == 0);
         var firstRepeatOffset = FindPrivateExpressionOffset(producer, 47,
             firstRepeat.Type, firstRepeat.Span);
+        var oldRepeatVersion = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            oldRepeatVersion.AsSpan(sizeof(int)), 101);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(oldRepeatVersion));
+        var unknownRepeatVersion = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            unknownRepeatVersion.AsSpan(sizeof(int)), 103);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownRepeatVersion));
+        var repeatAsFieldPath = (byte[])producer.Clone();
+        repeatAsFieldPath[firstRepeatOffset] = 48;
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(repeatAsFieldPath));
+        var unknownRepeatTag = (byte[])producer.Clone();
+        unknownRepeatTag[firstRepeatOffset] = 49;
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownRepeatTag));
         var wrongSeedType = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             wrongSeedType.AsSpan(firstRepeatOffset + 14),
             (int)PrimitiveType.Int32);
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(wrongSeedType));
-        var truncatedRepeat = producer.AsSpan(0, producer.Length - 1)
-            .ToArray();
+        var wrongArrayType = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrongArrayType.AsSpan(firstRepeatOffset + 1),
+            (int)PrimitiveType.UInt32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(wrongArrayType));
+        var truncatedRepeat = producer.AsSpan(0,
+            firstRepeatOffset + 33).ToArray();
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(truncatedRepeat));
     }
@@ -288,6 +312,11 @@ public sealed class ModuleTests
             wrongVersion.AsSpan(sizeof(int)), 101);
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(wrongVersion));
+        var unknownVersion = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            unknownVersion.AsSpan(sizeof(int)), 103);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownVersion));
 
         var missingField = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
@@ -313,12 +342,23 @@ public sealed class ModuleTests
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(tooManyFields));
 
+        var tooManyProjections = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            tooManyProjections.AsSpan(expressionOffset + 17), 128);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(tooManyProjections));
+
         var invalidArrayType = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             invalidArrayType.AsSpan(expressionOffset + 21),
             (int)PrimitiveType.UInt32);
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(invalidArrayType));
+        var invalidRoot = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            invalidRoot.AsSpan(expressionOffset + 13), -1);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidRoot));
 
         var mismatchedValueType = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
@@ -326,8 +366,16 @@ public sealed class ModuleTests
             (int)PrimitiveType.Int32);
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(mismatchedValueType));
-        var truncatedFieldPath = producer.AsSpan(0, producer.Length - 1)
-            .ToArray();
+        var repeatAsFieldPath = (byte[])producer.Clone();
+        repeatAsFieldPath[expressionOffset] = 47;
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(repeatAsFieldPath));
+        var unknownFieldPathTag = (byte[])producer.Clone();
+        unknownFieldPathTag[expressionOffset] = 49;
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownFieldPathTag));
+        var truncatedFieldPath = producer.AsSpan(0,
+            expressionOffset + 74).ToArray();
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(truncatedFieldPath));
 
