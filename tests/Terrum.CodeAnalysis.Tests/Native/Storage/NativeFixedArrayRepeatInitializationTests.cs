@@ -595,13 +595,18 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
 
             int32 Main() {
                 unsafe {
-                    [uint32; 3] values = [10, 20, 30];
-                    PointerHolder seed = new PointerHolder(&values[0]);
+                    [uint32; 4] values = [10, 20, 30, 40];
+                    PointerHolder first = new PointerHolder(&values[0]);
+                    PointerHolder second = new PointerHolder(&values[1]);
                     mut [PointerHolder; 2] holders
-                        = [seed; 2];
-                    mut int32 index = 0;
+                        = [first, second];
+                    mut int32 index = 1;
                     holders[index++].Tag = SetTag(ref index);
-                    return Observe(holders[0].Value);
+                    mut int32 firstObservation
+                        = Observe(holders[0].Value);
+                    mut int32 secondObservation
+                        = Observe(holders[1].Value);
+                    return firstObservation + secondObservation;
                 }
             }
             """), BoundRuntimePolicy.FailFast);
