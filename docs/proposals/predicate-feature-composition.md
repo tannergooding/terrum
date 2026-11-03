@@ -13,16 +13,17 @@ support claim. Provisional implementation direction is not normative approval.
 **Recommend option (c): retain the bounded `10/1` registration and restrict
 anchor predicates to that exact subset; keep general predicates gated.**
 `10/1=PublishedPredicates` has no unconditional Feature prerequisites and
-covers only the six phase-3 normal-result selectors defined by
-[aggregate native outputs](aggregate-native-outputs.md#exact-shared-predicate-codec).
-`8/1=NativeAggregateOutputs` continues to require exactly
-`[(1,1),(2,1),(10,1)]`. No new Feature ID or revision is selected.
+covers only the six phase-3 normal-result selectors defined by the
+[NativeOutput cell proposal](aggregate-native-outputs.md#exact-shared-predicate-codec).
+`8/1=NativeOutputCells` continues to require exactly
+`[(1,1),(2,1),(10,1)]`; `NativeAggregateOutputs` is not an alias. No new
+Feature ID or revision is selected.
 
 This document supersedes the
 [function-pointer anchor proposal's](standard-function-pointer-anchor-contracts.md)
 former `10 -> 11 -> 9` requirement and broad phase-1/2 predicate applicability
 for provisional integration. Its applicability/normalization rules now apply
-only to admitted selector graphs. It confirms the aggregate proposal's
+only to admitted selector graphs. It confirms the cell proposal's
 `10/1` scope and prerequisites, and owns their cross-proposal composition.
 That proposal still owns the six-node codec; the anchor proposal still owns
 TypeSpec identity and rebasing. Neither owner may independently broaden
@@ -79,7 +80,7 @@ The edition's empty baseline Feature set is unchanged.
 | `(3,1)` DirectNativeCalls | `[(1,1),(2,1)]` | Preserve direct-call gate. |
 | `(4,1)` NativeExportEntries | `[(3,1)]` | Preserve address/indirect-call gate; transitive closure includes 1 and 2. |
 | `(5,1)` NativeInterfaceCalls | `[(1,1),(2,1)]` | Preserve interface-call gate. |
-| `(8,1)` NativeAggregateOutputs | `[(1,1),(2,1),(10,1)]` | Confirm aggregate-output candidate; closure is `{1/1,2/1,8/1,10/1}`. |
+| `(8,1)` NativeOutputCells | `[(1,1),(2,1),(10,1)]` | Confirm the NativeOutput cell candidate; closure is `{1/1,2/1,8/1,10/1}`. |
 | `(9,1)` NominalUnionMetadata | `[]` | Keep assigned-registration-pending; selectors do not require it. |
 | `(10,1)` PublishedPredicates | `[]` | Register only the six phase-3 selectors and their complete admission/binding/rewrite obligations. Remove only the unconditional `10 -> 11` edge. |
 | `(11,1)` TypedFrozenValues | `[(9,1)]` | Keep current assigned-registration-pending definition unchanged by this decision. No selector literal/value dependency is fabricated. |
@@ -113,9 +114,9 @@ optional when derived from the selected catalog.
 | Anchor with admitted selector contracts, metadata only | `{1/1,10/1}` | `{1/1,10/1}` |
 | Function-pointer value use with selector contracts | `{2/1,10/1}` | `{1/1,2/1,10/1}` |
 | Address formation/indirect use with selector contracts | `{4/1,10/1}` | `{1/1,2/1,3/1,4/1,10/1}` |
-| Raw aggregate-output declarations without calls | `{8/1}` | `{1/1,2/1,8/1,10/1}` |
-| Direct native aggregate-output call | `{3/1,8/1}` | `{1/1,2/1,3/1,8/1,10/1}` |
-| Native-interface aggregate-output call | `{5/1,8/1}` | `{1/1,2/1,5/1,8/1,10/1}` |
+| Raw NativeOutput cell declarations without calls | `{8/1}` | `{1/1,2/1,8/1,10/1}` |
+| Direct NativeOutput cell call | `{3/1,8/1}` | `{1/1,2/1,3/1,8/1,10/1}` |
+| Native-interface NativeOutput cell call | `{5/1,8/1}` | `{1/1,2/1,5/1,8/1,10/1}` |
 | Selector anchors/indirect use plus both output-call forms | `{4/1,5/1,8/1}` | `{1/1,2/1,3/1,4/1,5/1,8/1,10/1}` |
 | Selectors plus separately retained frozen values | `{10/1,11/1}` | `{9/1,10/1,11/1}`; value/union registrations remain pending, so this is not yet an admitted complete profile. |
 
@@ -128,7 +129,7 @@ interpret 10 narrowly in one Module and broadly in another.
 
 ## Exact predicate admission boundary
 
-Reuse the aggregate proposal's complete selector codec without a second
+Reuse the cell proposal's complete selector codec without a second
 condition language:
 
 | `nodeKind` | Required ordinary result type and test |
@@ -143,7 +144,7 @@ child edges, captures, literals or selected-call dependencies. It has one
 owning MethodDef `000B` attachment with `phaseTag=3`, valid contiguous
 phase-local ordinals and the exact existing row extents/reference namespaces.
 Canonical selector reuse/order and ordinary noncanonical acceptance remain
-owned by the aggregate proposal. Observation at normal Publish is not an
+owned by the cell proposal. Observation at normal Publish is not an
 assertion, user-code evaluation or false-postcondition failure.
 
 For TypeSpec `0x0D`, an anchor may carry `000B` **only** for those phase-3
@@ -153,7 +154,7 @@ proposal, not opaque graph bytes or MethodDef names. Feature 1 covers anchor
 identity, Feature 10 the selectors, and Features 2/4 their existing uses.
 Feature 8 is not required merely for a checked-output anchor. Combining
 Features 8 and 10 does not admit raw native-output formals on arbitrary
-function-pointer types or enable the aggregate proposal's reservation
+function-pointer types or enable the cell proposal's reservation
 protocol on a raw callable-value target.
 
 Phase `1=Precondition` and `2=NormalPostcondition` retain their existing
@@ -179,10 +180,10 @@ proof of producer truth or completion of unrelated carriers.
 |---|---|---|
 | PFC-01 Positive | `{1/1}`; predicate-free anchor | No Feature 10/11/9 requirement follows merely from TypeSpec `0x0D`. |
 | PFC-02 Positive | `{1/1,10/1}`; eligible checked-output anchor with exact bool true/false phase-3 selectors | Admit predicate composition with no Feature 8/11/9. Retain all independent checked-output prerequisites. |
-| PFC-03 Derived prerequisites | `{3/1,8/1}`; direct aggregate-output call | Derive `{1/1,2/1,3/1,8/1,10/1}`. Accept absence of explicit 10/1; do not derive 11/1 or 9/1. |
+| PFC-03 Derived prerequisites | `{3/1,8/1}`; direct NativeOutput cell call | Derive `{1/1,2/1,3/1,8/1,10/1}`. Accept absence of explicit 10/1; do not derive 11/1 or 9/1. |
 | PFC-04 Cross-feature | `{4/1,5/1,8/1}`; selector anchors, indirect use, direct/interface output calls | Derive exactly `{1/1,2/1,3/1,4/1,5/1,8/1,10/1}` once per pair. Shared 10 needs no second revision or physical row. |
 | PFC-05 Ordinary/canonical | Ordered sequence `[10/1,8/1,10/1]`, or sorted `[8/1,10/1]`; valid outputs | Same closure as `{8/1}`. Ordinary reader accepts both; canonical writer/audit requires sorted, nonrepeated IDs, but does not require omission of explicit derived 10. |
-| PFC-06 Missing effective requirement | `{1/1}` with a retained phase-3 anchor graph; `{3/1,10/1}` with retained raw aggregate-output declarations | Decline for missing effective 10/1 or 8/1 respectively; recognizing rows cannot supply it. |
+| PFC-06 Missing effective requirement | `{1/1}` with a retained phase-3 anchor graph; `{3/1,10/1}` with retained raw NativeOutput cell declarations | Decline for missing effective 10/1 or 8/1 respectively; recognizing rows cannot supply it. |
 | PFC-07 Revision conflict | `{8/1,10/2}`, or `{10/1,10/2}` | Reject conflicting exact revisions (and unregistered 10/2); no maximum, roll-forward, alias or profile branch. |
 | PFC-08 General assertion | `{1/1,10/1}`; anchor phase-1/2 graph using even a single selector-shaped node | Decline unsupported predicate applicability. Assigned phase values are not malformed merely for being known, but their required semantics are not supplied by this registration. |
 | PFC-09 Broader graphs | `{9/1,10/1,11/1}`; literal/call/capture/composition graph | Incomplete registrations and general graph semantics still prevent admission. Adding 11 or 9 cannot widen 10. |
@@ -202,7 +203,7 @@ proof of producer truth or completion of unrelated carriers.
    complete bounded 10/1 and remove `10 -> 11`. Reconcile the observed missing
    implementation `11 -> 9` edge with the **selected** value catalog; do not
    silently adopt the scalar-value alternative or treat the omission as policy.
-2. Consume the aggregate proposal's selector codec and this exact gate in
+2. Consume the cell proposal's selector codec and this exact gate in
    producers, structural/support checks and retained requirement inference;
    apply the anchor proposal's identity/rebasing only to admitted inputs.
    Preserve those facts through binding, rewriting and lowering. A row

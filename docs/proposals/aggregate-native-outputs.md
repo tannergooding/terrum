@@ -1,13 +1,16 @@
-# Result-correlated aggregate native outputs
+# Result-correlated NativeOutput cells
 
 **Status: unapproved; provisionally actionable under the authorized
-missing-contract workflow.** This document recommends a focused source and
-logical contract. It does not amend accepted specifications, establish compiler
-support, or change the normative registry. The standard representation below
-is a concrete **unapproved candidate**, provisionally actionable as a whole.
-Its adoption, implementation and qualification are prerequisites for the
-whole-plan standard native path, not optional work after that path succeeds.
-No private revision or compatibility encoding is proposed.
+missing-contract workflow.** This document owns the generalized source and
+logical cell contract. Its integrated scalar/pointer eligibility and
+source-dependency applicability are unapproved amendments; they do not
+approve or stabilize adjacent ownership, private persistence, foreign identity
+or indirect-call designs. It does not amend accepted specifications, establish
+compiler support, or change the normative registry. The standard
+representation below is a concrete **unapproved candidate**. Adoption,
+implementation and qualification remain prerequisites for the whole-plan
+standard native path. No private revision or compatibility encoding is
+selected here.
 
 The [predicate Feature composition decision](predicate-feature-composition.md)
 owns the joint provisional registration with
@@ -21,24 +24,67 @@ and output semantics below remain owned here.
 ## Decision and scope
 
 Recommend an explicit, call-extent output contract for a foreign callable to
-initialize **one wholly vacant, caller-owned `Blittable Copy` aggregate**.
-Publish the complete value only on its declared native-result condition;
-otherwise leave the destination logically vacant, irrespective of bytes
-written. Use a raw **`write ptr<T>`** formal and an explicit proposed
-`&init destination` argument, not a checked reference or an ordinary pointer
-to an already-live value.
+initialize **one wholly vacant, caller-owned cell of exact type T**, where T
+is a closed, positive-extent, fixed-rootless, directly interoperable
+`Blittable Copy` value type. Publish complete T only on its declared
+native-result condition; otherwise leave the destination logically vacant,
+irrespective of bytes written. Use a raw **`write ptr<T>`** formal and an
+explicit proposed `&init destination` argument, not a checked reference or
+an ordinary pointer to an already-live value.
 
 Apply the same logical contract to a direct callable import and to an exact
 foreign native-interface method when its complete vtable/receiver ABI is
-independently admitted. No API, symbol name, sample, IID or slot number selects
-the behavior. This proposal does not generalize all native pointer contracts:
-arrays/prefix outputs, live in/out replacement, ownership acquisition, retained
-buffers, async completion and general failure-output values are outside scope.
+independently admitted. T may be a scalar, raw-pointer cell, or aggregate
+whose own complete representation meets the same eligibility predicate. No
+API, symbol name, sample, IID, handle width or slot number selects behavior.
+This proposal does not generalize all native pointer contracts:
+arrays/prefix outputs, live in/out replacement, resource ownership transfer,
+retained buffers, async completion and general failure-output values remain
+outside the cell contract.
 
 Preserve the selected
 [NoThrow retirement direction](no-throw-retirement-and-proof-boundaries.md#proposed-source-and-proof-rules).
 An output contract is not a no-failure promise, and call sites must not inspect
 an ordinary authored constructor/helper body to acquire such a promise.
+
+### Candidate cell eligibility and ownership boundary
+
+The cell contract is selected by the complete resolved source declaration,
+not by a same-named attribute, an `extern` modifier, a scalar width, pointer
+bits, or an API-specific type. Require exactly `write ptr<T>`, an admitted
+bodyless foreign role, exact T identity, a closed fixed representation,
+positive extent, directly interoperable target layout, and complete
+`Blittable Copy` eligibility. Existing eligible aggregates remain included.
+Scalar, raw-pointer, and plain function-pointer cells are included only when
+their own exact type and representation are independently admitted; copying
+a function-pointer cell does not admit an indirect call. Unique owners,
+checked references, views, managed values, and unassigned optional or
+class-handle carriers do not qualify merely because their representation
+appears pointer-sized.
+
+For T=`ptr<U>`, the initialized value is the pointer descriptor itself. Its
+cell extent/alignment follows that descriptor; the output says nothing about
+U's extent, validity, initialization, access, lifetime, backing or
+dereferenceability. A null pointer cell is a complete pointer value only when
+the selected provider contract promises it; it does not identify a foreign
+interface or authorize resource operations.
+
+| Contract boundary | Evidence required |
+|---|---|
+| Complete cell value | Exact T, native representation, result condition, publication and any declared input/receiver dependencies under this proposal. |
+| Foreign resource right or responsibility | A separate authored unsafe provider/wrapper contract for acquisition or borrowing, provider origin, retention, transfer and exact release. Copying raw bits acquires no checked ownership. |
+| Checked owner or typed interface | An authored operation must establish its complete type, validity, dependencies and unique responsibility. COM/interface acquisition must fix or validate the IID before typed publication; a caller-selected IID plus `void**`, equal slot or cast is insufficient. |
+
+The resource-acquisition/adoption boundary remains separately owned by
+[NativeOutput resource ownership](native-pointer-output-ownership.md). This
+cell proposal grants no ownership flag, automatic adoption, synthesized
+release or compiler-recognized owner-constructor name.
+
+The source-dependency applicability in this document is a separate
+unapproved decision: it reuses existing DependsOn/ForwardsBacking vocabulary
+only for the published inner T and does not change cell formation or grant
+ownership. Its former standalone specification is retained as a concise
+decision record; the complete candidate rules are integrated below.
 
 ## Problem and current authority
 
@@ -72,7 +118,7 @@ private aggregate pointer inputs from bounded native outputs.
 
 | Accepted owner | Boundary preserved or intentionally proposed for amendment |
 |---|---|
-| [NBP-01 through NBP-04](../specs/conformance/native-boundaries.md#4-pointer-dependency-and-lifetime-boundaries) | Pointer spelling supplies no initialization, extent or retention promise; the selected schema currently rejects NativeOutput/NativeParameter clauses. Admitting this narrow output contract would intentionally amend that rejection only after its schema is selected. |
+| [NBP-01 through NBP-04](../specs/conformance/native-boundaries.md#4-pointer-dependency-and-lifetime-boundaries) | Pointer spelling supplies no initialization, extent or retention promise; the selected schema currently rejects NativeOutput/NativeParameter clauses. Admitting this bounded cell contract would intentionally amend that rejection only after its schema is selected. |
 | [Logical dependency records](../specs/representation/logical-records.md#general-dependency-contracts-carrier-and-capability-integration-pending) | Required output/region facts outside assigned shared carriers remain unsupported. This proposal does not bypass that gate. |
 | [Contract clauses](../specs/representation/contract-clauses.md#5-outputstate) | Assigned OutputState selects `ref<init T>` or `Span<init T>`, not a raw pointer. This proposal explicitly extends its applicability and the direct-formal domain of [Dependency destination 2](../specs/representation/contract-clauses.md#6-dependency); neither resolves through a NativeOutput row. |
 | [References](../specs/language/references.md#descriptors-referents-and-bindings) and [initialization](../specs/language/initialization-and-flow.md#states-reads-and-initialization) | `ptr<T>` and `write ptr<T>` have different access authority; neither alone is initialization authority. Vacancy, partial state, live values and reserved storage remain distinct. |
@@ -87,6 +133,14 @@ attributes or the existing `Terrum.Interop` prototype schema. Ordinary
 layout/type syntax follows the accepted
 [layout schemas](../specs/targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
 and [grammar](../specs/grammar-spec.md#32-types-parameters-and-arguments).
+
+Resolve `NativeOutput` and `NativeOutputCondition` through the exact selected
+Core registration, including nominal identity. The condition enum is a
+candidate `int32` enum with `NonZero=0` and `NonNegative=1`; these source
+values are not standard or private selector codes. Keep one required named
+`When` argument, with no positional-ordinal, ownership, extent or implicit
+`NativeParameter` form. Same-spelled declarations, matching bits and
+fully-qualified text do not select the registration.
 
 ```terrum
 [Blittable]
@@ -133,7 +187,12 @@ not a no-failure helper or an independently complete executable.
 * Admit only a synchronous bodyless callable import, or a bodyless method
   declaration in an independently admitted foreign native interface. Its
   selected formal must be exactly `write ptr<T>`, with a closed, directly
-  interoperable, positive-extent `Blittable Copy` aggregate `T`. No implicit
+  interoperable, positive-extent, fixed-rootless `Blittable Copy` T whose
+  complete target representation is independently admitted. T may be a
+  scalar, raw-pointer cell, or eligible aggregate; no optional/class-handle
+  or ownership carrier is inferred from size or spelling. For T=`ptr<U>`,
+  publish the pointer descriptor only; do not infer U's validity, extent,
+  backing, access, lifetime or dereferenceability. No implicit
   conversion from `ptr<T>`, nullable pointer, `ref<T>` or `ref<init T>` applies.
   Ordinary authored helpers, native-callable callback bodies, receivers,
   fields, results and arbitrary function-pointer type uses are not new
@@ -141,7 +200,7 @@ not a no-failure helper or an independently complete executable.
 * The proposed closed source conditions are `NonZero` for `int32`/`uint32`
   results and `NonNegative` for `int32` results. They mean exactly `result != 0`
   and `result >= 0` in that result type. Nonzero does not mean exactly one;
-  signed negative values satisfy NonZero. Source enum numeric values are not
+  signed negative values satisfy NonZero. Source enum values `0/1` are not
   wire codes. Normalize these templates to the shared result-predicate nodes
   specified below, not a native-only condition field, a second predicate
   language or a symbol/status-name heuristic.
@@ -245,13 +304,14 @@ by this one. Ordinary external side effects are not rolled back on failure.
 ## Layout, ABI and trust obligations
 
 The provider receives the address of the actual reserved caller storage, not
-a by-value aggregate copy, a hidden result buffer or a marshalling temporary.
-The logical formal is one pointer even when `T` is large. Its extent,
+a by-value T copy, a hidden result buffer or a marshalling temporary. The
+logical formal is one pointer regardless of T's size. Its extent,
 alignment, nested fields, packing and validity follow the exact selected
 [target layout](../specs/targets/windows-x64-data-layout.md) and
 [foreign call mapping](../specs/targets/windows-x64-call-interface.md#1-foreign-primitive-admission).
 Equal size, current field shape or `[Blittable]` alone is insufficient.
-There is no proposal-specific aggregate-size cap; unsupported complete
+For pointer-valued T the cell extent/alignment is the pointer descriptor's,
+not the pointee's. There is no proposal-specific cell-size cap; unsupported complete
 representations reject rather than acquire a new ABI.
 
 Success requires valid Boolean, enum, pointer-descriptor and other nominal
@@ -316,7 +376,7 @@ The following baseline comes from the
 
 | Surface | Existing assignment and remaining gap |
 |---|---|
-| OutputState / Dependency | Clauses `0x0002` / `0x0004`, each 20 bytes total. Raw output applicability is not assigned. Dependency destination `2` currently means checked initialization output. |
+| OutputState / Dependency | Clauses `0x0002` / `0x0004`, each 20 bytes total. NativeOutput cell applicability is not assigned. Dependency destination `2` currently means checked initialization output. |
 | Published predicates | Clause `0x000B`, 20 bytes; sections `0x0037..0x003E` already hold graphs, footprints, roots/dependencies, nodes, operands, edges and captures. General node/operand kinds and their roles/arities remain open. |
 | Predicate attachment | `0x000B.phaseTag` currently has `1=Precondition`, `2=NormalPostcondition`. A success selector and its complement cannot both be asserted postconditions. No output-selector phase is assigned. |
 | Feature closure | `10/1=PublishedPredicates` is assigned but registration-pending, with `10 -> 11 -> 9`. Recognizable predicate tables alone do not complete that closure. |
@@ -342,13 +402,13 @@ values retain their current rejection rules.
 
 | Namespace | Candidate |
 |---|---|
-| Contract `0x0002` OutputState | Keep its exact 20-byte shape; extend the admitted destination domain to the selected `write ptr<T>` aggregate formal. Make `predicateRef` explicitly a typed `PredicateGraph` row in section `0x0037`. |
-| Contract `0x0004` Dependency | Keep its exact 20-byte shape; broaden destination `2` to **initialization output**, selected directly by formal ordinal, including this raw output. No NativeOutput-row reference or new destination tag. |
+| Contract `0x0002` OutputState | Keep its exact 20-byte shape; extend the admitted destination domain to the selected `write ptr<T>` cell formal for eligible T. Make `predicateRef` explicitly a typed `PredicateGraph` row in section `0x0037`. |
+| Contract `0x0004` Dependency | Keep its exact 20-byte shape; broaden destination `2` to **initialization output**, selected directly by formal ordinal, including this raw cell. No NativeOutput-row reference or new destination tag. |
 | Contract `0x000B.phaseTag` | Add `3=NormalOutcomeSelector`; retain the existing 20-byte payload/owner/ordinal rules. It observes a predicate, not an assertion that the predicate is true. |
 | `PredicateNode.nodeKind` | Assign the six closed shared normal-result test forms in the next table, `0x00000001..0x00000006`. |
 | `PredicateNodeOperand.operandKind` | Assign `1=ReadRoot`, selecting a typed row of section `0x0039` in that graph's own footprint. |
 | Feature `10/1` | Complete a deliberately bounded `PublishedPredicates` registration for these closed normal-outcome selectors, governing edition `1`, prerequisites `[]`. Remove the draft unconditional `10 -> 11` edge; the [composition decision](predicate-feature-composition.md#recommended-registration-and-closure) governs the shared registration and bounded anchor applicability. |
-| Feature `8/1` | Register `NativeAggregateOutputs`, governing edition `1`, prerequisites `[(1,1),(2,1),(10,1)]`, covering raw-output declarations, shared dependency applicability, reservation/call records, binding, rewriting and lowering below. |
+| Feature `8/1` | Register `NativeOutputCells`, governing edition `1`, prerequisites `[(1,1),(2,1),(10,1)]`, covering eligible raw-cell declarations, shared dependency applicability, reservation/call records, binding, rewriting and lowering below. `NativeAggregateOutputs` is not an alias. |
 | Body record `0x0C` | `OutputReservation`, 12 bytes total: ordinary four-byte record header, then `u16 callSiteRecordIndex, u16 destinationHomeIndex, u32 formalOrdinal`. |
 | Long primary `0xDF` | Four bytes: `u8 primary=DF, u8 action, u16 outputReservationRecordIndex`; action `0=Reserve`, `1=CancelBeforeInvoke`. No result register, short form, prefix or escape. |
 | CallSite input source-use `6` | `ReservedNativeOutput`; only with `selectorKind=2` (Home), naming the reserved **T destination**, not a pointer-valued argument home. Other source-use contexts do not acquire value `6`. |
@@ -499,6 +559,51 @@ external backing obligations and do not make a pointer field safe to use.
 Phase 2/3, retention of the output address, ownership transfer and partial
 resource acquisition are not introduced by this raw variant.
 
+#### Source-dependency applicability
+
+The candidate source-schema extension is limited to the complete inner T of
+an otherwise eligible NativeOutput formal. Admit equivalent primary-contract
+placements: callable-level `[param(output): DependsOn(...)]` and
+`[param(output): ForwardsBacking(...)]`, or the same attributes directly on
+the selected formal. The two placements cannot both supply the same effective
+occurrence. Different output formals have independent sets. `return:` keeps
+its ordinary result meaning; `this:`, fields, callbacks, function-pointer
+type uses and secondary partial declarations do not select an output.
+DependsOn on an arbitrary pointer formal does not itself make that formal an
+output.
+
+Use only the existing flat sources: direct `this`, `nameof(parameter)`, or a
+direct literal naming that exact formal. Resolve against the annotated
+callable, including before its parameter list. Reject computed strings,
+field paths, ordinals as source arguments, duplicate effective sources and
+unknown names. Bind source identities through the checked named/positional
+argument map to already staged actual arguments in source order; never
+re-evaluate them or persist caller variable names. `this` denotes the actual
+receiver; `nameof(@this)` names an escaped formal rather than the receiver.
+An attribute target `this:` is not an output destination.
+
+| Declaration | Candidate meaning for this output |
+|---|---|
+| `DependsOn(sources...)` | Names the complete permitted source set, not proof that each source is used or permission to discover body-dependent sources. Callers conservatively retain every listed source. Broad permission includes eligible own-storage borrowing and existing-backing forwarding; normalize each source to shared relationship `3` (declared union). |
+| `ForwardsBacking(sources...)` | Refines a nonempty subset of the effective DependsOn set to relationship `2` (existing-backing forwarding only). It cannot add sources, manufacture backing or erase carried owner/guard/root/pin/code/provider/affinity obligations. |
+| No relationship or explicit `DependsOn()` | Use an explicit empty formal/receiver source set only when no other effective declared, inherited or registered relationship supplies sources. `DependsOn()` records authored emptiness; the unannotated empty default does not. Neither can erase independent required obligations. |
+
+Eligible initialized inputs may contribute their own storage and carried
+backing. By-value descriptors forward their actual dependencies rather than a
+caller descriptor variable or physical callee parameter copy. Raw pointer
+inputs remain pointer values: preserve only independently established backing
+and provenance; do not infer pointee initialization, extent, ownership or
+lifetime. A receiver contributes only its independently admitted actual
+storage/backing relation. Naming a scalar formal cannot justify a pointer
+into the callee's scalar slot.
+
+This is a destination-only extension. `nameof(output)` cannot project the
+future inner T, and `&init` is not an escaping dependency source. Reject
+self-dependencies and raw-output-to-output/result source claims, including
+backing-only claims. Do not silently reinterpret unsupported or missing
+required facts as empty. No dependency annotation adds ownership transfer,
+AddRef, rooting, pinning, marshalling or lifetime extension.
+
 ### Body staging, call-site and lowering
 
 Keep instruction encoding `01`, the masked prefix, HomeMap/MethodMap/TypeMap
@@ -595,7 +700,7 @@ result-only rows above. No constructor call, output load or pointer constant
 is needed.
 
 Lowering maps the reserved Home directly to its native address with checked
-frame extent/alignment, not to an aggregate by-value temporary. Preserve
+frame extent/alignment, not to a by-value T temporary. Preserve
 earlier argument snapshots, the selected vtable receiver/adjustment, native
 register/stack placement and all provider lifetimes. The internal publication
 test can use ordinary integer comparison/control flow, but must retain its
@@ -697,6 +802,20 @@ path. An independently read embedded `.trrm` must select the complete amended
 standard draft and its requirements. Until then standard production/use
 must reject the required unrepresentable/unsupported contract, not omit it.
 
+Private output persistence remains a separate owner and exact-schema
+decision. The existing
+[aggregate output persistence candidate](aggregate-native-output-private-persistence.md)
+describes revision 90 on the revision-89 layout. The proposed NoThrow
+retirement composition uses revision 91 for retirement and revision 92 for
+that output delta; the pointer/scalar amendment further proposes the
+revision-92 output collection with eligible scalar, pointer and function-
+pointer type identities. The separate provenance revision-93 and wide-scalar
+revision-94 compositions add their own carriers. These are distinct
+unapproved exact candidates, not aliases or a license to infer a reader from
+matching header bytes. The cell owner does not select or merge those private
+schemas. The outer provider-binding candidate and its version-3
+foreign-expectation table also remain separately owned.
+
 [Exact draft agreement](../specs/representation/format-versioning.md#2-beta-draft-and-preview-artifacts)
 still governs unchanged `(1,0)` bytes. No optional Attr, reserved field,
 private fallback, retired native-output table or historical decoder activates
@@ -705,6 +824,14 @@ reconstructs all affected records, indexes and proofs; byte substitution or
 clearing a requirement is not conversion.
 
 ## Alternatives and owner integration
+
+The shared cell contract does not absorb adjacent decisions:
+
+| Separate owner | Boundary |
+|---|---|
+| [NativeOutput resource ownership](native-pointer-output-ownership.md) | Authored acquisition/adoption, release, borrowed-resource lifetime and fixed/validated interface identity remain a distinct unsafe/resource contract. NativeOutput cell publication alone transfers no resource right or responsibility. |
+| [Aggregate NativeOutput private persistence](aggregate-native-output-private-persistence.md), [direct-import provider binding](native-output-direct-import-provider-binding.md), and [foreign-interface identity](native-output-foreign-interface-method-identity.md) | Exact private bytes, outer provider/export binding, and nominal interface/method identity are separate decisions. None follows from the shared cell schema. |
+| [Checked function-pointer output parameters](function-pointer-checked-output-parameters.md) and [Standard NativeImport function-pointer obligations](standard-native-import-function-pointer-contracts.md) | Checked `ref<init T>` outputs and indirect callable-value contracts retain their own source, schema and runtime gates. This proposal does not widen either. |
 
 | Representation option | Tradeoff |
 |---|---|
@@ -720,8 +847,8 @@ mandatory carrier and replacement rules. It directly reverses the selected
 [retirement recommendation](no-throw-retirement-and-proof-boundaries.md#alternatives-and-acceptance-cases).
 A helper's current constant body, Pure selection or retired Effects bit
 cannot supply the promise. It also would not approve the current
-NativeParameter prototype or express vacant, result-correlated aggregate
-outputs; it solves a different, larger callable-contract problem.
+NativeParameter prototype or express vacant, result-correlated cell outputs;
+it solves a different, larger callable-contract problem.
 
 An intrinsic zero-fill/default helper is not a generic substitute: zero bits
 need not satisfy `T`'s validity, and an ordinary authored wrapper remains an
@@ -729,7 +856,7 @@ ordinary potentially failing call. Using checked `ref<init T>` as an alias
 for the foreign pointer likewise erases distinct source contracts; an
 authored checked wrapper would still need an admitted raw-output publication
 operation. A full native region/ownership/in-out redesign may be useful
-later, but is unnecessary for this bounded whole-aggregate decision.
+later, but is unnecessary for this bounded cell decision.
 
 Adoption would require focused edits to these owners; none is amended here:
 
@@ -750,16 +877,19 @@ not only the motivating graphics sample.
 | Case | Required outcome |
 |---|---|
 | Vacant local, nested `Blittable Copy` aggregate, valid successful writes | Publish the complete value under the exact saved result condition without invoking any source constructor. Exercise direct import and independently admitted vtable dispatch. |
+| Vacant scalar cell and raw-pointer cell with the same result partition | Apply the same reservation/publication rules to exact admitted T types; the scalar/pointer cell's own extent/alignment is used, not a handle-name or pointee-size heuristic. |
+| Pointer-valued T is null or non-null on claimed success | Publish only the pointer descriptor promised by the provider. Do not infer pointee validity, extent, lifetime, access, ownership or interface identity. |
 | NonZero receives `2` or signed `-1`; NonNegative receives `0` | Apply the exact integral tests, not Boolean-one, HRESULT-name or sample heuristics. |
 | False result after no writes, one field written, or all bytes written | Keep vacant; reject value reads/default inference and perform no complete-`T` cleanup or rollback. |
 | Live, maybe-live, partial or already-reserved output place | Reject formation until ordinary state/dependency rules establish whole vacancy. No implicit retirement of an old value. |
 | `ptr<T>`, nullable pointer, ordinary `&place`, checked ref or stored raw pointer supplied instead | Do not upgrade access or fabricate the proposed initialization reservation. |
-| Missing/duplicate/unknown condition, wrong result type, nonaggregate/non-Copy/rooted/unsupported layout | Reject the selected source contract or affected use, not a silent fallback. |
+| Missing/duplicate/unknown condition, wrong result type, non-Copy/rooted/unsupported T or layout | Reject the selected source contract or affected use, not a silent fallback. |
 | Later argument fails, reads the output or aliases a second output to it | Preserve source evaluation order; no invocation on failure, and no competing access/reservation. |
 | Reentrant access conflicts with the reserved destination; native code retains it, or failed writes acquire an owner | Violates this provider contract; require a distinct admitted protocol rather than relaxing the reservation. Unrelated callbacks do not themselves violate it. |
 | Native unwind or postcondition failure before normal publication | No normal result/output; retain exceptional initialization and containment rules. Unsafe or NativeOutput is not NoThrow. |
 | DoesNotReturn native target with a non-unit declared status | Preserve the complete signature and terminal None-result CallSite; publish no default status/output, and still validate the complete declaration and reservations. |
 | Saved result overwritten, output retired/replaced, or relevant aliasing write intervenes | Invalidate affected correlations; an old result cannot authorize reading a new/vacant generation. |
+| DependsOn omitted, explicitly empty, nonempty, or ForwardsBacking refinement | Retain the exact source set and independent obligations; reject output-as-source projection, missing backing and silent empty-set fallback. |
 | Packed/over-aligned nested object, large extent or target/profile mismatch | Require actual derived extent/alignment and exact foreign mapping; no size-based alias, buffer overrun or alignment fabrication. |
 | Provider promises success but leaves an invalid Boolean/enum/nominal field | False semantic/unsafe promise, not valid initialization from byte coverage. Mandatory consumer structural checks are not semantic re-proof of that provider. |
 | Row/type remapping, renamed formals or replacement provider | Preserve logical formal order/identities, condition/state, footprint, phases and dependencies. Reject weakening or a plain-fnptr erasure of required facts. |
@@ -768,7 +898,7 @@ not only the motivating graphics sample.
 | DF names the wrong record kind, Home, formal or call; input mode 5 is substituted for 6; cancellation occurs after Invoke | Reject structural mismatches; producers/auditors also reject invalid reservation flow. No arbitrary address formation, implicit retirement or state reset. |
 | Body/global index endpoints, forward/duplicate/reordered records, multiple outputs and loops | Exercise zero and `0xFFFF` Body indexes, 24-bit global bounds, more than fourteen Homes, exact reuse/generation rules and complete source/record/Block remapping. |
 
-The provisional direction is therefore **explicit vacant aggregate output,
+The provisional direction is therefore **one explicit vacant NativeOutput cell,
 not a resurrected general no-failure API**. Its complete candidate standard
 representation is a prerequisite of implementation, not an optional later
 assignment; adoption and passing qualification remain distinct from this

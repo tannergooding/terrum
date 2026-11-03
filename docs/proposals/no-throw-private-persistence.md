@@ -41,7 +41,7 @@ stages avoid that dependency reversal. Keeping an ignored Boolean or adding
 a general proof-record family instead would retain ambiguity or introduce
 an unnecessary carrier; neither is selected.
 
-## Owners and observed baseline
+## Owners and historical baseline
 
 The accepted [persistence taxonomy](../specs/representation/persistence.md),
 [exact-schema policy](../specs/representation/format-versioning.md),
@@ -51,11 +51,14 @@ remain unchanged. The source retirement proposal owns the intentional
 removal of the general promise and preservation of role-specific obligations.
 This proposal selects only its private persistence and reconstruction boundary.
 
-The following are source observations, not test or execution evidence:
+The following source observations record the snapshot used when this proposal
+was drafted; they are not current support claims or test/execution evidence.
+Current private-module support is tracked in the
+[implementation inventory](../implementation/modules.md).
 
 | Implementation owner | Current behavior relevant to the decision |
 |---|---|
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader` | `TRRM` magic, then a little-endian **i32** private revision. The final writer selection is `ArithmeticOperationVersion=89`, even without arithmetic. The current header admits **76, 78, 79, 80, 82–89**; 77/81 explicitly reject. Neither 90 nor a later private revision is implemented there. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader` | In this snapshot, `TRRM` magic was followed by a little-endian **i32** private revision. The final writer selection was `ArithmeticOperationVersion=89`, even without arithmetic. The header admitted **76, 78, 79, 80, 82–89**; 77/81 explicitly rejected. |
 | `PutFunction`, `GetFunction`, `Contract`, `TryContractPromises`, `CompatibleContract` | Every stored function has a strict Boolean `IsNoThrow` between `IsOperator` and `DoesNotReturn`. Every contract string appends `NoThrow` or `MayThrow` before its return-continuation marker. Directed comparison preserves an expected NoThrow promise. Bodyless imports retain that promise in their string even without the Boolean. |
 | `Declaration`, `CreateReference`, ordinary `Link`; [`ModuleCompiler.ModuleSets.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.ModuleSets.cs) | Declaration projection uses record copying. Linking/restoration imports and remaps provider declarations or bodies; removal from serialization alone would leave in-memory promise propagation. |
 | [`ModuleCompiler.Graph.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.Graph.cs), `RecordedImportPromises`, `ValidateGraphImports`, `ReadGraphLibrary` | Set/graph restoration reapplies recorded NoThrow, no-return and caller-unsafe promises to replacement declarations. Graph libraries have a separate read path sharing header/function readers. |
@@ -109,9 +112,10 @@ requirements, initialization triggers, failure instructions or cleanup order.
 
 ### Header selection and old readers
 
-At the retirement checkpoint, all new structured writes select **91** and
-the current private reader selects only exact **91**. At the combined-output
-checkpoint, all new writes and the current reader select only exact **92**,
+Under the retirement candidate, all new structured writes would select
+**91** and its reader would select only exact **91**. Under the
+combined-output candidate, all new writes and its reader would select only
+exact **92**,
 even without outputs. Regenerate 91 artifacts at that second boundary.
 This deliberately proposes **no historical reader or automatic converter**:
 current use rejects 76–90, and later current-92 use also rejects 91.

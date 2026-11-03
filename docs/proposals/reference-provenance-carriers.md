@@ -352,7 +352,8 @@ All assignments here are **unapproved**. Select exactly
 **candidate 92** from
 [private NoThrow retirement](no-throw-private-persistence.md), with the
 unchanged output-schema delta from candidate 90, then add only this field.
-Do not redefine 90, 91 or 92, or reinterpret current revision 89.
+Do not redefine candidate revisions 90, 91 or 92, or reinterpret the
+revision-89 base schema.
 
 Immediately after each `ModuleFunction.OutputContracts` collection proposed
 there, before its expected-vtable presence Boolean, insert:
@@ -402,17 +403,21 @@ defaults. No additional per-row rule-version word is needed.
 * Writers emit the canonical ordering above. Readers may accept reordered
   well-formed rows, then normalize; equal duplicates still reject.
 
-Revision **93** is free in the inspected private revision namespace; current
-code assigns through 89 and the interacting proposals select 90–92.
-It is an i32 private header value, not `(major,minor)`, a Feature, opcode,
-expression tag or native-profile ID. Existing expression tags 1–40 and the
-candidate tag 41 are unchanged; no new operation tag is allocated.
+At the source snapshot used to form this proposal, revision **93** followed
+the inspected private revisions through 89 and the interacting proposals'
+90–92 candidates. The current implementation inventory selects revision 103;
+93 is therefore a historical candidate assignment, not the current schema or
+an availability claim. This proposal does not revise its exact candidate
+identity. The number denotes an i32 private header value, not `(major,minor)`,
+a Feature, opcode, expression tag or native-profile ID. Existing expression
+tags 1–40 and the candidate tag 41 are unchanged; no new operation tag is
+allocated.
 
-At this integration boundary all new structured writes and the current reader
-select exact **93**, including programs with empty collections. Reject other
+Under this candidate, all new structured writes and its reader would select
+exact **93**, including programs with empty collections. Reject other
 revisions rather than guessing/promoting them or retrying an older decoder.
-As with 92, no historical reader/converter is required. Equal “93” bytes still
-require agreement on this complete draft schema. Revision 93 cannot be
+As with 92, no historical reader/converter is proposed. Equal “93” bytes still
+require agreement on this complete draft schema. The candidate cannot be
 implemented by changing only the writer's final version constant: header
 allowlists, nested readers, declaration projection and producer validation
 must select the same layout.

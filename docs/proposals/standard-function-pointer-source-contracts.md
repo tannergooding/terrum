@@ -247,12 +247,25 @@ execution qualification separate from semantic and serialization evidence.
 
 The current
 [semantic signature record](../../sources/Terrum.CodeAnalysis/Semantics/NativeFunctionPointerContract.cs)
-contains only convention, result and ordered parameter types; its target
-matcher excludes DoesNotReturn. Invocation facts instead live separately on
+now carries declared Effects and whole-source Dependency rows, and its target
+matcher checks DoesNotReturn/declared caller-unsafety. It validates phase-3
+selector structure, but checked OutputState remains unsupported for the
+current native ABI parameter subset. Dependency projection now supports source
+subsets and backing-only refinement while preserving destination, phase and
+explicit empty-set identity. `&Callable` now infers that target identity for an
+unannotated local `var`; a supplied expected `fnptr` remains a directed checked
+view. Bare `fnptr<Args..., R>` source types now bind with the Terrum default
+convention; display uses the canonical no-prefix form. The old `NativeAbi`
+prefix remains accepted only as prototype migration debt and is not selected
+as an alias. Focused same-module native-JIT and default-convention tests cover
+the inferred address and bare signature. Remaining foreign-role migration,
+source-form output contracts and broader policy-level obligations still
+exceed the current binder/model.
+Invocation facts also remain on
 [BoundFunction and its parameters](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs).
 [TrRmExecutableCompiler](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.cs)
-still emits Development signature references and a Development artifact, not
-this complete Standard source producer. The
+still emits Development signature references and refuses nondefault invocation
+facts; this is not the complete Standard source producer. The
 [support inventory](../implementation.md#persistent-and-self-hosted-components)
 records bounded Standard anchor consumption/comparison, with producer,
 cross-module binding and remapping gaps. Existing

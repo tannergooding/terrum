@@ -4,8 +4,11 @@
 missing-contract workflow.** The authorization permits implementation using
 this recommendation as provisional direction; it does not approve or stabilize
 its private assignments, amend specifications, or establish implementation
-support. This document supplies only the private-persistence decision left
-open by [aggregate native outputs](aggregate-native-outputs.md).
+support. This document supplies only the aggregate-only revision-90
+private-persistence candidate for
+[NativeOutput cells](aggregate-native-outputs.md). The later scalar/pointer
+cell widening and revision-92/93/94 compositions are separate exact draft
+candidates, not aliases or compatibility readers for revision 90.
 
 ## Decision and boundary
 
@@ -24,12 +27,12 @@ declared normal-result selector; vacancy on its complement; cancellation
 before invocation and indeterminate exceptional state after invocation.
 Several independent annotated formals may use one captured result.
 
-This adds no source alias, general pointer output, pointer/COM ownership
-acquisition, retained address, partial output or ordinary live-value
-replacement. It does not reopen NoThrow retirement. The selected standard
-direction remains shared OutputState/Dependency, with the predicate and
-reservation amendments in the prerequisite proposal. Private records below
-are a bounded projection of those meanings, not another standard clause,
+For revision 90, this adds no source alias, general pointer output,
+pointer/COM ownership acquisition, retained address, partial output or
+ordinary live-value replacement. It does not reopen NoThrow retirement. The
+selected standard direction remains shared OutputState/Dependency, with the
+predicate and reservation amendments in the cell proposal. Private records
+below are a bounded projection of those meanings, not another standard clause,
 Feature, Body codec or registry allocation.
 
 **Composition with NoThrow retirement.** This document remains the standalone
@@ -48,13 +51,16 @@ The accepted [persistence taxonomy](../specs/representation/persistence.md),
 unchanged. Their private/native boundary obligations apply independently of
 this proposal's approval.
 
-## Verified source baseline
+## Historical source baseline
 
-These are observations of the current worktree, not qualification results.
+These observations describe the source snapshot used when this proposal was
+drafted; they are not current support claims or qualification results. Current
+private-module support is tracked in the
+[implementation inventory](../implementation/modules.md).
 
 | Owner | Current representation and actual gap |
 |---|---|
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `ReadModuleHeader`, `Write` | Magic `TRRM`, followed by little-endian **i32** private revision, not the standard header's u16 pair. The reader explicitly lists revisions **76–89**. The writer finishes revision selection with `ArithmeticOperationVersion=89`, including programs without arithmetic. Revision 90 is not assigned there. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `ReadModuleHeader`, `Write` | At this snapshot, magic `TRRM` was followed by a little-endian **i32** private revision, not the standard header's u16 pair. The reader explicitly listed revisions **76–89**. The writer finished revision selection with `ArithmeticOperationVersion=89`, including programs without arithmetic. Revision 90 was not assigned there. |
 | [`FixedLayout`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.FixedLayout.cs), [`TokenSpans`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.TokenSpans.cs) | Additional revisions are 77 (span prototype), 78 (fixed layout) and 81 (their combination). Main-code revisions are 79 direct imports/outputs, 80 native parameters, 82 function pointers, 83 pointers, 84 vtables, 85 vptr offsets, 86 expected vtable bindings, 87 expected vtable outputs, 88 callable entry names and 89 resolved arithmetic. Explicit revision lists coexist with threshold tests; adding a constant alone is insufficient. |
 | `PutFunction`/`GetFunction`, `PutImportedNativeVTableMethod`/`GetImportedNativeVTableMethod` | Old output vectors occur inside direct imports, defined vtable metadata, and imported expected vtable metadata. Each is an i32 count followed by **16-byte** tuples: `i32 ParameterIndex, i32 PointeeType, u32 ResultCondition, u32 FailureDisposition`. They carry no explicit formation, complementary state relation or dependency set. |
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), [`DirectNativeImportContract.cs`](../../sources/Terrum.CodeAnalysis/Semantics/DirectNativeImportContract.cs), [`NativeVTableCallContract.cs`](../../sources/Terrum.CodeAnalysis/Semantics/NativeVTableCallContract.cs) | `DirectNativeOutput` still has that prototype tuple. Prototype conditions are 1 signed-nonzero, 2 unsigned-nonzero and 3 signed-nonnegative; failure disposition is 1. The in-progress validators now admit aggregate reservations, but the imported expected-vtable reader still uses the scalar/pointer-only `IsOutputPointee(type)` overload. Neither those numbers nor these differing gates select a candidate persistence contract. |
@@ -110,7 +116,7 @@ against the exact writable pointer formal and remap it with the owning
 declaration's structure mapping. No independent structure ordinal or new
 type-code namespace is introduced.
 
-The exact schema is the current revision-89 layout with only the new
+The exact schema is the candidate revision-89 layout with only the new
 collection, removal of the three legacy output vectors/text suffix, and
 expression tag 41 specified below. Other field positions relative to their
 remaining neighbors, checked-output modes and operation meanings are

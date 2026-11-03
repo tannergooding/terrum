@@ -12,11 +12,10 @@ generic storage admission**:
 reuse nominal constructed TypeSpec `0x05`, GenericParam/Constraint and
 TypeDef/FieldDef/Layout/LayoutField records; substitute complete type actuals
 before deriving storage; retain A2's universal positive Copy declaration and
-check rootlessness on the resulting stored children. Its uniqueness-amended
-successor adds positive nominal `DeclaredUnique` evidence as selected by the
-[companion proposal](standard-trrm-a3-positive-unique-type-evidence.md); it
-does not introduce a per-instantiation nominal definition or physical-layout
-table.
+check rootlessness on the resulting stored children. This proposal owns the
+complete unapproved uniqueness-amended successor, including positive nominal
+`DeclaredUnique` evidence in TypeDef flags. It does not introduce a
+per-instantiation nominal definition or physical-layout table.
 
 The missing decision is **how to select this reusable generic declaration
 and closed-storage subset without selecting general generic execution/export
@@ -65,7 +64,7 @@ All choices below are unapproved.
 | Direction | Assessment |
 |---|---|
 | Retain A2 semantics | Keep its independently admitted generic prerequisite and decline this new generic-storage route when that prerequisite is unavailable. Coherent, but does not supply the requested bounded admission. A helper fix or another document cannot implicitly extend the A2 selector. |
-| **A3 with existing declaration templates and exact substitution — recommended** | Existing form `05`, formal/constraint rows and inherited A2 Copy evidence retain identity and formation. Existing Layout inputs suffice to derive each closed representation. The distinct successor selector also assigns the positive TypeDef `DeclaredUnique` bit from the companion proposal; no per-instance records or generic execution capability are added. |
+| **A3 with existing declaration templates and exact substitution — recommended** | Existing form `05`, formal/constraint rows and inherited A2 Copy evidence retain identity and formation. Existing Layout inputs suffice to derive each closed representation. The distinct successor selector also assigns the positive TypeDef `DeclaredUnique` bit under the rules below; no per-instance records or generic execution capability are added. |
 | Explicit closed-instantiation records with per-instance capabilities/layout | A substantive alternative could retain the original generic definition and complete actuals while publishing separately keyed instance facts. It needs exact instance ownership, field correspondence, provider availability, replacement and capability semantics, and a new required encoding/composition. It must not disguise one favorable instance as a universal Copy promise. Enumeration or conditional recipes are materially wider than this closed-storage requirement. |
 | Complete general generic/witness capability first | Appropriate for constrained behavior, associated projections, constant recipes and independently callable generic code. The existing proposals remain prerequisites there. Requiring that entire surface for type-only, property-bounded storage adds no necessary representation fact. |
 
@@ -74,9 +73,9 @@ All choices below are unapproved.
 **Select the amended A3 only by
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`.** Its
 complete meaning is A2's F+S+array+Copy composition plus the bounded
-generic-storage admission rules in this proposal and the positive nominal
-Unique evidence in the companion proposal. The flag-free `...-3` candidate
-does not select this complete composition.
+generic-storage and positive nominal Unique rules in this proposal. The
+flag-free `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3` candidate
+does not select this composition and is not an alias.
 
 The [format-versioning rules](../specs/representation/format-versioning.md)
 permit unpublished drafts to be replaced without compatibility duties or a
@@ -89,12 +88,12 @@ not a claim that draft A2 must remain compatible or immutable.
 
 Retain `(major,minor)=(1,0)` and the inherited codec. Add no on-wire schema
 discriminator, Feature ID/revision, section, TypeSpec form or runtime policy.
-The successor assigns only TypeDef flag `0x40` to positive `DeclaredUnique`,
-with the exact A3-only applicability and exclusivity in the companion
-proposal. The public selector and its typed/internal counterpart identify
+The successor assigns TypeDef flag `0x40` to positive `DeclaredUnique`, with
+the A3-only applicability, mutual exclusivity and universal declaration
+rules below. The public selector and its typed/internal counterpart identify
 this complete successor, never A2 plus a hidden flag, proposal list or
-inferred capability. No selector implementation is performed by these
-proposals.
+inferred capability. No selector implementation is performed by this
+proposal.
 
 ## Proposed formation and declaration evidence
 
@@ -145,6 +144,60 @@ logical semantics:
    positive Copy evidence. A parent flag, Cleanup absence or zero extent is
    insufficient. Statics are not instance storage, but their retained
    requirements cannot be erased.
+
+### Positive nominal uniqueness evidence
+
+The uniqueness-amended A3 successor adds **TypeDef flag `0x40 =
+DeclaredUnique`** for positive nominal struct ownership evidence. This is a
+declaration-level promise, not a per-instance observation or Cleanup-derived
+classification.
+
+| TypeDef flag state | Candidate meaning |
+|---|---|
+| `0x20` | A2's unchanged positive universal `DeclaredCopy` promise, permitted only for kind-1 structs. |
+| `0x40` | A3-only positive `DeclaredUnique`, permitted only for kind-1 structs, including retained imported expectations. |
+| neither bit | Unknown/no positive Copy or Unique evidence. Absence of either bit is not inferred as the other. |
+| both bits | Invalid: Copy and Unique are mutually exclusive. |
+
+Keep bits 4 and 7..31 reserved zero; the exact candidate mask is
+`0x0000_006F`, preserving existing visibility/kind bits. Class/interface rows
+clear both declaration bits. A kind-1 TypeDef retaining Cleanup requires
+`DeclaredUnique=1` and `DeclaredCopy=0`, in addition to the existing Cleanup
+owner/range/target and independent role/phase requirements. **Unique without
+Cleanup is valid**; Cleanup presence is not uniqueness evidence.
+
+`DeclaredUnique=1` promises the ordinary inline value form is unique for
+every well-formed instantiation admitted by the complete published formation
+contract. It is not a favorable-instance or physical-layout fact and grants
+no Copy, Blittable, rootless, initialization, backing, cleanup-role or
+execution capability. It does not assign uniqueness to classes, interfaces,
+enums, tagged unions or unsupported representation constructors.
+
+Preserve the accepted formal ownership domains independently: domain 1
+requires positive Copy for directly stored T; domain 2 requires positive
+Unique; domain 3 requires either positive promise. Nullable admission is
+separate. Blittable, trivial bytes, Layout flags, zero extent or no Cleanup
+do not prove Copy or Unique. Unique actuals may remain behind an independently
+admitted pointer cell or unused phantom formal, but cannot be an inline
+stored child of an A2/A3 Copy array. `own<T>` and other already-positive
+constructors retain their own evidence rules.
+
+Producers must publish the correct universal declaration fact from canonical
+source semantics, not names, fields or Cleanup presence. Rewriters own the
+truth of facts they change. Consumers check the selected schema, flag mask/
+exclusivity, target row, actual domains, storage closure, required support and
+binding before use; they need not re-prove arbitrary producer bodies. A
+structurally consistent false promise remains producer misconduct under
+reader-trust rules.
+
+When a consumer relies on Unique, retain a positive expected TypeDef/Import
+and compare it with positive actual Unique at the selected provider. Do not
+overwrite a weaker original stub or retain the guarantee only in a host
+cache. Copy or unknown actuals do not satisfy expected Unique, and Unique
+does not satisfy expected Copy. Preserve the actual origin and stronger
+relied-on expectation through substitution, remapping and replacement.
+This does not create an AssociatedRelation witness or general ownership
+codec.
 
 ### Universal Copy across formal domains
 
@@ -298,8 +351,8 @@ or generic admission added to Standard/F/F+S/A1/A2 selections.
 
 A3 inherits TypeSpec `11` `(E,u64 N)`, Module-owned `0012`/40-byte rows,
 TypeDef `0x20` with A2's unchanged universal meaning, PlaceSelection
-`targetRefKind=3`, and the companion proposal's A3-only TypeDef `0x40`
-uniqueness evidence; the layout reserved word remains zero.
+`targetRefKind=3`, and this proposal's A3-only TypeDef `0x40`
+uniqueness evidence; the Layout reserved word remains zero.
 
 Each supplied provider retains its own explicit supported schema and
 requirements. A dependency requiring this bounded generic admission must

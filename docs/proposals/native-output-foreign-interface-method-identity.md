@@ -25,11 +25,11 @@ defined type-qualified invocation with an explicit receiver argument; do
 not introduce a stored interface descriptor, owner, acquisition operation,
 general witness dispatcher or duplicate method-signature registry.
 
-[Scalar and pointer native-output cells](native-pointer-output-ownership.md)
-remains the semantic owner of eligible scalar/pointer/aggregate T, result
-conditions, vacancy/reservation/publication, source dependencies, failures
-and resource boundaries. Its
-[aggregate](aggregate-native-outputs.md),
+[NativeOutput cells](aggregate-native-outputs.md) remain the semantic owner
+of eligible scalar/pointer/aggregate T, result conditions, vacancy/
+reservation/publication and source dependencies. The separate
+[resource-ownership proposal](native-pointer-output-ownership.md) preserves
+authored adoption/release and fixed/validated IID obligations. The
 [source-dependency](aggregate-native-output-source-dependencies.md) and
 [persistence](aggregate-native-output-private-persistence.md) prerequisites
 remain provisional. This proposal supplies only the previously missing

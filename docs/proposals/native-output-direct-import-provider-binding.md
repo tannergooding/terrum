@@ -21,7 +21,8 @@ Retain the consumer's expected foreign descriptor in a small native-container
 table so replacement cannot silently change it.
 
 This applies to synchronous direct calls with the existing admitted private
-Windows x64 direct-import signature, with or without aggregate outputs.
+Windows x64 direct-import signature, with or without NativeOutput cell
+contracts.
 Preserve the exact revision-92 inner schema selected by
 [private NoThrow retirement](no-throw-private-persistence.md) and
 [aggregate-output persistence](aggregate-native-output-private-persistence.md).

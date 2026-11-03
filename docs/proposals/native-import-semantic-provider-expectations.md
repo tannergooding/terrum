@@ -55,8 +55,9 @@ These are inspected source boundaries, not newly executed validation:
 | [`NativeModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs), direct-expectation provider validation | Outer native containers already retain and compare direct descriptors. Their Windows library comparison is ordinal-ignore-case; foreign exports and provider identities are ordinal. This is not a carrier for bare semantic imports. |
 | [`NativeParameterExtentPersistenceTests.cs`](../../tests/Terrum.CodeAnalysis.Tests/Modules/NativeParameterExtentPersistenceTests.cs) and the [test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj) | The direct replacement regression demonstrates that a consumer expecting extent `uint.MaxValue` currently links against a replacement at `ushort.MaxValue`; the analogous vtable replacement rejects the change. |
 
-The [implementation reference](../implementation/modules.md) distinguishes
-the current private revision-92 codec from the unapproved compositions.
+The [implementation reference](../implementation/modules.md) records the
+current private revision-103 codec; this candidate remains an unapproved
+expectation-transport amendment and is not part of that selection.
 The missing representation is a private semantic expectation decision,
 not permission to weaken accepted retained-binding obligations.
 
@@ -81,7 +82,7 @@ selects 92; the intervening candidates are not historical readers to retain.
 
 | Candidate component | Meaning retained in this selection |
 |---|---|
-| 92 | [NoThrow retirement](no-throw-private-persistence.md) plus the complete [aggregate-output delta](aggregate-native-output-private-persistence.md), [scalar/pointer-cell amendment](native-pointer-output-ownership.md#exact-candidate-representation-delta), resolved arithmetic modes and reservation tag 41. |
+| 92 | [NoThrow retirement](no-throw-private-persistence.md) plus the complete [aggregate-output delta](aggregate-native-output-private-persistence.md), [NativeOutput cell amendment](aggregate-native-outputs.md#standard-path-prerequisite-and-private-persistence), resolved arithmetic modes and reservation tag 41. |
 | 93 | Mandatory [general declaration dependencies](reference-provenance-carriers.md#private-exchange-candidate-revision-93), separate from output-specific rows. |
 | 94 | Complete [wide-scalar catalog and type-derived payloads](scalar-wide-value-carriers.md#exact-private-schema-and-composition). |
 | 95 | Mandatory [copy-origin summary field](reference-field-value-provenance.md#necessary-private-transport-candidate-95). |

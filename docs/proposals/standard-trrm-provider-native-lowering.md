@@ -17,16 +17,12 @@ Return PE bytes or the existing JIT result, **not native packages**.
 
 This completes the native-handoff direction left open by
 [selected-provider consumption](standard-trrm-selected-provider-consumption.md).
-It uses that proposal's exact per-artifact selections, Module/key resolution
-and original-expectation checks. Initially it supports only the existing
-bounded `trrm/1-draft-foreign-invocation-contracts-1` (F) consumer shape:
-each populated Module has one NativeImport declaration (owned or an imported
-expectation), its pointer anchor and supported caller Body; Windows x64 and
-fail-fast. Multiple such Modules may share an artifact. Only the selected root
-may retain one MethodDef Import, selecting a distinct leaf provider Module's
-NativeImport in the root artifact or an explicitly supplied additional
-artifact. Empty leading Modules do not make row one the selected Module.
-This is not general F support.
+It consumes that proposal's exact per-artifact selections, bounded Module
+closure, every-edge Module/key resolution and original-expectation checks.
+This document adds the native preparation/realization contract, not another
+provider topology or identity resolver. The candidate remains limited to
+exact `trrm/1-draft-foreign-invocation-contracts-1` (F), Windows x64 and
+fail-fast, and does not imply support for unrelated F schemas/content.
 
 The consumption mode is **semantic relowering of explicitly selected
 `.trrm` inputs**. No precompiled provider image is supplied or selected.
@@ -39,26 +35,20 @@ Keep `LoadStandard` and `CreateStandardReference` as semantic operations.
 Keep existing `NativeEmitter`/`NativeJit` public operations unchanged,
 including their rejection of provider-bound imports on direct-import routes.
 
-### Decision classification and supersession
+### Decision classification and ownership
 
-Co-location needs **no new Module-binding or native-realization contract**.
-[Modules](../specs/modules.md) already permits admitted semantic relowering
-without merging nominal identities;
-[metadata](../specs/il-metadata.md#metadata-logical-tables-and-row-semantics)
-selects an in-artifact Module by exact identity, and
-[binding](../specs/representation/binding-and-replacement.md#5-packing-replacement-and-relied-on-facts)
-requires the same complete checks for retained internal and external imports.
-The selected-consumer proposal already includes co-located dependencies.
+The [selected-provider proposal](standard-trrm-selected-provider-consumption.md#bounded-f-module-closure)
+owns exact Module shapes, multiple root Imports, finite dependency topology,
+every-edge validation and the distinct-name admission bound. This proposal
+owns how the checked immutable binding plan is consumed by JIT/PE lowering,
+the native import/entry realization, code/load origins and runtime lifetime.
+Co-located Modules and provider-owned dependency edges do not create a
+precompiled provider image or alter the selected consumption mode.
 
-A **provisional native-admission amendment** is nevertheless necessary:
-this recommendation supersedes this proposal's earlier one-populated-Module
-restriction, blanket exclusion of co-located dependency closure, and matching
-preparation/acceptance rejection cases. The replacement is only the
-[bounded closure and origin handoff](#bounded-module-closure-and-origin)
-below, not arbitrary multi-Module linking. Consolidating here keeps one owner
-for the checked native handoff; a separate resolver or proposal would duplicate
-already determined semantics. No accepted specification text is replaced,
-and this amendment remains unapproved.
+No accepted specification text is replaced. Both the shared admission
+proposal and this native handoff remain unapproved; this separation prevents
+semantic relowering from being treated as unchanged precompiled-provider
+deployment.
 
 ## Owners and inspected boundary
 
@@ -223,86 +213,34 @@ three different binding relations:
    direct foreign imports. Check uncalled, address-only and discarded uses,
    not just eventual machine-import usage.
 
-### Bounded Module closure and origin
+### Checked native-plan handoff and origin
 
-The root is exactly the `moduleIdentity` selected within `input`; a matching
-Module in `providers` cannot supply a missing root. Build the selected
-consumer's one directory from **all** Modules of `input` and the additional
-artifacts. Duplicate identities reject within or across artifacts, even for
-equal bytes, unused Modules or a repeated copy of `input` in `providers`.
-There is no root-first/provider-first precedence.
+The complete Module shape, root cardinality, name bound, provider graph,
+every-edge validation and original/actual binding relation are owned by
+[selected-provider consumption](standard-trrm-selected-provider-consumption.md#bounded-f-module-closure).
+This proposal adds no second topology or alternate admission path. It owns
+the native handoff after that semantic preparation succeeds.
 
-The admitted dependency topology has either no ModuleRef/Import edges
-(the owned-direct case), or exactly one retained ModuleRef and one MethodDef
-Import, both owned by the selected root. That Import's exact producer identity
-selects a **distinct logical Module**, then its exact key selects the public
-provider-local NativeImport under all checks above. The provider may occur at
-any Module row in `input` or an additional artifact. Its location does not
-alter the expectation, actual-target relation or native realization.
-A co-located provider is already explicitly supplied by `input`; use an empty
-`providers` list and no CLI `--trrm-provider` option when there are no additional
-artifacts. Do not resubmit it as another artifact.
+The native operation receives one internal immutable plan retaining:
 
-Every Module other than the selected root, including the selected provider,
-must have no retained ModuleRef/Import dependencies. All populated Modules
-must independently fit the bounded three-MethodDef shape; permitted empty
-Modules do not waive structure or requirements checks. Additional supported
-leaf Modules are not implicitly lowered, invoked or exported. An extra
-dependency, including an uncalled or declaration-only edge, declines this
-slice rather than being ignored. A structurally valid self-selection is
-likewise unsupported here, not a new general metadata prohibition; exporting
-the imported expectation itself is invalid and never turns it into a local
-actual definition.
-Missing exact producer/key, wrong kind/owner/native role, incompatible
-requirements or a failed original expectation reject without trying another
-Module, key, same-named method or equal foreign symbol.
-
-Retain artifact origins as indexes into the captured input sequence:
-`0` means the one whole `input` snapshot, and `i + 1` means `providers[i]`.
-`ProviderArtifactIndex` is valid in `[0, artifactCount)`; zero is **not**
-an absent-binding, self-binding or owned-direct sentinel. The owned-direct
-case has no provider binding. For a provider binding, require:
-
-* The root selection is in artifact `0`; its Module row/identity and expected
-  MethodDef range agree with the retained root Import and ModuleRef.
-* The provider tuple `(artifact index, Module row, MethodDef row)` identifies
-  the exact admitted snapshot, Module identity/requirements and public local
-  definition selected by the Export key. MethodDef rows are artifact-wide,
-  must lie in that Module's range, and are not relative to the root's range.
-* If the provider artifact index is `0`, its Module row and identity differ
-  from the root's. The same snapshot/schema is reused with separate owning
-  Module contexts; neither definition is renamed, flattened or coalesced.
-
-Keep the original root expectation, checked actual-provider correspondence
-and code/load origin through the existing plan and all three native operations.
-The root's public `ModuleImport` remains intact even for co-location; only the
-checked internal lowering view may realize the binding. No extra public
-selector, wire flag, trust assertion or general Body merger is introduced.
-
-Preparation produces one internal immutable plan, not a serialized trust flag
-or publicly constructible proof. Its required logical contents are:
-
-| Retained part | Required information |
+| Retained part | Native realization needs |
 |---|---|
-| Selection/context | Owned root/provider snapshots, each exact schema/catalog and Module identity/requirements, selected root entry or no-entry state, operation and runtime/target context. |
-| Original expectation | Using Module, Import/expected MethodDef identity, exact selected provider/key/requirements, complete original callable/native contracts and pointer-view obligations. Keep these separate from actual-provider facts. |
-| Actual definition | The selected provider snapshot, Module, Export key and provider-local MethodDef, its complete admitted NativeImport descriptor/contracts and the supported satisfaction result. |
-| Lowering correspondence | Checked mapping from each root external declaration/address target to that actual definition and eventual native import/thunk, with its semantic declaration origin and actual code/load origin. Include retained dependencies even without a machine call. |
+| Selection/context | Owned input snapshots, exact schema/catalog and Module selections, root entry/no-entry state, operation and target/runtime context. |
+| Every original edge | Using artifact/Module, Import and ModuleRef/expected MethodDef identities, selected provider/key/requirements and complete original callable/native/pointer-view expectations. Include uncalled dependencies. |
+| Selected actual | Exact provider artifact/Module/local MethodDef, public Export key, admitted NativeImport descriptor/contracts and checked satisfaction result. |
+| Lowering correspondence | Root declaration/address use to checked actual definition and its native import/thunk, semantic origin and actual code/load origin. Preserve separate semantic origins even if physical machinery is shared. |
 
-Keep the reconstructed root's `ModuleImport` and original declaration intact.
-A checked internal emitter/JIT entry consumes the plan together with that
-root; a bare `BoundProgram` or an old success flag cannot supply it.
-Do not pass through the public direct-import API by erasing the marker.
-Internal factoring may reuse machine-binding/PE/JIT helpers, but their names
-alone never replace the plan.
+Keep the root `ModuleImport` and original declaration intact. Only the
+checked internal lowering view may realize the bound actual; a bare
+`BoundProgram`, copied descriptor or previous success flag is insufficient
+for direct native APIs. Do not clear imports or derive a DLL/export mapping
+from caller-supplied strings.
 
-Any remapping, interning or bound-tree rewrite must preserve this
-correspondence and all original expectations, rebuilding affected typed
-references, indexes and call plans. Revalidate changed inputs/relationships;
-reject missing or stale correspondence before generation rather than
-reconstructing the expectation from the provider. Shared traversal and
-lowering must use general native contracts, not Module names, API names,
-particular pointer extents or motivating sample patterns.
+The same correspondence must survive remapping, interning and bound-tree
+rewriting, with affected typed references/maps/call plans rebuilt. Revalidate
+changed inputs; reject missing/stale relationships before generation.
+Precompiled provider deployment remains a separate route and is not
+regenerated or validated by semantic relowering.
 
 ## Native realization and lifetime
 
@@ -403,7 +341,7 @@ selected.
 | Null required input/list/element/identity or exports | `ArgumentNullException`; malformed/missing CLI option values remain usage errors. |
 | Empty/invalid identity or unselected/altered schema token | `ArgumentException`; option/schema preflight remains exit `2`, `TRM2000`, before artifact reads. A decoded missing root identity remains admission exit `1`, `TRM5001`. |
 | Malformed selected bytes/references, duplicate Module identities, missing provider/key, wrong actual role or incompatible original expectation | `InvalidDataException`; exit `1`, `TRM5001`, without generation, output replacement or execution. |
-| Valid but unsupported selected-F content, provider chain/topology, replacement relation, mapping or runtime policy | `NotSupportedException` before generation; exit `1`, `TRM5001`. Unselected schema tokens follow argument preflight above; invalid encoded values remain invalid-data errors, not unsupported aliases. |
+| Valid but unsupported selected-F content outside the bounded Module closure, replacement relation, native mapping or runtime policy | `NotSupportedException` before generation; exit `1`, `TRM5001`. Unselected schema tokens follow argument preflight above; invalid encoded values remain invalid-data errors, not unsupported aliases. |
 | Wrong executable/library entry state, invalid verified root or invalid export arguments | Existing invalid-data/argument/verifier failure categories; exit `1`, `TRM5001`. No fallback entry, provider export or partial image. |
 | Observed emission cancellation | `OperationCanceledException`, no image result; no new CLI cancellation/deadline protocol. |
 | CLI input/output I/O, access or decoding failure | Existing exit `2`, `TRM2001`, and output-publication cleanup. |
@@ -435,12 +373,12 @@ separate binding, image inspection and supervised execution evidence.
 | Exact selection and entry | Use a legal key different from the MethodDef/local expected name, reorder methods/maps and place empty or supported populated Modules before selected Modules. Preserve root `EntryMethodDef` or no-entry state and exact provider ownership. Never run/export the provider's caller or choose the first/same-spelled entry. Unsupported entry shapes still decline. |
 | Co-located selection and origins | Use independently assembled or schema-aware repacked F fixtures with valid ranges, references and maps, containing distinct root/provider Modules in both orders and supported distractor Modules sharing names/keys. `LoadStandard` retains the original root Import; `CreateStandardReference` preserves the selected root's export ownership and contracts rather than automatically projecting the provider. Native operations accept provider origin index `0` and a provider MethodDef outside the root's range, with an explicitly empty `providers` list. Reordering cannot change the selected Module/key or admit an Export into another Module's range. This requires no general merger API. |
 | Co-located cross-route behavior | Compare the same root/provider contracts supplied separately versus co-located through public APIs and all three CLI commands, with no `--trrm-provider` for the co-located-only case. Exercise supervised JIT and emitted EXE execution, plus an explicitly produced no-entry root whose emitted DLL wrapper is actually invoked. Preserve entry/export ownership, foreign behavior, pointer origins, raw program status and streams; do not automatically invoke/export another Module's entry or caller. Bare loaded roots still fail direct native APIs with `ModuleImport` retained. |
-| Co-located rejection and atomicity | Reject duplicate identities within one artifact or across inputs (including resubmitting the root artifact), a root present only in an additional artifact, missing/wrong-case producer or key, wrong-kind/owner Export, imported proxy, anchor or equal-shaped authored target, and incompatible original contracts. A structurally valid self-selection or any extra ModuleRef/Import in the provider or another Module remains unsupported, including chains/cycles and declaration-only edges. Malformed or unsupported nonselected Modules still fail admission; co-location cannot hide them. Preserve sentinel outputs and observe no execution marker on each preparation failure. |
+| Co-located rejection and atomicity | Reject duplicate identities within one artifact or across inputs (including resubmitting the root artifact), a root present only in an additional artifact, missing/wrong-case producer or key, wrong-kind/owner Export, imported proxy, anchor or equal-shaped authored target, and incompatible original contracts. Reject a self-edge unless its distinct expected stub resolves to a public owned NativeImport; reject every unresolved, incompatible or invalid incoming edge, including uncalled edges. Malformed or unsupported nonselected Modules still fail admission; co-location cannot hide them. Preserve sentinel outputs and observe no execution marker on each preparation failure. |
 | Original contracts | Independently alter library/entry, convention/resolution, caller obligations and each NativeParameter type/access/retention/extent dimension. Reject incompatible provider/key/target/runtime before generation, including unused/discarded/address-only expectations. Preserve high-bit/maximum unsigned extents without truncation. No claim that these checks prove foreign behavior. |
-| Admission and closure | Reject unknown/altered or unsupported composite selectors before decoding even malformed other inputs; then reject malformed rows/maps, duplicate identities, missing providers, proxy/anchor/data targets and provider chains/cycles. Multiple populated Modules alone are not a rejection reason; unsupported retained content or edges in any Module still decline. Valid unsupported raw outputs or richer F forms decline rather than dropping facts. |
+| Admission and closure | Reject unknown/altered or unsupported composite selectors before decoding even malformed other inputs; then reject malformed rows/maps, duplicate identities, missing providers and proxy/anchor/data targets. Exercise owned-direct, imported, mixed, chain, diamond, valid finite-cycle/self-edge and invalid-edge cases from the shared selected-provider contract. Multiple populated Modules alone are not a rejection reason; unsupported retained content or edges in any Module still decline. Valid unsupported raw outputs or richer F forms decline rather than dropping facts. |
 | Replacement and snapshot isolation | Accept a freshly selected same-identity provider whose unrelated private Body changes while the supported contract remains satisfied; independently reject each incompatible replacement. Interleave equal identities with different schemas/bytes/contracts without stale cached acceptance. Caller buffers changed after a completed operation cannot change its image; never reread files during JIT/emission. |
 | Binding authority | Bare `LoadStandard` results still fail direct native APIs with `ModuleImport` retained. Matching raw DLL/export strings, copied descriptors, provider order or same foreign symbol in another Module do not authorize this route. Check the actual target/origin correspondence after any internal remapping; no fixture-specific exemption. |
-| JIT/AOT agreement and lifetime | Use identical selected root/provider snapshots for JIT versus EXE, and an explicitly produced no-entry library variant retaining the same provider/expectations for DLL. Never clear an executable entry implicitly to obtain that variant. Compare deterministic observations or API-specific invariants, not process-dependent IDs for equality. Inspect PE/import/entry/export structure separately. Execute without source or generated provider packages; retain address thunks/foreign loads/unwind data through actual calls, then retire only under existing lifetime rules. |
+| JIT/AOT agreement and lifetime | Use identical selected closure snapshots for JIT versus EXE, and an explicitly produced no-entry library variant retaining the same expectations for DLL. Exercise mixed modules, multiple root Imports and a finite provider graph while realizing only checked provider-owned NativeImports. Never clear an executable entry implicitly to obtain the library variant. Compare deterministic observations or API-specific invariants, not process-dependent IDs for equality. Inspect PE/import/entry/export structure separately. Execute without source or generated provider packages; retain address thunks/foreign loads/unwind data through actual calls, then retire only under existing lifetime rules. |
 | CLI/output isolation | Exercise all three commands, existing entry/export failures, option/schema errors, file failures and collision with root/provider inputs. Preserve sentinel destinations on admission/emission failure and observe no execution marker. Keep `.trrm` inputs unchanged, PE outputs distinct from package bytes, build status/JSON unchanged and raw program status/streams untouched. |
 | Preserved routes | No-provider F retains direct-import behavior. Development/default and historical schema routes keep their interpretations. Native single/set/graph and root-only graph JIT continue to use their selected precompiled provider entries and existing supervision; none is silently routed through semantic regeneration. |
 
@@ -454,11 +392,10 @@ does not close the larger implementation or CLI milestone.
 
 The recommendation is the three-operation checked **semantic-to-native**
 facade above, with an internal origin/expectation-preserving plan and no
-native-package conversion, including the bounded co-located root-to-leaf
-case above. No unresolved identity, provider-selection or origin-handoff
-choice remains for that case; implementation and focused qualification are
-still required. Formal approval of this proposal and its prerequisite
-candidates remains outstanding. No additional encoding, replacement,
-output-format or runtime-supervision choice is assumed. Unchanged precompiled
-Standard providers, chains, multiple Imports and broader closure/remapping
-remain outside this amendment.
+native-package conversion. The selected-provider owner defines the bounded
+root/provider graph; this proposal owns native realization and lifetime for
+that admitted closure. No unresolved native handoff or origin-retention choice
+remains, but implementation and final-closure JIT/AOT qualification are
+required. Formal approval of this proposal and its prerequisites remains
+outstanding. Unchanged precompiled Standard providers retain their existing
+deployment contract and are not regenerated by this semantic route.

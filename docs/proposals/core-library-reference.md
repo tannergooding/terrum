@@ -3126,6 +3126,10 @@ compiler-owned; it does not use the candidate public GetAwaiter pattern below.
 The remaining methods, public task/awaiter nominal shapes, TaskStatus/
 TaskOutcome, scope, cancellation and executor APIs are proposals, not physical
 layouts or prerequisites inferred from that logical approval.
+The cancellation request/token surface and its proposed terminal-failure
+mapping have their own unapproved owner in
+[cooperative cancellation and terminal settlement](cancellation-and-terminal-settlement.md);
+the repeated declarations below are not an independent cancellation contract.
 The accepted existential `Task<_>` view exposes the common `IsCompleted`
 observation and permits a contractually defined completion-only consuming
 operation when the payload type is hidden; that operation settles and cleans
@@ -3167,15 +3171,6 @@ public struct TaskAwaiter<T>
     public ref<TaskOutcome<T>> GetResult();
     public void OnCompleted(func<void> continuation);
 }
-public struct CancellationToken
-{
-    public bool IsCancellationRequested { get; }
-}
-public mut unique class CancellationSource
-{
-    public CancellationToken Token { get; }
-    public mut void Cancel();
-}
 public mut unique struct TaskScope
 {
     public TaskScope();
@@ -3187,11 +3182,11 @@ public mut unique struct TaskScope
 
 | **OPEN** task/cancellation family | Proposed signatures and relationships |
 |---|---|
-| `TaskOutcome<T>` nominal sum | `Completed(T value)`, `Faulted(Error error)`, `Canceled` are an exploratory observation API; Error alone cannot replace the selected task failure event/causes |
+| `TaskOutcome<T>` nominal sum | `Completed(T value)`, `Faulted(Error error)`, `Canceled` remain an exploratory observation alternative; the cancellation proposal instead recommends ordinary CancellationException failure events and selects no outcome carrier |
 | `Task<T>` | Affine owner and IsCompleted contract selected; other representative methods and nominal representation remain proposed |
 | conditional Copy-only observation | `Task<T>.GetOutcomeCopy() -> TaskOutcome<T>` only when **all** variant payloads are `[Copy]`; relationship syntax OPEN |
 | `TaskAwaiter<T>` | Complete representative signature above; continuation registration and error propagation OPEN |
-| `CancellationToken` / `CancellationSource` | Complete representative signatures above; token retains request-state dependency and source owns unique request authority |
+| `CancellationToken` / `CancellationSource` | See [cooperative cancellation and terminal settlement](cancellation-and-terminal-settlement.md); its distinct borrowed-token candidate supersedes the repeated signatures and cooperative-request text in this sketch, remains unapproved, and selects no TaskScope policy or physical layout |
 | `TaskScope` | Representative signatures above; explicit join settles every adopted completion/cleanup, with exact error/shutdown policy still OPEN |
 | `IExecutor` / **new proposal** | `Schedule(func<void>)`, `Yield() -> Task<void>`, `ResumeOn(IExecutor) -> awaitable`; scheduler and continuation affinity remain separately checked contracts |
 
@@ -3243,9 +3238,11 @@ Run signature is selected here. Candidate `ResumeOn(executor)`
 selects the awaiting continuation without rescheduling the producer; `Yield`
 may request a scheduling boundary.
 
-TaskScope, adoption, nonconsuming outcome accessors and cancellation APIs
-remain separate library proposals. Their exact methods and policies must
-satisfy the selected owner/observation/dependency contract. Ordinary task
+TaskScope, adoption and nonconsuming outcome accessors remain separate
+library proposals. CancellationToken/CancellationSource has the separate
+unapproved proposal linked above; that profile adds no TaskScope behavior.
+These APIs' exact methods and policies must satisfy the selected
+owner/observation/dependency contract. Ordinary task
 destruction never implicitly blocks, suspends, joins, cancels or supervises;
 normal and exceptional exits require explicit settlement or valid transfer.
 An adopted multi-task join must settle all accepted siblings before completing
@@ -3257,10 +3254,6 @@ payload destinations. Captures remain subject to the accepted transfer/share
 and lifetime rules; task handles do not gain implicit
 thread-sharing. The accepted rule that dropping a handle does not cancel work
 is in [language](../specs/language.md#storage-concurrency-entry-and-boundaries).
-`CancellationSource` uniquely controls a shared request; its token retains
-the source dependency and may not be default-fabricated. This proposal makes
-cancellation requests idempotent, monotonic and cooperative; cross-thread
-request/observation guarantees remain a memory/runtime contract to specify.
 
 GetAwaiter and result-observation signatures are **PROPOSED**, not the initial
 consuming-await lowering. Task-state synchronization, error aggregation in JoinAsync,

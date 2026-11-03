@@ -124,13 +124,38 @@ storage or non-field-backed RVA data require their own reviewed identity
 carrier. Do not manufacture a hidden StaticField or guess a region codec.
 Until the static/publication representation is complete, kind 2 remains
 gated, not satisfied by the presence of a StaticField-shaped row.
-Separate unapproved candidates now address the direct DefId assignments in
-[ImmutableData definition kinds](immutable-data-definition-kinds.md),
-the [StaticField/publication physical schema](immutable-static-field-persistence.md),
-and [AssociatedConstDef identity](associated-constant-definition-identity.md).
-They remain proposals: this document still selects no numeric kind or
-StaticField section, and implementation must preserve its direct-only
-ImmutableData reference.
+
+### Candidate DefId targets and exact assignments
+
+The direct-reference proposal includes these **unapproved candidate**
+assignments as part of one integrated direction:
+
+| Candidate DefId kind | Exact target | ImmutableData kind | Import/Export |
+|---:|---|---|---|
+| `0x22` | `InterfaceConstDef`, section `0x0031`, 16-byte row | 1 only | Add to both target sets, with complete expected-definition/access and exact owner binding. |
+| `0x23` | `WitnessAssociatedConst`, section `0x0033`, 16-byte selected binding row | 1 only | Add to neither; resolve through its exact selected witness origin/binding graph. |
+| `0x24` | Distinct logical `StaticField` table; physical section remains unassigned | 2 only | Add to both only with its complete static expectation/provider representation. |
+
+Encode `(kind << 24) | row` as a four-byte little-endian word with a
+one-based row in `1..0x00FF_FFFF`, checked against that exact target table.
+Kind 1 permits only 22/23 and kind 2 only 24. Import token `0x1C`, raw
+typed-row tokens, section-derived kinds and reserved `0xFF` are not alternate
+forms. Preserve registered kinds `0x13/0x14/0x16/0x19/0x1E/0x21` and the
+separate unapproved `0x20=AssociatedTypeDef` candidate. No associated
+constant declaration kind is assigned here; an unbound
+`AssociatedConstDef` is not a selected binding.
+
+Section IDs and DefId kinds are distinct namespaces: the coincident section
+`0x0024=InterfaceMethod`, for example, does not make `0x24` an interface
+method identity. The separate
+[definition-kind proposal](immutable-data-definition-kinds.md) preserves the
+numeric-allocation decision and its independent approval status. These
+candidates allocate no StaticField section, access flag, storage/value codec
+or publication rule; those remain in
+[static persistence](immutable-static-field-persistence.md). The separate
+[AssociatedConstDef identity proposal](associated-constant-definition-identity.md)
+owns its requirement identity/reference codec. Neither is silently approved
+by adopting the ImmutableData target set.
 
 ## Exact owner substitution
 
@@ -225,6 +250,47 @@ Equal names, rows or values do not redirect a failed binding to another key,
 owner or provider. Co-locating modules does not discharge access or import
 obligations. Share a row only when its resolved meaning agrees in every
 using context; otherwise clone it and remap its uses.
+
+### Feature admission and per-Module closure
+
+This integrated direction also recommends the separate unapproved
+**`19/1=ImmutableDataIdentities`** Feature with governing edition 1 and no
+unconditional prerequisites. It covers retained 0041 identities and their
+declaration/owner resolution, comparison, binding and remapping. Feature 19
+does not supply a declaration/value/witness/publication codec or a new
+attachment; those remain required support dependencies.
+
+Detect every retained identity per using Module/formal context, including
+uncalled/bodyless declarations, unselected graph branches, allowed-root rows
+not directly loaded by a node, views and dependencies retained after
+constant folding. Require 19/1 for each using Module that retains an
+ImmutableData identity. A provider's own Feature list cannot satisfy the
+using Module's requirement, and a provider-only use does not add 19 to an
+unrelated consumer. A physically present but unreferenced row has no invented
+using context. Do not union requirements artifact-wide.
+
+| Retained use | Candidate effective closure |
+|---|---|
+| ImmutableData identity without a graph | `{19/1}` |
+| Phase-1/2 predicate graph or Pure allowed bound with root kind 6 | `{10/1,17/1,19/1}`, plus the identity's actual value/witness/publication dependencies |
+| The same graph/bound retaining a fixed-scalar constant source/value | `{10/1,11/1,17/1,19/1}`; 11 is required for the retained value, not derived from 19 |
+| ConstantExecution dependency kind 6 or LogicalInputView backing kind 2 | `{10/1,11/1,12/1,17/1,19/1}`, plus actual program/view/target dependencies; this does not complete Feature 12 |
+| Any preceding use with actual Feature-13 layout-query/TypeIdentity/FieldPath or FieldDef Import/Export content | Add `13/1`; ordinary Layout rows, owner TypeSpecs, DefId 22/23/24 or a static region alone do not add it |
+| Resolved constant with a candidate nominal-enum value | Add `18/1` and its `11/1` prerequisite; enum members do not become ImmutableData targets |
+| Phase-3 selector or function-pointer anchor attempts root kind 6 | Invalid under the bounded selector contract, even if Features 19 and 17 are present |
+
+Feature 19 has no edge to 17, and 17 gains no edge to 19. Existing
+scalar-only Feature 11/1 does not own ImmutableData; the accepted registry
+still has its separate pending registration/closure. Static publication
+`0055..005C`, intrinsic registration `005D/26`, witness-runtime support and
+general predicate/constant execution remain separate contracts. A Feature
+pair never authorizes a missing source, value, witness, backing or publication
+representation.
+
+The [Feature-admission proposal](immutable-data-feature-admission.md) remains
+the concise record of that independently unapproved 19/1 allocation and its
+support gate; its full target, closure and per-Module rules are integrated
+here.
 
 ## Provider, replacement and lifetime obligations
 

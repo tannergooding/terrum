@@ -1,12 +1,13 @@
 # Nested storage-address paths in private persistence
 
 **Status: unapproved; provisionally actionable only under the user's explicit
-missing-contract workflow.** This document selects a candidate representation,
-not formal approval or format stability. The byte representation is now
-implemented in the worktree; the separate
-[address-only backing companion](native-storage-address-address-only-backing.md)
-amends its retained nested-runtime exclusion for one narrowly scoped use.
-Neither proposal changes or completes the ongoing source-to-Standard A2 work.
+missing-contract workflow.** This document owns the complete revised private
+revision-101 candidate: path bytes plus the separately proposed
+construction-only nested-backing use. The path representation is implemented
+in the worktree; the nested-backing admission remains unapproved and
+unqualified. The [address-only backing decision record](native-storage-address-address-only-backing.md)
+preserves that separate approval boundary. Neither candidate changes or
+completes source-to-Standard A2.
 
 The authorization is: “At a genuine missing contract, prepare the smallest
 concrete decision needed as a new proposal doc using gpt-6.1-sol at max
@@ -19,7 +20,7 @@ that workflow; adjacent missing contracts remain separate.
 ## Decision and scope
 
 Recommend **private semantic-module i32 revision 101**, exact draft identity
-**`terrum/private-semantic-101-storage-address-paths-1`**:
+**`terrum/private-semantic-101-storage-address-only-backing-1`**:
 
 1. Inherit the complete [revision-100 fixed-array schema](native-fixed-array-private-persistence.md),
    including its [artifact-local metadata amendment](native-fixed-array-private-metadata-boundary.md),
@@ -41,29 +42,35 @@ is introduced.
 
 For p=0, retain every independently admitted enclosing-use role. The added
 list supplies no new NativeOutput or separately formed pointer-value role.
+The exact identity above supersedes the unpublished
+`terrum/private-semantic-101-storage-address-paths-1` candidate even though
+the path byte shape is unchanged. It is not an alias or a second decoder.
 
 Scope is a direct local root followed only by fixed-array element selections,
 ending at an independently admitted positive-extent native referent. This is
 a representation prerequisite for direct NativeParameter adaptation. It
 adds no source spelling, field-path variant, checked reference, nonlocal base,
-pointer arithmetic, pointer-to-array runtime carrier, general array value or
-initialization operation, NativeOutput protocol, foreign ABI or runtime policy.
+pointer arithmetic, pointer-to-array runtime carrier, general nested array
+value operation, NativeOutput protocol, foreign ABI or runtime policy. It
+reuses tag 43 only for the exact nested construction tree that backs this
+address-only role; no new operation tag or general nested value is added.
 The [source array direction](standard-native-fixed-array-source-contract.md#places-addresses-and-failures),
 [A2 identity/Copy composition](standard-trrm-rootless-copy-type-evidence.md),
 and [S address semantics](standard-native-storage-address-formation.md#source-region-and-failure-semantics)
 remain distinct unapproved owners.
 
-**Encoding capacity does not grant executable backing.** Revision 100
-deliberately excludes nested runtime locals and array-valued operations.
-This proposal specifies how a path-bearing tag 35 is retained and checked;
-it does not lift those enclosing-use exclusions or widen tags 43–46.
-A complete module needing an excluded nested local, initialization/value
-operation or index codec must still reject before executable admission.
-Completing that route requires its own explicit complete composition; merely
-implementing this codec, or possessing nested metadata rows, is insufficient.
-This boundary is material to the positive end-to-end gates below.
+**Encoding capacity alone does not grant executable backing.** The revised
+101 candidate additionally admits recursively initialized nested direct-local
+storage only as backing for a non-retaining direct `NativeParameter` address
+argument. Require the exact construction-only admission below; a valid
+ancestor list or metadata row alone is insufficient. This does not admit
+ordinary nested array values, reads, writes, copies, field/nonlocal places,
+vacant initialization, pointer-to-array runtime values, indirect calls,
+NativeOutput or any general array-value ABI. Tags 44–46 retain their flat
+runtime rules. The nested-backing decision is substantive and remains
+separately unapproved; it is not inferred from unchanged revision-101 bytes.
 
-## Owners, live evidence and allocation review
+## Owners, historical source snapshot and allocation review
 
 Accepted owners remain [private persistence](../specs/representation/persistence.md),
 [exact format selection](../specs/representation/format-versioning.md),
@@ -73,13 +80,20 @@ Accepted owners remain [private persistence](../specs/representation/persistence
 and [Windows x64 layout/access](../specs/targets/windows-x64-data-layout.md).
 None is amended here.
 
-These are observations of the inspected worktree, not test results:
+The source observations below are retained from an earlier inspection
+snapshot, not a live support inventory or test result. The current private
+writer/reader selection is revision 103 and is recorded in the
+[module inventory](../implementation/modules.md),
+[native inventory](../implementation/native.md) and
+[conformance handoff](../implementation/conformance-gaps.md). Revision 103 is
+not the unapproved revised-101 schema identity and does not establish that
+candidate's exact agreement or nested-backing support.
 
 | Owner | Observed boundary |
 |---|---|
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), `BoundNativeStorageAddress` | Retains a root `Variable`, final `Index`, carrier/element/address types, three u64 quantities, readonly fact and span. The worktree also has a full-path `Projections` collection with final `Index` alias. That in-memory extension supplies no private byte schema; preserve the existing fields and collection meaning. |
 | Same file, `BoundNativeFixedArrayProjection` and array pointer/path nodes | Represents one immediate array layout plus its original index. Reuse that entry shape; other nodes' full-path lists need not change meaning. |
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `PutExpression`, `GetExpression` | Final structured writer selection and header admission are **exactly 100**. Tag 35 already writes and reads u64 quantities, followed by Boolean and one expression. The earlier revision-99 proposal's revision-92 width mismatch is not the current codec. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `PutExpression`, `GetExpression` | In the inspected snapshot, writer/header selection was exactly 100. Tag 35 used three u64 quantities followed by Boolean and one expression; the earlier revision-99 proposal's revision-92 width mismatch is historical and does not describe the current revision-103 codec. |
 | Same file, `ReadNativeFixedArrayTypes`, `GetPrivateFixedArrayLayout`, `GetFunction` | Mandatory bounded 44-byte array rows follow pointer types. Rows describe nested recipes; runtime-local admission separately rejects excluded nested rows. |
 | Same file, `Calls`, `RequiredStructures`, `RemapNativeTypeIdentities`, `RemapExpression`, `ResolveExpression`; [`BoundTreeTraversal.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundTreeTraversal.cs) | Traversal/remapping generalization is in progress. Every route must retain the additional children/layout identities and final-child alias; changing only the writer loses facts on other routes. |
 | [`ModuleCompiler.Graph.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.Graph.cs), `ReadGraphLibrary`; [`ModuleCompiler.ModuleSets.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.ModuleSets.cs) | Graph libraries share header/table/body codecs but have separate reconstruction/admission. Set/reference merging and graph edges also require the same path/type mappings. |
@@ -91,7 +105,7 @@ and proposal compositions, including working/untracked documents:
 
 | Namespace / existing selection | Consequence for this recommendation |
 |---|---|
-| Legacy private constants through 92, including span/fixed-layout selectors in `ModuleCompiler.TokenSpans.cs` and `ModuleCompiler.FixedLayout.cs` | Historical constants are not additional currently admitted header schemas; header admission is exactly 100. |
+| Legacy private constants through 92, including span/fixed-layout selectors in `ModuleCompiler.TokenSpans.cs` and `ModuleCompiler.FixedLayout.cs` | Historical constants are not additional admitted schemas. The proposal's inspected revision-100 header selection is a source snapshot, not the current revision-103 writer selection. |
 | Private 93 [dependencies](reference-provenance-carriers.md#private-exchange-candidate-revision-93), 94 [wide scalar codec](scalar-wide-value-carriers.md#exact-private-schema-and-composition), 95 [copy-origin summaries](reference-field-value-provenance.md#necessary-private-transport-candidate-95), 96 [foreign identities](native-output-foreign-interface-private-persistence.md#exact-revision-composition), 97 [native composition](native-calling-convention-private-persistence.md#exact-composition-and-selection) and [checked references](checked-reference-private-persistence.md#exact-schema-composition), 98 [interfaces/witnesses](source-interface-witness-private-persistence.md#exact-revision-composition) | Distinct complete candidates; 101 does **not** inherit them numerically or cherry-pick their type/value/contract codecs. |
 | Private 99 [u64 storage-address codec](native-storage-address-private-persistence.md), then 100 [array composition](native-fixed-array-private-persistence.md#allocation-and-exact-selection) | These are the actual base chain. Select **100 plus this delta**, not standalone 99 plus guessed array fields. |
 | **Private i32 101** | No competing private assignment was found. Proposed here, not allocated by the Standard registry. Unrelated decimal exponents, source/scanner operation numbers and descriptor byte sizes are other namespaces. |
@@ -301,7 +315,13 @@ Before affected consumption, the reader must establish:
    supported index/element/runtime representations, declaration/native
    contracts and original provider expectations. Reject absent required
    origins or unsupported enclosing nested storage rather than exposing a
-   partially admitted executable program.
+   partially admitted executable program. Check every nested local and every
+   retained use, including uncalled functions and unreachable branches:
+   nested backing has only the construction/address roles above. Tags 44–46,
+   general array-valued expressions, and runtime uses of descriptive
+   ptr-to-array/fnptr recipes remain rejected even when their table rows are
+   valid. An unused fully initialized nested root is permitted; its presence
+   does not authorize any excluded operation.
 
 Static invalid constant indices/requests diagnose or fail admitted IR
 validation before use; dynamic checks execute at their original positions.
@@ -326,6 +346,82 @@ failures through the existing module-format diagnostic boundary; failed
 read/write/admission must not publish a partial artifact/program/image.
 
 ## Capture, suffix, access and execution semantics
+
+### Construction-only nested backing
+
+The revised 101 candidate admits nested storage only as backing for its direct
+address path, not as a general nested-value feature. A root is an ordinary
+explicitly initialized direct local, outside parameter/receiver slots, whose
+structural type has at least two inline fixed-array dimensions. Every
+dimension has positive element count, stride and extent under the inherited
+complete, acyclic geometry rules.
+
+The final non-array element E must be positive-size, rootless Copy, directly
+interoperable on the selected Windows x64 target, and independently
+representable by the inherited revision-99 runtime/initializer codec. It must
+meet the existing flat-row eligibility rules, excluding unit. Array-containing
+nominal leaves, metadata-only pointer/signature recipes, unsupported wide or
+support-bearing values, managed values and owning cleanup are not admitted by
+this extension. Existing eligible scalar, inline aggregate and pointer-cell
+leaves retain their exact contracts; size alone never establishes eligibility.
+
+Initialize the complete nested local with a tag-43 construction tree of its
+exact type. At each array-valued element type, every child is another exact
+tag-43 constructor; each leaf child is an independently admitted expression
+of exact E. Require exactly N ordered children at every dimension. Do not
+substitute array-valued reads, conditionals, call results, casts, spreads or
+synthetic temporaries for constructor subtrees.
+
+Evaluate/acquire captures once, left-to-right, recursively as reached.
+Complete construction and install elements in order before publishing the
+root as live. Partial construction is never addressable or observable. Any
+implementation using the root's unobservable construction storage instead
+of separate captures must preserve identical effects, dependencies and
+failure behavior; this grants no implicit allocation, defaulting or early
+publication.
+
+A failing capture publishes no root or readable prefix. Preserve earlier
+effects and settle actual private acquisitions under ordinary unwinding; do
+not clean up a nonexistent complete root. Payload and padding are not
+implicitly cleared. Permitted subsequent uses are the address adaptations
+below and ordinary lexical retirement of cleanup-free storage. Whole-root
+assignment/copy/move, row/scalar reads, element/row writes or updates,
+checked references, separately stored/returned pointers and ptr-to-array
+formation remain excluded. Vacant `init`/`init mut` backing is not admitted;
+Write and `&init` do not initialize it. Zero-count/zero-stride storage, unit
+and non-unit zero-payload nested backing are excluded while independent
+flat/unit operations remain unchanged.
+
+This is a private-profile decision, not a normative grammar amendment. It
+adds no source qualifier; accepted structural-array and native-annotation
+owners remain separate unapproved contracts. Direct-source nested reads or
+writes may bind under their own direction while the selected private producer
+declines them.
+
+### NativeParameter role and resource boundary
+
+Every p>0 path must occur as the direct address-adaptation argument of an
+already admitted bodyless direct `NativeImport`'s saved `NativeParameter`
+formal. Require exact pointee, Read/Write/ReadWrite access, **NoEscape**
+retention, and an unsigned minimum extent in `0..uint.MaxValue`. Missing
+annotations and MayEscape cannot be treated as NoEscape. This admits no
+indirect/vtable protocol, escape adapter, pointer-value flow or NativeOutput;
+p=0 retains its independently admitted existing roles.
+
+Read requires the whole constructed root live. Write/ReadWrite requires the
+same initialization and actual mutable authority along the complete path;
+Write is not initialization. Preserve `IsReadonly == (Access == Read)`.
+A pointer's write qualification cannot upgrade a readonly root. Opaque-void
+adaptation retains its existing Read/NoEscape/minimum-zero restriction and
+derives geometry from actual E, not void or a byte count.
+
+The address is non-owning, non-rooting and call-confined. NoEscape covers the
+invocation and applicable exceptional exits, including copied interior
+addresses; it is a provider promise, not proof of foreign behavior, an
+exclusive loan, no-reentry guarantee or lifetime extension. Add no marshalling,
+pin, retain, ownership transfer, cleanup responsibility or stack-to-heap
+promotion. Raw calls and the address operation require explicit lexical unsafe
+authorization; an unsafe declaration alone does not authorize its body.
 
 At the address-adaptation argument's actual **Stage** position:
 
@@ -383,6 +479,12 @@ copy. Retain all existing code/binding/lifetime obligations. Emitting a PE,
 decoding metadata or executing a scalar neighbor is not evidence that the
 nested address executed.
 
+Lower the recursive tag-43 construction into the actual aligned root and
+derived child offsets. Do not materialize array-valued loads, spills or ABI
+copies. Include every leaf capture and ancestor/final index call in frame,
+spill and call-staging planning; it is not sufficient to lower only the final
+address operation.
+
 For Standard F+S+A2 production, the corresponding lowering is the existing
 ordered intrinsic PlaceSelection chain followed by EC with Q at this Stage
 position. Each selection retains its own row/parent; EC consumes the final
@@ -402,12 +504,14 @@ Apply the following on ordinary producer/reference/consumer links, set
 merges, graph-library/root/edge routes, embedded semantic Contracts,
 provider/consumer snapshots and every source-free re-emission:
 
-* Shared nested-expression traversal/rewriting visits each ancestor's
-  index in order, followed by final `Index`, **once each**, using the full
-  bound projection list without a second visit through its final alias.
-  Type visitors also visit each hidden layout's carrier/E identities. Include calls,
-  function addresses, data/code-pointer provenance and all retained effects
-  inside any child in dependency closure, even when the final index is zero.
+* Shared nested-expression traversal/rewriting visits recursive tag-43
+  constructor children and every ancestor index in order, followed by final
+  `Index`, **once each**, using the full bound projection list without a
+  second visit through its final alias. After rewriting, rebuild the final
+  `Index` alias from the last rewritten projection. Type visitors also visit
+  every hidden layout's carrier/E identities. Include calls, function
+  addresses, data/code-pointer provenance and all retained effects inside any
+  child in dependency closure, even when the final index is zero.
 * Remap root slots only in their actual containing function, using an
   explicit local map if slots move. Remap result/address/carrier/element
   types, each parent type, every index-child type/symbolic function,
@@ -442,19 +546,33 @@ provider/consumer snapshots and every source-free re-emission:
 
 ## Selection, regeneration and implementation gates
 
-All fresh structured writers select **exact 101**, including scalar-only
-artifacts, empty array tables and addresses with p=0. Audit every
+All fresh structured writers select the exact revised agreement
+**`terrum/private-semantic-101-storage-address-only-backing-1`**, including
+scalar-only artifacts, empty array tables and addresses with p=0. Its
+on-wire header remains i32 101 and its tag-35 byte shape is unchanged. The
+former `...storage-address-paths-1` draft identity is not an alias or a
+second decoder. Draft identity/agreement is selected out of band; a matching
+header or payload alone does not establish that the revised admission rules
+were used. Audit every
 exact-membership gate, not only `ReadModuleHeader`: tag 35, array tables/
 layouts, structure fields, invocation buffers, local/body admission,
 retained profiles, producer validation, graph reads and snapshots must
-select the whole stated schema. Do not make 101 an alias for 100.
+select the whole stated schema. Do not make 101 an alias for 100 or the
+retired path-only draft.
+
+No record or operation bytes change in this amendment. Tag 43 keeps its
+existing envelope and ordered child framing; revised 101 newly admits a
+recursive tag-43 construction tree only when it initializes the nested
+direct-local backing required by the p>0 address role. This is a role-sensitive
+semantic admission, not a second tag-43 decoder or a general nested-value
+operation.
 
 Readers for this selection reject honestly declared 100, 99, candidates
 93–98, earlier/unknown revisions and other formats **before records**.
 Old exact-100 readers reject 101. No numeric roll-forward, p=0 fallback,
 filename/profile/Feature sniffing, equal-magic retry or alternate decoder
 after a failed parse. Keep outer TNPK/TNSP/TNGP version 3 and existing
-native-profile labels; the new complete outer-3/inner-101 agreement must
+native-profile labels; the revised exact outer-3/inner-101 agreement must
 hold for each embedded semantic payload/snapshot. Outer integrity checks
 never replace inner selection or binding.
 
@@ -475,26 +593,28 @@ independently retained IR, not an inferred path.
 
 Until migration, any extended bound carrier reaching an exact-100 writer
 must **reject nonempty ancestors**, not silently serialize only `Index`.
-The 101 codec and remappers can be implemented as this bounded prerequisite.
-They must not turn 100's excluded nested-local/value forms into accepted
-runtime input merely to obtain a round-trip or passing test. A required
-richer backing/initialization codec needs its own expressly selected complete
+Revised 101 admits p>0 only for the construction-only nested backing profile
+above; it does not turn nested array value operations, vacant initialization
+or other revision-100 exclusions into accepted runtime input. A richer
+backing/initialization codec needs its own expressly selected complete
 composition; source-to-Standard A2 work remains independent and unfinished.
 
 ## Required acceptance cases
 
 These are future gates, **not tests run or support claims**. Use public
 compiler APIs, independent byte fixtures and unrelated synthetic providers.
-Codec/structural cases must distinguish successful representation checking
-from declined enclosing runtime use. Positive nested full-module/execution
-cases are conditional on a complete separately admitted backing route; until
-then, retain explicit unsupported-use negatives rather than assert success.
+Codec/structural cases must distinguish representation checking from actual
+execution. The revised 101 candidate selects construction-only nested backing;
+its positives are required but still unimplemented/unqualified evidence gates.
+Keep all other nested value/operation exclusions explicit.
 
 | Gate | Required cases / outcome |
 |---|---|
 | Exact selection and inherited behavior | All fresh producer/consumer/graph-library outputs select 101, even without addresses/arrays. Ordinary/set/graph/snapshot readers reject 100/99/93–98/unknown headers before body decoding. Preserve scalar, flat array, readonly/writable, u64 extents, FieldMove 42 and tags 43–46 semantics; keep excluded operations rejected. |
 | Independent framing | Assert prefix operands at 25/33/41, Boolean at 49, count at 50 and 75/100/125-byte vectors. Use independent 2D bytes above and adjacent expressions/statements/functions to detect drift; round-trip agreement alone is insufficient. Mixed signed/unsigned constant types retain their own envelopes/bits. |
+| Public source-to-private fixture | Compile a 2D `[[int32; 3]; 2]` direct local initialized by exact nested tag-43 construction, address `[1][1]` for a direct Read/NoEscape `NativeParameter` with minimum 2, persist/read/link/re-emit using public APIs without source, then execute a controlled provider returning 83. Inspect outer N/S/B, leaf N/S, Q=2/ByteExtent=8, indices `(1,1)` and displacement 16 separately from runtime evidence. |
 | Nested identity and suffix | Two and three dimensions, unequal extents/strides, nonzero outer and zero/nonzero final index. Preserve every row/index/N/S/B and exact final E. Q below/equal/above final suffix; reject the outer-0/inner-2/Q-2 crossing despite sufficient flattened bytes. Never multiply dimensions or borrow adjacent/padding storage. |
+| Construction-only admission | Positive initialized direct-local roots require exact recursive tag-43 constructor children and N elements at every level; nested reads/calls/conditionals/casts/spreads, vacant backing, zero dimensions, unit/nominal-zero nested leaves, owning/managed leaves and array-containing nominal leaves reject. A failing middle capture prevents later captures/addressing and publishes no root. |
 | Capture/order/failure | Side-effecting indices, a throwing/failing outer or middle selection, rebinding, later failing argument and final suffix failure. Each reached index executes once in order; earlier failure suppresses all later indices/arguments/calls. Original storage mutates/readbacks correctly, with untouched neighbors and no result publication on failure. |
 | Integer and geometry boundaries | Negative signed indices; first/last/N; u64 high-bit/max values; counts above i32/u32; checked stride/product/offset/summed-offset/extent overflow; unit/nominal-zero/count-zero metadata remains valid where inherited but cannot back an address. Preserve original bits or explicitly reject unsupported codec/target/backend use, without huge backing allocations or narrowing. Int128/uint128 remain negative under this 100-based composition. |
 | Access/state/alignment | Fixed versus mutable root, readonly attenuation versus write upgrade, unsafe block/expression versus declaration-only authorization, vacant/partial/retired backing, packed underalignment, transitive explicit alignment, pointer-cell depth versus pointee, output overlap, NoEscape/later-argument invalidation. Retain existing obligations; no anchor, temporary copy or external-opacity fallback. |
@@ -502,7 +622,7 @@ then, retain explicit unsupported-use negatives rather than assert success.
 | Resource limits | p=0/1/127/128, effective depth 128/129 with enclosing expressions, remaining-node/type-work exhaustion, maximum slot and 256/out-of-range slot, 4 MiB boundaries and insufficient bytes before allocating count-driven builders. A wire-maximum count is not a promise that all other limits permit that fixture. |
 | Structural remap and dependencies | Independently permute struct/array/pointer/fnptr tables and move local/function indexes; include calls/function addresses in ancestor-only children and unrelated equal-layout types. Reconstruct/re-emit non-byte-identically, preserving child order/spans, all original expectations and conditional dependency closure. Same spelling/different admitted origins must not merge. |
 | Cross-route and replacement | Full ordinary artifacts, producer/consumer dependencies, sets, graph libraries/root/edges, embedded Contracts/snapshots and source-free re-emission preserve retained path closure. Bodyless projection prunes only unrooted implementation data. Compatible unrelated provider changes succeed; changed relied-on E/N/layout/R/access/native contract or wrong/missing/ambiguous provider/key rejects. |
-| Standard isolation and native outcomes | No private/Standard alias: unchanged F/F+S/A2 schemas and EC/0E remain separately selected. Once backing and A2 body gates are actually implemented, qualify source-to-A2, source-free reconstruction, semantic rewriting, JIT and AOT/native package/set/graph execution with nonzero nested selections, native read/write/readback and exact failure order. Decode/emission/metadata-only/scalar-neighbor results are not those execution results. |
+| Standard isolation and native outcomes | No private/Standard alias: unchanged F/F+S/A2 schemas and EC/0E remain separately selected. After revised-101 backing and independent A2 body gates are implemented, qualify source-to-A2, source-free reconstruction, semantic rewriting, JIT and AOT/native package/set/graph execution with nonzero nested selections, native read/write/readback and exact failure order. Decode/emission/metadata-only/scalar-neighbor results are not those execution results. |
 
 Active starting patterns are
 [`NativeOutputModulePersistenceTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/NativeOutputModulePersistenceTests.cs),
@@ -527,17 +647,30 @@ Within the proposed **101 selection**, this document supersedes only:
   and matching 71-byte regression vector, exact-100 selection and single-index
   traversal/remapping assumption for this node. Keep the mandatory array
   table, layout identity, metadata boundary and other operation exclusions.
+* Revision 100's blanket rejection of array-valued tag-43 children only for a
+  recursively initialized direct-local root that is used as backing by an
+  admitted p>0 direct NativeParameter address. This does not revise exact 100,
+  admit nested array reads/writes/copies or alter tags 44–46.
 
-This does not retroactively redefine 99/100, edit either proposal, allocate
-a Standard ID, or amend accepted owners. The recommendation settles the
-candidate number/composition, sole record shape, ancestor/final-field roles,
-integer domains, reconstruction/checking, mapping and exact-only regeneration.
-No alternative byte interpretation is left to implementation.
+It also incorporates the separate
+[address-only backing decision](native-storage-address-address-only-backing.md):
+the same tag-43 bytes may construct nested direct-local backing solely for
+the direct NoEscape NativeParameter address role. This is a separate
+unapproved admission choice, not a byte amendment or a reason to enable
+ordinary nested array values. The exact revised identity is
+`terrum/private-semantic-101-storage-address-only-backing-1`; the prior
+`...storage-address-paths-1` identity is superseded, not an alias.
 
-**Formal approval remains outstanding** for those choices. **Still separate**
-are the complete private nested-local storage/initialization/value admission
-composition if required, additional private wide/provenance/origin codecs,
-field/nonlocal paths and broader Standard A2 producer/source-free/provider/
-JIT/AOT adoption. They are not approved or implemented by this document.
-Implementing this persistence prerequisite is not acceptance of the A2
-milestone; no source, test, inventory, plan or todo change accompanies it.
+This does not retroactively redefine 99/100, allocate a Standard ID, or amend
+accepted owners. The complete revised candidate fixes the number/composition,
+exact identity, sole record shape, ancestor/final-field roles, construction-
+only nested backing, integer domains, reconstruction/checking, mapping and
+exact-only regeneration. No alternative byte interpretation is left to
+implementation.
+
+**Formal approval remains outstanding** for the revised 101 agreement and
+the nested-backing admission. **Still separate** are additional private
+wide/provenance/origin codecs, field/nonlocal paths and broader Standard A2
+producer/source-free/provider/JIT/AOT adoption. They are not approved or
+implemented by this document. Implementing this persistence prerequisite is
+not acceptance of the A2 milestone.

@@ -36,11 +36,13 @@ Its standard `ForeignNativeInterface` section candidate and Feature 5
 integration remain in that separate proposal; none of those standard rows
 is encoded here.
 
-[Scalar and pointer native-output cells](native-pointer-output-ownership.md)
-remains the semantic owner of eligible T, result conditions, cell
-vacancy/reservation/publication, source dependencies, failures, resource
-adoption and ABI restrictions. Reuse its declaration-owned output collection
-and expression tag 41 unchanged. No second output vector, resource flag,
+[NativeOutput cells](aggregate-native-outputs.md) remain the semantic owner
+of eligible T, result conditions, cell vacancy/reservation/publication,
+source dependencies, failures and ABI restrictions. The separate
+[resource-ownership proposal](native-pointer-output-ownership.md) owns
+authored adoption/release and fixed/validated IID obligations. Reuse the
+private persistence owner's declaration-owned output collection and
+expression tag 41 unchanged. No second output vector, resource flag,
 interface-specific selector or provider thunk is selected.
 
 The accepted [persistence taxonomy](../specs/representation/persistence.md),
@@ -105,7 +107,7 @@ The composition is by these exact deltas, **not numeric ordering**:
 
 | Candidate | Complete meaning retained by 96 |
 |---|---|
-| 92 | [NoThrow retirement](no-throw-private-persistence.md) composed with the complete [output-persistence delta](aggregate-native-output-private-persistence.md) from 90, including old-vector/suffix removal and tag 41. Apply the [scalar/pointer cell eligibility amendment](native-pointer-output-ownership.md#exact-candidate-representation-delta). Retain revision 89's resolved arithmetic modes. |
+| 92 | [NoThrow retirement](no-throw-private-persistence.md) composed with the complete [output-persistence delta](aggregate-native-output-private-persistence.md) from 90, including old-vector/suffix removal and tag 41. Apply the [NativeOutput cell eligibility amendment](aggregate-native-outputs.md#standard-path-prerequisite-and-private-persistence). Retain revision 89's resolved arithmetic modes. |
 | 93 | Exactly that amended 92 plus the mandatory [general declaration-dependency collection](reference-provenance-carriers.md#private-exchange-candidate-revision-93) on every definition/expectation. Output phase-1 rows remain exclusively in the output collection. |
 | 94 | Exactly 93 plus [wide scalar private persistence](scalar-wide-value-carriers.md#exact-private-schema-and-composition): its complete catalog and type-derived tag-1 payloads, not an unconditional i64. |
 | 95 | Exactly 94 plus the mandatory [copy-origin summary field](reference-field-value-provenance.md#necessary-private-transport-candidate-95). Its zero/unavailable form remains present on foreign methods; foreign declarations acquire no summary attachment. |

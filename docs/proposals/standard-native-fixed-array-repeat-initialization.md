@@ -2,7 +2,10 @@
 
 **Status: unapproved; provisionally actionable only under the user's explicit
 missing-contract workflow.** Every recommendation below remains a candidate,
-not normative adoption, implementation support or execution evidence.
+not normative adoption, implementation support or execution evidence. The
+exact private revision-102 identities below were drafted before the current
+revision-102 field-path schema and revision-103 writer selection; they require
+reidentification before implementation.
 [Proposal index](README.md).
 
 > “At a genuine missing contract, prepare the smallest concrete decision needed
@@ -19,9 +22,10 @@ N=0, followed by ordinary Copy repetition**. Retain one element-fact template
 and sparse deviations, not N expressions, captures or analysis entries.
 For compact Standard retention, select the distinct **A2R1+Repeat** successor
 below with one explicitly amended SemanticStore combination; allocate no
-opcode. The required private semantic route selects **revision 102, expression
-tag 47** below. Huge source qualification needs neither native emission nor
-storage allocation.
+opcode. The original private candidate used **revision 102, expression tag
+47**; current revision 102 already denotes a different schema, so its exact
+identity must be revised before implementation. Huge source qualification
+needs neither native emission nor storage allocation.
 
 This enables the pending
 `standard-native-storage-array-raw-union-array-compact-counts` acceptance work:
@@ -253,7 +257,7 @@ or compatibility reader is prescribed. Semantic-only source qualification
 needs no serialized Body; existing exact schemas remain usable for unchanged
 type-only inputs, but cannot retain the new compact operation.
 
-## Exact private semantic successor
+## Historical exact private semantic candidate
 
 **Unapproved private candidate: i32 revision 102**, exact identity
 **`terrum/private-semantic-102-fixed-array-repeat-initialization-1`**.
@@ -261,13 +265,18 @@ Inherit the complete [101 storage-address-path schema](native-storage-address-pa
 its [address-only backing amendment](native-storage-address-address-only-backing.md)
 and [artifact-local projection rules](native-fixed-array-private-metadata-boundary.md);
 add **expression tag 47 (`2F` hex)** for the proposed repeat node.
-The [current codec](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs)
-selects exactly 101, derives tag-43 layout from its common result type and
-then reads an i32 element count/list. A new tag avoids changing that invariant.
+The [implementation inventory](../implementation/modules.md) records current
+private revision 103, which includes revision 102's fixed-array field-path
+writes. This candidate's exact revision-102 assignment was drafted against the
+earlier revision-101 codec and is now occupied by a different selected
+schema; the candidate identity must be revised before implementation. Its
+tag-47 proposal still avoids changing the then-existing tag-43 layout
+invariant. The later 102+FieldWrites candidate is a distinct schema with the
+same stale revision number, not a compatible alias.
 
 | Alternative | Decision |
 |---|---|
-| **102 + tag 47 + one seed child** | Smallest independent operation and unambiguous existing header selector; no duplicate count/type/layout authority. |
+| **One seed child under a newly selected exact schema** | Smallest independent operation and no duplicate count/type/layout authority. The old 102/tag-47 assignment is occupied and must not be used as the current selector. |
 | Reuse 101 or reinterpret tag 43 with a marker/count exception | Requires a separately selected schema that current private entry points cannot distinguish; negative/absent counts are not repetition. Reject this direction. |
 | Serialize geometry, N copies or a seed list | Duplicates the array table or expands the extent. Neither supplies additional semantics. |
 
@@ -323,15 +332,15 @@ an imported body. Full owned construction is not a bodyless provider promise.
 
 ### Exact selection, embedding and transformation
 
-All selected private producers, consumers, contract-only projections and
-graph libraries write 102, including scalar-only artifacts and empty array
-tables. Readers require **exact 102 before tables/records**; reject honestly
-declared 101/100/older/unknown revisions and Standard input, without a
-`>=101` gate, profile sniffing, retry or scalar-only fallback. An exact-101
-reader rejects 102. Reject unknown tags, missing/truncated seed, invalid
-spans/types/table references, seed-type mismatch, invalid closure/geometry,
-excluded enclosing uses and inherited byte/node/depth exhaustion. Update
-every exact-membership/header/snapshot path coherently, not only tag dispatch.
+Under an adopted, reidentified exact candidate, all selected private
+producers, consumers, contract-only projections and graph libraries must use
+that one schema, including scalar-only artifacts and empty array tables.
+Readers must select its exact identity before tables/records, without a
+`>=101` gate, profile sniffing, retry or scalar-only fallback. Reject unknown
+tags, missing/truncated seed, invalid spans/types/table references,
+seed-type mismatch, invalid closure/geometry, excluded enclosing uses and
+inherited byte/node/depth exhaustion. Update every exact-membership/header/
+snapshot path coherently, not only tag dispatch.
 Regenerate from source or complete checked IR; header patching is not a
 conversion, and no universal detection of dishonestly relabelled bytes is
 promised.
@@ -523,13 +532,14 @@ Source/private production checks actual unsafe scope; reconstruction derives
 the obligation from owner/layout/field facts and the enclosing unsafe scope,
 not a stored IsUnsafeAuthorized bit.
 
-Private entry points select **one current exact 102 agreement**. Integrating
-this amendment replaces their selected repeat-only agreement; it does not
-add decoder modes. Regenerate all private peers/contracts/packages to the
-amended agreement. Equal i32 102, outer version 3 or absence/presence of tag 48
-does not select a schema. A repeat-only reader rejects tag 48; header-only
-checks cannot distinguish every unlabelled stream of the two 102 agreements.
-No automatic old-102 detection, compatible alias or fallback is claimed.
+The originally proposed 102+FieldWrites agreement is not the current private
+selection and its revision is occupied by a different schema. After
+reidentification, private entry points must select **one exact amended
+agreement**; integrating the field-write amendment replaces its repeat-only
+base and does not add decoder modes. Regenerate all private peers/contracts/
+packages to that agreement. Equal i32 values, outer version 3 or absence/
+presence of tag 48 do not select a schema. No automatic old-schema detection,
+compatible alias or fallback is claimed.
 Existing exact-101/unknown-version rejection, full-source-free closure,
 TNPK/TNSP/TNGP embedding, resource and R/C-representation boundaries remain.
 

@@ -63,7 +63,7 @@ Related **unapproved** proposals supply adjacent provisional directions:
   attaches its host projection to `NativeCoreRegistrationSet` for enum/schema
   designation, not ordinary struct references or source exports. Shared
   machinery is appropriate; ordinary imports neither require nor grant Core.
-* [Private fixed-array metadata](native-fixed-array-private-metadata-boundary.md#decision-and-alternatives)
+* [Private fixed-array metadata](native-fixed-array-private-metadata-boundary.md#decision-and-owner)
   defers type-only publication in revision 100; this proposal preserves that
   private boundary.
 

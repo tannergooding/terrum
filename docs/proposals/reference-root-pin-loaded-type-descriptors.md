@@ -21,9 +21,13 @@ The existing `windows-x64-root-pin/1` operation table remains exactly
 **104 bytes, revision 1, twelve entries**. Its enclosing
 `RootPinRuntimeInfoV1` remains exactly **112 bytes**, and
 `TerrumRootPinGetRuntimeV1` remains unchanged. The supplementary interface
-below has the separate candidate identity
-**`windows-x64-root-pin-loaded-types/1`**. Both interfaces must be explicitly
-supported before affected initialization or execution.
+below is one complete replacement candidate with exact identity
+**`windows-x64-root-pin-loaded-types/2`**. It incorporates the fixed-array
+descriptor amendment; V1 is not an alias or alternate descriptor decoder.
+The operation table/info and supplementary interface must be explicitly
+supported before affected initialization or execution. The 104/112-byte
+sizes describe only the existing helper table and RuntimeInfo, not V2
+descriptor records.
 
 This decision closes descriptor admission and lifetime, not allocation:
 
@@ -68,7 +72,7 @@ physical handoff and applies the existing semantic contracts.
 | Candidate | Effect |
 |---|---|
 | Append one AdmitLoadedTypes entry to the operation table | The new entry starts at offset 104; the table becomes 112 bytes/thirteen entries and its enclosing info becomes 120 bytes. A coherent replacement would select a revised operation ABI/discovery record rather than claiming the original exact 104/112-byte V1 contract. This is feasible for an unpublished candidate, but couples cold loader machinery to every operation-table consumer. |
-| **Separate same-provider export; recommended** | Leaves every operation offset, signature, acquisition status and 104/112-byte extent unchanged. One additional required export supplies the cold loader handoff. It uses the same admitted provider and D, not another runtime or configurable provider role. |
+| **Separate same-provider export; recommended** | Leaves every operation offset, signature, acquisition status and 104/112-byte extent unchanged. One additional required export supplies the cold loader handoff. It uses the same admitted provider and D, not another runtime or configurable provider role. The array amendment replaces the supplementary descriptor ABI with V2, not the operation table. |
 | Loader-private factory without a shared handoff | Reasonable only inside one jointly implemented loader/runtime. It does not by itself let separately supplied AOT images and JIT code obtain provider-owned descriptors under the selected opaque-provider ABI. A documented, exact handoff is still required at that boundary. |
 
 The recommendation is based on separation of responsibilities, not an
@@ -80,8 +84,8 @@ add a general runtime reflection/type-construction service.
 The admitted instance of `terrum-root-pin-runtime.dll` must also export:
 
 ```text
-u32 __cdecl TerrumRootPinAdmitLoadedTypesV1(
-    Domain* D, const RootPinTypeBatchV1* batch,
+u32 __cdecl TerrumRootPinAdmitLoadedTypesV2(
+    Domain* D, const RootPinTypeBatchV2* batch,
     LoadedType** vacantOutTypes, u32 outCount)
 ```
 
@@ -158,20 +162,21 @@ are eight-byte machine pointers. Array elements use the exact strides below;
 the `u32 originUses` array is four-byte aligned. No C packing option or
 implementation-defined flexible tail changes a record's extent.
 
-`RootPinTypeBatchV1` is **72 bytes/alignment 8**:
+`RootPinTypeBatchV2` is **72 bytes/alignment 8**:
 
 ```text
-u32 abiRevision=1, u32 byteSize=72
+u32 abiRevision=2, u32 byteSize=72
 u32 targetProfileId=2, u32 targetProfileRevision=1
 u32 nodeCount, u32 fieldCount, u32 originCount, u32 originUseCount
-const TypeNodeV1* nodes
+const TypeNodeV2* nodes
 const TypeFieldV1* fields
 const TypeOriginV1* origins
 const u32* originUses
 u32 flags=0, u32 reserved=0
 ```
 
-`TypeNodeV1` is **80 bytes/alignment 8**:
+`TypeNodeV2` is **96 bytes/alignment 8**. Its first 80 bytes retain the V1
+field positions:
 
 ```text
 u64 typeKey
@@ -182,7 +187,12 @@ u32 child, u32 fieldFirst, u32 fieldCount
 u32 originFirst, u32 originCount, u32 retirementOrigin
 u64 retireGcPayloadThunk
 u32 layoutKind, u32 flags
+u64 elementCount, u64 elementStride
 ```
+
+The new fields are at offsets 80 and 88; they are not a variable tail or
+TypeFieldV1 payload. The `nodes` span has checked extent `nodeCount * 96`.
+Every node uses this stride, including shapes 1–8.
 
 `role` is exactly `1=Value` or `2=GcPayload`. The intern key is
 `(D, role, typeKey, targetProfile 2/1)`; Value and payload lookup roles never
@@ -251,15 +261,54 @@ arithmetic. No new limit is inferred from TRRM's separate 24-bit row domain.
 | `6 StableRef` | Value stable `ref<T>`, 16/8; child is the exact T Value descriptor. Support is zero only for an independently valid externally bounded stable place, or the admitted PinCell kind. No new normal shared support kind is inferred. |
 | `7 StableClass` | Value stable C, 16/8; child is the corresponding GC class payload. Presence requires nonzero PinCell support from the preserved whole-object conversion/provider contract, not normal C construction. |
 | `8 BoxPayload` | GcPayload for an independently admitted `gc box<T>`; child is its exact stored T Value, with identical logical payload size/alignment and no fields. Scan the stored T through that child, without inventing a synthetic FieldDef or normal box construction. Identity/header storage remains the separate allocation boundary's responsibility. |
+| `9 FixedArray` | `role=1=Value`, with one required exact element Value child, explicit u64 count/stride, and derived complete extent/alignment. Elements are indexed subplaces, not FieldDefs. |
 
 Only Fields has a field range. Leaf and Fields have no child; every other
-shape has the one child specified above. A GC class payload requires Fields,
-and a GC box payload requires BoxPayload. Unavailable inheritance,
-variable-size payload or other layout forms decline rather than becoming an
-opaque byte payload. This restriction does not establish or forbid those
-source operations; their independent representation and allocation boundary
-remain prerequisites. Shape 8 is local to this new descriptor interface,
-not an additional F0 action or Body record.
+shape has the one child specified above. Shapes 1–8 require
+`elementCount=elementStride=0`; shape 9 requires zero `fieldFirst`,
+`fieldCount` and `layoutKind`. A GC class payload requires Fields, and a GC
+box payload requires BoxPayload. Unavailable inheritance, variable-size
+payload or other layout forms decline rather than becoming an opaque byte
+payload. This restriction does not establish or forbid those source
+operations; their independent representation and allocation boundary remain
+prerequisites. Shape 9 is local to this new descriptor interface, not an
+additional F0 action or Body record.
+
+For FixedArray, the child is the complete element type E and may itself be
+FixedArray for nested inline storage. The derived stride and descriptor
+storage are:
+
+```text
+A = a(E) when a(E) != 0, otherwise 1
+S = checkedRoundUp(s(E), A)
+size = checked(N * S)
+alignment = A
+```
+
+Validate `elementStride == S`, `size == N*S`, the child layout and all
+arithmetic in the Windows x64 `nuint` domain before admission. Preserve exact
+count/type identity; never infer N from size or permit extra tail/capacity.
+No padding/state bytes appear between elements or after the final element.
+The enclosing array does not repack E or strengthen a packed member inside E.
+The Value `Copy` flag remains a checked semantic fact, not a consequence of
+shape 9; no element ownership or Cleanup policy is synthesized.
+
+**N=0** has size zero but still requires complete E/S/alignment validation;
+it has no element residence and never computes `N-1`. **S=0** is allowed
+only for independently admitted zero-data unit E with `size=0`, preserving
+the logical count and exact type without division or element-address
+formation. The array itself has alignment 1. A distinct zero-extent nominal
+E retains its own admitted identity/alignment and does not become unit.
+Existing unsupported zero-extent root/borrow gates remain unchanged.
+Inline array occurrences use the actual alignment supplied by the containing
+layout; they do not automatically receive natural alignment when packed.
+No new rule admits arrays of unknown/unsupported element types.
+
+FixedArray is an inline-storage edge for cycle checking, like Fields and
+BoxPayload. Reject cycles formed by inline fixed-array storage before
+publication; ordinary descriptor/reference edges do not expand inline
+storage. Recursive traversal uses a finite visited-state worklist and the
+existing budgets, never per-element graph expansion from N.
 
 Value nodes have `retirementKey=0`, thunk zero and retirementOrigin
 `FFFFFFFF`. Every payload node has its nonzero exact retirement key and
@@ -279,24 +328,26 @@ retain a nonexistent payload.
 
 At a Value residence, recursive traversal has three distinct purposes:
 
-* **Scan:** Fields visit their typed fields and Optional visits only Some.
-  ObjectCell/RootCell/PinCell descriptors contribute the corresponding
-  object/support graph edges. A StableRef's raw address is not independently
-  followed; its nonzero support supplies the edge. Leaf bits and padding
-  contribute none.
+* **Scan:** Fields visit their typed fields, FixedArray visits its N typed
+  element residences, and Optional visits only Some. ObjectCell/RootCell/
+  PinCell descriptors contribute the corresponding object/support graph
+  edges. A StableRef's raw address is not independently followed; its
+  nonzero support supplies the edge. Leaf bits and padding contribute none.
 * **Copy/support retirement:** retain/release the existing descriptor-cell
-  holds through Fields and Some; retain before retiring an overwritten hold.
-  Do not acquire another root/pin, recursively destroy the referenced T,
-  follow a stored class handle as an inline object, or call authored Cleanup.
-  Descriptor hold counts are not unconditional collector roots.
+  holds through Fields, FixedArray elements and Some; retain before retiring
+  an overwritten hold. Do not acquire another root/pin, recursively destroy
+  the referenced T, follow a stored class handle as an inline object, or call
+  authored Cleanup. Descriptor hold counts are not unconditional collector
+  roots.
 * **Payload scan/relocation:** scan a reached ObjectCell using its registered
   payload node. Relocation transfers existing field residences without
   another logical Copy. Payload bytes are never frame-slot addresses.
 
 Recursive nominal graphs are represented by batch-local backedges, for
 example payload fields containing optional GC handles to one another.
-Validate the finite graph before publishing any node. Fields, Optional and
-BoxPayload are inline-storage edges; cycles composed of those edges reject.
+Validate the finite graph before publishing any node. Fields, FixedArray,
+Optional and BoxPayload are inline-storage edges; cycles composed of those
+edges reject.
 Descriptor-to-payload/referent edges break storage expansion, but do not
 authorize malformed cyclic structural TypeSpecs or infinite substitutions.
 Scanning object/support cycles uses the selected collector's visited-state
@@ -315,12 +366,17 @@ particular serialized route; that does not enable that route.
 
 The provider then performs these physical checks before exposing descriptors:
 
-1. Check exact ABI revision/extent, target `(2,1)`, closed roles/shapes/flags,
-   reserved zeros, nonzero keys, node count and output count. `nodeCount`
-   is nonzero and `outCount` equals it. Output words are initially zero.
+1. Check exact **supplementary ABI revision 2** and record extent, target
+   `(2,1)`, closed roles/shapes/flags, reserved zeros, nonzero keys, node
+   count and output count. `nodeCount` is nonzero and `outCount` equals it.
+   Output words are initially zero. V1 supplementary records are not a
+   fallback.
 2. Check every declared array extent with checked Windows x64 `nuint`
-   multiplication/addition, every record/range/reference, role/child
-   agreement and origin records, including unused field/origin entries.
+   multiplication/addition, including `nodeCount * 96`, every
+   record/range/reference, role/child agreement and origin records, including
+   unused field/origin entries. Require elementCount/elementStride zero on
+   shapes 1–8. For shape 9 require Value role, a real element child, zero
+   field range/layoutKind and supported retirement fields.
    Zero-count arrays have null pointers; nonzero arrays have readable storage
    through the call.
    The caller supplies valid readable/writable machine spans; this is not
@@ -337,6 +393,12 @@ The provider then performs these physical checks before exposing descriptors:
    Do not strengthen field alignment or read beyond a field/presence extent.
    Logical void fields contribute no addressable place; existing zero-extent
    nominal root/borrow gates remain unchanged.
+   For FixedArray, derive `A=max(1,a(E))`, `S=checkedRoundUp(s(E),A)` and
+   `size=checked(N*S)` in target `nuint`; require the submitted stride,
+   size and alignment to match. Validate E and arithmetic even for N=0.
+   Unit is the only zero-stride case here; preserve its logical count without
+   division, per-element storage or address formation. Actual packed
+   containing placement remains subject to its selected layout.
 4. Validate storage-cycle freedom, complete shape applicability, supported
    overlap and presence rules, payload retirement/code-origin availability,
    and all required implementation capacities. Unknown layout is not Leaf.
@@ -408,7 +470,8 @@ runtime-contract violations, not descriptor-registration retries.
 
 ## Lifetime and retained retirement code
 
-The V1 choice is a domain-lifetime descriptor arena and origin lease set.
+The V2 loaded-type choice is a domain-lifetime descriptor arena and origin
+lease set.
 For the selected process-wide singleton D, successful admission retains
 both until process reclamation or a separately established **whole-domain
 quiescent shutdown**. No per-node reference count, weak intern entry,
@@ -421,7 +484,7 @@ closures longer than their last value. It does **not** retain every source
 object, keep every pin active, change the last PinCell-hold endpoint, delay
 ordinary support retirement or make metadata an object root. A future
 reclaimable-descriptor lease protocol is a separate decision, not an
-implementation-defined extension of V1.
+implementation-defined extension of this V2 interface.
 
 JIT disposal and AOT image unload must respect the retained leases even when
 no direct import/call remains. A successful descriptor registration does not
@@ -477,9 +540,11 @@ Process exit establishes no new promise to run source Cleanup.
 
 This proposal adds **no TRRM bytes, Feature, TargetProfile, opcode, Body kind,
 TypeSpec constructor or private revision**. It supplements only RootPin's
-unspecified loaded-type handoff and corresponding code/lifetime obligation.
-It does not replace the operation-derived provenance ledger or the separate
-LoadedMethod/frame/call-transfer contract.
+unspecified loaded-type handoff and corresponding code/lifetime obligation,
+using the exact supplementary candidate
+`windows-x64-root-pin-loaded-types/2`. It does not replace the
+operation-derived provenance ledger or the separate LoadedMethod/frame/
+call-transfer contract.
 
 Keep these existing selections exact:
 
@@ -499,7 +564,7 @@ Keep these existing selections exact:
   Compatible rootless dependencies may still bind; this does not pack their
   retained F operations into the RootPin artifact.
 
-The supplementary loader ABI must be part of the **explicit prospective
+The supplementary V2 loader ABI must be part of the **explicit prospective
 runtime agreement** for this candidate; recognizing RootPinRuntimeDraft or
 equal `(1,0)` bytes cannot silently supply it. Preserve the selected schema
 and catalog rather than inventing a feature-based decoder or new composition.
@@ -533,14 +598,15 @@ none requires or demonstrates general source GC construction.
 | Case | Required outcome |
 |---|---|
 | LTD-01 Shared identity | Independently lowered AOT/JIT views of the same selected origin and complete type receive the same descriptor. Remap batch nodes/origin arrays and repeat admission; preserve pointer identity and exact field order. Separate readonly/write, optional/nonoptional, nominal and Value/payload subjects remain distinct. |
-| LTD-02 Recursive graph | Admit two unrelated nominal payloads with nested inline fields and optional GC-handle backedges, including a RootCell/PinCell-bearing field; separately describe admitted GC boxes of a scalar, an inline aggregate and a descriptor. BoxPayload preserves exact T without a synthetic field or new construction path. Trace through typed presence/support edges; metadata and field hold counts do not make an unreachable object/support cycle a global root. Reject by-value storage cycles without publishing any node. |
+| LTD-02 Recursive graph | Admit two unrelated nominal payloads with nested inline fields and optional GC-handle backedges, including a RootCell/PinCell-bearing field; also admit nested FixedArray descriptors for complete element types. Separately describe admitted GC boxes of a scalar, an inline aggregate and a descriptor. BoxPayload preserves exact T without a synthetic field or new construction path. Trace through typed presence/support edges; metadata and field hold counts do not make an unreachable object/support cycle a global root. Reject by-value storage cycles without publishing any node. |
 | LTD-03 Presence and leaves | Exercise None and Some for each supported descriptor envelope, including a stable external ref with zero support. None has no hold; Copy shares Some's existing cell. Reject malformed zero-address/nonzero-support values and stable C with absent PinCell support. Known raw pointer fields are not scanned; unknown representations or an unassigned optional aggregate are not admitted as Leaf. |
 | LTD-04 Exact places/layout | Root the first/last eligible field, a nested packed scalar and a GC-handle slot in admitted payloads. Validate exact T, extent and actual alignment without following the object stored in the slot. Reject a same-size different type, wrong role, one-past-end, overflow, fabricated alignment and unsupported zero-extent root. Preserve source access/init/guard obligations. |
-| LTD-05 Framing/capacity | Exercise index zero and the last valid index, empty ranges, shared recursive edges and large finite graphs. Reject unsupported revision/target, incorrect record extent, unknown shape/role/flags, reserved bits, bad count/output count, null nonempty array, sentinel in an ordinary index, out-of-range child/origin and checked extent overflow. Capacity exhaustion is not a successful truncated graph. |
+| LTD-05 Framing/capacity | Exercise V2 node index zero/last valid index, empty ranges, shared recursive edges and large finite graphs. Check `nodeCount*96` and every V2 array extent. Reject unsupported supplementary revision/target, incorrect record extent, unknown shape/role/flags, nonzero count/stride on shapes 1–8, reserved bits, bad count/output count, null nonempty array, sentinel in an ordinary index, out-of-range child/origin and checked extent overflow. Capacity exhaustion is not a successful truncated graph. |
 | LTD-06 Semantic/precompiled input | At loader preflight, reject a field/cleanup/layout recipe inconsistent with its admitted declarations, unsatisfied original Import or unavailable required codec. Reject conflicting graph data for an interned key. Equal names, row numbers, sizes, hashes or DLL names do not merge different origins. False producer body/loader facts are not claimed to be semantically re-proved by the provider. |
 | LTD-07 Atomic failure | Inject failure during node/edge preparation and before final publication. Output words remain zero, provisional origin retains roll back, existing types/objects are unchanged, and no initializer or Cleanup ran. Keep loader status 1 separate from actual source root/pin acquisition OOM behavior. |
 | LTD-08 Origin and lifetime | Free the caller's batch arrays after success; descriptors remain valid. Forward an object through an intermediate image and drop its direct caller/import; retain the actual leaf layout, thunk, allocator and unwind providers. Ending the last pin unpins promptly despite domain-lifetime metadata. Per-image/JIT disposal cannot free retained origins. |
 | LTD-09 Complete retirement | Under the registered-object boundary, queue GC retirement, run the exact authored body once then reverse-declaration fields, and release field-held supports once. The receiver remains complete/stable across admitted calls. A thrown Cleanup terminates under the selected worker policy without resumed field cleanup or unsafe reclamation. Retain/release helpers never invoke the adapter. |
-| LTD-10 ABI discovery | Accept only the exact existing 104-byte/twelve-entry table and 112-byte info plus the same-provider supplementary export. Reject a missing export, wrong D/provider, widened V1 table, null callback/thunk or unavailable code/unwind origin before affected use. No private collector or rootless-profile fallback. |
+| LTD-10 ABI discovery | Accept only the unchanged 104-byte/twelve-entry operation table and 112-byte `RootPinRuntimeInfoV1` plus the same-provider V2 supplementary export and exact `RootPinTypeBatchV2`/96-byte `TypeNodeV2` shapes. Reject a missing export, V1 supplementary record, wrong D/provider, widened operation table, null callback/thunk or unavailable code/unwind origin before affected use. No private collector or rootless-profile fallback. |
 | LTD-11 Profiles | Inspect valid RootPinRuntimeDraft input without creating descriptors; load it only after independent runtime/type admission. Preserve NativeAddress `0D` under all four F selections. Reject F0 under F, E9 under RootPin and retained F+RootPin packing; do not infer a decoder from the new export, record extent or Feature rows. Private/Development and alternate-target gates remain closed. |
 | LTD-12 Scope boundaries | A valid graph alone cannot register payload bytes, publish a GC handle, authorize ordinary C/box construction, support erasure/generic/witness/async execution or obtain a new root/pin. Whole-domain shutdown requires actual quiescence; absent that proof, retain code/descriptor origins rather than guessing that disposal is safe. |
+| LTD-13 FixedArray shape | Derive `A=max(1,a(E))`, checked `S=roundUp(s(E),A)` and `size=N*S`; reject mismatches, overflow, unknown element types and nonzero field ranges. Preserve nested dimensions and exact nominal element identity. Validate E for N=0; permit S=0 only for unit, with alignment 1 and no element address/scan. Preserve actual packed containing alignment. |

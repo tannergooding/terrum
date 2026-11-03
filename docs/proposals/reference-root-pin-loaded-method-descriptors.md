@@ -26,7 +26,7 @@ It preserves:
 * `windows-x64-root-pin/1`, revision **1**, its **104-byte/twelve-entry**
   operation table, **112-byte** `RootPinRuntimeInfoV1` and
   `TerrumRootPinGetRuntimeV1`. No thirteenth entry is added.
-* The selected [loaded-type V2 candidate](reference-root-pin-array-layout-descriptors.md#exact-supplementary-abi-amendment):
+* The selected [loaded-type V2 candidate](reference-root-pin-loaded-type-descriptors.md#exact-supplementary-windows-x64-interface):
   `TerrumRootPinAdmitLoadedTypesV2`, the **72-byte** batch and **96-byte**
   nodes. There is no combined batch, V1 alias, inferred node stride or
   reinterpretation of that schema.

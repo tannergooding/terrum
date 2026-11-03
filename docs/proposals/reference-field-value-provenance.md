@@ -6,6 +6,10 @@ authorized missing-contract instruction.** This is a bounded addition to
 approval of that proposal, a normative amendment or an implementation claim.
 The [root/pin runtime proposal](reference-root-pin-runtime.md) remains the
 sole candidate owner of its runtime support, layouts and operations.
+The [fresh inline unique-constructor extension](reference-unique-constructor-field-provenance.md)
+separately proposes superseding only this candidate's Copy-only destination
+root restriction; its addition remains unapproved and does not widen Standard
+TRRM.
 
 ## Decision and genuine gap
 
@@ -220,10 +224,12 @@ exact selected-place/alias facts must refuse. Do not manufacture field facts
 by unioning all arguments, treating absence as empty, inspecting foreign code,
 or attaching a borrow of an indirect ABI buffer.
 
-In particular, [NativeOutput](aggregate-native-output-source-dependencies.md#native-roles-and-outcome-semantics)
-keeps its existing successful-inner-value bound, complement, maybe-live,
-pre-Invoke cancellation and indeterminate post-Invoke failure. This summary
-does not apply to NativeOutput destinations or admit them as sources.
+In particular, [NativeOutput cells](aggregate-native-outputs.md#destination-states-order-and-failed-writes)
+keep their successful-inner-value bound, complement, maybe-live, pre-Invoke
+cancellation and indeterminate post-Invoke failure. The separate
+[source-dependency applicability](aggregate-native-outputs.md#source-dependency-applicability)
+still does not apply this summary to output destinations or admit them as
+sources.
 Exact fields of an opaque successful packet remain unavailable unless
 subsequent admitted local operations establish them. No new annotation or
 native-output projection is needed for the selected ordinary-call slice.

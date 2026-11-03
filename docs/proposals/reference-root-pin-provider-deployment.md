@@ -27,7 +27,7 @@ for this combined candidate are exactly:
 
 * `TerrumRootPinGetRuntimeV1`, with the unchanged 112-byte runtime info and
   104-byte/twelve-entry operation table.
-* [Loaded-type admission V2](reference-root-pin-array-layout-descriptors.md#exact-supplementary-abi-amendment),
+* [Loaded-type admission V2](reference-root-pin-loaded-type-descriptors.md#exact-supplementary-windows-x64-interface),
   `TerrumRootPinAdmitLoadedTypesV2`, not the superseded V1 interface.
 * [Loaded-method admission V1](reference-root-pin-loaded-method-descriptors.md#exact-supplementary-interface),
   `TerrumRootPinAdmitLoadedMethodsV1`.
@@ -67,7 +67,7 @@ On adoption, integrate these changes together; this document makes none now.
 | [Windows deployment §5](../specs/targets/windows-x64-deployment.md#5-invocation-and-process-launch-boundary) | Require the selected native deployment to supply P at AOT finalization or JIT execution selection, and complete runtime admission before affected initialization/invocation. AOT takes P from its finalized imports, not a second launch-time path setting. |
 | [Windows deployment §3](../specs/targets/windows-x64-deployment.md#3-native-image-stack-and-unwind-support) | Add a new §6, “RootPin runtime-provider binding”, owning absolute import names, actual H/domain checks and process-lifetime retention; reference it from publication requirements. Use ordinary PE imports/IATs, not an additional provider-slot format. |
 | [Runtime candidate: provider discovery](reference-root-pin-runtime.md#candidate-provider-discovery-and-domain-sharing) | Complete its physical library identity as the selected absolute P. Preserve compiler-generated AOT imports and the exact helper ABI; require JIT to resolve the same P and actual H. Adopt neither a late-bound-only format nor a blanket unowned-preload rejection; the runtime's same-provider rule remains unchanged. |
-| [Type admission](reference-root-pin-loaded-type-descriptors.md#exact-supplementary-windows-x64-interface), [array amendment](reference-root-pin-array-layout-descriptors.md#exact-supplementary-abi-amendment), [method admission](reference-root-pin-loaded-method-descriptors.md#exact-supplementary-interface) | Reference the canonical process binding for “same provider”. Select their conservative process-lifetime domain/origin branch; no early whole-domain teardown is supplied here. Preserve all records, statuses, semantic identity and admission rules. |
+| [Type and FixedArray admission](reference-root-pin-loaded-type-descriptors.md#exact-supplementary-windows-x64-interface), [method admission](reference-root-pin-loaded-method-descriptors.md#exact-supplementary-interface) | Reference the canonical process binding for “same provider”. Select their conservative process-lifetime domain/origin branch; no early whole-domain teardown is supplied here. Preserve all records, statuses, semantic identity and admission rules. |
 
 [Native lifetime](../specs/native.md#runtime-and-code-lifetime),
 [JIT replacement](../specs/jit.md#replacement-and-code-lifetime), abstract

@@ -60,16 +60,18 @@ gated. In particular, int128/uint128 source arrays or indices need the
 does not admit their value codec. Reject required unrepresentable facts;
 never replace them with a convenient scalar, spelling or empty collection.
 
-The table can describe nested types and types in existing descriptive
-field/pointer records without granting those types a runtime value or place
-representation. The [metadata-only boundary](#metadata-only-nested-and-zero-payload-types)
+The table can describe nested types and types in retained full-artifact
+descriptive field/pointer records without granting those types a runtime value
+or place representation. It does not publish a type-only export or make
+metadata presence a bodyless-reference root. The
+[metadata-only boundary](#metadata-only-nested-and-zero-payload-types)
 enumerates the permitted records and rejected operations. Field-rooted/nested
 element **places**, whole-array parameters/results, globals/statics, descriptor
 bases and managed/non-Copy arrays remain outside this direct-local operation
 slice. Existing independently admitted flat whole-Copy/assignment contexts keep
 their contracts; they cannot provide a carrier for an excluded nested element.
 
-## Owners, evidence and alternatives
+## Owners, historical evidence and alternatives
 
 Accepted [private-persistence taxonomy](../specs/representation/persistence.md),
 [format selection](../specs/representation/format-versioning.md),
@@ -81,13 +83,18 @@ The [grammar](../specs/grammar-spec.md#32-types-parameters-and-arguments) and
 approve the structural source experiment. Only this proposal would own the
 new private records; no Standard allocation is amended.
 
-These are observations of the current checkout, not test-run results:
+The following source observations are the historical baseline for this exact
+revision-100 candidate, not a live support inventory or test-run results.
+Current private writer/reader support is tracked at revision 103 in the
+[module inventory](../implementation/modules.md) and
+[conformance handoff](../implementation/conformance-gaps.md); it does not
+make revision 100 a compatibility alias or select this unapproved candidate.
 
-| Inspected owner | Current boundary |
+| Inspected owner | Observed baseline boundary |
 |---|---|
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), `NativeFixedArrayTypes`, array records | Array IDs occupy a separate host range starting at `1 << 29`. A row retains E, N, S, B, A and required alignment R; initialization has ordered children, while element/address/write nodes have a local slot and index. |
 | [`NativeFixedArrayContract.cs`](../../sources/Terrum.CodeAnalysis/Semantics/NativeFixedArrayContract.cs) | Structural interning and geometry checking exist. N/S/B/A/R are unsigned 64-bit; unit uses `(s,a,R)=(0,0,1)`. Revision 100 persists those rows and validates nested and pointer/fnptr metadata recipes independently of runtime operation admission. |
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `GetType`, `PutExpression` | Writer and reader select exactly 100. A mandatory bounded 44-byte array table follows pointer types; tags 43–46 encode flat direct-local construction, selection, address and write. The reader reconstructs layouts before functions, and the writer canonicalizes first-use closure and prunes unreferenced rows. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `GetType`, `PutExpression` | At this proposal's inspected baseline, writer and reader selected exactly 100. It defined a mandatory bounded 44-byte array table and tags 43–46 for flat direct-local operations. The current writer/reader select revision 103 and retain later private compositions; revision 100 remains a separate candidate, not the current selection. |
 | Same file, `PutFunction`/`GetFunction`, `Calls`, `RequiredStructures`, `RemapType`, native-type mapping | Variable wire records remain unchanged; local layouts are reconstructed from rows. `Calls` traverses nested expression children, ordinary Link remaps/deduplicates array identities, and type spellings include normalized recursive array identities. Runtime locals/calls using nested or ptr-to-array metadata remain rejected. |
 | [`ModuleCompiler.Graph.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.Graph.cs), `ReadGraphLibrary`; [`ModuleCompiler.ModuleSets.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.ModuleSets.cs) | Graph libraries and sets use the shared revision-100 table/body codec. In-memory set/graph reference merging remaps reordered nested rows and pointer/fnptr recipes; replacement and embedded-contract closure remain in progress. |
 | [`SemanticVerifier.cs`](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs), `RejectSourceNativeImports`; [`NativePointerModuleTests.cs`](../../tests/Terrum.CodeAnalysis.Tests/Native/Modules/NativePointerModuleTests.cs) | Private-module admission allows checked direct-local arrays while retaining foreign-import obligations. The producer/reader reject array-derived runtime contracts, nested value locals, ptr-to-array runtime carriers and non-unit zero-payload array operations. |
@@ -246,8 +253,15 @@ u32, 4096-byte or slot-allocation cap is a type-identity/wire bound. Existing
 i32 field sizes and native stack/slot limits still constrain their **uses**.
 A compact row with a huge zero-stride N allocates no N-element graph or backing.
 
-Canonical writers first compute the complete retained type/body dependency
-closure, then intern arrays by normalized identity and emit each once.
+Canonical writers compute the complete closure for the artifact's retained
+roots, then intern arrays by normalized identity and emit each once. Full
+implementation artifacts retain the array/type closure of every retained
+declaration, field/layout and admitted body occurrence, including valid
+metadata-only recipes. Bodyless references and Contract-only projections have
+different roots: existing legally exported runtime contracts and their
+required declarations/dependencies. A public type name, implementation row
+or metadata presence alone is not an export or projection root; revision 100
+adds no type-only export/import identity.
 Use deterministic **first-use, element-before-parent** discovery: scan retained
 non-array records in their existing wire order and their type fields in field
 order; scan function bodies in encoded preorder/child order. A discovered
@@ -258,9 +272,11 @@ Reject recipe cycles/depth/work exhaustion. Omit unreferenced array rows
 canonically; readers may consume well-formed unreferenced rows. Re-encoding a
 noncanonical row permutation rebuilds all affected type references.
 
-For inherited textual declaration expectations, add this recursive private
-type spelling, where U64Decimal uses invariant unsigned decimal without leading
-zeros and no whitespace is added:
+For an inherited textual expectation that actually retains this complete
+array type as a legal runtime contract, add this recursive private type
+spelling, where U64Decimal uses invariant unsigned decimal without leading
+zeros and no whitespace is added. Do not generate a type-only expectation for
+an unrelated descriptive recipe:
 
 ```text
 ArrayContract(E,N) = "[" + ContractType(E) + ";" + U64Decimal(N) + "]"
@@ -270,15 +286,20 @@ Existing non-array spellings stay unchanged. This is a private contract token,
 **not source parsing**: `[3;2]` denotes an array of private scalar code 3, not source
 `[uint32; 2]`. Nested arrays and pointers recursively preserve their actual
 types; no `array#oldRow` or bare numeric array-ID fallback is allowed.
-Check the token against the owning decoded tables and original expectation;
-existing nominal visibility/layout checks remain required. Keep the
-1,024-byte strict UTF-8 String limit and reject unrepresentable contracts.
+For a retained legal contract, check the token against the owning decoded
+tables and original expectation; existing nominal visibility/layout checks
+remain required. Bodyless projections retain only those legal contracts and
+their relied-on dependencies, not every array description. Keep the 1,024-byte
+strict UTF-8 String limit and reject unrepresentable contracts.
 
 ### Metadata-only nested and zero-payload types
 
 **Type/layout decoding is distinct from operation admission.** Subject to the
 same exact references, complete nominal declarations, geometry, cycles and
-resource checks, revision 100 can decode, normalize, remap and re-emit:
+resource checks, revision 100 can decode, normalize, remap and re-emit the
+following descriptive recipes when they are retained by a full artifact's
+implementation closure, or required by an independently admitted non-array
+contract:
 
 * Array rows whose E is another fixed-array row, recursively, including
   dimensions with N=0 or zero stride/extent. Preserve every dimension and the
@@ -295,11 +316,15 @@ resource checks, revision 100 can decode, normalize, remap and re-emit:
   declaration/layout has an admitted private representation. A bare name,
   zero size or unit row cannot replace missing nominal metadata.
 
-Re-emission follows the existing closure and canonical pruning rules:
-preserve referenced metadata recipes and remap all their references; genuinely
-unreferenced array rows may be omitted. No new type-only section or runtime
-flag is added. A scalar executable can retain valid descriptive recipes without
-executing their storage; its execution is not evidence of nested-array support.
+Re-emission follows role-specific closure and canonical pruning rules:
+preserve every referenced recipe in a retained full artifact and remap all its
+references; a bodyless projection prunes metadata-only recipes unless an
+independently admitted contract requires them. Genuinely unreferenced array
+rows may be omitted. No new type-only section, export/import identity or
+runtime flag is added. A scalar executable can retain valid descriptive
+recipes without executing their storage; its execution is not evidence of
+nested-array support. A pruned bodyless reference cannot substitute for the
+full provider artifact needed for source-free implementation re-emission.
 
 100 assigns no runtime value or element subplace for an array-valued E, no
 array-valued temporary/capture, and no non-unit zero-payload element
@@ -525,11 +550,14 @@ with family-specific maps; do not add an independent numeric array offset to
 the current pointer-only merge. The smallest required transformation is:
 
 1. Decode each artifact under its exact schema and retain its original using/
-   provider context. Gather every declaration/body type and symbolic call,
-   including all initializer children, indices, values and hidden layout
-   carrier/E fields. Follow nested arrays, nominal field layouts, pointer
-   pointees and fnptr contracts; do not prune a retained dependency because
-   its only occurrence has zero extent or no executed element.
+   provider context. For a full implementation artifact, gather every retained
+   declaration/body type and symbolic call, including initializer children,
+   indices, values and hidden layout carrier/E fields. Follow nested arrays,
+   nominal field layouts, pointer pointees and fnptr recipes; do not prune a
+   retained implementation dependency because its only occurrence has zero
+   extent or no executed element. For a bodyless reference or Contract-only
+   projection, start instead from its existing legally exported runtime
+   contracts and their required declarations/dependencies.
 2. Resolve existing selected private nominal declarations/bindings first.
    Import proxies remain the selected declarations, not newly local E types.
    Preserve the current private ambiguity rejection; outer-3 native routes
@@ -537,6 +565,9 @@ the current pointer-only merge. The smallest required transformation is:
    expectations. **100 adds no candidate-96/general nominal-origin codec**.
    If those existing mechanisms cannot represent an actual required origin
    or substitution, refuse that input rather than comparing only spelling.
+   An implementation row, public type name or metadata recipe is not a
+   type-only export root. Reject an excluded array-derived contract; do not
+   erase its type facts or silently drop the export to make projection succeed.
 3. Recursively map normalized E and intern `(FixedInlineArray,E,N)` in the
    destination, memoizing source-context-to-destination identities. Compatible
    duplicate identities from different inputs merge; differing N, constructor,
@@ -551,24 +582,32 @@ the current pointer-only merge. The smallest required transformation is:
    Preserve the metadata-only versus executable boundary after mapping;
    neither row merging nor provider replacement may activate an excluded
    nested, ptr-to-array or nominal-zero runtime use.
-5. Compare **original expectations against the selected actual provider**:
-   exact E/N, compatible fixed-layout/public-value contract and all relied-on
-   Copy/rootless, access, backing, output/native/call/code-lifetime obligations.
-   A layout or required-alignment change rejects; do not recompute a new tuple
-   and overwrite the old expectation to make replacement pass. Preserve
-   existing private slot-flexible vtable replacement versus stricter native
-   package/set/graph binding.
-6. Re-emit through the exact-100 canonical writer, rebuilding maps, textual
+5. Compare **original expectations against the selected actual provider**
+   only for retained legal contracts and facts they actually rely on. Preserve
+   every required non-array expectation: nominal identity, compatible
+   fixed-layout/public-value contract, Copy/rootless, access, backing,
+   output/native/call and code-lifetime obligations. Do not compare unrelated
+   metadata-only array descriptions as though they were type-only exported
+   contracts. A relied-on layout or required-alignment change rejects; do not
+   recompute a new tuple and overwrite the old expectation to make replacement
+   pass. Preserve existing private slot-flexible vtable replacement versus
+   stricter native package/set/graph binding.
+6. Validate the complete selected input before projection pruning. Pruning
+   cannot repair malformed rows/references or an excluded runtime occurrence.
+   Then re-emit through the exact-100 canonical writer, rebuilding maps, textual
    original expectations, container lengths/checksums and any affected native
    outputs. No octet substitution or header editing. Invalidate check/layout/
    code caches for changed bytes, schema, bindings, target or runtime context.
 
-This applies to ordinary producer/reference/consumer linking, sets, graph
-libraries/edges, embedded Contracts and contract snapshots. A bodyless source
-reference may omit genuinely unneeded implementation rows; the full producer
-and any source-free execution artifact must retain the actual body/table
-closure. Re-emission cannot manufacture it by rereading source or recognizing
-a particular application. The [standard A2](standard-trrm-rootless-copy-type-evidence.md)
+For full persisted modules, sets, graph libraries/edges and source-free
+execution artifacts, preserve the complete retained implementation closure.
+For bodyless references, embedded Contracts and snapshots, retain only their
+existing legal contract roots and required dependencies; prune unrelated
+metadata-only recipes. Do not infer type-only exports from names, rows or
+metadata presence. Re-emission of implementation data requires the full
+provider/consumer artifacts; a pruned bodyless reference cannot manufacture
+omitted bodies or descriptions by rereading source or recognizing an
+application. The [standard A2](standard-trrm-rootless-copy-type-evidence.md)
 TypeSpec 11, section 0012, Copy bit and Feature closure are a **distinct,
 unapproved schema**, not byte layouts or evidence aliases for this private
 component. Cross-format conversion/adoption is separately scoped.
@@ -585,7 +624,7 @@ bounded `TestFileCleanup` retries.
 |---|---|
 | Producer and exact selection | Producer, scalar-only producer, consumer, set and graph-library writers declare 100 and include the empty/nonempty component. Public readers reject honest 99 and candidates 92–98, unknown versions, Standard/A2 bytes and inconsistent embedded selections before decoding records. Retain inherited outputs, FieldMove and u64 tag-35 fields in the same fixture. |
 | Independent framing | Inspect all 44 row bytes and mandatory count; verify 17/59/42/63-byte operation vectors and adjacent statements/functions without drift. Decode independent fixtures, not only self-round-trips. Preserve an ordinary 21-byte scalar/unit child and the unchanged 71-byte constant-index tag 35. |
-| Identity and closure | Equal normalized aliases/count expressions intern once; different E, N, nominal wrapper/origin, pointer depth/access and nested dimensions remain distinct. Valid metadata-only nested rows, descriptive fields, ptr-to-array/pointer-chain/fnptr recipes and forward/reordered references retain closure through decoding/remapping/re-emission. Canonical pruning may remove genuinely unreferenced rows. No runtime storage or callable admission follows. A same-named user InlineArray remains nominal. |
+| Identity and closure | Equal normalized aliases/count expressions intern once; different E, N, nominal wrapper/origin, pointer depth/access and nested dimensions remain distinct. Full artifacts retain valid metadata-only nested rows, descriptive fields, ptr-to-array/pointer-chain/fnptr recipes and forward/reordered references through decoding/remapping/re-emission. Bodyless projections prune unrooted recipes unless an independently admitted non-array contract requires them. Canonical pruning may remove genuinely unreferenced rows. No type-only export, runtime storage or callable admission follows. A same-named user InlineArray remains nominal. |
 | Initialization and failure | For eligible flat rows, N=0 with [] is complete only after explicit initialization; N>0 unit needs N children. Underfill/overfill, wrong child type, absent target row and nonzero unit payload reject. Ordered side-effecting/throwing non-array captures and failed replacement preserve prior effects and publish no prefix. Vacant read/write and forged live-state facts fail producer verification and the existing private verifier where applicable. |
 | Nested operation exclusion | For E itself an array, reject each of 43/44/45/46 independently at N=0 and positive N, including positive-size and zero-size inner arrays. Reject recursive 43 captures through wrappers, array-valued reads/copies/conditionals/RHSs, nested update/place synthesis and array-containing nominal E. A separately initialized flat local of the inner type remains positive; it cannot be derived from an excluded outer element. Rejection is before publication/execution and is expected coverage, not an open positive gate. |
 | Pointer-to-array exclusion | Valid descriptive ptr-to-array, pointer-chain and fnptr recipes round-trip. Reject runtime variables, field-value materialization, signature/call carriers, constants/copies/projections, 45 array-valued pointees and tag-35/38/39/40 formation/access requiring them, even in unreachable/uncalled code. An array of ptr-to-array cells also rejects 43–46. No scalar-pointer or first-element reinterpretation fallback. |
@@ -594,7 +633,7 @@ bounded `TestFileCleanup` retries.
 | Unsigned geometry and limits | Independent rows exercise N=0/1, int.MaxValue+1, uint.MaxValue+1, bit 63 and ulong.MaxValue without huge allocation, especially zero stride. Test product/round-up/offset overflow, incorrect S/B/A/R, zero/non-power alignment, N=0 with invalid E/cycles, packed/overaligned occurrences and backend resource rejection. Reject negative/excess counts, c=100,001, insufficient bytes at c=100,000, slot 256, node/depth/string/artifact boundaries; do not claim a physically impossible maximum-row artifact passed. |
 | Malformed records | Truncate each table field, count and nested child; wrong-family/out-of-range/retired-20 type codes, duplicate/conflicting rows, recipe/inline cycles, invalid slots/result/pointee types, unknown tags, invalid spans, missing mandatory component and trailing bytes. Wrong-schema reference-family bytes never trigger a retry. |
 | Authority/backing | Fixed versus mutable locals, unsafe block/expression versus declaration-only authorization, uninitialized/zero-payload/underaligned backing, one-past/padding and incorrect pointer access reject affected formation. Known suffix Q below/equal/above retained backing keeps inherited NativeParameter checks; no lifetime, ownership or write upgrade through copy/adaptation. |
-| Remap/replacement | Non-byte-identical struct/array/pointer/fnptr table permutations round-trip and preserve all layouts/children/contracts. Merge equivalent recipes across ordinary/set/graph inputs; preserve differing bindings. Compatible provider replacement succeeds; missing/ambiguous/wrong provider or key, N/E/access/Copy/layout/R/output/native-contract changes reject. Exercise transitive provider closure and zero-extent retained imports. |
+| Remap/replacement | Non-byte-identical struct/array/pointer/fnptr table permutations round-trip and preserve retained layouts/children/contracts. Merge equivalent recipes across ordinary/set/graph inputs; preserve differing bindings. Compatible provider replacement may change/remove unrelated metadata-only recipes; changes to retained legal contracts or actually relied-on non-array facts reject. Exercise transitive provider closure and zero-extent retained imports. |
 | Source-free/JIT/AOT/CLI | Compile scalar-export providers/consumers containing eligible flat local arrays, persist them, discard source trees, read/link/rewrite/re-emit/reload and execute actual bodies. Include dynamic nonzero indices, empty/unit arrays, mutation/readback and checked failure/order. Exercise ordinary JIT, PE/AOT and native package/set/graph routes plus their existing CLI artifact paths; inspect emission separately from supervised actual process results and preserve binding expectations. Scalar execution beside metadata-only recipes supplies no nested/nominal-zero execution evidence. |
 | Deliberate external gates | Preserve explicit rejection for unsupported wide/general nominal/generic/reference/frozen/static/call/place routes. Nested array values, ptr-to-array runtime use and non-unit zero-payload operations are excluded by the revision-100 direction above; additional backend implementation alone does not turn their negative tests into positive gates. |
 
@@ -613,15 +652,16 @@ above or change this proposal's unapproved status.
 | Remaining implementation gap | Dependency / completion condition |
 |---|---|
 | Exact operation vectors and malformed bodies | Independently assert the 17/59/42/63-byte 43–46 vectors and exercise forged malformed children, slots, spans and unsupported runtime rows. Keep writer/reader agreement separate from producer truth. |
-| Full metadata declaration closure | Exercise descriptive nominal field layouts, pointer chains and fnptr recipes with array references through reference projection, embedded Contracts, provider replacement and re-emission. Runtime uses remain excluded. |
-| Provider-origin replacement | Verify changed E/N/layout/access facts and exact provider identities through ordinary, set and graph replacements; retain compatible replacement behavior for unrelated implementation-local arrays. |
+| Role-specific metadata closure | Exercise nested array, nominal-field, pointer-chain and fnptr recipes through full module/set/graph persistence and remapping. A bodyless scalar-export projection prunes unrelated recipes; embedded Contracts retain only their legal expectations and required dependencies. No type-only export is required or inferred. |
+| Provider-origin replacement | Permit valid unrelated implementation-only array descriptions, dimensions and geometry to change or disappear. Preserve original identities/expectations for legal exports and all actually relied-on non-array facts; include an imported non-array E used by a consumer flat array, for which incompatible provider layout/Copy/origin changes still reject. |
 | Remaining CLI and native package paths | Cover CLI build/library and replacement paths in addition to the passing run/link, native set and graph executions; record final input identity and supervised process results. |
 | Broader source and Standard A2 | Complete the separate source conformance and Standard A2 producer/source-free type/body/provider/CLI routes. Private revision 100 is not evidence for Standard A2. |
 | Qualification | New independent producer/consumer/malformed fixtures and source-free execution evidence cover the final relevant compiler patch/configuration/input identities. Updating a header assertion or removing a rejection test does not discharge these gates. |
 | Outside the selected 100 scope | The source proposal's broader nested/field/nonlocal/whole-call and non-unit zero-size routes need a separately selected complete runtime/value/place direction, not enabling a latent 100 Body form. ConstEval extents, general provenance, 94–98 codecs/composition and Standard A2 adoption remain distinct. Do not silently compose them into 100. |
 
 **Remaining formal decisions:** approve candidate 100 and its exact 99-based
-composition, the flat/metadata-only operation boundary, table/operation
+composition, the flat/artifact-local metadata and role-specific projection
+boundary, table/operation
 allocation, canonical/reference rules and exact-only regeneration policy.
 The recommendation supplies all of these
 provisionally; no wire width, table position, tag meaning or historical-reader

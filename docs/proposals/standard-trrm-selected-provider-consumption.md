@@ -54,31 +54,17 @@ The [specification index](../specs/README.md) leads to these controlling owners:
 | [Modules](../specs/modules.md), [native boundaries](../specs/native.md) and [Windows x64](../specs/targets/windows-x64.md) | Semantic relowering is distinct from precompiled composition; actual native roles, target mappings, unsafe obligations and code lifetime remain required. |
 | [CLI protocol](../specs/cli-protocol.md) | Artifact selection is independent of machine-response and execution-supervision selection. The existing experimental `--json` route is not `terrum.cli/1`. |
 
-These are current source observations, not approval or qualification:
-
-| Inspected source | Relevant boundary |
-|---|---|
-| [`TrRmExecutableCompiler`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.cs), [`Standard consumer API`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.StandardConsumption.cs) | `EmitStandard`, `LoadStandard` and `CreateStandardReference` now use exact F identity input. Public `Load` and `CreateReference(byte[])` still select Development; they remain distinct routes. |
-| [`F source-free loader`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs) | The bounded loader reconstructs one direct NativeImport, one anchor and one caller Body, and binds one retained MethodDef Import to one selected F provider export. It validates multiple populated Modules of that shape, selects exact non-first root/provider identities and admits one co-located leaf provider in the root artifact. It compares the selected provider key, signature, NativeImport descriptor and complete `000E` rows before verification. Provider chains, extra dependency edges and general remapping remain unsupported. |
-| [`TrRmArtifactIndex`](../../sources/Terrum.CodeAnalysis/Modules/TrRmArtifactIndex.cs) | The public default selects Standard; explicit internal F and CopyOrigin factories select distinct schemas. The enum is not a public selection protocol. |
-| [`NativeEmitter`](../../sources/Terrum.CodeAnalysis/Native/NativeEmitter.cs) | Direct-native JIT and library emission still reject `ModuleImport`/module references without explicit module binding. The bounded Standard high-level route now consumes an internal checked plan and lowers one selected provider NativeImport into the admitted foreign import. DLL/export strings supplied to `EmitWithImports` remain no proof of provider compatibility. |
-| [`Standard native plan`](../../sources/Terrum.CodeAnalysis/Modules/TrRmStandardNativeBindingPlan.cs), [`NativeModuleCompiler`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.StandardTrRm.cs) and [`NativeJit`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.StandardTrRm.cs) | A new unapproved, provisionally actionable lowering proposal now has a bounded implementation: the plan retains artifact snapshots, exact schema and Module selections, the original root expectation, and the selected provider MethodDef origin. The public operations route to JIT or complete PE emission without private package conversion. |
-| [`TRRM commands`](../../sources/terrumc/Program.TrRmExecution.cs) and [`usage`](../../sources/terrumc/Program.cs) | `compile-trrm` retains `--trrm-schema` as a destination selector. Artifact commands accept exact F `--trrm-schema`, `--trrm-module`, and repeatable `--trrm-provider` selections; both direct-import and one-provider run/build/library routes are wired. Source compilation supplies no explicit `NativeCoreRegistration`. |
-
-Existing implementation and focused tests do not approve this surface or
-establish support beyond the recorded F subset.
-
-The current bounded implementation routes the exact selected F root/provider
-pair through the internal native binding plan, including a leaf provider
-co-located in the root artifact. The
-[native-lowering candidate](standard-trrm-provider-native-lowering.md#owners-and-inspected-boundary)
-records the latest 27-test Debug F/CLI report and distinguishes co-located
-provider JIT/AOT executable coverage from the still-bounded separate-provider
-library and broader closure evidence. Input hashes are retained at
-`artifacts\\log\\fnptr-fprofile-multimodule-colocated-final-v2-inputs.txt`.
-Provider chains, raw-output contracts, co-located library invocation and broad
-remapping remain unqualified; the report does not approve the candidate or
-complete the larger implementation plan.
+Current implementation support, test evidence and remaining gates belong in
+the [module](../implementation/modules.md),
+[native](../implementation/native.md),
+[graph](../implementation/native-graph.md),
+[CLI](../implementation/cli-protocol.md) and
+[conformance](../implementation/conformance-gaps.md) inventories. This
+proposal defines a candidate admission/binding contract; it does not treat an
+implementation slice or a passing test report as approval or as full F
+support. The
+[provider-native-lowering proposal](standard-trrm-provider-native-lowering.md)
+owns native realization, actual code/load origin and execution lifetime.
 
 ## Exact proposed public API
 
@@ -119,8 +105,9 @@ ModuleRef supplies it. No provider path, resolver callback, installed-package
 search, native DLL or private package is accepted by these APIs.
 A distinct provider Module co-located with the selected root is already part
 of `input`; do not resubmit that artifact in `providers`. The
-[native-lowering candidate](standard-trrm-provider-native-lowering.md#bounded-module-closure-and-origin)
-owns the bounded admission and checked origin handoff for that case.
+bounded admission is defined below; the
+[native-lowering candidate](standard-trrm-provider-native-lowering.md#checked-native-plan-handoff-and-origin)
+owns native realization of the checked origins.
 
 Schema tokens compare ordinally, case-sensitively and without trimming,
 normalization or parsing components. Initially these two operations support
@@ -171,6 +158,89 @@ new activation policy. Cached decisions require the same owned input,
 exact schema/catalog, selected binding closure and rule/target/runtime
 context; Module text or byte equality alone is not the cache key.
 
+## Bounded F Module closure
+
+The explicitly supplied artifacts form the entire semantic dependency input;
+there is no discovery, search path, forwarding protocol or provider package
+selection. Validate all supplied artifacts and all their Modules under each
+artifact's exact F schema, including uncalled/declaration-only edges and
+disconnected populated Modules. The root is selected only from artifact
+`input`, by its explicit Module identity. A provider Module is not executed,
+merged into the root or re-exported by being present in this closure.
+
+For the bounded callable subset, each participating populated Module has one
+noncallable, nonexported pointer anchor, one supported caller Body, and the
+following bodyless NativeImport MethodDefs:
+
+| Module role | Owned NativeImports (`O`) | Imported expectations (`I`) | Relevant MethodDef count |
+|---|---:|---:|---:|
+| Owned-direct | 1 | 0 | 3 |
+| Imported consumer | 0 | at least 1 | `I + 2` |
+| Mixed provider/consumer | 1 | at least 1 | `I + 3` |
+
+Permitted empty Modules remain subject to ordinary structural/requirement
+checks. A selected F Import must resolve to a public **Module-local owned**
+NativeImport in the exact producer Module; an imported proxy is never an
+Export target. A mixed Module may own one such declaration and retain
+expectations to other Modules. This allows finite provider dependency graphs
+without forwarding a call or re-exporting another Module's declaration.
+No TypeDef, FieldDef/data, PropertyDef, authored-method provider, generic
+callable, extra Body/anchor, root initialization schedule or general linker
+is admitted by this shape.
+
+Each caller has exactly one existing E9 NativeAddress formation, selecting
+one owned NativeImport or imported expectation through its checked
+MethodMap/Body record. Other retained Imports need not occur in its
+MethodMap/CallSites and still require complete admission. Preserve the
+existing Effects masks (`04` for NativeImport, `00` for caller and anchor),
+the F `000E` contract and each Module's governing-edition/capability closure.
+This adds no nonempty raw-output support or new Feature/catalog.
+
+Each expected MethodDef has exactly one original Import. An Import's
+ModuleRef owner must be its using Module. `I` counts retained expected
+MethodDefs, not ModuleRefs or distinct provider identities; distinct Imports
+may reuse a ModuleRef/provider, but each original expectation is checked.
+Multiple views of one expected definition, duplicate Import triples and
+unowned/unused ModuleRefs reject. Let `M` be the ModuleRef count: require
+`M=0` when `I=0`, otherwise `1<=M<=I`, and every ModuleRef is used by at least
+one Import. This selects no two-provider, 16-provider or arbitrary depth cap;
+the existing checked row/count/backend resources still apply, and capacity
+exhaustion fails instead of truncating closure.
+
+**Current lowering-name bound:** in any participating Module with more than
+one callable declaration (`O+I>1`), require ordinally distinct method names
+among those declarations and the caller; the anchor is not a callable name.
+This is an implementation admission limit caused by the present
+`RootTargetName`/`function.Name` locator, not metadata identity or a general
+source-language uniqueness rule. Do not rename/coalesce declarations to
+make a collision pass. Names may repeat across different Modules, where exact
+Module identities/Export keys keep them distinct. The single-declaration
+routes gain no new name bound.
+
+The finite Module graph may contain chains, diamonds and cycles. Check every
+edge, including uncalled edges, after the complete input directory is known.
+Reaching a previously visited Module is not success for another incoming
+expectation; memoization may reuse only the same full original/actual
+comparison pair and context. A self-edge is admissible only when a distinct
+expected Import resolves to a public owned NativeImport in that same Module;
+an imported-only Module cannot satisfy its own expectation. These are
+metadata dependency cycles, not call forwarding, recursive type identities
+or authorization for initialization/cleanup cycles.
+
+Do not introduce a provider-count, graph-depth or two-provider cap in this
+candidate. Existing checked artifact-wide row/count, Body-local map and
+backend/resource limits remain in force. A finite closure that exceeds those
+resources fails explicitly; a traversal cutoff cannot mark unvisited edges
+valid. Reuse an actual Module snapshot for repeated ModuleRefs, but retain and
+compare each original expectation separately.
+
+This closure and the distinct-name bound are still unapproved candidate
+admission choices. The two shorter
+[multiple-root](standard-trrm-multiple-root-method-imports.md) and
+[provider-closure](standard-trrm-provider-dependency-closure.md) decision
+records preserve their distinct scope/approval history; the rules above are
+the single complete implementation-facing admission owner.
+
 ## Provider identity and F binding
 
 Build one unambiguous directory from the decoded Module identities of
@@ -182,7 +252,7 @@ selected inputs and must pass admission, not merely the first matching one.
 Provider authentication remains the host/environment's responsibility.
 
 For every retained ModuleRef/Import, including co-located and declaration-only
-uses:
+uses in every Module of the supplied closure, not only the selected root:
 
 1. Resolve the exact `producerIdentity`, then its exact `exportKey` and
    required definition kind. Use metadata's ordinal decoded-scalar equality
@@ -194,6 +264,8 @@ uses:
    required owner. An imported expectation/proxy cannot be re-exported as
    that definition. Honor legal explicit export keys, including keys
    different from the MethodDef name; infer no alias or native symbol.
+   Never redirect an edge to a terminal leaf or treat a provider's own
+   ModuleRef as forwarding/re-export.
 3. Resolve complete types and contract subjects in their original using,
    owner and substitution contexts. Check **every** original expectation
    against the actual selected provider, not a union, weakest expectation
@@ -327,9 +399,13 @@ providers; test decoding, binding, emission and supervised execution separately.
 | Routing before indexing | Unknown root/provider tokens, changed case/whitespace, enum names/numbers and known unsupported composites fail preflight even with malformed bytes in another input. No default decoder is constructed or retried. |
 | Preserved routes | Existing Standard default index, Development `Load`/`CreateReference`, omitted CLI schema and explicit historical CopyOrigin fixtures keep their original interpretation. F-only records fail those selected non-F schemas; equal valid subset bytes alone cannot prove originating provenance. |
 | Actual selected provider | Root imports `P/K`; P owns an eligible NativeImport with NativeParameter or raw-output facts. Exact input selections bind and source-free execution observes the expected result. A legal key different from the method name resolves by key, not name. |
+| Bounded Module shapes | Exercise owned-direct (`O=1,I=0`), imported (`O=0,I>=1`) and mixed (`O=1,I>=1`) Modules with the exact anchor/caller/bodyless-import MethodDef counts. Empty Modules still undergo structural/requirements checks. No extra Bodies, anchors or non-MethodDef Imports are admitted. |
+| Multiple root expectations | Root retains at least two distinct MethodDef Imports while one E9/NativeAddress selects one exact expected target; an uncalled second Import is still resolved and checked. Reuse one ModuleRef or use separate rows for the same provider, retaining separate originals. Expanded multi-callable Module names obey the explicit implementation bound; equal names across Modules remain distinct. |
+| Provider-owned dependency closure | Assemble `Root -> P -> Q` with P's selected Export targeting an owned local NativeImport and P retaining an uncalled Import to Q. Check every original edge and exact provider-owned target. No re-export, forwarding or dropped edge. |
+| Diamonds, cycles and self-edge | Reuse one snapshot in a diamond; permit a finite cycle/self-edge only when every expectation resolves to a distinct public owned NativeImport as specified. Check every incoming comparison, including in-progress/visited nodes; imported-only self-binding and proxy Export reject. |
 | Missing/wrong identity | Missing P, wrong Module/key/case, two artifacts defining P, imported-proxy Export, anchor target, data import and equal-ABI non-NativeImport reject before code/image loading or execution. Equal DLL/export strings in distinct P/Q do not coalesce origins. |
 | Complete original expectations | Independently vary convention, library/entry, resolution/policy, pointer access/extent/retention, output type/state/selector/phase/dependencies and caller obligations. Reject each incompatible provider without overwriting expectations. A stronger ordinary guarantee may satisfy its directed relation but cannot erase the exact foreign protocol. |
-| Diamonds and replacement | A/B retain different valid expectations for P/K and reuse one supplied P snapshot; check both. Reject a replacement satisfying only one, address-only/uncalled mismatches and stale cached acceptance after bytes/schema/binding change. |
+| Replacement and snapshot isolation | A/B retain different valid expectations for P/K and reuse one supplied P snapshot; check both. Reject a replacement satisfying only one, address-only/uncalled mismatches and stale cached acceptance after bytes/schema/binding change. |
 | Whole artifact and Module selection | Permute Module/table rows; explicitly select the same root identity and preserve behavior. Co-located imports use the same checks as external ones. Missing root, duplicate cross-input identities, malformed uncalled records and unsupported retained Modules cannot be hidden by choosing the first row or trimming. |
 | Context and cross-schema boundaries | Independently preflight every provider schema; never inherit F. Known unsupported baseline/C/composite provider selections decline before indexing even for common bytes. Nested/imported pointer types preserve their owning contexts and per-Module requirements; mixed-schema binding is admitted only after deliberate support for every exact schema and the full relation. |
 | No semantic re-proof requirement | A structurally valid but semantically false producer promise is not a guaranteed rejection case. Mandatory tests assert structure/support/binding checks; any deeper audit is separately selected/reported and does not prove foreign code. |
