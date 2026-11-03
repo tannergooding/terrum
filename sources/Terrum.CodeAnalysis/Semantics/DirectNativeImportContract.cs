@@ -542,7 +542,7 @@ internal static class DirectNativeImportContract
             && address.ByteExtent == (ulong)elementExtent;
     }
 
-    private static bool MatchesNativeFixedArrayFieldPlace(int variable,
+    internal static bool MatchesNativeFixedArrayFieldPlace(int variable,
         BoundExpression? fieldPlace, PrimitiveType arrayType,
         BoundFunction caller, BoundProgram program, bool requireWritable)
     {

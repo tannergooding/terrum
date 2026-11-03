@@ -3754,6 +3754,137 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2EmitsAndReconstructsArrayFieldStorageAddress()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-array-field-storage-address";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(Sequential)]
+            public struct Holder {
+                public mut [int32; 2] Values;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                [int32; 2] source = [-1, 0];
+                init mut Holder holder;
+                holder.Values = source;
+                mut int32 output = holder.Values[zeroIndex];
+                uint64 byteCount = 0;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&output, &holder.Values[zeroIndex], byteCount);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(1));
+        Assert.That(tables.Fields.Count, Is.EqualTo(1));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(1));
+
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        var sawFieldSelection = false;
+        var sawElementSelection = false;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x04)
+            {
+                continue;
+            }
+
+            var payload = record[4..];
+            if (payload[0] == 2 && payload[9] == 1
+                && BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]) == 1)
+            {
+                sawFieldSelection = true;
+            }
+            else if (payload[0] == 3 && payload[9] == 3)
+            {
+                sawElementSelection = true;
+            }
+        }
+        Assert.That(sawFieldSelection, Is.True);
+        Assert.That(sawElementSelection, Is.True);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var fieldAssignments = new List<BoundFieldAssignment>();
+        var storageAddresses = new List<BoundNativeStorageAddress>();
+        Assert.That(BoundTreeTraversal.VisitStatements(loadedMain.Body,
+            statement =>
+            {
+                if (statement is BoundFieldAssignment assignment)
+                {
+                    fieldAssignments.Add(assignment);
+                }
+            }), Is.True);
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address)
+                {
+                    storageAddresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(fieldAssignments, Has.Count.EqualTo(1));
+        Assert.That(fieldAssignments[0].NestedFields, Is.Empty);
+        Assert.That(fieldAssignments[0].Value, Is.TypeOf<BoundRead>());
+        var fieldAddress = storageAddresses.Single(address =>
+            NativeFixedArrayTypes.IsType(address.CarrierType));
+        Assert.That(fieldAddress.FieldPlace, Is.TypeOf<BoundFieldRead>());
+        Assert.That(fieldAddress.ElementType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(fieldAddress.Projections, Is.Empty);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(-1));
+    }
+
+    [Test]
     public void StandardA2EmitsAndReconstructsNestedArrayInitialization()
     {
         const string schemaIdentity
@@ -4392,7 +4523,6 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
-
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, schemaIdentity, 1);
         var malformedPointerStore = ReplaceA2PointerStoreType(artifact);

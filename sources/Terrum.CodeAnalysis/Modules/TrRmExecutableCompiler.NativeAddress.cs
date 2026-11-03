@@ -72,8 +72,34 @@ public static partial class TrRmExecutableCompiler
                 program, moduleIdentity, schema, sourceTypeExports);
         }
 
+        if (!program.Structures.IsEmpty)
+        {
+            if (schema is not (
+                    TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
+                || program.Structures.Any(static structure =>
+                    structure.StandardTypeOrigin is not null
+                    || structure.BlittableTargetRequirement
+                        != FixedLayoutStorage.WindowsX64TargetRequirement
+                    || structure.LayoutKind is not (1 or 2 or 3)
+                    || structure.CleanupMethod is not null
+                    || structure.IsUnique
+                    || structure.Fields.IsDefaultOrEmpty))
+            {
+                throw Unsupported(
+                    "The A2 NativeAddress producer requires local Blittable Copy structs without Cleanup.");
+            }
+
+            ValidateA2SourceTypeDeclarationMap(program);
+            _ = FixedLayoutStorage.Validate(program.Structures,
+                program.NativeFixedArrayTypes);
+        }
+
         if (program.Functions.Length < 2
-            || !program.Structures.IsEmpty || !program.Classes.IsEmpty
+            || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty || !program.NativeUtf16ZLiterals.IsEmpty
             || !program.NativeUtf8ZLiterals.IsEmpty || program.RequiresSourceGrant
             || program.InvocationProfileId is not null
@@ -270,6 +296,16 @@ public static partial class TrRmExecutableCompiler
         var fixedArrayLayoutRows = new List<TrRmFixedArrayLayoutRow>();
         a3LayoutResourceLedger?.ConsumeWork();
         var fixedArrayLayoutRowByType = new Dictionary<int, int>();
+        var typeDefCount = program.Structures.Length;
+        var structureTypeDefRows = new Dictionary<int, int>(
+            typeDefCount);
+        for (var structureIndex = 0; structureIndex < typeDefCount;
+            structureIndex++)
+        {
+            structureTypeDefRows.Add(structureIndex,
+                structureIndex + 1);
+        }
+        var typeDefTypeSpecRows = new Dictionary<int, int>();
         uint GetFixedArrayTypeSpecRef(int arrayIndex)
         {
             if ((uint)arrayIndex
@@ -337,6 +373,25 @@ public static partial class TrRmExecutableCompiler
             }
 
             byte[] typeSpecBytes;
+            var structureIndex = (int)type - 100;
+            if (structureTypeDefRows.TryGetValue(structureIndex,
+                    out var typeDefRow))
+            {
+                if (!typeDefTypeSpecRows.TryGetValue(typeDefRow,
+                        out var row))
+                {
+                    row = typeSpecRows.Count + 1;
+                    typeSpecRows.Add(
+                        TrRmTypeSpecTableWriter.Reference(0x02,
+                            checked((uint)typeDefRow)));
+                    typeDefTypeSpecRows.Add(typeDefRow, row);
+                }
+
+                typeSpecRef = checked((uint)row);
+                signatureTypeSpecRefs.Add(type, typeSpecRef);
+                return typeSpecRef;
+            }
+
             if (NativePointerTypes.IsType(type))
             {
                 a3LayoutResourceLedger?.ConsumeWork();
@@ -371,7 +426,9 @@ public static partial class TrRmExecutableCompiler
                     else if (NativePointerTypes.IsType(
                                 pointer.PointeeType)
                         || NativeFixedArrayTypes.IsType(
-                            pointer.PointeeType))
+                            pointer.PointeeType)
+                        || structureTypeDefRows.ContainsKey(
+                            (int)pointer.PointeeType - 100))
                     {
                         var pointeeTypeSpecRef
                             = GetSignatureTypeSpecRef(pointer.PointeeType);
@@ -502,7 +559,9 @@ public static partial class TrRmExecutableCompiler
         var anchorSignatureRow = functionSignatureRows[targetIndex];
         ReserveA3Collection(a3LayoutResourceLedger, 0);
         var featureRows = new List<TrRmFeatureRow>();
-        if (fixedArrayLayoutRows.Count != 0)
+        if (fixedArrayLayoutRows.Count != 0
+            || program.Structures.Any(static structure =>
+                !structure.IsUnique))
         {
             a3LayoutResourceLedger?.ConsumeWork();
             featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
@@ -566,6 +625,74 @@ public static partial class TrRmExecutableCompiler
         }
         var anchorNameRow = AddString(
             CreateAnchorName(program.Functions, a3LayoutResourceLedger), 1);
+        var typeDefRows = new List<TrRmTypeDefRow>(typeDefCount);
+        var fieldRows = new List<TrRmFieldDefRow>();
+        var layoutRows = new List<TrRmLayoutRow>(typeDefCount * 2);
+        var layoutFieldRows = new List<TrRmLayoutFieldRow>();
+        var fieldFirstByStructure = new int[typeDefCount];
+        for (var structureIndex = 0; structureIndex < typeDefCount;
+            structureIndex++)
+        {
+            var structure = program.Structures[structureIndex];
+            var separator = structure.Name.LastIndexOf('.',
+                StringComparison.Ordinal);
+            var typeNamespace = separator < 0
+                ? "" : structure.Name[..separator];
+            var typeName = separator < 0
+                ? structure.Name : structure.Name[(separator + 1)..];
+            if (typeName.Length == 0)
+            {
+                throw Unsupported(
+                    $"A2 TypeDef identity '{structure.Name}' is invalid.");
+            }
+
+            var firstField = structure.Fields.IsEmpty
+                ? 0 : fieldRows.Count + 1;
+            fieldFirstByStructure[structureIndex] = firstField;
+            foreach (var field in structure.Fields)
+            {
+                a3LayoutResourceLedger?.ConsumeWork();
+                var fieldTypeSpecRef
+                    = GetSignatureTypeSpecRef(field.Type);
+                var visibility = field.IsPrivate ? 0u
+                    : field.IsInternal ? 1u : 2u;
+                var fieldFlags = visibility
+                    | (field.IsMutable ? 4u : 0u);
+                fieldRows.Add(new TrRmFieldDefRow(structureIndex + 1,
+                    AddString(field.Name, 0), fieldTypeSpecRef, fieldFlags));
+            }
+
+            var firstLayout = layoutRows.Count + 1;
+            var pack = structure.LayoutKind is 1 or 2 ? 16u : 0u;
+            for (var variant = 0; variant < 2; variant++)
+            {
+                var layoutRow = layoutRows.Count + 1;
+                var firstLayoutField = structure.Fields.IsEmpty
+                    ? 0 : layoutFieldRows.Count + 1;
+                layoutRows.Add(new TrRmLayoutRow(structureIndex + 1,
+                    variant == 0 ? 0u : 1u, structure.LayoutKind,
+                    variant == 0 ? (byte)0 : (byte)1,
+                    0, pack, firstLayoutField,
+                    structure.Fields.Length));
+                for (var field = 0; field < structure.Fields.Length;
+                    field++)
+                {
+                    layoutFieldRows.Add(new TrRmLayoutFieldRow(layoutRow,
+                        field, firstField + field));
+                }
+            }
+
+            var typeVisibility = structure.IsPrivate ? 0u
+                : structure.IsInternal ? 1u : 2u;
+            var typeFlags = typeVisibility | 4u
+                | (structure.IsUnique
+                    ? 0u : TrRmTypeDefTableReader.DeclaredCopyFlag);
+            typeDefRows.Add(new TrRmTypeDefRow(
+                AddString(typeNamespace, 0), AddString(typeName, 0),
+                typeFlags, firstField, structure.Fields.Length,
+                0, 0, firstLayout, 2, 0, 0));
+        }
+
         ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
             sizeof(int));
         var nativeImportLibraryNameRows = new int[program.Functions.Length];
@@ -622,11 +749,11 @@ public static partial class TrRmExecutableCompiler
                 1, featureRows.Count, 1),
         };
         var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows,
-            strings, moduleRefRows.Count, 0,
+            strings, moduleRefRows.Count, typeDefCount,
             program.Functions.Length + 1, 0, featureRows.Count,
             a3LayoutResourceLedger);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            moduleRefRows.Count, 0, program.Functions.Length + 1, 0,
+            moduleRefRows.Count, typeDefCount, program.Functions.Length + 1, 0,
             featureRows.Count, a3LayoutResourceLedger);
         var moduleRefBytes = moduleRefRows.Count == 0
             ? []
@@ -638,11 +765,11 @@ public static partial class TrRmExecutableCompiler
                 moduleRefRows.Count, strings, modules,
                 a3LayoutResourceLedger);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
-            0, 0, 0, 0, schema,
+            typeDefCount, 0, 0, 0, schema,
             methodDefCount: program.Functions.Length + 1,
             resourceLedger: a3LayoutResourceLedger);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
-            typeSpecRows.Count, 0, 0, 0, 0, schema,
+            typeSpecRows.Count, typeDefCount, 0, 0, 0, schema,
             methodDefCount: program.Functions.Length + 1,
             resourceLedger: a3LayoutResourceLedger);
         var signatureBytes = TrRmMethodSigTableWriter.Encode(signatureRows,
@@ -742,9 +869,19 @@ public static partial class TrRmExecutableCompiler
                 a3LayoutResourceLedger);
         }
 
-        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
-            0, 0, 0, contractRows.Count, schema,
-            a3LayoutResourceLedger);
+        var typeDefBytes = typeDefCount == 0 ? []
+            : TrRmTypeDefTableWriter.Encode(typeDefRows, strings, modules,
+                fieldRows.Count, 0, layoutRows.Count, contractRows.Count,
+                schema);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
+            strings, modules, fieldRows.Count, 0, layoutRows.Count,
+            contractRows.Count, schema, a3LayoutResourceLedger);
+        var fieldBytes = fieldRows.Count == 0 ? []
+            : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs,
+                typeSpecs);
+        var fields = fieldRows.Count == 0 ? default
+            : new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
+                strings, typeDefs, typeSpecs, a3LayoutResourceLedger);
         ReserveA3Collection(a3LayoutResourceLedger,
             program.Functions.Length + 1);
         var methodRows = new List<TrRmMethodDefRow>(program.Functions.Length + 1);
@@ -815,6 +952,7 @@ public static partial class TrRmExecutableCompiler
             typeSpecs, 0, featureReader, modules,
             schema, resourceLedger: a3LayoutResourceLedger);
         var targetProfileBytes = fixedArrayLayoutRows.Count == 0
+            && typeDefCount == 0
             ? []
             : TrRmTargetProfileTableWriter.Encode([
                 new TrRmTargetProfileRow(
@@ -823,12 +961,24 @@ public static partial class TrRmExecutableCompiler
                         .WindowsX64NativeProfileRuleRevision),
             ], schema, a3LayoutResourceLedger);
         var targetProfiles = fixedArrayLayoutRows.Count == 0
+            && typeDefCount == 0
             ? new TrRmTargetProfileTableReader([], 0, schema,
                 a3LayoutResourceLedger)
             : new TrRmTargetProfileTableReader(targetProfileBytes, 1, schema,
                 a3LayoutResourceLedger);
-        var layouts = new TrRmLayoutTableReader([], 0, typeDefs,
-            targetProfiles, 0, a3LayoutResourceLedger);
+        var layoutBytes = layoutRows.Count == 0 ? []
+            : TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
+                targetProfiles, layoutFieldRows.Count);
+        var layouts = new TrRmLayoutTableReader(layoutBytes,
+            layoutRows.Count, typeDefs, targetProfiles,
+            layoutFieldRows.Count, a3LayoutResourceLedger);
+        var layoutFieldBytes = layoutFieldRows.Count == 0 ? []
+            : TrRmLayoutFieldTableWriter.Encode(layoutFieldRows, layouts,
+                typeDefs, fields);
+        var layoutFields = layoutFieldRows.Count == 0 ? default
+            : new TrRmLayoutFieldTableReader(layoutFieldBytes,
+                layoutFieldRows.Count, layouts, typeDefs, fields,
+                a3LayoutResourceLedger);
         ReserveA3Collection(a3LayoutResourceLedger,
             nativeImportFunctionIndices.Count);
         var nativeImportRows = new List<TrRmNativeImportRow>(
@@ -1143,7 +1293,7 @@ public static partial class TrRmExecutableCompiler
             body = EncodeForeignInvocationStorageAddressBody(caller,
                 program, storageCall, signature, maps, targetMethodMapToken,
                 contractRows.Count, GetSignatureTypeSpecRef,
-                fixedArrayLayoutRowByType, schema,
+                fixedArrayLayoutRowByType, fieldFirstByStructure, schema,
                 scalarValues, a3LayoutResourceLedger);
         }
         else
@@ -1343,7 +1493,7 @@ public static partial class TrRmExecutableCompiler
             = scalarValueTables is TrRmFrozenScalarValueTables {
                 ConstantSourceCount: > 0,
             };
-        if ((storageCall?.UsesScalarFrozenValues == true) != hasScalarValues)
+        if (storageCall?.UsesScalarFrozenValues == true != hasScalarValues)
         {
             throw new InvalidOperationException(
                 "The A2EU+SF1 constant plan differs from its emitted value tables.");
@@ -1381,6 +1531,27 @@ public static partial class TrRmExecutableCompiler
         AddA3Staged(sections, new TrRmSection(0x0011, 0,
             (uint)typeSpecRows.Count, typeSpecBytes),
             a3LayoutResourceLedger);
+        if (typeDefCount != 0)
+        {
+            AddA3Staged(sections, new TrRmSection(0x0013, 0,
+                (uint)typeDefCount, typeDefBytes), a3LayoutResourceLedger);
+        }
+        if (fieldRows.Count != 0)
+        {
+            AddA3Staged(sections, new TrRmSection(0x0014, 0,
+                (uint)fieldRows.Count, fieldBytes), a3LayoutResourceLedger);
+        }
+        if (layoutRows.Count != 0)
+        {
+            AddA3Staged(sections, new TrRmSection(0x0015, 0,
+                (uint)layoutRows.Count, layoutBytes), a3LayoutResourceLedger);
+        }
+        if (layoutFieldRows.Count != 0)
+        {
+            AddA3Staged(sections, new TrRmSection(0x0023, 0,
+                (uint)layoutFieldRows.Count, layoutFieldBytes),
+                a3LayoutResourceLedger);
+        }
         AddA3Staged(sections, new TrRmSection(0x0016, 0,
             (uint)methodRows.Count, methodBytes), a3LayoutResourceLedger);
         AddA3Staged(sections, new TrRmSection(0x0017, 0,
@@ -1426,6 +1597,9 @@ public static partial class TrRmExecutableCompiler
             AddA3Staged(sections, new TrRmSection(0x0012, 0,
                 (uint)fixedArrayLayoutRows.Count, fixedArrayLayoutBytes),
                 a3LayoutResourceLedger);
+        }
+        if (fixedArrayLayoutRows.Count != 0 || typeDefCount != 0)
+        {
             AddA3Staged(sections,
                 new TrRmSection(0x0048, 0, 1, targetProfileBytes),
                 a3LayoutResourceLedger);
@@ -1798,7 +1972,8 @@ public static partial class TrRmExecutableCompiler
 
         bool IsSupportedStorageCallStatement(BoundStatement statement)
         {
-            return statement is BoundLocal or BoundVacantLocal or BoundIf
+            return statement is BoundLocal or BoundVacantLocal
+                or BoundFieldAssignment or BoundIf
                 or BoundExpressionStatement
                     { Expression: BoundCall }
                 or BoundExpressionStatement
@@ -1828,10 +2003,34 @@ public static partial class TrRmExecutableCompiler
         var localVariables = new HashSet<int>();
         foreach (var declaration in localDeclarations)
         {
+            if (!AddA3Staged(localVariables, declaration.Variable,
+                    resourceLedger))
+            {
+                return false;
+            }
+        }
+
+        var fieldArrayInitializationVariables = new HashSet<int>();
+        if (!BoundTreeTraversal.VisitStatements(function.Body, statement =>
+                {
+                    if (statement is BoundFieldAssignment fieldAssignment
+                        && IsSupportedNativeFixedArrayFieldCopyAssignment(
+                            fieldAssignment, function, program))
+                    {
+                        _ = AddA3Staged(
+                            fieldArrayInitializationVariables,
+                            fieldAssignment.Variable, resourceLedger);
+                    }
+                }))
+        {
+            return false;
+        }
+
+        foreach (var declaration in localDeclarations)
+        {
             if (declaration.Variable < function.ParameterCount
                 || declaration.Variable >= function.Variables.Length
-                || !AddA3Staged(localVariables, declaration.Variable,
-                    resourceLedger))
+                || !localVariables.Contains(declaration.Variable))
             {
                 return false;
             }
@@ -1846,13 +2045,17 @@ public static partial class TrRmExecutableCompiler
 
             if (declaration.IsVacant)
             {
-                if (!NativeFixedArrayTypes.IsType(variable.Type)
-                    || !nullaryArrayInitializationVariables.Contains(
+                var isEmptyArrayLocal = NativeFixedArrayTypes.IsType(
+                        variable.Type)
+                    && nullaryArrayInitializationVariables.Contains(
                         declaration.Variable)
-                    || !NativeFixedArrayContract.TryGetLayout(variable.Type,
+                    && NativeFixedArrayContract.TryGetLayout(variable.Type,
                         program.Structures, program.NativeFixedArrayTypes,
                         out var emptyArrayLayout)
-                    || emptyArrayLayout.ElementCount != 0)
+                    && emptyArrayLayout.ElementCount == 0;
+                var isArrayFieldOwner = fieldArrayInitializationVariables
+                    .Contains(declaration.Variable);
+                if (!isEmptyArrayLocal && !isArrayFieldOwner)
                 {
                     return false;
                 }
@@ -1963,6 +2166,12 @@ public static partial class TrRmExecutableCompiler
             {
                 return false;
             }
+            if (statement is BoundFieldAssignment fieldAssignment
+                && !IsSupportedNativeFixedArrayFieldCopyAssignment(
+                    fieldAssignment, function, program))
+            {
+                return false;
+            }
         }
 
         if (returnRead.Variable < function.ParameterCount
@@ -2005,7 +2214,7 @@ public static partial class TrRmExecutableCompiler
                 if (isFixedArray && !isSupportedStorageType)
                 {
                     throw Unsupported(
-                    "Debug: the A2 nested address path failed its storage profile.");
+                        "The A2 array storage address is outside the supported call profile.");
                 }
 
                 if (nativeParameter is null
@@ -2013,7 +2222,7 @@ public static partial class TrRmExecutableCompiler
                     storageAddress, nativeParameter, function, program))
                 {
                     throw Unsupported(
-                    "Debug: the A2 storage address failed its NativeParameter contract.");
+                        "The A2 storage address does not match its NativeParameter contract.");
                 }
                 if (storageAddress.Variable < function.ParameterCount
                     || !localVariables.Contains(storageAddress.Variable)
@@ -2417,6 +2626,10 @@ public static partial class TrRmExecutableCompiler
                     || IsSupportedNativeFixedArrayCopyAssignment(
                         assignment, function, program);
 
+            case BoundFieldAssignment fieldAssignment:
+                return IsSupportedNativeFixedArrayFieldCopyAssignment(
+                    fieldAssignment, function, program);
+
             case BoundExpressionStatement
                 { Expression: BoundCall call }:
                 return call.Type == PrimitiveType.Void
@@ -2441,7 +2654,7 @@ public static partial class TrRmExecutableCompiler
         {
             if (!AddUnitInitializerStatement(statement))
             {
-            return false;
+                return false;
             }
         }
 
@@ -2517,8 +2730,10 @@ public static partial class TrRmExecutableCompiler
     {
         if (!NativeFixedArrayTypes.IsType(address.CarrierType)
             || (uint)address.Variable >= (uint)caller.Variables.Length
-            || caller.Variables[address.Variable].Type
-                != address.CarrierType
+            || (address.FieldPlace is null
+                ? caller.Variables[address.Variable].Type
+                    != address.CarrierType
+                : address.FieldPlace.Type != address.CarrierType)
             || address.Variable < caller.ParameterCount
             || !localVariables.Contains(address.Variable)
             || !NativeFixedArrayContract.TryGetLayout(
@@ -2617,14 +2832,21 @@ public static partial class TrRmExecutableCompiler
         int variable;
         PrimitiveType elementType;
         ImmutableArray<BoundNativeFixedArrayProjection> projections;
+        BoundExpression? fieldPlace;
         switch (expression)
         {
             case BoundNativeFixedArrayElement element:
                 variable = element.Variable;
                 elementType = element.Layout.ElementType;
-                projections = [];
+                fieldPlace = element.FieldPlace;
                 if (!NativeFixedArrayContract.MatchesType(
                         element.Layout.CarrierType, element.Layout, program)
+                    || (fieldPlace is not null
+                        && !DirectNativeImportContract
+                            .MatchesNativeFixedArrayFieldPlace(variable,
+                                fieldPlace,
+                                element.Layout.CarrierType, caller, program,
+                                requireWritable: false))
                     || !IsSupportedNativeAddressStorageIndex(element.Index,
                         caller, localVariables))
                 {
@@ -2636,13 +2858,21 @@ public static partial class TrRmExecutableCompiler
                 variable = pathElement.Variable;
                 elementType = pathElement.Type;
                 projections = pathElement.Projections;
+                fieldPlace = pathElement.FieldPlace;
+                var rootArrayType = fieldPlace?.Type
+                    ?? ((uint)variable < (uint)caller.Variables.Length
+                        ? caller.Variables[variable].Type
+                        : PrimitiveType.Int32);
                 if (projections.IsDefaultOrEmpty
                     || !NativeFixedArrayContract.MatchesPath(
-                        (uint)variable < (uint)caller.Variables.Length
-                            ? caller.Variables[variable].Type
-                            : PrimitiveType.Int32,
+                        rootArrayType,
                         projections, program, out _, out var leafLayout)
-                    || leafLayout.ElementType != pathElement.Type)
+                    || leafLayout.ElementType != pathElement.Type
+                    || (fieldPlace is not null
+                        && !DirectNativeImportContract
+                            .MatchesNativeFixedArrayFieldPlace(variable,
+                                fieldPlace, rootArrayType, caller, program,
+                                requireWritable: false)))
                 {
                     return false;
                 }
@@ -2664,9 +2894,11 @@ public static partial class TrRmExecutableCompiler
         return (uint)variable < (uint)caller.Variables.Length
             && variable >= caller.ParameterCount
             && localVariables.Contains(variable)
-            && !caller.Variables[variable].IsInitializationLocal
-            && NativeFixedArrayTypes.IsType(
-                caller.Variables[variable].Type)
+            && (!caller.Variables[variable].IsInitializationLocal
+                || fieldPlace is not null)
+            && (fieldPlace is not null
+                || NativeFixedArrayTypes.IsType(
+                    caller.Variables[variable].Type))
             && IsSupportedNativeAddressValueType(elementType);
     }
 
@@ -2850,6 +3082,74 @@ public static partial class TrRmExecutableCompiler
                 == function.Variables[arrayRead.Variable].Type
             && NativeFixedArrayContract.TryGetLayout(arrayRead.Type,
                 program.Structures, program.NativeFixedArrayTypes, out _);
+
+    private static bool IsSupportedNativeFixedArrayFieldCopyAssignment(
+        BoundFieldAssignment assignment, BoundFunction function,
+        BoundProgram program)
+    {
+        if ((uint)assignment.Variable >= (uint)function.Variables.Length
+            || assignment.Variable < function.ParameterCount
+            || !function.Variables[assignment.Variable].IsMutable
+            || !function.Variables[assignment.Variable].IsInitializationLocal
+            || assignment.Value is not BoundRead sourceRead
+            || (uint)sourceRead.Variable >= (uint)function.Variables.Length
+            || sourceRead.Variable < function.ParameterCount
+            || !NativeFixedArrayTypes.IsType(sourceRead.Type)
+            || sourceRead.Type != function.Variables[sourceRead.Variable].Type
+            || !NativeFixedArrayContract.TryGetLayout(sourceRead.Type,
+                program.Structures, program.NativeFixedArrayTypes, out _))
+        {
+            return false;
+        }
+
+        var fieldCount = checked(assignment.NestedFields.Length + 1);
+        if (fieldCount > SemanticVerifier.MaximumDepth)
+        {
+            return false;
+        }
+
+        var currentType = function.Variables[assignment.Variable].Type;
+        for (var fieldOrdinal = 0; fieldOrdinal < fieldCount; fieldOrdinal++)
+        {
+            var structureIndex = (int)currentType - 100;
+            if (ManagedClassTypes.IsClass(currentType)
+                || BoundEnumTypes.IsType(currentType)
+                || structureIndex < 0
+                || structureIndex >= program.Structures.Length)
+            {
+                return false;
+            }
+
+            var structure = program.Structures[structureIndex];
+            if (structure.IsUnique || structure.CleanupMethod is not null)
+            {
+                return false;
+            }
+
+            var fieldIndex = fieldOrdinal == 0
+                ? assignment.Field
+                : assignment.NestedFields[fieldOrdinal - 1];
+            if ((uint)fieldIndex >= (uint)structure.Fields.Length)
+            {
+                return false;
+            }
+
+            var field = structure.Fields[fieldIndex];
+            if (!field.IsMutable)
+            {
+                return false;
+            }
+
+            if (fieldOrdinal == fieldCount - 1)
+            {
+                return field.Type == sourceRead.Type;
+            }
+
+            currentType = field.Type;
+        }
+
+        return false;
+    }
 
     private static int GetBoundCallParameterIndex(BoundCall call,
         int argumentIndex)
@@ -3315,6 +3615,7 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyMaps maps, uint targetMethodMapToken,
         int contractCount, Func<PrimitiveType, uint> getSignatureTypeSpecRef,
         Dictionary<int, int> fixedArrayLayoutRowByType,
+        int[] fieldFirstByStructure,
         TrRmArtifactSchema schema,
         TrRmFrozenScalarValueBuilder? scalarValues,
         TrRmA3LayoutResourceLedger? resourceLedger)
@@ -3867,6 +4168,10 @@ public static partial class TrRmExecutableCompiler
                 BoundAssignment assignment
                     when IsSupportedA2EEmptyArrayInitialization(
                         assignment, caller, program, schema, out _) => 2,
+                BoundFieldAssignment fieldAssignment
+                    when IsSupportedNativeFixedArrayFieldCopyAssignment(
+                        fieldAssignment, caller, program)
+                    => checked(fieldAssignment.NestedFields.Length + 2),
                 BoundBlock block => CountNestedArrayInitializationRecords(
                     block.Statements),
                 BoundUnsafe unsafeBlock
@@ -4124,6 +4429,92 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var accessKind = address.IsReadonly ? (byte)1 : (byte)2;
+                var selectedArrayBaseKind = (byte)2;
+                var selectedArrayBaseIndex = rootHome;
+                if (address.FieldPlace is { } arrayFieldPlace)
+                {
+                    var fieldPath = new List<BoundFieldRead>();
+                    var rootPlace = arrayFieldPlace;
+                    while (rootPlace is BoundFieldRead fieldRead)
+                    {
+                        fieldPath.Add(fieldRead);
+                        rootPlace = fieldRead.Receiver;
+                    }
+
+                    if (fieldPath.Count == 0
+                        || rootPlace is not BoundRead rootRead
+                        || rootRead.Variable != address.Variable
+                        || rootRead.Type != caller.Variables[
+                            address.Variable].Type)
+                    {
+                        throw Unsupported(
+                            "The A2 field-rooted storage address has no exact local FieldDef path.");
+                    }
+
+                    fieldPath.Reverse();
+                    var previousFieldRegister = -1;
+                    for (var fieldOrdinal = 0;
+                        fieldOrdinal < fieldPath.Count; fieldOrdinal++)
+                    {
+                        var selectedField = fieldPath[fieldOrdinal];
+                        var ownerIndex = (int)selectedField.Receiver.Type - 100;
+                        if ((uint)ownerIndex
+                                >= (uint)fieldFirstByStructure.Length
+                            || fieldFirstByStructure[ownerIndex] <= 0
+                            || selectedField.Field < 0
+                            || (uint)selectedField.Field
+                                >= (uint)program.Structures[ownerIndex]
+                                    .Fields.Length)
+                        {
+                            throw Unsupported(
+                                "The A2 field-rooted storage address has an invalid FieldDef identity.");
+                        }
+
+                        var fieldDefRow = checked(
+                            fieldFirstByStructure[ownerIndex]
+                            + selectedField.Field);
+                        var destinationRegister = checked(
+                            (byte)(fieldOrdinal % 2));
+                        var baseKind = fieldOrdinal == 0
+                            ? (byte)2 : (byte)1;
+                        var baseIndex = fieldOrdinal == 0
+                            ? rootHome : (fieldOrdinal - 1) % 2;
+                        if (fieldDefRow is <= 0 or > 0xFF_FFFF
+                            || baseIndex < 0
+                            || (uint)baseIndex > ushort.MaxValue)
+                        {
+                            throw Unsupported(
+                                "The A2 field-rooted address exceeds a PlaceSelection index domain.");
+                        }
+
+                        var fieldSelectionIndex
+                            = checked((ushort)records.Count);
+                        records.Add(
+                            TrRmRegisterBodyRecordWriter
+                                .EncodePlaceSelection(
+                                    targetKind: 2, accessKind: accessKind,
+                                    destinationKind: 1, baseKind: baseKind,
+                                    destinationIndex: destinationRegister,
+                                    baseIndex: checked((ushort)baseIndex),
+                                    indexKind: 0, targetRefKind: 1,
+                                    indexIndex: 0,
+                                    targetRef: checked((uint)fieldDefRow),
+                                    referentTypeMapIndex: maps.GetTypeMapIndex(
+                                        CreateStandardBodyTypeMapToken(
+                                            getSignatureTypeSpecRef(
+                                                selectedField.Type))),
+                                    schema, resourceLedger));
+                        code.Add(0xD8);
+                        code.Add(destinationRegister);
+                        code.Add(unchecked((byte)fieldSelectionIndex));
+                        code.Add((byte)(fieldSelectionIndex >> 8));
+                        previousFieldRegister = destinationRegister;
+                    }
+
+                    selectedArrayBaseKind = 1;
+                    selectedArrayBaseIndex = previousFieldRegister;
+                }
+
                 var previousRegister = -1;
                 for (var projectionIndex = 0;
                     projectionIndex < projections.Length; projectionIndex++)
@@ -4173,9 +4564,11 @@ public static partial class TrRmExecutableCompiler
 
                     var destinationRegister
                         = checked((byte)(projectionIndex % 2));
-                    var baseKind = projectionIndex == 0 ? (byte)2 : (byte)1;
+                    var baseKind = projectionIndex == 0
+                        ? selectedArrayBaseKind : (byte)1;
                     var baseIndex = projectionIndex == 0
-                        ? rootHome : (projectionIndex - 1) % 2;
+                        ? selectedArrayBaseIndex
+                        : (projectionIndex - 1) % 2;
                     if (baseIndex < 0 || (uint)baseIndex > ushort.MaxValue)
                     {
                         throw Unsupported(
@@ -5038,17 +5431,30 @@ public static partial class TrRmExecutableCompiler
             };
             var projections = expression switch {
                 BoundNativeFixedArrayElement element =>
-                    ImmutableArray.Create(
-                        new BoundNativeFixedArrayProjection(element.Layout,
-                            element.Index)),
+                    [new BoundNativeFixedArrayProjection(element.Layout,
+                        element.Index)],
                 BoundNativeFixedArrayPathElement pathElement =>
                     pathElement.Projections,
                 _ => [],
             };
+            var fieldPlace = expression switch {
+                BoundNativeFixedArrayElement element => element.FieldPlace,
+                BoundNativeFixedArrayPathElement pathElement =>
+                    pathElement.FieldPlace,
+                _ => null,
+            };
+            var rootArrayType = fieldPlace?.Type
+                ?? ((uint)variable < (uint)caller.Variables.Length
+                    ? caller.Variables[variable].Type
+                    : PrimitiveType.Int32);
             if ((uint)variable >= (uint)caller.Variables.Length
                 || variable < caller.ParameterCount
-                || !NativeFixedArrayTypes.IsType(
-                    caller.Variables[variable].Type)
+                || !NativeFixedArrayTypes.IsType(rootArrayType)
+                || (fieldPlace is not null
+                    && !DirectNativeImportContract
+                        .MatchesNativeFixedArrayFieldPlace(variable,
+                            fieldPlace, rootArrayType, caller, program,
+                            requireWritable: false))
                 || homeIndexByVariable[variable] < 0
                 || projections.IsDefaultOrEmpty
                 || projections.Length > SemanticVerifier.MaximumDepth
@@ -5062,7 +5468,7 @@ public static partial class TrRmExecutableCompiler
             {
                 if (expression is not BoundNativeFixedArrayElement element
                     || element.Layout.CarrierType
-                        != caller.Variables[variable].Type
+                        != rootArrayType
                     || !NativeFixedArrayContract.MatchesLayout(
                         element.Layout, program)
                     || element.Layout.ElementType != expression.Type
@@ -5076,7 +5482,7 @@ public static partial class TrRmExecutableCompiler
             else if (expression
                         is not BoundNativeFixedArrayPathElement pathElement
                     || !NativeFixedArrayContract.MatchesPath(
-                        caller.Variables[variable].Type, projections,
+                            rootArrayType, projections,
                         program, out _, out var leafLayout)
                     || pathElement.Type != leafLayout.ElementType
                     || !IsSupportedNativeAddressValueType(
@@ -5087,6 +5493,87 @@ public static partial class TrRmExecutableCompiler
             }
 
             var rootHome = homeIndexByVariable[variable];
+            var firstArrayBaseKind = (byte)2;
+            var firstArrayBaseIndex = rootHome;
+            if (fieldPlace is not null)
+            {
+                var fieldPath = new List<BoundFieldRead>();
+                var rootPlace = fieldPlace;
+                while (rootPlace is BoundFieldRead fieldRead)
+                {
+                    fieldPath.Add(fieldRead);
+                    rootPlace = fieldRead.Receiver;
+                }
+
+                if (fieldPath.Count == 0
+                    || rootPlace is not BoundRead rootRead
+                    || rootRead.Variable != variable
+                    || rootRead.Type != caller.Variables[variable].Type)
+                {
+                    throw Unsupported(
+                        "The A2 field-backed array read has no exact FieldDef path.");
+                }
+
+                fieldPath.Reverse();
+                var previousFieldRegister = -1;
+                for (var fieldOrdinal = 0;
+                    fieldOrdinal < fieldPath.Count; fieldOrdinal++)
+                {
+                    var selectedField = fieldPath[fieldOrdinal];
+                    var ownerIndex = (int)selectedField.Receiver.Type - 100;
+                    if ((uint)ownerIndex
+                            >= (uint)fieldFirstByStructure.Length
+                        || fieldFirstByStructure[ownerIndex] <= 0
+                        || (uint)selectedField.Field
+                            >= (uint)program.Structures[ownerIndex]
+                                .Fields.Length)
+                    {
+                        throw Unsupported(
+                            "The A2 field-backed array read has an invalid FieldDef identity.");
+                    }
+
+                    var fieldDefRow = checked(fieldFirstByStructure[
+                        ownerIndex] + selectedField.Field);
+                    var destinationRegister = checked(
+                        (byte)(fieldOrdinal % 2));
+                    var baseKind = fieldOrdinal == 0
+                        ? (byte)2 : (byte)1;
+                    var baseIndex = fieldOrdinal == 0
+                        ? rootHome : (fieldOrdinal - 1) % 2;
+                    if (fieldDefRow is <= 0 or > 0xFF_FFFF
+                        || baseIndex < 0
+                        || (uint)baseIndex > ushort.MaxValue)
+                    {
+                        throw Unsupported(
+                            "The A2 field-backed array read exceeds a PlaceSelection index domain.");
+                    }
+
+                    var fieldSelectionIndex
+                        = checked((ushort)records.Count);
+                    records.Add(
+                        TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                            targetKind: 2, accessKind: 1,
+                            destinationKind: 1, baseKind: baseKind,
+                            destinationIndex: destinationRegister,
+                            baseIndex: checked((ushort)baseIndex),
+                            indexKind: 0, targetRefKind: 1, indexIndex: 0,
+                            targetRef: checked((uint)fieldDefRow),
+                            referentTypeMapIndex: maps.GetTypeMapIndex(
+                                CreateStandardBodyTypeMapToken(
+                                    getSignatureTypeSpecRef(
+                                        selectedField.Type))),
+                            schema, resourceLedger));
+                    code.Add(0xD8);
+                    code.Add(destinationRegister);
+                    code.Add(unchecked((byte)fieldSelectionIndex));
+                    code.Add((byte)(fieldSelectionIndex >> 8));
+                    previousFieldRegister = destinationRegister;
+                }
+
+                firstArrayBaseKind = 1;
+                firstArrayBaseIndex = previousFieldRegister;
+            }
+
             for (var projectionIndex = 0;
                 projectionIndex < projections.Length; projectionIndex++)
             {
@@ -5118,9 +5605,11 @@ public static partial class TrRmExecutableCompiler
 
                 var destinationRegister
                     = checked((byte)(projectionIndex % 2));
-                var baseKind = projectionIndex == 0 ? (byte)2 : (byte)1;
+                var baseKind = projectionIndex == 0
+                    ? firstArrayBaseKind : (byte)1;
                 var baseIndex = projectionIndex == 0
-                    ? rootHome : (projectionIndex - 1) % 2;
+                    ? firstArrayBaseIndex
+                    : (projectionIndex - 1) % 2;
                 var placeSelectionIndex = checked((ushort)records.Count);
                 records.Add(
                     TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
@@ -5703,6 +6192,99 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        void AppendNativeFixedArrayFieldCopy(
+            BoundFieldAssignment assignment)
+        {
+            if (!IsSupportedNativeFixedArrayFieldCopyAssignment(assignment,
+                    caller, program)
+                || assignment.Value is not BoundRead sourceRead)
+            {
+                throw Unsupported(
+                    "The A2 field copy is outside the local fixed-array field profile.");
+            }
+
+            var rootHome = homeIndexByVariable[assignment.Variable];
+            var sourceHome = homeIndexByVariable[sourceRead.Variable];
+            if (rootHome < 0 || sourceHome < 0)
+            {
+                throw Unsupported(
+                    "The A2 field copy has no root or initialized array Home.");
+            }
+
+            var fieldCount = checked(assignment.NestedFields.Length + 1);
+            var ownerType = caller.Variables[assignment.Variable].Type;
+            var previousRegister = -1;
+            for (var depth = 0; depth < fieldCount; depth++)
+            {
+                var structureIndex = (int)ownerType - 100;
+                var fieldIndex = depth == 0
+                    ? assignment.Field
+                    : assignment.NestedFields[depth - 1];
+                if ((uint)structureIndex
+                        >= (uint)program.Structures.Length
+                    || (uint)structureIndex >= (uint)fieldFirstByStructure.Length
+                    || fieldFirstByStructure[structureIndex] <= 0
+                    || (uint)fieldIndex
+                        >= (uint)program.Structures[structureIndex]
+                            .Fields.Length)
+                {
+                    throw Unsupported(
+                        "The A2 field copy has no exact FieldDef path.");
+                }
+
+                var field = program.Structures[structureIndex]
+                    .Fields[fieldIndex];
+                var fieldDefRow = checked(fieldFirstByStructure[
+                    structureIndex] + fieldIndex);
+                var destinationRegister = checked((byte)(depth % 2));
+                var baseKind = depth == 0 ? (byte)2 : (byte)1;
+                var baseIndex = depth == 0
+                    ? rootHome : (depth - 1) % 2;
+                if (fieldDefRow is <= 0 or > 0xFF_FFFF
+                    || baseIndex < 0
+                    || (uint)baseIndex > ushort.MaxValue)
+                {
+                    throw Unsupported(
+                        "The A2 field copy exceeds a PlaceSelection index domain.");
+                }
+
+                var fieldSelectionIndex = checked((ushort)records.Count);
+                records.Add(
+                    TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                        targetKind: 2, accessKind: 3, destinationKind: 1,
+                        baseKind: baseKind, destinationIndex: destinationRegister,
+                        baseIndex: checked((ushort)baseIndex), indexKind: 0,
+                        targetRefKind: 1, indexIndex: 0,
+                        targetRef: checked((uint)fieldDefRow),
+                        referentTypeMapIndex: maps.GetTypeMapIndex(
+                            CreateStandardBodyTypeMapToken(
+                                getSignatureTypeSpecRef(field.Type))),
+                        schema, resourceLedger));
+                AppendRecordPlaceSelectionInstruction(code,
+                    fieldSelectionIndex, destinationRegister);
+                previousRegister = destinationRegister;
+                ownerType = field.Type;
+            }
+
+            if (previousRegister < 0
+                || ownerType != sourceRead.Type
+                || !NativeFixedArrayTypes.IsType(ownerType))
+            {
+                throw Unsupported(
+                    "The A2 field copy source differs from its fixed-array FieldDef.");
+            }
+
+            var storeIndex = checked((ushort)records.Count);
+            records.Add(TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                placeKind: 1, sourceKind: 2, transition: 1, sourceUse: 1,
+                placeIndex: checked((ushort)previousRegister),
+                sourceIndex: checked((ushort)sourceHome)));
+            code.Add(0xD9);
+            code.Add(0);
+            code.Add(unchecked((byte)storeIndex));
+            code.Add((byte)(storeIndex >> 8));
+        }
+
         int AppendBranchPlaceholder()
         {
             code.Add(0xE3);
@@ -5756,6 +6338,10 @@ public static partial class TrRmExecutableCompiler
 
                     AppendHomeLoad(code, 0, sourceArrayHome);
                     AppendHomeStore(code, 0, targetArrayHome);
+                    break;
+
+                case BoundFieldAssignment fieldAssignment:
+                    AppendNativeFixedArrayFieldCopy(fieldAssignment);
                     break;
 
                 case BoundLocal local:

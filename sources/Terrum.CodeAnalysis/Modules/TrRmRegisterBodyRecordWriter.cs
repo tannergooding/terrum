@@ -220,8 +220,9 @@ internal static class TrRmRegisterBodyRecordWriter
         byte sourceKind, byte transition, byte sourceUse, ushort placeIndex,
         ushort sourceIndex)
     {
-        if (placeKind != 1 || sourceKind != 1 || transition != 1
-            || sourceUse != 1 || placeIndex > 13 || sourceIndex > 15)
+        if (placeKind != 1 || sourceKind is not (1 or 2)
+            || transition != 1 || sourceUse != 1 || placeIndex > 13
+            || (sourceKind == 1 && sourceIndex > 15))
         {
             throw new ArgumentOutOfRangeException(nameof(placeKind));
         }

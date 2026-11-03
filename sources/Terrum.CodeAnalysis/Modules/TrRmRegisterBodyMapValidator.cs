@@ -2057,8 +2057,9 @@ internal static class TrRmRegisterBodyMapValidator
             }
             else if (body.Schema
                 .UsesForeignInvocationStorageFixedArrays()
-                && ReadByte(body, store, 1) == 1
-                && ReadUInt16(body, store, 6) < 14)
+                && ReadByte(body, store, 1) is 1 or 2
+                && (ReadByte(body, store, 1) == 2
+                    || ReadUInt16(body, store, 6) < 14))
             {
                 ValidateArrayElementValueStore(body, store,
                     registerTypes, typeSpecs);
@@ -3228,12 +3229,15 @@ internal static class TrRmRegisterBodyMapValidator
     {
         var placeIndex = ReadUInt16(body, payload, 4);
         var sourceIndex = ReadUInt16(body, payload, 6);
+        var sourceKind = ReadByte(body, payload, 1);
         if (payload.Length != 16
             || ReadByte(body, payload, 0) != 1
-            || ReadByte(body, payload, 1) != 1
+            || sourceKind is not (1 or 2)
             || ReadByte(body, payload, 2) != 1
             || ReadByte(body, payload, 3) != 1
-            || placeIndex > 13 || sourceIndex > 13
+            || placeIndex > 13
+            || (sourceKind == 1
+                ? sourceIndex > 13 : sourceIndex >= body.HomeCount)
             || ReadUInt32(body, payload, 8) != 0
             || ReadByte(body, payload, 12) != 0
             || ReadByte(body, payload, 13) != 0
@@ -3243,21 +3247,50 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         var place = GetRegisterTypeState(body, registerTypes, placeIndex);
-        var source = GetRegisterTypeState(body, registerTypes, sourceIndex);
         if (!place.IsPlaceHandle || place.AccessKind != 3
             || place.PlaceOrigins.Length == 0
-            || place.PlaceSelectionRecordIndex < 0
-            || source.IsPlaceHandle)
+            || place.PlaceSelectionRecordIndex < 0)
         {
             throw InvalidMap();
         }
 
         var placeTypeSpecRef = GetRegisterTypeSpecRef(body, place);
-        var sourceTypeSpecRef = GetRegisterTypeSpecRef(body, source);
         var selection = GetRecordPayload(body,
             place.PlaceSelectionRecordIndex);
         var selectedTypeSpecRef = GetTypeMapTypeSpecRef(body,
             ReadUInt16(body, selection, 16));
+        if (sourceKind == 2)
+        {
+            var sourceHome = GetHomeMapEntry(body, sourceIndex);
+            var sourceHomeTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                ReadUInt16(body, sourceHome, 2));
+            var sourceType = typeSpecs.GetTypeSpecRef(
+                sourceHomeTypeSpecRef);
+            if (ReadByte(body, selection, 0) != 2
+                || ReadByte(body, selection, 1) != 3
+                || ReadByte(body, selection, 2) != 1
+                || ReadByte(body, selection, 9) != 1
+                || ReadByte(body, sourceHome, 0) != 3
+                || !sourceType.IsRow || sourceType.Form != 0x11
+                || !typeSpecs.TryGetFixedInlineArray(
+                    checked((uint)sourceType.Row), out _, out _)
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    selectedTypeSpecRef, placeTypeSpecRef)
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    sourceHomeTypeSpecRef, placeTypeSpecRef))
+            {
+                throw InvalidMap();
+            }
+
+            return;
+        }
+
+        var source = GetRegisterTypeState(body, registerTypes, sourceIndex);
+        if (source.IsPlaceHandle)
+        {
+            throw InvalidMap();
+        }
+        var sourceTypeSpecRef = GetRegisterTypeSpecRef(body, source);
         var isScalar = TrRmNativeImportTypeContract.TryGetScalarType(
                 typeSpecs, placeTypeSpecRef, out var elementType)
             && DirectNativeImportContract.IsScalar(elementType);
