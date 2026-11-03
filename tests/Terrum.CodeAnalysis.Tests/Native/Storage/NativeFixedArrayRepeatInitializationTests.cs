@@ -14,6 +14,9 @@ namespace Terrum.CodeAnalysis.Tests.Native.Storage;
     Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class NativeFixedArrayRepeatInitializationTests
 {
+    private static readonly int[] s_twoCopyOriginOrdinals = [0, 1];
+    private static readonly int[] s_singleCopyOriginOrdinal = [1];
+
     [Test]
     public void RepeatedSeedPreservesFlatAndNestedHighIndexCoverage()
     {
@@ -784,19 +787,19 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         Assert.That(select.CopyOriginSummary!.Facts, Has.Length.EqualTo(1));
         Assert.That(select.CopyOriginSummary.Facts[0].Origins
             .Select(static origin => origin.SourceOrdinal),
-            Is.EquivalentTo(new[] { 0, 1 }));
+            Is.EquivalentTo(s_twoCopyOriginOrdinals));
         var selectKnown = compilation.Program.Functions.Single(
             static function => function.Name == "SelectKnown");
         Assert.That(selectKnown.CopyOriginSummary, Is.Not.Null);
         Assert.That(selectKnown.CopyOriginSummary!.Facts[0].Origins
             .Select(static origin => origin.SourceOrdinal),
-            Is.EqualTo(new[] { 1 }));
+            Is.EqualTo(s_singleCopyOriginOrdinal));
         var selectExplicit = compilation.Program.Functions.Single(
             static function => function.Name == "SelectExplicit");
         Assert.That(selectExplicit.CopyOriginSummary, Is.Not.Null);
         Assert.That(selectExplicit.CopyOriginSummary!.Facts[0].Origins
             .Select(static origin => origin.SourceOrdinal),
-            Is.EqualTo(new[] { 1 }));
+            Is.EqualTo(s_singleCopyOriginOrdinal));
         Assert.That(NativeJit.Execute(compilation.Program!,
             NativeRuntimePolicy.FailFast), Is.EqualTo(24));
     }
@@ -928,28 +931,31 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
     [Test]
     public void FieldWriteInvalidatesOverlappingUnionPointerProvenance()
     {
-        static string CreateSource(string alternativeWrite) => $$"""
-            [Blittable]
-            [Layout(LayoutKind.Union)]
-            public struct PointerOrWide {
-                public mut write ptr<uint32> Pointer;
-                public mut uint64 Wide;
-                public PointerOrWide(write ptr<uint32> pointer) {
-                    unsafe { Pointer = pointer; }
+        static string CreateSource(string alternativeWrite)
+        {
+            return $$"""
+                [Blittable]
+                [Layout(LayoutKind.Union)]
+                public struct PointerOrWide {
+                    public mut write ptr<uint32> Pointer;
+                    public mut uint64 Wide;
+                    public PointerOrWide(write ptr<uint32> pointer) {
+                        unsafe { Pointer = pointer; }
+                    }
                 }
-            }
 
-            int32 Main() {
-                mut uint32 data = 42;
-                unsafe {
-                    mut PointerOrWide seed
-                        = new PointerOrWide(&data);
-                    mut [PointerOrWide; 2] values = [seed; 2];
-                    {{alternativeWrite}}
-                    return int32(*values[1].Pointer);
+                int32 Main() {
+                    mut uint32 data = 42;
+                    unsafe {
+                        mut PointerOrWide seed
+                            = new PointerOrWide(&data);
+                        mut [PointerOrWide; 2] values = [seed; 2];
+                        {{alternativeWrite}}
+                        return int32(*values[1].Pointer);
+                    }
                 }
-            }
-            """;
+                """;
+        }
 
         var preserved = Compilation.Create(
             SyntaxTree.Parse(CreateSource(string.Empty)),

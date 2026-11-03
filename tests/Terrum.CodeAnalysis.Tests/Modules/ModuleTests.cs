@@ -190,37 +190,37 @@ public sealed class ModuleTests
         var oldRepeatVersion = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             oldRepeatVersion.AsSpan(sizeof(int)), 101);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(oldRepeatVersion));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(oldRepeatVersion))!;
         var unknownRepeatVersion = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             unknownRepeatVersion.AsSpan(sizeof(int)), 103);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(unknownRepeatVersion));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownRepeatVersion))!;
         var repeatAsFieldPath = (byte[])producer.Clone();
         repeatAsFieldPath[firstRepeatOffset] = 48;
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(repeatAsFieldPath));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(repeatAsFieldPath))!;
         var unknownRepeatTag = (byte[])producer.Clone();
         unknownRepeatTag[firstRepeatOffset] = 49;
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(unknownRepeatTag));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownRepeatTag))!;
         var wrongSeedType = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             wrongSeedType.AsSpan(firstRepeatOffset + 14),
             (int)PrimitiveType.Int32);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(wrongSeedType));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(wrongSeedType))!;
         var wrongArrayType = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             wrongArrayType.AsSpan(firstRepeatOffset + 1),
             (int)PrimitiveType.UInt32);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(wrongArrayType));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(wrongArrayType))!;
         var truncatedRepeat = producer.AsSpan(0,
             firstRepeatOffset + 33).ToArray();
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(truncatedRepeat));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(truncatedRepeat))!;
     }
 
     [Test]
@@ -310,74 +310,74 @@ public sealed class ModuleTests
         var wrongVersion = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             wrongVersion.AsSpan(sizeof(int)), 101);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(wrongVersion));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(wrongVersion))!;
         var unknownVersion = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             unknownVersion.AsSpan(sizeof(int)), 103);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(unknownVersion));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownVersion))!;
 
         var missingField = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             missingField.AsSpan(expressionOffset + 46), 0);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(missingField));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(missingField))!;
 
         var invalidField = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             invalidField.AsSpan(expressionOffset + 50), 99);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(invalidField));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidField))!;
 
         var noProjections = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             noProjections.AsSpan(expressionOffset + 17), 0);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(noProjections));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(noProjections))!;
 
         var tooManyFields = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             tooManyFields.AsSpan(expressionOffset + 46), 128);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(tooManyFields));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(tooManyFields))!;
 
         var tooManyProjections = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             tooManyProjections.AsSpan(expressionOffset + 17), 128);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(tooManyProjections));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(tooManyProjections))!;
 
         var invalidArrayType = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             invalidArrayType.AsSpan(expressionOffset + 21),
             (int)PrimitiveType.UInt32);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(invalidArrayType));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidArrayType))!;
         var invalidRoot = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             invalidRoot.AsSpan(expressionOffset + 13), -1);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(invalidRoot));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidRoot))!;
 
         var mismatchedValueType = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             mismatchedValueType.AsSpan(expressionOffset + 55),
             (int)PrimitiveType.Int32);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(mismatchedValueType));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(mismatchedValueType))!;
         var repeatAsFieldPath = (byte[])producer.Clone();
         repeatAsFieldPath[expressionOffset] = 47;
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(repeatAsFieldPath));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(repeatAsFieldPath))!;
         var unknownFieldPathTag = (byte[])producer.Clone();
         unknownFieldPathTag[expressionOffset] = 49;
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(unknownFieldPathTag));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(unknownFieldPathTag))!;
         var truncatedFieldPath = producer.AsSpan(0,
             expressionOffset + 74).ToArray();
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(truncatedFieldPath));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(truncatedFieldPath))!;
 
         var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse("""
@@ -477,14 +477,14 @@ public sealed class ModuleTests
         var invalidRoot = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             invalidRoot.AsSpan(expressionOffset + 13), -1);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(invalidRoot));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(invalidRoot))!;
 
         var immutableRoot = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             immutableRoot.AsSpan(expressionOffset + 13), readonlyVariable);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(immutableRoot));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(immutableRoot))!;
 
         var zeroLengthSelection = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
@@ -493,8 +493,8 @@ public sealed class ModuleTests
         BinaryPrimitives.WriteInt32LittleEndian(
             zeroLengthSelection.AsSpan(expressionOffset + 21),
             (int)emptyType);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(zeroLengthSelection));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(zeroLengthSelection))!;
 
         BoundUnsafe? pathWriteUnsafeScope = null;
         Assert.That(BoundTreeTraversal.VisitStatements(function.Body,
@@ -524,8 +524,8 @@ public sealed class ModuleTests
         Assert.That(pathWriteUnsafeScope, Is.Not.Null);
         var withoutPathWriteUnsafeScope = RemovePrivateUnsafeWrapper(
             producer, pathWriteUnsafeScope!);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(withoutPathWriteUnsafeScope));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(withoutPathWriteUnsafeScope))!;
     }
 
     [Test]
@@ -591,14 +591,14 @@ public sealed class ModuleTests
         BinaryPrimitives.WriteInt32LittleEndian(
             discontinuousProjection.AsSpan(expressionOffset + 46),
             (int)pathWrite.Projections[0].Layout.CarrierType);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(discontinuousProjection));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(discontinuousProjection))!;
 
         var discontinuousFieldOwner = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             discontinuousFieldOwner.AsSpan(expressionOffset + 75), 1);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(discontinuousFieldOwner));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(discontinuousFieldOwner))!;
     }
 
     [Test]
@@ -704,8 +704,8 @@ public sealed class ModuleTests
 
         var oversizedArtifact = new byte[(4 * 1024 * 1024) + 1];
         producer.AsSpan().CopyTo(oversizedArtifact);
-        Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateReference(oversizedArtifact));
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(oversizedArtifact))!;
     }
 
     [Test]
@@ -717,9 +717,9 @@ public sealed class ModuleTests
                 SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.Throws<ModuleContractException>(() =>
+            _ = Assert.Throws<ModuleContractException>(() =>
                 ModuleCompiler.CreateProducer(compilation.Program!,
-                    ["PrivateFieldPathOperation"]));
+                    ["PrivateFieldPathOperation"]))!;
         }
 
         AssertPrivateRejection("""
