@@ -320,6 +320,66 @@ public sealed class NativeFixedArrayStorageTests
     }
 
     [Test]
+    public void LargeRawUnionArrayGeometryUsesU64WithoutElementExpansion()
+    {
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            public struct Sparse {
+                public uint8 First;
+                public uint32 Last;
+                public Sparse(uint8 first, uint32 last) {
+                    First = first;
+                    Last = last;
+                }
+            }
+
+            [Blittable] [Layout(Union)]
+            public struct RawWord {
+                public mut uint64 Wide;
+                public mut Sparse Padded;
+                public RawWord(uint64 value) {
+                    unsafe { Wide = value; }
+                }
+            }
+
+            public uint64 Value() { return 0; }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var rawWordIndex = Enumerable.Range(0,
+            program.Structures.Length).Single(index =>
+                program.Structures[index].Name == "RawWord");
+        var rawWordType = (PrimitiveType)(100 + rawWordIndex);
+        var arrays
+            = new System.Collections.Generic.List<BoundNativeFixedArrayType>();
+
+        Assert.That(NativeFixedArrayContract.TryCreateType(rawWordType,
+            5_000_000_000UL, program.Structures, arrays, out var innerType,
+            out var innerLayout), Is.True);
+        Assert.That(innerLayout.ElementStride, Is.EqualTo(8));
+        Assert.That(innerLayout.ByteExtent, Is.EqualTo(40_000_000_000UL));
+        Assert.That(NativeFixedArrayContract.TryCreateType(innerType, 1000,
+            program.Structures, arrays, out _, out var outerLayout), Is.True);
+        Assert.That(outerLayout.ElementStride,
+            Is.EqualTo(40_000_000_000UL));
+        Assert.That(outerLayout.ByteExtent,
+            Is.EqualTo(40_000_000_000_000UL));
+        Assert.That(NativeFixedArrayContract.IsValidTable(program.Structures,
+            arrays), Is.True);
+
+        var overflowingArrays
+            = new System.Collections.Generic.List<BoundNativeFixedArrayType>();
+        Assert.That(NativeFixedArrayContract.TryCreateType(rawWordType,
+            ulong.MaxValue, program.Structures, overflowingArrays, out _, out _),
+            Is.False);
+        Assert.That(overflowingArrays, Is.Empty);
+    }
+
+    [Test]
     public void FixedArrayFieldPlaceBindsOnAnInitializedLocalCopyAggregate()
     {
         const string source = """
