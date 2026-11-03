@@ -611,6 +611,50 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
     }
 
     [Test]
+    public void FieldWritePreservesPostRhsPointerSiblings()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public mut uint32 Tag;
+                public unsafe PointerHolder(ptr<uint32> value, uint32 tag) {
+                    unsafe { Value = value; }
+                    Tag = tag;
+                }
+            }
+
+            uint32 ChangeIndex(write ref<int32> index) {
+                *index = 0;
+                return uint32(99);
+            }
+
+            int32 Main() {
+                unsafe {
+                    mut [uint32; 3] values = [10, 20, 30];
+                    mut [PointerHolder; 2] holders = [
+                        new PointerHolder(&values[0], uint32(10)),
+                        new PointerHolder(&values[2], uint32(20))];
+                    mut int32 index = 1;
+                    holders[index++].Tag = ChangeIndex(ref index);
+                    return int32(*holders[0].Value)
+                        + int32(*holders[1].Value) * 100
+                        + int32(holders[1].Tag)
+                        + index;
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(3109));
+    }
+
+    [Test]
     public void FieldPointerReplacementTransfersBackingToTheSelectedElement()
     {
         Assume.That(OperatingSystem.IsWindows()
