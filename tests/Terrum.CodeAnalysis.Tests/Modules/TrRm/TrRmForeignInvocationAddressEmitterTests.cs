@@ -138,6 +138,131 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task A2R1RepeatRoundTripsCapturedArrayFieldRootWrites()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2r1-repeat-array-field-root-write";
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct Word {
+                public mut uint8 Low;
+                public mut uint32 Wide;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [Word; 2] Values;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<uint32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                init mut Word seed;
+                unsafe { seed.Wide = uint32(0x11223344); }
+                init mut Holder holder;
+                holder.Values = [seed; 2];
+                mut int32 observedWide = 0;
+                mut uint64 selectedIndex = 1;
+                uint64 byteCount = 4;
+                unsafe {
+                    holder.Values[selectedIndex].Low = uint8(0xAA);
+                    uint32 source = holder.Values[selectedIndex].Wide;
+                    var callback = &RtlMoveMemory;
+                    callback(&observedWide, &source, byteCount);
+                }
+                return observedWide;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, A2R1RepeatInitializationSchemaIdentity, 1);
+        AssertA2R1RepeatBodyRecords(artifact, moduleIdentity,
+            expectedRepeatCopies: 1);
+        var input = new TrRmStandardArtifactInput(
+            A2R1RepeatInitializationSchemaIdentity, artifact);
+        foreach (var fieldSelectionIndex in new[] { 0, 1 })
+        {
+            var malformedFieldWrite = RewriteA2BodyArtifact(artifact,
+                "Main", (_, _, records, _) =>
+                {
+                    var writableFieldSelections = records.Where(
+                        static record => record.Length == 24
+                            && record[0] == 0x04
+                            && record[4] == 2 && record[5] == 2)
+                        .ToArray();
+                    Assert.That(writableFieldSelections,
+                        Has.Length.EqualTo(2));
+                    writableFieldSelections[fieldSelectionIndex][5] = 1;
+                }, isRepeatInitialization: true);
+            _ = Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(
+                        A2R1RepeatInitializationSchemaIdentity,
+                        malformedFieldWrite), moduleIdentity, []))!;
+        }
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, A2R1RepeatInitializationSchemaIdentity, 1),
+            Is.EqualTo(artifact));
+
+        BoundNativeFixedArrayPathWrite? fieldWrite = null;
+        var loadedMain = loaded.Functions.Single(
+            static function => function.Name == "Main");
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayPathWrite write)
+                {
+                    fieldWrite = write;
+                }
+            }), Is.True);
+        Assert.That(fieldWrite, Is.Not.Null);
+        Assert.That(fieldWrite!.FieldPlace, Is.Not.Null);
+        Assert.That(fieldWrite.Projections, Has.Length.EqualTo(1));
+        Assert.That(fieldWrite.LeafFields, Has.Length.EqualTo(1));
+
+        var jitResult = NativeJit.Execute(loaded,
+            NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2R1+Repeat field-root source-free JIT: target=WindowsX64; policy=FailFast; schema={A2R1RepeatInitializationSchemaIdentity}; module={moduleIdentity}; expected=0x112233AA; actual=0x{jitResult:X}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={typeof(TrRmExecutableCompiler).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(TrRmExecutableCompiler).Assembly.Location)))}.");
+        Assert.That(jitResult, Is.EqualTo(0x112233AA));
+
+        var sourceImage = NativeEmitter.EmitWithNativeImports(program,
+            NativeRuntimePolicy.FailFast);
+        await AssertNativeImageExitCodeAsync(sourceImage,
+            $"{moduleIdentity}-source", 0x112233AA).ConfigureAwait(true);
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        Assert.That(image, Is.Not.Empty);
+        await AssertNativeImageExitCodeAsync(image, moduleIdentity,
+            0x112233AA).ConfigureAwait(true);
+    }
+
+    [Test]
     public async Task A2R1RepeatRoundTripsNestedCapturedArrayFieldWrites()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -6689,7 +6814,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
     [TestCase(2, 1)]
     [TestCase(3, 2)]
-    public async Task PrivateRevision101AddressOnlyBackingRoundTripsAndExecutes(
+    public async Task PrivateRevision102AddressOnlyBackingRoundTripsAndExecutes(
         int dimensionCount, int ancestorCount)
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -6704,7 +6829,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var producer = ModuleCompiler.CreateProducer(
             libraryCompilation.Program!, ["Exercise"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(101));
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(102));
         var addressOffset = FindPrivateStorageAddressWithAncestorCount(
             producer, ancestorCount);
         var excessiveAncestorCount = producer.ToArray();
@@ -6815,7 +6940,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             linked with { EntryPoint = -1 }, ["Exercise"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
             reemittedProducer.AsSpan(sizeof(int), sizeof(int))),
-            Is.EqualTo(101));
+            Is.EqualTo(102));
         _ = FindPrivateStorageAddressWithAncestorCount(reemittedProducer,
             ancestorCount);
 
@@ -6867,7 +6992,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101NestedTypeClosureDepth64Executes()
+    public async Task PrivateRevision102NestedTypeClosureDepth64Executes()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -6902,7 +7027,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101NestedTypeClosureDepth65Executes()
+    public async Task PrivateRevision102NestedTypeClosureDepth65Executes()
     {
         var compilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(CreateDeepPrivateNestedAddressSource(65)),
@@ -7281,7 +7406,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
     [TestCase("return values[1][1];")]
     [TestCase("values[1][1] = 77; return values[1][1];")]
-    public void PrivateRevision101StillRejectsNestedArrayValueOperations(
+    public void PrivateRevision102StillRejectsNestedArrayValueOperations(
         string operations)
     {
         var source = $$"""
@@ -7302,7 +7427,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public void PrivateRevision101DoesNotTreatWriteAsNestedBackingInitialization()
+    public void PrivateRevision102DoesNotTreatWriteAsNestedBackingInitialization()
     {
         const string source = """
             [Terrum.Interop.NativeImport("example.dll", "WriteValue")]
@@ -7375,7 +7500,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101AddressOnlyBackingSurvivesNativePackageSet()
+    public async Task PrivateRevision102AddressOnlyBackingSurvivesNativePackageSet()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7423,7 +7548,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101AddressOnlyBackingSurvivesGraphPackage()
+    public async Task PrivateRevision102AddressOnlyBackingSurvivesGraphPackage()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7480,7 +7605,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101NestedConstructionFailurePreventsAddressUse()
+    public async Task PrivateRevision102NestedConstructionFailurePreventsAddressUse()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7538,7 +7663,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101NestedBoundsFailurePreventsNativeCall()
+    public async Task PrivateRevision102NestedBoundsFailurePreventsNativeCall()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7595,7 +7720,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101NestedSuffixFailurePreventsNativeCall()
+    public async Task PrivateRevision102NestedSuffixFailurePreventsNativeCall()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7652,7 +7777,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101EffectfulNestedIndicesExecuteOnceInPathOrder()
+    public async Task PrivateRevision102EffectfulNestedIndicesExecuteOnceInPathOrder()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7710,7 +7835,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101ReadOnlyNestedBackingExecutes()
+    public async Task PrivateRevision102ReadOnlyNestedBackingExecutes()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7765,7 +7890,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101NestedInitializerEffectsRunOnceInOrder()
+    public async Task PrivateRevision102NestedInitializerEffectsRunOnceInOrder()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -7843,7 +7968,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101LaterArgumentFailureSuppressesNativeCall()
+    public async Task PrivateRevision102LaterArgumentFailureSuppressesNativeCall()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
