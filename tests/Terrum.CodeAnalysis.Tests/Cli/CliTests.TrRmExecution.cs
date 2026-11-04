@@ -420,6 +420,60 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task RunTrRmExecutesNestedNativeParameterSuffixCasesInChildWorkerAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string a2euSchema
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string a2euScalarFrozenValuesSchema
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        var cases = new[] {
+            (Name: "q2-positive", Schema: a2euScalarFrozenValuesSchema,
+                Extent: 2u, CounterObserved: false, ExpectedExitCode: -1),
+            (Name: "q3-positive", Schema: a2euSchema,
+                Extent: 3u, CounterObserved: true, ExpectedExitCode: 0xFFFF),
+            (Name: "q4-short-suffix", Schema: a2euSchema,
+                Extent: 4u, CounterObserved: true,
+                ExpectedExitCode: unchecked((int)0xE0540004)),
+        };
+        foreach (var testCase in cases)
+        {
+            var moduleIdentity = $"a2-{testCase.Name}-cli-worker";
+            var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+                $"trrm-{testCase.Name}-{Guid.NewGuid():N}.trrm");
+            try
+            {
+                var input = TrRmForeignInvocationAddressEmitterTests
+                    .CreateA2NestedArrayReadbackInput(moduleIdentity,
+                        0, 0, 1, out _, effectfulIndices: true,
+                        counterObservedIndexUpdates:
+                            testCase.CounterObserved,
+                        nativeParameterExtent: testCase.Extent,
+                        schemaIdentityOverride: testCase.Schema);
+                Assert.That(input.SchemaIdentity,
+                    Is.EqualTo(testCase.Schema));
+                await File.WriteAllBytesAsync(artifactPath,
+                    input.Artifact.ToArray()).ConfigureAwait(true);
+
+                var (exit, output, error) = await RunAsync([], "run-trrm",
+                    artifactPath, "--runtime", "fail-fast", "--trrm-schema",
+                    testCase.Schema, "--trrm-module", moduleIdentity, "--json")
+                    .ConfigureAwait(true);
+                Assert.That(exit, Is.EqualTo(testCase.ExpectedExitCode),
+                    $"{testCase.Name}: {output}{Environment.NewLine}{error}");
+                Assert.That(output, Is.Empty);
+                Assert.That(error, Is.Empty);
+            }
+            finally
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(artifactPath)
+                    .ConfigureAwait(true);
+            }
+        }
+    }
+
+    [Test]
     public async Task RegisterExceptionRegionsStandardProfileRunsAndBuildsScalarBodiesAsync()
     {
         const string schemaIdentity
