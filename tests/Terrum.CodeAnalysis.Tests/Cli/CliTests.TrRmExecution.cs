@@ -762,6 +762,72 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task RunAndBuildTrRmRejectMalformedA2ArtifactBeforeReplacingOutputAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        const string moduleIdentity = "a2-malformed-cli-input";
+        var input = TrRmForeignInvocationAddressEmitterTests
+            .CreateA2NestedArrayReadbackInput(moduleIdentity,
+                0, 0, 1, out _, effectfulIndices: true,
+                nativeParameterExtent: 2,
+                schemaIdentityOverride: schemaIdentity);
+        var malformedArtifact = input.Artifact.ToArray();
+        malformedArtifact[0] ^= 0xFF;
+        var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-a2-malformed-{Guid.NewGuid():N}.trrm");
+        var outputPath = Path.ChangeExtension(artifactPath, ".exe");
+        byte[] retainedOutput = [0xA5, 0x5A, 0xC3, 0x3C];
+        try
+        {
+            await File.WriteAllBytesAsync(artifactPath, malformedArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(outputPath, retainedOutput)
+                .ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                artifactPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", moduleIdentity, "--json")
+                .ConfigureAwait(true);
+            Assert.That(ran, Is.EqualTo(1));
+            Assert.That(runError, Is.Empty);
+            using (var runResult = JsonDocument.Parse(runOutput))
+            {
+                Assert.That(runResult.RootElement
+                    .GetProperty("success").GetBoolean(), Is.False);
+                Assert.That(runResult.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            }
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", artifactPath, "-o", outputPath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity, "--trrm-module",
+                moduleIdentity, "--json").ConfigureAwait(true);
+            Assert.That(built, Is.EqualTo(1));
+            Assert.That(buildError, Is.Empty);
+            using (var buildResult = JsonDocument.Parse(buildOutput))
+            {
+                Assert.That(buildResult.RootElement
+                    .GetProperty("success").GetBoolean(), Is.False);
+                Assert.That(buildResult.RootElement
+                    .GetProperty("diagnostics")[0].GetProperty("code")
+                    .GetString(), Is.EqualTo("TRM5001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(outputPath)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(artifactPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(outputPath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task RegisterExceptionRegionsStandardProfileRunsAndBuildsScalarBodiesAsync()
     {
         const string schemaIdentity
