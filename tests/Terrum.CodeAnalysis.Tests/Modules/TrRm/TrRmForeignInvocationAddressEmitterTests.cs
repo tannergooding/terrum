@@ -8437,6 +8437,46 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task StandardA2SourceFreeTransfersFromTwoElementNativeParameterSuffix()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2-two-element-native-parameter-suffix";
+        var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
+            0, 0, 1, out var source, effectfulIndices: true,
+            nativeParameterExtent: 2,
+            schemaIdentityOverride:
+                "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1");
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundNativeStorageAddress? selectedAddress = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress {
+                    Projections.Length: 3,
+                } address)
+                {
+                    selectedAddress = address;
+                }
+            }), Is.True);
+        Assert.That(selectedAddress, Is.Not.Null);
+        Assert.That((selectedAddress!.ElementCount,
+            selectedAddress.ElementStride, selectedAddress.ByteExtent),
+            Is.EqualTo((4UL, 4UL, 8UL)));
+        Assert.That(selectedAddress.Projections.All(static projection =>
+            projection.Index is BoundUpdate), Is.True);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, input.SchemaIdentity, 1),
+            Is.EqualTo(input.Artifact.ToArray()));
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            input, source, -1, "two-element nested NativeParameter suffix")
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public async Task StandardA2NestedAddressIndexesExecuteOnceInSourceOrder()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -8804,10 +8844,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             bool counterObservedIndexUpdates = false,
             PrimitiveType unsignedIndexType = PrimitiveType.UInt64,
             SourceArithmeticProfile arithmeticProfile
-                = SourceArithmeticProfile.Development)
+                = SourceArithmeticProfile.Development,
+            uint nativeParameterExtent = 1,
+            string? schemaIdentityOverride = null)
     {
-        const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        var schemaIdentity = schemaIdentityOverride
+            ?? "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
         var options = new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             NativeCoreRegistration
@@ -8874,7 +8916,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "RtlMoveMemory",
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
             [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
-            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape,
+                {{nativeParameterExtent}})]
             internal extern void RtlMoveMemory(
                 write ptr<int32> destination,
                 ptr<int32> source,
@@ -8904,7 +8947,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "RtlMoveMemory",
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
             [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
-            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape,
+                {{nativeParameterExtent}})]
             internal extern void RtlMoveMemory(
                 write ptr<int32> destination,
                 ptr<int32> source,
