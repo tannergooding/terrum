@@ -57,6 +57,46 @@ public sealed class GenericNominalTypeTests
             Is.EqualTo(PrimitiveType.Int32));
     }
 
+    [Test]
+    public void AppliesGenericStructTypeDefaultsInDeclarationOrder()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Cell<T = int32, U = T> {
+                public T first;
+                public U second;
+            }
+
+            int32 ReadDefault(Cell value) { return value.second; }
+            uint32 ReadExplicit(Cell<uint32> value) { return value.second; }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics, Is.Empty);
+        var program = compilation.Program!;
+        var defaultCell = program.Structures.Single(static structure
+            => structure.Name == "Cell<int32, int32>");
+        Assert.That(defaultCell.Fields.Select(static field => field.Type),
+            Is.EqualTo(new[] {
+                PrimitiveType.Int32,
+                PrimitiveType.Int32,
+            }));
+        var unsignedCell = program.Structures.Single(static structure
+            => structure.Name == "Cell<uint32, uint32>");
+        Assert.That(unsignedCell.Fields.Select(static field => field.Type),
+            Is.EqualTo(new[] {
+                PrimitiveType.UInt32,
+                PrimitiveType.UInt32,
+            }));
+        Assert.That(program.Functions.Single(static function
+            => function.Name == "ReadDefault").Variables[0].Type,
+            Is.EqualTo((PrimitiveType)(100
+                + program.Structures.IndexOf(defaultCell))));
+        Assert.That(program.Functions.Single(static function
+            => function.Name == "ReadExplicit").Variables[0].Type,
+            Is.EqualTo((PrimitiveType)(100
+                + program.Structures.IndexOf(unsignedCell))));
+    }
+
     [TestCase("public struct Box<T> { T value; }")]
     [TestCase("class Box<T> { int32 value; }")]
     [TestCase("interface I<T> {} struct Box<T> : I<T> { T value; }")]

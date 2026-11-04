@@ -196,8 +196,11 @@ internal sealed partial class Binder
             }
             if (_genericStructTemplates.TryGetValue(qualified, out var genericStruct))
             {
-                if (typeArguments is ImmutableArray<PrimitiveType> arguments
-                    && arguments.Length == genericStruct.TypeParameters.Length)
+                var arguments = typeArguments
+                    ?? ImmutableArray<PrimitiveType>.Empty;
+                if (arguments.Length <= genericStruct.TypeParameters.Length
+                    && genericStruct.TypeDefaults.Skip(arguments.Length)
+                        .All(static defaultType => defaultType is not null))
                 {
                     AddTypeCandidate(InstantiateGenericStruct(genericStruct, arguments, useSite));
                 }

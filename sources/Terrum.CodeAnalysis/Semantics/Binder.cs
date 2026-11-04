@@ -135,7 +135,9 @@ internal sealed partial class Binder
     }
 
     private sealed record GenericStructTemplate(string Name, string QualifiedName,
-        ImmutableArray<string> TypeParameters, SyntaxTree Tree, SyntaxNode Declaration);
+        ImmutableArray<string> TypeParameters,
+        ImmutableArray<SyntaxNode?> TypeDefaults,
+        SyntaxTree Tree, SyntaxNode Declaration);
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
         : this([tree], [], cancellationToken)
@@ -2235,10 +2237,88 @@ internal sealed partial class Binder
 
         var parameterList = declaration.Children.OfType<SyntaxNode>()
             .First(static child => child.Kind == SyntaxKind.TypeParameterList);
-        var typeParameters = parameterList.Children.OfType<SyntaxTokenElement>()
-            .Where(static child => child.Token.Kind == TokenKind.Identifier)
-            .Select(static child => child.Token.Name)
-            .ToImmutableArray();
+        var typeParametersBuilder = ImmutableArray.CreateBuilder<string>();
+        var typeDefaultsBuilder = ImmutableArray.CreateBuilder<SyntaxNode?>();
+        var formalElements = new List<SyntaxElement>();
+        var hasInvalidFormal = false;
+        void AddGenericStructFormal()
+        {
+            var formalTokens = formalElements
+                .OfType<SyntaxTokenElement>().ToArray();
+            if (formalTokens.Any(static token =>
+                    token.Token.Text == "const"))
+            {
+                Report("TRM3005",
+                    "Generic struct specialization supports only type formals.",
+                    parameterList.Span);
+                hasInvalidFormal = true;
+                return;
+            }
+            if (formalElements.OfType<SyntaxNode>().Any(
+                    static child => child.Kind == SyntaxKind.Attribute))
+            {
+                Report("TRM3005",
+                    "Generic struct formal attributes are not supported.",
+                    parameterList.Span);
+                hasInvalidFormal = true;
+                return;
+            }
+
+            var formalName = formalTokens.FirstOrDefault(static token =>
+                token.Token.Kind == TokenKind.Identifier);
+            if (formalName is null)
+            {
+                Report("TRM3005",
+                    "Generic struct formals require a type parameter name.",
+                    parameterList.Span);
+                hasInvalidFormal = true;
+                return;
+            }
+
+            var equalsIndex = formalElements.FindIndex(
+                static element => element is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Equals,
+                });
+            var defaultType = equalsIndex < 0
+                ? null
+                : formalElements.Skip(equalsIndex + 1)
+                    .OfType<SyntaxNode>().FirstOrDefault();
+            if (equalsIndex >= 0 && defaultType is null)
+            {
+                Report("TRM3005",
+                    "Generic struct type defaults require a type.",
+                    parameterList.Span);
+                hasInvalidFormal = true;
+                return;
+            }
+
+            typeParametersBuilder.Add(formalName.Token.Name);
+            typeDefaultsBuilder.Add(defaultType);
+        }
+
+        foreach (var element in parameterList.Children.Skip(1)
+            .Take(parameterList.Children.Length - 2))
+        {
+            if (element is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Comma,
+                })
+            {
+                AddGenericStructFormal();
+                formalElements.Clear();
+            }
+            else
+            {
+                formalElements.Add(element);
+            }
+        }
+        AddGenericStructFormal();
+        if (hasInvalidFormal)
+        {
+            return;
+        }
+
+        var typeParameters = typeParametersBuilder.ToImmutable();
+        var typeDefaults = typeDefaultsBuilder.ToImmutable();
         if (typeParameters.IsEmpty
             || typeParameters.Distinct(StringComparer.Ordinal).Count() != typeParameters.Length)
         {
@@ -2293,12 +2373,89 @@ internal sealed partial class Binder
         }
 
         _genericStructTemplates.Add(qualifiedName,
-            new GenericStructTemplate(name.Name, qualifiedName, typeParameters, tree, declaration));
+            new GenericStructTemplate(name.Name, qualifiedName, typeParameters,
+                typeDefaults, tree, declaration));
+    }
+
+    private bool TryCompleteGenericStructTypeArguments(
+        GenericStructTemplate template,
+        ImmutableArray<PrimitiveType> suppliedArguments,
+        out ImmutableArray<PrimitiveType> completedArguments)
+    {
+        completedArguments = [];
+        if (suppliedArguments.Length > template.TypeParameters.Length)
+        {
+            return false;
+        }
+        if (suppliedArguments.Length == template.TypeParameters.Length)
+        {
+            completedArguments = suppliedArguments;
+            return true;
+        }
+
+        var completed = ImmutableArray.CreateBuilder<PrimitiveType>(
+            template.TypeParameters.Length);
+        completed.AddRange(suppliedArguments);
+        var previousContext = CaptureContext();
+        try
+        {
+            SetContext(template.Tree, template.Declaration);
+            while (completed.Count < template.TypeParameters.Length)
+            {
+                var ordinal = completed.Count;
+                var defaultType = template.TypeDefaults[ordinal];
+                if (defaultType is null)
+                {
+                    return false;
+                }
+
+                var earlierArguments = ImmutableDictionary
+                    .CreateBuilder<string, PrimitiveType>(
+                        StringComparer.Ordinal);
+                for (var earlier = 0; earlier < ordinal; earlier++)
+                {
+                    earlierArguments.Add(
+                        template.TypeParameters[earlier], completed[earlier]);
+                }
+
+                _aliasTypeArguments.Add(earlierArguments.ToImmutable());
+                try
+                {
+                    SetContext(template.Tree, defaultType);
+                    var diagnosticCount = DiagnosticCount;
+                    var argument = BindType(defaultType, allowVoid: false);
+                    if (DiagnosticCount != diagnosticCount)
+                    {
+                        return false;
+                    }
+
+                    completed.Add(argument);
+                }
+                finally
+                {
+                    _aliasTypeArguments.RemoveAt(
+                        _aliasTypeArguments.Count - 1);
+                }
+            }
+
+            completedArguments = completed.MoveToImmutable();
+            return true;
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
     }
 
     private PrimitiveType InstantiateGenericStruct(GenericStructTemplate template,
         ImmutableArray<PrimitiveType> typeArguments, TextSpan useSite)
     {
+        if (!TryCompleteGenericStructTypeArguments(template, typeArguments,
+                out var completedArguments))
+        {
+            return PrimitiveType.Int32;
+        }
+        typeArguments = completedArguments;
         var key = template.QualifiedName + "\u001F" + string.Join(",",
             typeArguments.Select(static type => ((int)type).ToString(
                 System.Globalization.CultureInfo.InvariantCulture)));
