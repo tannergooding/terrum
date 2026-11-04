@@ -8518,6 +8518,48 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task StandardA2SourceFreeRejectsFourElementNativeParameterBeyondSuffix()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2-four-element-native-parameter-suffix-failure";
+        var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
+            0, 0, 1, out var source, effectfulIndices: true,
+            counterObservedIndexUpdates: true,
+            nativeParameterExtent: 4);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundNativeStorageAddress? selectedAddress = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress {
+                    Projections.Length: 3,
+                } address)
+                {
+                    selectedAddress = address;
+                }
+            }), Is.True);
+        Assert.That(selectedAddress, Is.Not.Null);
+        Assert.That((selectedAddress!.ElementCount,
+            selectedAddress.ElementStride, selectedAddress.ByteExtent),
+            Is.EqualTo((4UL, 4UL, 16UL)));
+        Assert.That(selectedAddress.Projections.All(static projection =>
+            projection.Index is BoundUpdate), Is.True);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, input.SchemaIdentity, 1),
+            Is.EqualTo(input.Artifact.ToArray()));
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            input, source, 0xFFFF,
+            "four-element NativeParameter exceeds selected suffix",
+            runJit: false,
+            expectedAotExitCode: unchecked((int)0xE0540004))
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public async Task StandardA2NestedAddressIndexesExecuteOnceInSourceOrder()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -8712,7 +8754,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         int expectedResult,
         string scenario,
         bool runJit = true,
-        byte[]? expectedReemitted = null)
+        byte[]? expectedReemitted = null,
+        int? expectedAotExitCode = null)
     {
         var schemaIdentity = input.SchemaIdentity;
         var artifact = input.Artifact.ToArray();
@@ -8782,10 +8825,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             var output = await stdout.ConfigureAwait(true);
             var error = await stderr.ConfigureAwait(true);
             TestContext.WriteLine(
-                $"A2 nested source-free AOT {scenario}: policy=FailFast; pid={processId}; expected={expectedResult}; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+                $"A2 nested source-free AOT {scenario}: policy=FailFast; pid={processId}; expected={expectedAotExitCode ?? expectedResult}; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
-            Assert.That(process.ExitCode, Is.EqualTo(expectedResult));
+            Assert.That(process.ExitCode,
+                Is.EqualTo(expectedAotExitCode ?? expectedResult));
         }
         finally
         {
