@@ -95,8 +95,7 @@ public static partial class TrRmExecutableCompiler
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
                     or TrRmArtifactSchema.LocalAggregateLayoutDraft)
                 || program.Structures.Any(static structure =>
-                    structure.StandardTypeOrigin is not null
-                    || structure.BlittableTargetRequirement
+                    structure.BlittableTargetRequirement
                         != FixedLayoutStorage.WindowsX64TargetRequirement
                     || structure.LayoutKind is not (1 or 2 or 3)
                     || structure.CleanupMethod is not null
@@ -319,7 +318,12 @@ public static partial class TrRmExecutableCompiler
             structureTypeDefRows.Add(structureIndex,
                 structureIndex + 1);
         }
+        var typeImportRowPlan = CreateSourceTypeImportPlan(program, schema,
+            static _ => 1);
+        var typeImportCount = typeImportRowPlan.Imports.Count
+            + (moduleImport is null ? 0 : 1);
         var typeDefTypeSpecRows = new Dictionary<int, int>();
+        var importedTypeSpecRows = new Dictionary<int, int>();
         uint GetFixedArrayTypeSpecRef(int arrayIndex)
         {
             if ((uint)arrayIndex
@@ -389,6 +393,26 @@ public static partial class TrRmExecutableCompiler
 
             byte[] typeSpecBytes;
             var structureIndex = (int)type - 100;
+            if (structureIndex >= 0
+                && structureIndex < program.Structures.Length
+                && program.Structures[structureIndex].StandardTypeOrigin
+                    is not null
+                && typeImportRowPlan.FirstImportRowByStructure.TryGetValue(
+                    structureIndex, out var typeImportRow))
+            {
+                if (!importedTypeSpecRows.TryGetValue(structureIndex,
+                        out var row))
+                {
+                    row = typeSpecRows.Count + 1;
+                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+                        checked((uint)typeImportRow)));
+                    importedTypeSpecRows.Add(structureIndex, row);
+                }
+
+                typeSpecRef = checked((uint)row);
+                signatureTypeSpecRefs.Add(type, typeSpecRef);
+                return typeSpecRef;
+            }
             if (structureTypeDefRows.TryGetValue(structureIndex,
                     out var typeDefRow))
             {
@@ -443,7 +467,9 @@ public static partial class TrRmExecutableCompiler
                         || NativeFixedArrayTypes.IsType(
                             pointer.PointeeType)
                         || structureTypeDefRows.ContainsKey(
-                            (int)pointer.PointeeType - 100))
+                            (int)pointer.PointeeType - 100)
+                        || typeImportRowPlan.FirstImportRowByStructure
+                            .ContainsKey((int)pointer.PointeeType - 100))
                     {
                         var pointeeTypeSpecRef
                             = GetSignatureTypeSpecRef(pointer.PointeeType);
@@ -573,56 +599,6 @@ public static partial class TrRmExecutableCompiler
 
         var anchorSignatureRow = functionSignatureRows[targetIndex];
         ReserveA3Collection(a3LayoutResourceLedger, 0);
-        var featureRows = new List<TrRmFeatureRow>();
-        if (fixedArrayLayoutRows.Count != 0
-            || program.Structures.Any(static structure =>
-                !structure.IsUnique))
-        {
-            a3LayoutResourceLedger?.ConsumeWork();
-            featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
-        }
-        a3LayoutResourceLedger?.ConsumeWork();
-        featureRows.Add(new TrRmFeatureRow(4, 1));
-        var hasNativeImportParameters = false;
-        foreach (var function in program.Functions)
-        {
-            a3LayoutResourceLedger?.ConsumeWork();
-            if (function.DirectNativeImport is DirectNativeImport nativeImport
-                && !nativeImport.Parameters.IsEmpty)
-            {
-                hasNativeImportParameters = true;
-                break;
-            }
-        }
-        if (hasNativeImportParameters)
-        {
-            a3LayoutResourceLedger?.ConsumeWork();
-            featureRows.Add(TrRmFeatureRow.ForeignInvocationContractsCandidate);
-        }
-        if (fixedArrayLayoutRows.Count != 0)
-        {
-            a3LayoutResourceLedger?.ConsumeWork();
-            featureRows.Add(
-                TrRmFeatureRow.FixedInlineArrayStorageCandidate);
-        }
-        if (storageCall?.UsesScalarFrozenValues == true)
-        {
-            if (!schema.UsesScalarFrozenValues())
-            {
-                throw Unsupported(
-                    "Numeric comparison literals require the exact A2EU+SF1 schema.");
-            }
-
-            a3LayoutResourceLedger?.ConsumeWork();
-            featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
-        }
-
-        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema,
-            a3LayoutResourceLedger);
-        var featureReader = new TrRmFeatureTableReader(featureBytes,
-            featureRows.Count, schema, a3LayoutResourceLedger);
-
-        ReserveA3Collection(a3LayoutResourceLedger, 0);
         var stringRows = new List<(string Text, int Encoding)>();
         AddA3Staged(stringRows, ("", 0), a3LayoutResourceLedger);
         ReserveA3Collection(a3LayoutResourceLedger, 0);
@@ -710,6 +686,56 @@ public static partial class TrRmExecutableCompiler
                 0, 0, firstLayout, 2, 0, 0));
         }
 
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
+        var featureRows = new List<TrRmFeatureRow>();
+        if (fixedArrayLayoutRows.Count != 0
+            || program.Structures.Any(static structure =>
+                !structure.IsUnique))
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
+            featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
+        }
+        a3LayoutResourceLedger?.ConsumeWork();
+        featureRows.Add(new TrRmFeatureRow(4, 1));
+        var hasNativeImportParameters = false;
+        foreach (var function in program.Functions)
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
+            if (function.DirectNativeImport is DirectNativeImport nativeImport
+                && !nativeImport.Parameters.IsEmpty)
+            {
+                hasNativeImportParameters = true;
+                break;
+            }
+        }
+        if (hasNativeImportParameters)
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
+            featureRows.Add(TrRmFeatureRow.ForeignInvocationContractsCandidate);
+        }
+        if (fixedArrayLayoutRows.Count != 0)
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
+            featureRows.Add(
+                TrRmFeatureRow.FixedInlineArrayStorageCandidate);
+        }
+        if (storageCall?.UsesScalarFrozenValues == true)
+        {
+            if (!schema.UsesScalarFrozenValues())
+            {
+                throw Unsupported(
+                    "Numeric comparison literals require the exact A2EU+SF1 schema.");
+            }
+
+            a3LayoutResourceLedger?.ConsumeWork();
+            featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
+        }
+
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema,
+            a3LayoutResourceLedger);
+        var featureReader = new TrRmFeatureTableReader(featureBytes,
+            featureRows.Count, schema, a3LayoutResourceLedger);
+
         ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
             sizeof(int));
         var nativeImportLibraryNameRows = new int[program.Functions.Length];
@@ -739,6 +765,19 @@ public static partial class TrRmExecutableCompiler
             ? 0 : AddString(moduleImport.ProducerIdentity, 1);
         var providerExportKeyRow = moduleImport is null
             ? 0 : AddString(moduleImport.ExportKey, 1);
+        var typeImportPlan = CreateSourceTypeImportPlan(program, schema,
+            text => AddString(text, 1));
+        if (typeImportPlan.Imports.Count
+                != typeImportRowPlan.Imports.Count
+            || typeImportPlan.FirstImportRowByStructure.Count
+                != typeImportRowPlan.FirstImportRowByStructure.Count
+            || typeImportRowPlan.FirstImportRowByStructure.Any(pair =>
+                !typeImportPlan.FirstImportRowByStructure.TryGetValue(
+                    pair.Key, out var row) || row != pair.Value))
+        {
+            throw Unsupported(
+                "The source TypeDef import rows changed while preparing NativeAddress TypeSpecs.");
+        }
         var stringsBytes = a3LayoutResourceLedger is null
             ? TrRmStringTableWriter.EncodeTextRows(stringRows)
             : TrRmStringTableWriter.EncodeTextRows(stringRows,
@@ -746,11 +785,19 @@ public static partial class TrRmExecutableCompiler
         var strings = new TrRmStringTableReader(stringsBytes, stringRows.Count,
             a3LayoutResourceLedger);
 
-        var moduleRefCapacity = moduleImport is null ? 0 : 1;
+        var moduleRefCapacity = typeImportPlan.ModuleRefs.Count
+            + (moduleImport is null ? 0 : 1);
         ReserveA3Collection(a3LayoutResourceLedger, moduleRefCapacity);
         var moduleRefRows = new List<TrRmModuleRefRow>(moduleRefCapacity);
+        foreach (var typeModuleRef in typeImportPlan.ModuleRefs)
+        {
+            AddA3Staged(moduleRefRows, typeModuleRef,
+                a3LayoutResourceLedger);
+        }
+        var functionModuleRefRow = 0;
         if (moduleImport is not null)
         {
+            functionModuleRefRow = moduleRefRows.Count + 1;
             AddA3Staged(moduleRefRows,
                 new TrRmModuleRefRow(providerIdentityRow,
                     moduleImport.TargetRequirement, moduleImport.RuntimePolicy),
@@ -782,11 +829,11 @@ public static partial class TrRmExecutableCompiler
                 moduleRefRows.Count, strings, modules,
                 a3LayoutResourceLedger);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
-            typeDefCount, 0, 0, 0, schema,
+            typeDefCount, typeImportCount, 0, 0, schema,
             methodDefCount: program.Functions.Length + 1,
             resourceLedger: a3LayoutResourceLedger);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
-            typeSpecRows.Count, typeDefCount, 0, 0, 0, schema,
+            typeSpecRows.Count, typeDefCount, typeImportCount, 0, 0, schema,
             methodDefCount: program.Functions.Length + 1,
             resourceLedger: a3LayoutResourceLedger);
         var signatureBytes = TrRmMethodSigTableWriter.Encode(signatureRows,
@@ -937,13 +984,20 @@ public static partial class TrRmExecutableCompiler
         var methods = new TrRmMethodDefTableReader(methodBytes,
             methodRows.Count, strings, modules, typeDefs, signatures,
             contractRows.Count, 1, a3LayoutResourceLedger);
-        var importRowCapacity = moduleImport is null ? 0 : 1;
+        var importRowCapacity = typeImportPlan.Imports.Count
+            + (moduleImport is null ? 0 : 1);
         ReserveA3Collection(a3LayoutResourceLedger, importRowCapacity);
         var importRows = new List<TrRmImportRow>(importRowCapacity);
+        foreach (var typeImport in typeImportPlan.Imports)
+        {
+            AddA3Staged(importRows, typeImport,
+                a3LayoutResourceLedger);
+        }
         if (moduleImport is not null)
         {
             AddA3Staged(importRows,
-                new TrRmImportRow(1, providerExportKeyRow,
+                new TrRmImportRow(functionModuleRefRow,
+                    providerExportKeyRow,
                     0x1600_0000u | (uint)targetMethodRow),
                 a3LayoutResourceLedger);
         }

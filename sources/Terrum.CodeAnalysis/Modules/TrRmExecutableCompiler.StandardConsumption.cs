@@ -365,7 +365,8 @@ public static partial class TrRmExecutableCompiler
                 a3LayoutResourceLedger: a3LayoutResourceLedger);
             return RetainLoadedA2SourceTypeFacts(loadedProgram, artifacts,
                 schemaIdentities, tables, rootModuleRow,
-                typeProviderBindings);
+                typeProviderBindings,
+                retainExecutableTypes: !loadedProgram.Functions.IsEmpty);
         }
 
         var boundTypeImports = typeProviderBindings
@@ -449,7 +450,8 @@ public static partial class TrRmExecutableCompiler
                 typeProviderBindings: typeProviderBindings);
             return RetainLoadedA2SourceTypeFacts(loadedProgram, artifacts,
                 schemaIdentities, tables, rootModuleRow,
-                typeProviderBindings);
+                typeProviderBindings,
+                retainExecutableTypes: !loadedProgram.Functions.IsEmpty);
         }
 
         var selectedModuleImports = new Dictionary<int, BoundModuleImport>(
@@ -533,7 +535,10 @@ public static partial class TrRmExecutableCompiler
             schema: GetForeignInvocationSchema(schemaIdentities[0]),
             a3LayoutResourceLedger: a3LayoutResourceLedger);
         providerBindings = providerBindingsBuilder.MoveToImmutable();
-        return program;
+        return RetainLoadedA2SourceTypeFacts(program, artifacts,
+            schemaIdentities, tables, rootModuleRow,
+            typeProviderBindings,
+            retainExecutableTypes: !program.Functions.IsEmpty);
     }
 
     private static TrRmA3AdmissionFailureKind GetA3AdmissionFailureKind(

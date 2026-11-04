@@ -762,6 +762,192 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task RunAndBuildTrRmResolveA2FixedArrayTypeProvidersAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string providerIdentity = "a2-cli-fixed-array-type-provider";
+        const string consumerIdentity = "a2-cli-fixed-array-type-consumer";
+        const string typeExportKey = "PacketKey";
+        const string providerSource = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Packet {
+                public [int32; 2] Values;
+            }
+            """;
+        const string incompatibleProviderSource = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Packet {
+                public [int32; 3] Values;
+            }
+            """;
+        const string consumerSource = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "FlushProcessWriteBuffers",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            extern void FlushProcessWriteBuffers();
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Consumer {
+                public Packet Value;
+            }
+
+            void Main() {
+                unsafe {
+                    var callback = &FlushProcessWriteBuffers;
+                    callback();
+                }
+            }
+            """;
+
+        var nativeCoreRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var layoutCoreRegistration
+            = NativeCoreRegistrationTests.CreateLayoutRegistration(
+                nativeCoreRegistration);
+
+        byte[] CreateProviderArtifact(string source, string moduleIdentity,
+            string schemaIdentity, string exportKey)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source), new CompilationOptions {
+                    LayoutCoreRegistration = layoutCoreRegistration,
+                });
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                moduleIdentity, schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Packet", exportKey)]);
+        }
+
+        var providerArtifact = CreateProviderArtifact(providerSource,
+            providerIdentity, schemaIdentity, typeExportKey);
+        var incompatibleProviderArtifact = CreateProviderArtifact(
+            incompatibleProviderSource, providerIdentity, schemaIdentity,
+            typeExportKey);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            providerIdentity, [], [typeExportKey]);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource), providerReference,
+            new CompilationOptions {
+                NativeCoreRegistration
+                    = nativeCoreRegistration,
+                LayoutCoreRegistration = layoutCoreRegistration,
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program!, consumerIdentity, schemaIdentity, 1);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            consumerInput, consumerIdentity, [providerInput]);
+        var retainedPacketOrigin = false;
+        foreach (var structure in loadedConsumer.Structures)
+        {
+            if (structure.Name == "Packet")
+            {
+                retainedPacketOrigin = structure.StandardTypeOrigin is not null;
+                break;
+            }
+        }
+        Assert.That(retainedPacketOrigin, Is.True);
+        consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            loadedConsumer, consumerIdentity, schemaIdentity, 1);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-a2-fixed-array-type-provider-");
+        try
+        {
+            var providerPath = Path.Combine(directory, "provider.trrm");
+            var incompatibleProviderPath
+                = Path.Combine(directory, "incompatible-provider.trrm");
+            var consumerPath = Path.Combine(directory, "consumer.trrm");
+            var executablePath = Path.Combine(directory, "consumer.exe");
+            var retainedOutputPath = Path.Combine(directory, "retained.exe");
+            byte[] retainedOutput = [0xA5, 0x5A, 0xC3, 0x3C];
+            await File.WriteAllBytesAsync(providerPath, providerArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(incompatibleProviderPath,
+                incompatibleProviderArtifact).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(consumerPath, consumerArtifact)
+                .ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([],
+                "run-trrm", consumerPath, "--runtime", "fail-fast",
+                "--trrm-schema", schemaIdentity, "--trrm-module",
+                consumerIdentity, "--trrm-provider", schemaIdentity,
+                providerPath, "--json").ConfigureAwait(true);
+            Assert.That(ran, Is.Zero,
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", consumerPath, "-o", executablePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                schemaIdentity, providerPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteTrRmImageAsync(executablePath)
+                .ConfigureAwait(true), Is.Zero);
+
+            var (rejectedRun, rejectedRunOutput, rejectedRunError)
+                = await RunAsync([], "run-trrm", consumerPath, "--runtime",
+                    "fail-fast", "--trrm-schema", schemaIdentity,
+                    "--trrm-module", consumerIdentity, "--trrm-provider",
+                    schemaIdentity, incompatibleProviderPath, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(rejectedRun, Is.EqualTo(1),
+                $"{rejectedRunOutput}{Environment.NewLine}{rejectedRunError}");
+            Assert.That(rejectedRunError, Is.Empty);
+            using (var rejection = JsonDocument.Parse(rejectedRunOutput))
+            {
+                Assert.That(rejection.RootElement.GetProperty("success")
+                    .GetBoolean(), Is.False);
+                Assert.That(rejection.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            }
+
+            await File.WriteAllBytesAsync(retainedOutputPath, retainedOutput)
+                .ConfigureAwait(true);
+            var (rejectedBuild, rejectedBuildOutput, rejectedBuildError)
+                = await RunAsync([], "build-trrm", consumerPath, "-o",
+                    retainedOutputPath, "--runtime", "fail-fast",
+                    "--trrm-schema", schemaIdentity, "--trrm-module",
+                    consumerIdentity, "--trrm-provider", schemaIdentity,
+                    incompatibleProviderPath, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(rejectedBuild, Is.EqualTo(1),
+                $"{rejectedBuildOutput}{Environment.NewLine}{rejectedBuildError}");
+            Assert.That(rejectedBuildError, Is.Empty);
+            using (var rejection = JsonDocument.Parse(rejectedBuildOutput))
+            {
+                Assert.That(rejection.RootElement.GetProperty("success")
+                    .GetBoolean(), Is.False);
+                Assert.That(rejection.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(retainedOutputPath)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task RunAndBuildTrRmRejectMalformedA2ArtifactBeforeReplacingOutputAsync()
     {
         Assume.That(OperatingSystem.IsWindows()

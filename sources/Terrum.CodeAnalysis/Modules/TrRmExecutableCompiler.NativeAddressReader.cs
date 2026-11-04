@@ -315,6 +315,8 @@ public static partial class TrRmExecutableCompiler
             ? tables.Modules.GetModuleRefRange(selectedModuleRow)
             : (0, 0);
         var selectedImportCount = 0;
+        var selectedTypeImportCount = 0;
+        var selectedUnsupportedImportCount = 0;
         var selectedImportRows = new Dictionary<int, int>();
         if (selectedModuleIsValid)
         {
@@ -339,9 +341,31 @@ public static partial class TrRmExecutableCompiler
                                 "A root MethodDef has more than one retained Import.");
                         }
                     }
+                    else if ((expectedDefinition >> 24) == 0x13)
+                    {
+                        selectedTypeImportCount++;
+                    }
+                    else
+                    {
+                        selectedUnsupportedImportCount++;
+                    }
                 }
             }
         }
+        var selectedTypeProviderBindingCount
+            = typeProviderBindings.IsDefault
+                ? 0
+                : typeProviderBindings.Count(binding =>
+                    binding.ConsumerArtifactIndex == 0
+                    && binding.ConsumerModuleRow == selectedModuleRow);
+        var selectedModuleRefRangeMatchesImports
+            = selectedImportCount == 0
+                ? moduleRefEnd == moduleRefStart
+                : moduleRefEnd > moduleRefStart;
+        var selectedMethodImportsMatch
+            = selectedModuleImports is null
+                ? selectedImportRows.Count == 0
+                : selectedImportRows.Count == selectedModuleImports.Count;
 
         if ((schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -362,12 +386,11 @@ public static partial class TrRmExecutableCompiler
             || !selectedModuleIsValid
             || tables.Modules.GetRequirements(selectedModuleRow) != (1u, 0u)
             || methodEnd - methodStart < 3
-            || (selectedModuleImports is null
-                ? moduleRefEnd != moduleRefStart || selectedImportCount != 0
-                : moduleRefEnd == moduleRefStart
-                    || selectedImportCount != selectedModuleImports.Count
-                    || selectedImportRows.Count
-                        != selectedModuleImports.Count))
+            || !selectedModuleRefRangeMatchesImports
+            || !selectedMethodImportsMatch
+            || selectedUnsupportedImportCount != 0
+            || selectedTypeImportCount
+                != selectedTypeProviderBindingCount)
         {
             throw Unsupported(
                 "The source-free loader supports one caller Body, one address anchor and direct NativeImport methods under the selected profile.");
