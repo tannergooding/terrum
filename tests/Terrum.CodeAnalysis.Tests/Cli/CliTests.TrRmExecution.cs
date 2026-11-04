@@ -613,6 +613,21 @@ public sealed partial class CliTests
                 providerCompilation.Diagnostics));
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
             providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        var incompatibleProviderSource = providerSource
+            .Replace("NativeParameter(1, Write, NoEscape, 1)",
+                "NativeParameter(1, Read, NoEscape, 1)",
+                StringComparison.Ordinal)
+            .Replace("write ptr<int32> destination",
+                "ptr<int32> destination", StringComparison.Ordinal);
+        var incompatibleProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(incompatibleProviderSource), coreReference);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderCompilation.Program!, providerIdentity,
+                schemaIdentity, 1);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
@@ -644,6 +659,8 @@ public sealed partial class CliTests
         try
         {
             var providerPath = Path.Combine(directory, "provider.trrm");
+            var incompatibleProviderPath
+                = Path.Combine(directory, "incompatible-provider.trrm");
             var consumerPath = Path.Combine(directory, "consumer.trrm");
             var executablePath = Path.Combine(directory, "consumer.exe");
             var libraryArtifactPath
@@ -651,6 +668,8 @@ public sealed partial class CliTests
             var libraryPath = Path.Combine(directory, "consumer.dll");
             await File.WriteAllBytesAsync(providerPath, providerArtifact)
                 .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(incompatibleProviderPath,
+                incompatibleProviderArtifact).ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumerPath, consumerArtifact)
                 .ConfigureAwait(true);
             await File.WriteAllBytesAsync(libraryArtifactPath, libraryArtifact)
@@ -709,6 +728,31 @@ public sealed partial class CliTests
             {
                 NativeLibrary.Free(library);
             }
+
+            var retainedOutputPath
+                = Path.Combine(directory, "retained.exe");
+            byte[] retainedOutput = [0xA5, 0x5A, 0xC3, 0x3C];
+            await File.WriteAllBytesAsync(retainedOutputPath, retainedOutput)
+                .ConfigureAwait(true);
+            var (rejected, rejectionOutput, rejectionError) = await RunAsync(
+                [], "build-trrm", consumerPath, "-o", retainedOutputPath,
+                "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                schemaIdentity, incompatibleProviderPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(rejected, Is.EqualTo(1),
+                $"{rejectionOutput}{Environment.NewLine}{rejectionError}");
+            Assert.That(rejectionError, Is.Empty);
+            using (var rejectionDocument = JsonDocument.Parse(
+                       rejectionOutput))
+            {
+                Assert.That(rejectionDocument.RootElement
+                        .GetProperty("diagnostics")[0]
+                        .GetProperty("code").GetString(),
+                    Is.EqualTo("TRM5001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(retainedOutputPath)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
         }
         finally
         {
