@@ -14,11 +14,31 @@ using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-internal sealed class TrRmZeroCountFieldPlaceTests
+internal sealed class TrRmFieldPlaceNegativeTests
 {
     private const string SchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
     private const string ModuleIdentity = "l1-zero-count-field-place";
+    private const string FieldPathSource = """
+        [Blittable]
+        [Layout(LayoutKind.Sequential, Packing: 1)]
+        public struct Item {
+            public mut uint8 Value;
+            public mut uint32 Other;
+
+            internal Item() {
+                Value = uint8(0);
+                Other = uint32(0);
+            }
+        }
+
+        int32 Main() {
+            mut [Item; 2] items = [new Item(), new Item()];
+            mut [Item; 0] empty = [];
+            items[0].Value = uint8(1);
+            return 0;
+        }
+        """;
 
     [Test]
     public void RejectsSourceFieldPlaceSelectionIntoZeroCountArray()
@@ -66,42 +86,13 @@ internal sealed class TrRmZeroCountFieldPlaceTests
     [Test]
     public void RejectsSourceFreeFieldPlaceSelectionIntoZeroCountArray()
     {
-        var artifact = EmitArtifactBytes("""
-            [Blittable]
-            [Layout(LayoutKind.Sequential, Packing: 1)]
-            public struct Item {
-                public mut uint8 Value;
-
-                internal Item() {
-                    Value = uint8(0);
-                }
-            }
-
-            int32 Main() {
-                mut [Item; 2] items = [new Item(), new Item()];
-                mut [Item; 0] empty = [];
-                items[0].Value = uint8(1);
-                return 0;
-            }
-            """);
+        var artifact = EmitArtifactBytes(FieldPathSource);
         var index = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact);
         var tables
             = TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
                     index);
-        var mainMethodRow = 0;
-        for (var methodRow = 1; methodRow <= tables.Methods.Count;
-            methodRow++)
-        {
-            if (StringComparer.Ordinal.Equals(
-                    tables.Methods.GetName(methodRow), "Main"))
-            {
-                mainMethodRow = methodRow;
-                break;
-            }
-        }
-
-        Assert.That(mainMethodRow, Is.GreaterThan(0));
+        var mainMethodRow = FindMainMethodRow(tables);
         var bodyRow = tables.Methods.GetBodyRow(mainMethodRow);
         var body = tables.Bodies.GetRegisterBody(bodyRow,
             tables.Contracts.Count);
@@ -191,6 +182,198 @@ internal sealed class TrRmZeroCountFieldPlaceTests
                     malformedArtifact), ModuleIdentity, []));
     }
 
+    [Test]
+    public void RejectsSourceFreeFieldPlaceWithMismatchedFieldType()
+    {
+        var artifact = EmitArtifactBytes(FieldPathSource);
+        var index = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    index);
+        var valueFieldRow = 0;
+        var otherFieldRow = 0;
+        for (var fieldRow = 1; fieldRow <= tables.Fields.Count;
+            fieldRow++)
+        {
+            switch (tables.Fields.GetName(fieldRow))
+            {
+                case "Value":
+                    valueFieldRow = fieldRow;
+                    break;
+                case "Other":
+                    otherFieldRow = fieldRow;
+                    break;
+            }
+        }
+
+        Assert.That(valueFieldRow, Is.GreaterThan(0));
+        Assert.That(otherFieldRow, Is.GreaterThan(0));
+        Assert.That(tables.Fields.GetOwnerTypeDef(valueFieldRow),
+            Is.EqualTo(tables.Fields.GetOwnerTypeDef(otherFieldRow)));
+        var mainMethodRow = FindMainMethodRow(tables);
+        var bodyRow = tables.Methods.GetBodyRow(mainMethodRow);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var selectedRecordIndex = -1;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record.Length == 24 && record[0] == 0x04
+                && record[4] == 2 && record[7] == 1
+                && record[13] == 1
+                && BinaryPrimitives.ReadUInt32LittleEndian(
+                    record[16..]) == (uint)valueFieldRow)
+            {
+                selectedRecordIndex = recordIndex;
+                break;
+            }
+        }
+
+        Assert.That(selectedRecordIndex, Is.GreaterThanOrEqualTo(0));
+        var bodyBytes = GetBodyRowBytes(artifact, bodyRow);
+        var selectionOffset = GetRecordOffset(bodyBytes,
+            selectedRecordIndex);
+        Assert.That(bodyBytes.AsSpan(selectionOffset, 24)
+            .SequenceEqual(body.GetRecord(selectedRecordIndex)), Is.True);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            bodyBytes.AsSpan(selectionOffset + 16),
+            checked((uint)otherFieldRow));
+        var malformedArtifact = ReplaceBodyRow(artifact, bodyRow,
+            bodyBytes);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    malformedArtifact), ModuleIdentity, []));
+    }
+
+    [Test]
+    public void RejectsSourceFreeFieldPlaceWithOutOfRangeFieldDef()
+    {
+        var artifact = EmitArtifactBytes(FieldPathSource);
+        var index = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    index);
+        var valueFieldRow = 0;
+        for (var fieldRow = 1; fieldRow <= tables.Fields.Count;
+            fieldRow++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    tables.Fields.GetName(fieldRow), "Value"))
+            {
+                valueFieldRow = fieldRow;
+                break;
+            }
+        }
+
+        Assert.That(valueFieldRow, Is.GreaterThan(0));
+        var mainMethodRow = FindMainMethodRow(tables);
+        var bodyRow = tables.Methods.GetBodyRow(mainMethodRow);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var selectedRecordIndex = -1;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record.Length == 24 && record[0] == 0x04
+                && record[4] == 2 && record[7] == 1
+                && record[13] == 1
+                && BinaryPrimitives.ReadUInt32LittleEndian(
+                    record[16..]) == (uint)valueFieldRow)
+            {
+                selectedRecordIndex = recordIndex;
+                break;
+            }
+        }
+
+        Assert.That(selectedRecordIndex, Is.GreaterThanOrEqualTo(0));
+        var bodyBytes = GetBodyRowBytes(artifact, bodyRow);
+        var selectionOffset = GetRecordOffset(bodyBytes,
+            selectedRecordIndex);
+        Assert.That(bodyBytes.AsSpan(selectionOffset, 24)
+            .SequenceEqual(body.GetRecord(selectedRecordIndex)), Is.True);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            bodyBytes.AsSpan(selectionOffset + 16),
+            checked((uint)(tables.Fields.Count + 1)));
+        var malformedArtifact = ReplaceBodyRow(artifact, bodyRow,
+            bodyBytes);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    malformedArtifact), ModuleIdentity, []));
+    }
+
+    [Test]
+    public void RejectsSourceFreeFieldPlaceWithOutOfRangeElementIndex()
+    {
+        var artifact = EmitArtifactBytes(FieldPathSource);
+        var index = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    index);
+        var mainMethodRow = FindMainMethodRow(tables);
+        var bodyRow = tables.Methods.GetBodyRow(mainMethodRow);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var selectedRecordIndex = -1;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record.Length != 24 || record[0] != 0x04
+                || record[4] != 3 || record[7] != 2)
+            {
+                continue;
+            }
+
+            var baseHomeIndex = BinaryPrimitives
+                .ReadUInt16LittleEndian(record[10..]);
+            if (baseHomeIndex >= body.HomeCount
+                || body.HomeMap[baseHomeIndex * 8] != 3)
+            {
+                continue;
+            }
+            var baseTypeMapIndex = BinaryPrimitives
+                .ReadUInt16LittleEndian(
+                    body.HomeMap[(baseHomeIndex * 8 + 2)..]);
+            var baseTypeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap[(baseTypeMapIndex * sizeof(uint))..]);
+            if ((baseTypeSpecRef >> 24) == 0x11
+                && tables.TypeSpecs.TryGetFixedInlineArray(
+                    baseTypeSpecRef & 0x00FF_FFFF, out _,
+                    out var elementCount)
+                && elementCount > 0)
+            {
+                Assert.That(record[12], Is.AnyOf((byte)1, (byte)2));
+                selectedRecordIndex = recordIndex;
+                break;
+            }
+        }
+
+        Assert.That(selectedRecordIndex, Is.GreaterThanOrEqualTo(0));
+        var bodyBytes = GetBodyRowBytes(artifact, bodyRow);
+        var selectionOffset = GetRecordOffset(bodyBytes,
+            selectedRecordIndex);
+        Assert.That(bodyBytes.AsSpan(selectionOffset, 24)
+            .SequenceEqual(body.GetRecord(selectedRecordIndex)), Is.True);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            bodyBytes.AsSpan(selectionOffset + 14), ushort.MaxValue);
+        var malformedArtifact = ReplaceBodyRow(artifact, bodyRow,
+            bodyBytes);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    malformedArtifact), ModuleIdentity, []));
+    }
+
     private static byte[] EmitArtifactBytes(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
@@ -205,6 +388,23 @@ internal sealed class TrRmZeroCountFieldPlaceTests
                 ?? throw new InvalidOperationException(
                     "A successful compilation must contain a bound program."),
             ModuleIdentity, SchemaIdentity, 1);
+    }
+
+    private static int FindMainMethodRow(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        for (var methodRow = 1; methodRow <= tables.Methods.Count;
+            methodRow++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    tables.Methods.GetName(methodRow), "Main"))
+            {
+                return methodRow;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The artifact has no Main Method.");
     }
 
     private static ushort FindBodyTypeMapIndex(
