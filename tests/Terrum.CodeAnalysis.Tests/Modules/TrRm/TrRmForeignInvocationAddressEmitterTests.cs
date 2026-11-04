@@ -8931,7 +8931,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             SourceArithmeticProfile arithmeticProfile
                 = SourceArithmeticProfile.Development,
             uint nativeParameterExtent = 1,
-            string? schemaIdentityOverride = null)
+            string? schemaIdentityOverride = null,
+            bool isLibrary = false)
     {
         var schemaIdentity = schemaIdentityOverride
             ?? "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
@@ -9008,7 +9009,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 ptr<int32> source,
                 uint64 byteCount);
 
-            int32 Main() {
+            {{(isLibrary ? "public " : "")}}int32 Main() {
                 int32 zeroIndex = 0;
                 mut {{effectfulSequenceType}} oneIndex = 0;
                 {{(counterObservedIndexUpdates ? "mut uint64 counter = 0;" : "")}}
@@ -9039,7 +9040,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 ptr<int32> source,
                 uint64 byteCount);
 
-            int32 Main() {
+            {{(isLibrary ? "public " : "")}}int32 Main() {
                 int32 zeroIndex = 0;
                 int32 minusOne = -1;
                 mut [[[int32; 2]; 2]; 2] values = [
@@ -9058,13 +9059,16 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 return observed;
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        var sourceTree = SyntaxTree.Parse(source);
+        var compilation = isLibrary
+            ? Compilation.CreateLibrary(sourceTree, options)
+            : Compilation.Create(sourceTree, options);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         if (effectfulIndices)
         {
-            var function = compilation.Program!.Functions[
-                compilation.Program.EntryPoint];
+            var function = compilation.Program!.Functions.Single(
+                static function => function.Name == "Main");
             var addresses = new List<BoundNativeStorageAddress>();
             _ = BoundTreeTraversal.VisitExpressions(function.Body,
                 expression =>

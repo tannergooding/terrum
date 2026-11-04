@@ -430,12 +430,15 @@ public sealed partial class CliTests
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
         var cases = new[] {
             (Name: "q2-positive", Schema: a2euScalarFrozenValuesSchema,
-                Extent: 2u, CounterObserved: false, ExpectedExitCode: -1),
+                Extent: 2u, CounterObserved: false, ExpectedExitCode: -1,
+                BuildLibrary: true),
             (Name: "q3-positive", Schema: a2euSchema,
-                Extent: 3u, CounterObserved: true, ExpectedExitCode: 0xFFFF),
+                Extent: 3u, CounterObserved: true, ExpectedExitCode: 0xFFFF,
+                BuildLibrary: true),
             (Name: "q4-short-suffix", Schema: a2euSchema,
                 Extent: 4u, CounterObserved: true,
-                ExpectedExitCode: unchecked((int)0xE0540004)),
+                ExpectedExitCode: unchecked((int)0xE0540004),
+                BuildLibrary: false),
         };
         foreach (var testCase in cases)
         {
@@ -443,6 +446,9 @@ public sealed partial class CliTests
             var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
                 $"trrm-{testCase.Name}-{Guid.NewGuid():N}.trrm");
             var imagePath = Path.ChangeExtension(artifactPath, ".exe");
+            var libraryPath = Path.ChangeExtension(artifactPath, ".dll");
+            var libraryArtifactPath
+                = Path.ChangeExtension(artifactPath, ".library.trrm");
             try
             {
                 var input = TrRmForeignInvocationAddressEmitterTests
@@ -482,6 +488,51 @@ public sealed partial class CliTests
                 Assert.That(await ExecuteTrRmImageAsync(imagePath)
                     .ConfigureAwait(true),
                     Is.EqualTo(testCase.ExpectedExitCode));
+
+                if (testCase.BuildLibrary)
+                {
+                    var libraryInput
+                        = TrRmForeignInvocationAddressEmitterTests
+                            .CreateA2NestedArrayReadbackInput(moduleIdentity,
+                                0, 0, 1, out _, effectfulIndices: true,
+                                counterObservedIndexUpdates:
+                                    testCase.CounterObserved,
+                                nativeParameterExtent: testCase.Extent,
+                                schemaIdentityOverride: testCase.Schema,
+                                isLibrary: true);
+                    await File.WriteAllBytesAsync(libraryArtifactPath,
+                        libraryInput.Artifact.ToArray())
+                        .ConfigureAwait(true);
+                    var (libraryBuilt, libraryOutput, libraryError)
+                        = await RunAsync([], "build-trrm-library",
+                            libraryArtifactPath, "--export", "Main", "-o",
+                            libraryPath, "--runtime", "fail-fast",
+                            "--trrm-schema", testCase.Schema, "--trrm-module",
+                            moduleIdentity, "--json").ConfigureAwait(true);
+                    Assert.That(libraryBuilt, Is.Zero,
+                        $"{testCase.Name}: {libraryOutput}{Environment.NewLine}{libraryError}");
+                    Assert.That(libraryError, Is.Empty);
+                    using (var libraryResult
+                           = JsonDocument.Parse(libraryOutput))
+                    {
+                        Assert.That(libraryResult.RootElement
+                            .GetProperty("success").GetBoolean(), Is.True);
+                    }
+
+                    var library = NativeLibrary.Load(libraryPath);
+                    try
+                    {
+                        var main = Marshal.GetDelegateForFunctionPointer<
+                            StandardFNativeFunction>(NativeLibrary.GetExport(
+                                library, "Main"));
+                        Assert.That(main(),
+                            Is.EqualTo(testCase.ExpectedExitCode));
+                    }
+                    finally
+                    {
+                        NativeLibrary.Free(library);
+                    }
+                }
             }
             finally
             {
@@ -489,6 +540,10 @@ public sealed partial class CliTests
                     .ConfigureAwait(true);
                 await TestFileCleanup.DeleteWithRetryAsync(imagePath)
                     .ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                    .ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(
+                    libraryArtifactPath).ConfigureAwait(true);
             }
         }
     }
