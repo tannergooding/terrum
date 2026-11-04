@@ -8477,6 +8477,47 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task StandardA2SourceFreeTransfersFromThreeElementNativeParameterSuffix()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2-three-element-native-parameter-suffix";
+        var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
+            0, 0, 1, out var source, effectfulIndices: true,
+            counterObservedIndexUpdates: true,
+            nativeParameterExtent: 3);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundNativeStorageAddress? selectedAddress = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress {
+                    Projections.Length: 3,
+                } address)
+                {
+                    selectedAddress = address;
+                }
+            }), Is.True);
+        Assert.That(selectedAddress, Is.Not.Null);
+        Assert.That((selectedAddress!.ElementCount,
+            selectedAddress.ElementStride, selectedAddress.ByteExtent),
+            Is.EqualTo((4UL, 4UL, 12UL)));
+        Assert.That(selectedAddress.Projections.All(static projection =>
+            projection.Index is BoundUpdate), Is.True);
+        Assert.That(GetA2IndexUpdateControls(input),
+            Is.EqualTo(new byte[] { 0x01, 0x01, 0x01 }));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, input.SchemaIdentity, 1),
+            Is.EqualTo(input.Artifact.ToArray()));
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            input, source, 0xFFFF, "three-element dynamic NativeParameter suffix")
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public async Task StandardA2NestedAddressIndexesExecuteOnceInSourceOrder()
     {
         Assume.That(OperatingSystem.IsWindows()
