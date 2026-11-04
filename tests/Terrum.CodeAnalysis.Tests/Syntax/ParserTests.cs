@@ -164,6 +164,27 @@ public sealed class ParserTests
     }
 
     [Test]
+    public void ParsesGenericStructTypeDefaults()
+    {
+        const string Source = """
+            public struct Defaulted<T = int32> { T Value; }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+
+        var typeParameters = tree.Root.DescendantNodes().Single(
+            static node => node.Kind == SyntaxKind.TypeParameterList);
+        Assert.That(typeParameters.Children.OfType<SyntaxTokenElement>()
+            .Where(static token => token.Token.Kind == TokenKind.Identifier)
+            .Select(static token => token.Token.Name), Is.EqualTo(["T"]));
+        Assert.That(typeParameters.Children.OfType<SyntaxNode>().Select(
+            static node => node.Kind),
+            Is.EqualTo([SyntaxKind.TypeName]));
+        AssertLossless(tree);
+    }
+
+    [Test]
     public void ParsesGenericNominalConformancesAndConstraintsLosslessly()
     {
         const string Source = """

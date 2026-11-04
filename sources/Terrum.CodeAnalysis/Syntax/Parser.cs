@@ -35,26 +35,14 @@ internal sealed class Parser
     {
         var missing = _missingTokens;
         var children = new List<SyntaxElement> { ExpectAttached(TokenKind.Less) };
-        if (!interfaceParameters && !interfaceMember)
+        while (true)
         {
-            children.Add(Expect(TokenKind.Identifier));
-            while (Current.Kind == TokenKind.Comma)
+            ParseGenericFormal(children, interfaceParameters);
+            if (Current.Kind != TokenKind.Comma)
             {
-                children.Add(Take());
-                children.Add(Expect(TokenKind.Identifier));
+                break;
             }
-        }
-        else
-        {
-            while (true)
-            {
-                ParseGenericFormal(children, interfaceParameters);
-                if (Current.Kind != TokenKind.Comma)
-                {
-                    break;
-                }
-                children.Add(Take());
-            }
+            children.Add(Take());
         }
         children.Add(ExpectTypeCloser(missing));
         return Node(SyntaxKind.TypeParameterList, children);
