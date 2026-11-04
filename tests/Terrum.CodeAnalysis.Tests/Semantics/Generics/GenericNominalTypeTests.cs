@@ -3,6 +3,7 @@
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
@@ -97,6 +98,80 @@ public sealed class GenericNominalTypeTests
                 + program.Structures.IndexOf(unsignedCell))));
     }
 
+    [Test]
+    public void AppliesGenericStructOwnershipAndBlittableFormalDomains()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Bits { public int32 Value; }
+            struct BitCell<T> where T : [Blittable] { public T Value; }
+            struct UniqueMarker<T> where T : unique { public int32 Value; }
+            struct FlexibleMarker<T> where T : unique? { public int32 Value; }
+            struct NullableMarker<T> where T : null? { public int32 Value; }
+            unique struct Owner { public int32 Value; }
+            class Node { public int32 Value; public Node() { Value = 0; } }
+
+            void ReadBits(BitCell<int32> value) { }
+            void ReadStructBits(BitCell<Bits> value) { }
+            void ReadUnique(UniqueMarker<Owner> value) { }
+            void ReadFlexibleCopy(FlexibleMarker<int32> value) { }
+            void ReadFlexibleUnique(FlexibleMarker<Owner> value) { }
+            void ReadNullable(NullableMarker<Node?> value) { }
+            int32 Main() { return 0; }
+            """), new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
+
+        Assert.That(compilation.Diagnostics, Is.Empty);
+    }
+
+    [TestCase("struct CopyCell<T> { public T Value; } unique struct Owner { public int32 Value; } void Use(CopyCell<Owner> value) { } int32 Main() { return 0; }")]
+    [TestCase("struct UniqueMarker<T> where T : unique { public int32 Value; } void Use(UniqueMarker<int32> value) { } int32 Main() { return 0; }")]
+    [TestCase("unique struct Owner { public int32 Value; } struct CopyCell<T = Owner> { public T Value; } void Use(CopyCell value) { } int32 Main() { return 0; }")]
+    public void RejectsGenericStructArgumentsOutsideTheirOwnershipDomain(string source)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("ownership domain",
+                    System.StringComparison.Ordinal)), Is.True);
+    }
+
+    [Test]
+    public void RejectsGenericStructArgumentsThatDoNotSatisfyBlittableConstraint()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct NotBlittable { public int32 Value; }
+            struct BitCell<T> where T : [Blittable] { public T Value; }
+            void Use(BitCell<NotBlittable> value) { }
+            int32 Main() { return 0; }
+            """), new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("Blittable constraint",
+                    System.StringComparison.Ordinal)), Is.True);
+    }
+
+    [Test]
+    public void RejectsNullableGenericStructArgumentsWithoutNullabilityDomain()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Node { public int32 Value; public Node() { Value = 0; } }
+            struct NonNullableMarker<T> { public int32 Value; }
+            void Use(NonNullableMarker<Node?> value) { }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("nullability domain",
+                    System.StringComparison.Ordinal)), Is.True);
+    }
+
     [TestCase("struct Cell<T = U, U = int32> { public T First; public U Second; } int32 Read(Cell value) { return value.Second; } int32 Main() { return 0; }")]
     [TestCase("struct Cell<T = T> { public T Value; } int32 Read(Cell value) { return value.Value; } int32 Main() { return 0; }")]
     public void RejectsGenericStructDefaultsThatReferenceCurrentOrForwardFormals(
@@ -110,7 +185,9 @@ public sealed class GenericNominalTypeTests
     [TestCase("public struct Box<T> { T value; }")]
     [TestCase("class Box<T> { int32 value; }")]
     [TestCase("interface I<T> {} struct Box<T> : I<T> { T value; }")]
+    [TestCase("interface I<T> where T : unique { }")]
     [TestCase("struct Box<T> where T : I<T> { T value; }")]
+    [TestCase("struct Box<T> where T : write { T value; }")]
     [TestCase("struct Box<T> { T value; public U Get<U>() { return value; } }")]
     public void RejectsGenericNominalFormsOutsideTheClosedStructProfile(string declaration)
     {

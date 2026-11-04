@@ -137,6 +137,9 @@ internal sealed partial class Binder
     private sealed record GenericStructTemplate(string Name, string QualifiedName,
         ImmutableArray<string> TypeParameters,
         ImmutableArray<SyntaxNode?> TypeDefaults,
+        ImmutableArray<byte> OwnershipDomains,
+        ImmutableArray<byte> NullabilityDomains,
+        ImmutableArray<bool> BlittableRequirements,
         SyntaxTree Tree, SyntaxNode Declaration);
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
@@ -2336,11 +2339,122 @@ internal sealed partial class Binder
         }
 
         if (declaration.Children.OfType<SyntaxNode>().Any(static child =>
-                child.Kind is SyntaxKind.ConformanceList or SyntaxKind.ConstraintClause))
+                child.Kind == SyntaxKind.ConformanceList))
         {
             Report("TRM3005",
-                "Generic struct conformances and constraints require nominal witness support.",
+                "Generic struct conformances require nominal witness support.",
                 declaration.Span);
+            return;
+        }
+
+        var ownershipDomains = Enumerable.Repeat((byte)1, typeParameters.Length).ToArray();
+        var nullabilityDomains = Enumerable.Repeat((byte)1, typeParameters.Length).ToArray();
+        var blittableRequirements = new bool[typeParameters.Length];
+        var ownershipSpecified = new bool[typeParameters.Length];
+        var nullabilitySpecified = new bool[typeParameters.Length];
+        var blittableSpecified = new bool[typeParameters.Length];
+        var formalOrdinals = typeParameters.Select((formal, ordinal) => (formal, ordinal))
+            .ToDictionary(static pair => pair.formal, static pair => pair.ordinal,
+                StringComparer.Ordinal);
+        var hasInvalidConstraint = false;
+        foreach (var constraintClause in declaration.Children.OfType<SyntaxNode>()
+            .Where(static child => child.Kind == SyntaxKind.ConstraintClause))
+        {
+            var formalToken = constraintClause.Children.OfType<SyntaxTokenElement>()
+                .FirstOrDefault(static token => token.Token.Kind == TokenKind.Identifier
+                    && token.Token.Text != "where");
+            if (formalToken is null
+                || !formalOrdinals.TryGetValue(formalToken.Token.Name, out var formalOrdinal))
+            {
+                Report("TRM3005",
+                    "Generic struct constraints must name a declared type formal.",
+                    constraintClause.Span);
+                hasInvalidConstraint = true;
+                continue;
+            }
+
+            var afterColon = false;
+            foreach (var element in constraintClause.Children)
+            {
+                if (element is SyntaxTokenElement { Token.Kind: TokenKind.Colon })
+                {
+                    afterColon = true;
+                    continue;
+                }
+                if (!afterColon
+                    || element is SyntaxTokenElement { Token.Kind: TokenKind.Comma })
+                {
+                    continue;
+                }
+
+                if (element is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
+                {
+                    var registeredBlittable = _layoutCoreRegistration
+                        is LayoutCoreRegistrationSet layoutRegistration
+                        && IsRegisteredLayoutAttribute(attribute,
+                            layoutRegistration.Blittable);
+                    if (!registeredBlittable || !HasNoAttributeArguments(attribute)
+                        || blittableSpecified[formalOrdinal])
+                    {
+                        Report("TRM3005",
+                            "A generic struct Blittable constraint must be a single registered [Blittable] property.",
+                            attribute.Span);
+                        hasInvalidConstraint = true;
+                        continue;
+                    }
+
+                    blittableSpecified[formalOrdinal] = true;
+                    blittableRequirements[formalOrdinal] = true;
+                    continue;
+                }
+
+                if (element is SyntaxNode { Kind: SyntaxKind.ConstraintTerm } constraintTerm)
+                {
+                    var constraintToken = constraintTerm.Children
+                        .OfType<SyntaxTokenElement>().FirstOrDefault();
+                    var isOptional = constraintTerm.Children[^1] is SyntaxTokenElement {
+                        Token.Kind: TokenKind.Question,
+                    };
+                    if (constraintToken?.Token.Kind == TokenKind.UniqueKeyword)
+                    {
+                        if (ownershipSpecified[formalOrdinal])
+                        {
+                            Report("TRM3005",
+                                "A generic struct formal can declare only one ownership domain.",
+                                constraintTerm.Span);
+                            hasInvalidConstraint = true;
+                            continue;
+                        }
+
+                        ownershipSpecified[formalOrdinal] = true;
+                        ownershipDomains[formalOrdinal] = isOptional ? (byte)3 : (byte)2;
+                        continue;
+                    }
+                    if (constraintToken?.Token.Kind == TokenKind.NullKeyword && isOptional)
+                    {
+                        if (nullabilitySpecified[formalOrdinal])
+                        {
+                            Report("TRM3005",
+                                "A generic struct formal can declare only one nullability domain.",
+                                constraintTerm.Span);
+                            hasInvalidConstraint = true;
+                            continue;
+                        }
+
+                        nullabilitySpecified[formalOrdinal] = true;
+                        nullabilityDomains[formalOrdinal] = 2;
+                        continue;
+                    }
+                }
+
+                Report("TRM3005",
+                    "This generic struct constraint is not supported by the source specialization profile.",
+                    element.Span);
+                hasInvalidConstraint = true;
+            }
+        }
+        if (hasInvalidConstraint)
+        {
             return;
         }
 
@@ -2374,12 +2488,14 @@ internal sealed partial class Binder
 
         _genericStructTemplates.Add(qualifiedName,
             new GenericStructTemplate(name.Name, qualifiedName, typeParameters,
-                typeDefaults, tree, declaration));
+                typeDefaults, [.. ownershipDomains], [.. nullabilityDomains],
+                [.. blittableRequirements], tree, declaration));
     }
 
     private bool TryCompleteGenericStructTypeArguments(
         GenericStructTemplate template,
         ImmutableArray<PrimitiveType> suppliedArguments,
+        TextSpan useSite,
         out ImmutableArray<PrimitiveType> completedArguments)
     {
         completedArguments = [];
@@ -2390,7 +2506,8 @@ internal sealed partial class Binder
         if (suppliedArguments.Length == template.TypeParameters.Length)
         {
             completedArguments = suppliedArguments;
-            return true;
+            return ValidateGenericStructFormalArguments(template,
+                completedArguments, useSite);
         }
 
         var completed = ImmutableArray.CreateBuilder<PrimitiveType>(
@@ -2439,11 +2556,110 @@ internal sealed partial class Binder
             }
 
             completedArguments = completed.MoveToImmutable();
-            return true;
         }
         finally
         {
             RestoreContext(previousContext);
+        }
+
+        return ValidateGenericStructFormalArguments(template,
+            completedArguments, useSite);
+    }
+
+    private bool ValidateGenericStructFormalArguments(
+        GenericStructTemplate template,
+        ImmutableArray<PrimitiveType> arguments,
+        TextSpan useSite)
+    {
+        for (var ordinal = 0; ordinal < arguments.Length; ordinal++)
+        {
+            var argument = arguments[ordinal];
+            var ownershipDomain = template.OwnershipDomains[ordinal];
+            if (template.NullabilityDomains[ordinal] == 1
+                && IsSupportedOptionalType(argument))
+            {
+                Report("TRM3005",
+                    $"Type argument '{TypeName(argument)}' does not satisfy the nullability domain of formal '{template.TypeParameters[ordinal]}'.",
+                    useSite);
+                return false;
+            }
+
+            var isUnique = IsUniqueGenericArgumentType(argument);
+            var isCopy = IsCopyGenericArgumentType(argument)
+                || BoundEnumTypes.IsType(argument);
+            if ((ownershipDomain == 1 && (!isCopy || isUnique))
+                || (ownershipDomain == 2 && !isUnique)
+                || (ownershipDomain == 3 && !isCopy && !isUnique))
+            {
+                Report("TRM3005",
+                    $"Type argument '{TypeName(argument)}' does not satisfy the ownership domain of formal '{template.TypeParameters[ordinal]}'.",
+                    useSite);
+                return false;
+            }
+
+            if (template.BlittableRequirements[ordinal]
+                && !IsBlittableGenericArgumentType(argument, []))
+            {
+                Report("TRM3005",
+                    $"Type argument '{TypeName(argument)}' does not satisfy the Blittable constraint of formal '{template.TypeParameters[ordinal]}'.",
+                    useSite);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool IsUniqueGenericArgumentType(PrimitiveType type) =>
+        IsUnique(type)
+        || (IsSupportedOptionalType(type)
+            && TryGetRequiredOptionalType(type, out var requiredType)
+            && IsUnique(requiredType));
+
+    private bool IsBlittableGenericArgumentType(
+        PrimitiveType type,
+        HashSet<PrimitiveType> activeFixedArrays)
+    {
+        if (IsBlittableLayoutFieldType(type))
+        {
+            return true;
+        }
+        if (IsStruct(type))
+        {
+            return _structs[(int)type - 100].BlittableTargetRequirement
+                == FixedLayoutStorage.WindowsX64TargetRequirement;
+        }
+        if (BoundEnumTypes.IsType(type))
+        {
+            var enumIndex = BoundEnumTypes.Index(type);
+            return (uint)enumIndex < (uint)_enumDefinitions.Count
+                && _enumDefinitions[enumIndex].BlittableTargetRequirement
+                    == FixedLayoutStorage.WindowsX64TargetRequirement;
+        }
+        if (!NativeFixedArrayTypes.IsType(type)
+            || !activeFixedArrays.Add(type))
+        {
+            return false;
+        }
+
+        try
+        {
+            var arrayIndex = NativeFixedArrayTypes.Index(type);
+            if ((uint)arrayIndex >= (uint)_nativeFixedArrayTypes.Count)
+            {
+                return false;
+            }
+
+            var array = _nativeFixedArrayTypes[arrayIndex];
+            return NativeFixedArrayContract.TryGetLayout(type,
+                    array.ElementType, array.ElementCount, _structs,
+                    _nativeFixedArrayTypes, out _)
+                && IsBlittableGenericArgumentType(array.ElementType,
+                    activeFixedArrays);
+        }
+        finally
+        {
+            _ = activeFixedArrays.Remove(type);
         }
     }
 
@@ -2451,7 +2667,7 @@ internal sealed partial class Binder
         ImmutableArray<PrimitiveType> typeArguments, TextSpan useSite)
     {
         if (!TryCompleteGenericStructTypeArguments(template, typeArguments,
-                out var completedArguments))
+                useSite, out var completedArguments))
         {
             return PrimitiveType.Int32;
         }

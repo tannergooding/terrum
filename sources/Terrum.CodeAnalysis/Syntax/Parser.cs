@@ -104,6 +104,19 @@ internal sealed class Parser
                 children.Add(Node(SyntaxKind.Attribute,
                     [Take(), Expect(TokenKind.Identifier), Expect(TokenKind.CloseBracket)]));
             }
+            else if (Current.Kind is TokenKind.WriteKeyword or TokenKind.UniqueKeyword
+                or TokenKind.NullKeyword)
+            {
+                var term = new List<SyntaxElement> { Take() };
+                if (term[0] is SyntaxTokenElement {
+                        Token.Kind: TokenKind.UniqueKeyword or TokenKind.NullKeyword,
+                    }
+                    && Current.Kind == TokenKind.Question)
+                {
+                    term.Add(Take());
+                }
+                children.Add(Node(SyntaxKind.ConstraintTerm, term));
+            }
             else
             {
                 children.Add(ParseType());

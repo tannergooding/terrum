@@ -239,4 +239,6 @@ public enum SyntaxKind
     ConstantGenericArgument,
     /// <summary>A hidden type slot in an existential generic type argument.</summary>
     ExistentialTypeArgument,
+    /// <summary>A keyword property used as a generic constraint term.</summary>
+    ConstraintTerm,
 }

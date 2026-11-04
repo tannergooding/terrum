@@ -1759,6 +1759,12 @@ internal sealed partial class Binder
                         formalOrdinal, BoundInterfaceConstraintKind.Type, type, null)
                         { FormalScope = formalScope });
                 }
+                else if (item.Kind == SyntaxKind.ConstraintTerm)
+                {
+                    Report("TRM3005",
+                        "This generic property constraint is not supported by interface contracts.",
+                        item.Span);
+                }
             }
         }
     }
