@@ -442,6 +442,7 @@ public sealed partial class CliTests
             var moduleIdentity = $"a2-{testCase.Name}-cli-worker";
             var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
                 $"trrm-{testCase.Name}-{Guid.NewGuid():N}.trrm");
+            var imagePath = Path.ChangeExtension(artifactPath, ".exe");
             try
             {
                 var input = TrRmForeignInvocationAddressEmitterTests
@@ -464,10 +465,29 @@ public sealed partial class CliTests
                     $"{testCase.Name}: {output}{Environment.NewLine}{error}");
                 Assert.That(output, Is.Empty);
                 Assert.That(error, Is.Empty);
+
+                var (built, buildOutput, buildError) = await RunAsync([],
+                    "build-trrm", artifactPath, "-o", imagePath, "--runtime",
+                    "fail-fast", "--trrm-schema", testCase.Schema,
+                    "--trrm-module", moduleIdentity, "--json")
+                    .ConfigureAwait(true);
+                Assert.That(built, Is.Zero,
+                    $"{testCase.Name}: {buildOutput}{Environment.NewLine}{buildError}");
+                Assert.That(buildError, Is.Empty);
+                using (var buildResult = JsonDocument.Parse(buildOutput))
+                {
+                    Assert.That(buildResult.RootElement
+                        .GetProperty("success").GetBoolean(), Is.True);
+                }
+                Assert.That(await ExecuteTrRmImageAsync(imagePath)
+                    .ConfigureAwait(true),
+                    Is.EqualTo(testCase.ExpectedExitCode));
             }
             finally
             {
                 await TestFileCleanup.DeleteWithRetryAsync(artifactPath)
+                    .ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(imagePath)
                     .ConfigureAwait(true);
             }
         }
