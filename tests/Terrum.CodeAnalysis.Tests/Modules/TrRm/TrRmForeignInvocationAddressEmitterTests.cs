@@ -5048,6 +5048,85 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task StandardA2EUFieldArrayNativeWriteUsesTwoElementSuffix()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        const string moduleIdentity = "a2eu-field-array-native-write-q2";
+        const string source = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [int32; 2] Values;
+            }
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 2)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut uint64 index = 0;
+                [int32; 2] initial = [-1, 0];
+                int32 replacement = 0;
+                init mut Holder holder;
+                holder.Values = initial;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&holder.Values[index++],
+                        &replacement, index);
+                }
+                return replacement;
+            }
+            """;
+        var options = WithLayoutRegistration(new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        });
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundNativeStorageAddress? selectedWriteAddress = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress {
+                    FieldPlace: not null,
+                    IsReadonly: false,
+                    ElementCount: 2,
+                    ByteExtent: 8,
+                    Index: BoundUpdate,
+                } address)
+                {
+                    selectedWriteAddress = address;
+                }
+            }), Is.True);
+        Assert.That(selectedWriteAddress, Is.Not.Null);
+        Assert.That(selectedWriteAddress!.Index.Type,
+            Is.EqualTo(PrimitiveType.UInt64));
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            input, source, 0, "two-element field-array NativeParameter write")
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public async Task StandardA2FieldArrayReadUsesPositiveDynamicExtent()
     {
         Assume.That(OperatingSystem.IsWindows()
