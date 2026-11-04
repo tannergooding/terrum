@@ -484,6 +484,12 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
         get; init;
     } = [];
 
+    internal ImmutableArray<BoundSourceGenericTypeDefinition>
+        SourceGenericTypeDefinitions { get; init; } = [];
+
+    internal ImmutableArray<BoundSourceGenericTypeInstance>
+        SourceGenericTypeInstances { get; init; } = [];
+
     internal ImmutableArray<BoundSourceTypePublication> SourceTypePublications
     {
         get; init;
@@ -544,6 +550,19 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 internal sealed record BoundSourceTypeDeclaration(int StructureIndex,
     string Namespace, string Name, BoundStruct DeclarationSnapshot);
 
+internal sealed record BoundSourceGenericTypeFormal(
+    int Ordinal, string Name, byte OwnershipDomain, byte NullabilityDomain,
+    bool RequiresBlittable, bool HasTypeDefault);
+
+internal sealed record BoundSourceGenericTypeDefinition(
+    int DefinitionIndex, string Namespace, string Name, string QualifiedName,
+    bool IsPublic, bool IsUnique,
+    ImmutableArray<BoundSourceGenericTypeFormal> Formals);
+
+internal sealed record BoundSourceGenericTypeInstance(
+    int StructureIndex, int DefinitionIndex,
+    ImmutableArray<PrimitiveType> TypeArguments);
+
 /// <summary>A loaded local A2 TypeDef and its retained ExportKey aliases; no keys means unpublished.</summary>
 internal sealed record BoundSourceTypePublication(int StructureIndex,
     ImmutableArray<string> ExportKeys, BoundStruct DeclarationSnapshot,
@@ -592,6 +611,7 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
 {
     internal TokenSpanTypeRole TokenSpanRole { get; init; }
     internal BoundStandardTypeOrigin? StandardTypeOrigin { get; init; }
+    internal int SourceGenericTypeDefinitionIndex { get; init; } = -1;
 
     /// <summary>Whether the value requests declaration-order natural layout; a public commitment also requires <see cref="BlittableTargetRequirement"/>.</summary>
     public bool IsSequential { get; init; }

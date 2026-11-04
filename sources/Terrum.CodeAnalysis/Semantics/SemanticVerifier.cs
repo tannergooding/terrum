@@ -201,6 +201,17 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "GenericNominalType");
         }
+        var sourceGenericArgumentsValid = true;
+        var sourceGenericArgumentsComplete =
+            BoundTreeTraversal.VisitSourceGenericTypeArguments(program,
+                type => sourceGenericArgumentsValid &=
+                    IsValidType(type, false, program));
+        if (!IsValidSourceGenericTypeTables(program)
+            || !sourceGenericArgumentsComplete
+            || !sourceGenericArgumentsValid)
+        {
+            throw InvalidEffect(default, "SourceGenericType");
+        }
         if (!CoreExceptionIdentitySelectionContract.IsValidTable(
             program.CoreExceptionIdentitySelections))
         {
@@ -10973,6 +10984,102 @@ public static partial class SemanticVerifier
 
     internal static bool IsValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         ValidType(type, allowVoid, program);
+
+    private static bool IsValidSourceGenericTypeTables(BoundProgram program)
+    {
+        var definitions = program.SourceGenericTypeDefinitions;
+        var instances = program.SourceGenericTypeInstances;
+        if (definitions.IsDefault || definitions.Length > MaximumAnalysisVisits
+            || instances.IsDefault || instances.Length > MaximumAnalysisVisits)
+        {
+            return false;
+        }
+
+        var definitionNames = new HashSet<string>(StringComparer.Ordinal);
+        long rowCount = 0;
+        for (var definitionIndex = 0; definitionIndex < definitions.Length;
+            definitionIndex++)
+        {
+            var definition = definitions[definitionIndex];
+            if (definition is null || definition.DefinitionIndex != definitionIndex
+                || definition.Namespace is null || definition.Name is null
+                || definition.QualifiedName is null
+                || string.IsNullOrWhiteSpace(definition.Name)
+                || (definition.Namespace.Length > 0
+                    && string.IsNullOrWhiteSpace(definition.Namespace))
+                || definition.Formals.IsDefaultOrEmpty
+                || definition.Formals.Length > MaximumAnalysisVisits
+                || definition.QualifiedName != (definition.Namespace.Length == 0
+                    ? definition.Name
+                    : definition.Namespace + "." + definition.Name)
+                || !definitionNames.Add(definition.QualifiedName))
+            {
+                return false;
+            }
+
+            var formalNames = new HashSet<string>(StringComparer.Ordinal);
+            rowCount += definition.Formals.Length;
+            if (rowCount > MaximumAnalysisVisits)
+            {
+                return false;
+            }
+            for (var ordinal = 0; ordinal < definition.Formals.Length; ordinal++)
+            {
+                var formal = definition.Formals[ordinal];
+                if (formal is null || formal.Ordinal != ordinal
+                    || string.IsNullOrWhiteSpace(formal.Name)
+                    || !formalNames.Add(formal.Name)
+                    || formal.OwnershipDomain is < 1 or > 3
+                    || formal.NullabilityDomain is < 1 or > 2)
+                {
+                    return false;
+                }
+            }
+        }
+
+        var mappedStructures = new HashSet<int>();
+        foreach (var instance in instances)
+        {
+            if (instance is null || (uint)instance.StructureIndex
+                    >= (uint)program.Structures.Length
+                || (uint)instance.DefinitionIndex >= (uint)definitions.Length
+                || instance.TypeArguments.IsDefault
+                || instance.TypeArguments.Length
+                    != definitions[instance.DefinitionIndex].Formals.Length
+                || !mappedStructures.Add(instance.StructureIndex)
+                || program.Structures[instance.StructureIndex] is not BoundStruct structure
+                || structure.SourceGenericTypeDefinitionIndex
+                    != instance.DefinitionIndex)
+            {
+                return false;
+            }
+            rowCount += instance.TypeArguments.Length;
+            if (rowCount > MaximumAnalysisVisits)
+            {
+                return false;
+            }
+        }
+
+        for (var structureIndex = 0; structureIndex < program.Structures.Length;
+            structureIndex++)
+        {
+            var structure = program.Structures[structureIndex];
+            if (structure is null)
+            {
+                return false;
+            }
+            var definitionIndex = structure.SourceGenericTypeDefinitionIndex;
+            if (definitionIndex < -1
+                || definitionIndex >= definitions.Length
+                || (definitionIndex >= 0)
+                    != mappedStructures.Contains(structureIndex))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         int enumDefinitionCount = 0) =>

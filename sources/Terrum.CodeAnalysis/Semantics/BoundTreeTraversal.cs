@@ -43,6 +43,34 @@ internal static class BoundTreeTraversal
         return true;
     }
 
+    internal static bool VisitSourceGenericTypeArguments(
+        BoundProgram program, Action<PrimitiveType> visitor)
+    {
+        if (program.SourceGenericTypeInstances.IsDefault)
+        {
+            return false;
+        }
+
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var instance in program.SourceGenericTypeInstances)
+        {
+            if (instance is null || instance.TypeArguments.IsDefault)
+            {
+                return false;
+            }
+            foreach (var argument in instance.TypeArguments)
+            {
+                if (--remaining < 0)
+                {
+                    return false;
+                }
+                visitor(argument);
+            }
+        }
+
+        return true;
+    }
+
     internal static bool VisitExpressions(BoundBlock body, Action<BoundExpression> visitor)
         => VisitExpressionsCore(body, visitor, requireComplete: false);
 
@@ -360,6 +388,13 @@ internal static class BoundTreeTraversal
         CheckedReferenceTypeDefinition referenceType,
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
         referenceType with { ReferentType = rewriteType(referenceType.ReferentType) };
+
+    internal static BoundSourceGenericTypeInstance RewriteTypes(
+        BoundSourceGenericTypeInstance instance,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        instance with {
+            TypeArguments = [.. instance.TypeArguments.Select(rewriteType)],
+        };
 
     internal static BoundInterfaceType RewriteTypes(
         BoundInterfaceType type,

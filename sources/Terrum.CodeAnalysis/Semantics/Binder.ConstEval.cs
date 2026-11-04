@@ -597,6 +597,13 @@ internal sealed partial class Binder
         }
 
         _pendingNativeCallConvExpressions.Clear();
+        for (var index = 0; index < _sourceGenericTypeInstances.Count;
+            index++)
+        {
+            _sourceGenericTypeInstances[index] =
+                BoundTreeTraversal.RewriteTypes(
+                    _sourceGenericTypeInstances[index], RewriteType);
+        }
         return true;
     }
 

@@ -36,6 +36,33 @@ public sealed class GenericNominalTypeTests
 
         Assert.That(compilation.Diagnostics, Is.Empty);
         var program = compilation.Program!;
+        var boxDefinition = program.SourceGenericTypeDefinitions.Single(
+            static definition => definition.Name == "Box");
+        var nestedDefinition = program.SourceGenericTypeDefinitions.Single(
+            static definition => definition.Name == "Nested");
+        Assert.That(boxDefinition.Formals.Select(static formal => formal.Ordinal),
+            Is.EqualTo(new[] { 0 }));
+        Assert.That(boxDefinition.Formals.Single().HasTypeDefault, Is.False);
+        Assert.That(program.Structures.Single(static structure
+                => structure.Name == "Box<int32>")
+                .SourceGenericTypeDefinitionIndex,
+            Is.EqualTo(boxDefinition.DefinitionIndex));
+        var int32Box = program.Structures.Single(static structure
+            => structure.Name == "Box<int32>");
+        var int32BoxIndex = program.Structures.IndexOf(int32Box);
+        Assert.That(program.SourceGenericTypeInstances.Single(instance
+                => instance.StructureIndex == int32BoxIndex).TypeArguments,
+            Is.EqualTo(new[] { PrimitiveType.Int32 }));
+        var uint32Box = program.Structures.Single(static structure
+            => structure.Name == "Box<uint32>");
+        var uint32BoxIndex = program.Structures.IndexOf(uint32Box);
+        Assert.That(program.SourceGenericTypeInstances.Single(instance
+                => instance.StructureIndex == uint32BoxIndex).TypeArguments,
+            Is.EqualTo(new[] { PrimitiveType.UInt32 }));
+        Assert.That(program.SourceGenericTypeInstances.Single(instance
+                => instance.DefinitionIndex == nestedDefinition.DefinitionIndex)
+                .TypeArguments,
+            Is.EqualTo(new[] { PrimitiveType.Int32 }));
         var box = program.Structures.Single(static structure => structure.Name == "Box<int32>");
         Assert.That(box.Size, Is.EqualTo(4));
         Assert.That(box.Fields.Select(static field => field.Type),
@@ -74,6 +101,11 @@ public sealed class GenericNominalTypeTests
 
         Assert.That(compilation.Diagnostics, Is.Empty);
         var program = compilation.Program!;
+        var cellDefinition = program.SourceGenericTypeDefinitions.Single(
+            static definition => definition.Name == "Cell");
+        Assert.That(cellDefinition.Formals.Select(static formal
+                => formal.HasTypeDefault),
+            Is.EqualTo(new[] { true, true }));
         var defaultCell = program.Structures.Single(static structure
             => structure.Name == "Cell<int32, int32>");
         Assert.That(defaultCell.Fields.Select(static field => field.Type),
@@ -123,6 +155,51 @@ public sealed class GenericNominalTypeTests
             });
 
         Assert.That(compilation.Diagnostics, Is.Empty);
+    }
+
+    [Test]
+    public void VerifiesSourceGenericDefinitionAndInstanceIdentity()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Box<T> { public T Value; }
+            int32 Read(Box<int32> value) { return value.Value; }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics, Is.Empty);
+        var program = compilation.Program!;
+        var instance = program.SourceGenericTypeInstances.Single();
+        _ = Assert.Throws<System.ArgumentException>(() =>
+            SemanticVerifier.Verify(program with {
+                SourceGenericTypeInstances = [],
+            }));
+        _ = Assert.Throws<System.ArgumentException>(() =>
+            SemanticVerifier.Verify(program with {
+                SourceGenericTypeInstances = [
+                    instance with {
+                        TypeArguments = [PrimitiveType.Void],
+                    },
+                ],
+            }));
+    }
+
+    [Test]
+    public void RewritesSourceGenericActualsWithNormalizedNativeTypes()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct PointerBox<T> { public T Value; }
+            unsafe void Use(PointerBox<ptr<int32>> value) { }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics, Is.Empty);
+        var program = compilation.Program!;
+        var instance = program.SourceGenericTypeInstances.Single();
+        var fieldType = program.Structures[instance.StructureIndex]
+            .Fields.Single().Type;
+        Assert.That(instance.TypeArguments, Is.EqualTo(new[] { fieldType }));
+        Assert.That(NativePointerTypeContract.IsValidType(fieldType,
+            program.NativePointerTypes), Is.True);
     }
 
     [TestCase("struct CopyCell<T> { public T Value; } unique struct Owner { public int32 Value; } void Use(CopyCell<Owner> value) { } int32 Main() { return 0; }")]

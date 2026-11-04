@@ -40,6 +40,8 @@ internal sealed partial class Binder
     private readonly List<BoundGenericNominalTypeDefinition> _genericNominalTypeDefinitions = [];
     private readonly List<BoundGenericNominalTypeInstance> _genericNominalTypeInstances = [];
     private readonly Dictionary<string, PrimitiveType> _genericNominalTypeUses = new(StringComparer.Ordinal);
+    private readonly List<BoundSourceGenericTypeDefinition> _sourceGenericTypeDefinitions = [];
+    private readonly List<BoundSourceGenericTypeInstance> _sourceGenericTypeInstances = [];
     private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
     private readonly Dictionary<PrimitiveType, int> _structureAlignments = [];
@@ -134,7 +136,7 @@ internal sealed partial class Binder
         internal PrimitiveType Type { get; set; }
     }
 
-    private sealed record GenericStructTemplate(string Name, string QualifiedName,
+    private sealed record GenericStructTemplate(int DefinitionIndex, string Name, string QualifiedName,
         ImmutableArray<string> TypeParameters,
         ImmutableArray<SyntaxNode?> TypeDefaults,
         ImmutableArray<byte> OwnershipDomains,
@@ -830,6 +832,8 @@ internal sealed partial class Binder
             NativeUtf16ZLiterals = [.. _nativeUtf16ZLiterals],
             NativeUtf8ZLiterals = [.. _nativeUtf8ZLiterals],
             RuntimePolicy = _runtimePolicy,
+            SourceGenericTypeDefinitions = [.. _sourceGenericTypeDefinitions],
+            SourceGenericTypeInstances = [.. _sourceGenericTypeInstances],
         };
         if (!SemanticVerifier.TryVerifySourceWithCopyOriginSummaries(program,
             out var verifiedProgram, out var functionIndex, out var span,
@@ -2081,6 +2085,8 @@ internal sealed partial class Binder
         var structureType = (PrimitiveType)(100 + index);
         _structs[index] = new BoundStruct(qualified, fieldLayout, size) {
             IsInternal = _structs[index].IsInternal,
+            SourceGenericTypeDefinitionIndex =
+                _structs[index].SourceGenericTypeDefinitionIndex,
             IsUnique = isUnique,
             IsTransparent = isTransparent,
             BlittableTargetRequirement = isBlittable
@@ -2486,8 +2492,23 @@ internal sealed partial class Binder
             return;
         }
 
+        var definitionIndex = _sourceGenericTypeDefinitions.Count;
+        var formals = ImmutableArray.CreateBuilder<BoundSourceGenericTypeFormal>(
+            typeParameters.Length);
+        for (var ordinal = 0; ordinal < typeParameters.Length; ordinal++)
+        {
+            formals.Add(new BoundSourceGenericTypeFormal(ordinal,
+                typeParameters[ordinal], ownershipDomains[ordinal],
+                nullabilityDomains[ordinal], blittableRequirements[ordinal],
+                typeDefaults[ordinal] is not null));
+        }
+        var isUnique = declaration.Children.OfType<SyntaxTokenElement>()
+            .Any(static child => child.Token.Kind == TokenKind.UniqueKeyword);
+        _sourceGenericTypeDefinitions.Add(new BoundSourceGenericTypeDefinition(
+            definitionIndex, _namespace, name.Name, qualifiedName, false,
+            isUnique, formals.MoveToImmutable()));
         _genericStructTemplates.Add(qualifiedName,
-            new GenericStructTemplate(name.Name, qualifiedName, typeParameters,
+            new GenericStructTemplate(definitionIndex, name.Name, qualifiedName, typeParameters,
                 typeDefaults, [.. ownershipDomains], [.. nullabilityDomains],
                 [.. blittableRequirements], tree, declaration));
     }
@@ -2702,7 +2723,10 @@ internal sealed partial class Binder
         _structNames.Add(qualifiedName, type);
         _structs.Add(new BoundStruct(qualifiedName, [], 0) {
             IsInternal = true,
+            SourceGenericTypeDefinitionIndex = template.DefinitionIndex,
         });
+        _sourceGenericTypeInstances.Add(new BoundSourceGenericTypeInstance(
+            index, template.DefinitionIndex, typeArguments));
         _structDeclarations.Add(index, (template.Tree, template.Declaration));
 
         var previousContext = CaptureContext();
