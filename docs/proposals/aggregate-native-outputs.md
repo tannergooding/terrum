@@ -3,9 +3,10 @@
 **Status: unapproved; provisionally actionable under the authorized
 missing-contract workflow.** This document owns the generalized source and
 logical cell contract. Its integrated scalar/pointer eligibility and
-source-dependency applicability are unapproved amendments; they do not
-approve or stabilize adjacent ownership, private persistence, foreign identity
-or indirect-call designs. It does not amend accepted specifications, establish
+source-dependency applicability are unapproved amendments. Resource adoption
+and release is a distinct, unapproved decision integrated below; none of
+these approvals implies private persistence, foreign identity or indirect-call
+designs. This document does not amend accepted specifications, establish
 compiler support, or change the normative registry. The standard
 representation below is a concrete **unapproved candidate**. Adoption,
 implementation and qualification remain prerequisites for the whole-plan
@@ -75,10 +76,78 @@ interface or authorize resource operations.
 | Foreign resource right or responsibility | A separate authored unsafe provider/wrapper contract for acquisition or borrowing, provider origin, retention, transfer and exact release. Copying raw bits acquires no checked ownership. |
 | Checked owner or typed interface | An authored operation must establish its complete type, validity, dependencies and unique responsibility. COM/interface acquisition must fix or validate the IID before typed publication; a caller-selected IID plus `void**`, equal slot or cast is insufficient. |
 
-The resource-acquisition/adoption boundary remains separately owned by
-[NativeOutput resource ownership](native-pointer-output-ownership.md). This
-cell proposal grants no ownership flag, automatic adoption, synthesized
-release or compiler-recognized owner-constructor name.
+Resource acquisition/adoption remains a distinct, unapproved decision; its
+obligations are stated below. This cell proposal grants no ownership flag,
+automatic adoption, synthesized release or compiler-recognized
+owner-constructor name.
+
+### Resource ownership, adoption and typed interfaces
+
+This is a distinct, unapproved resource policy, not an additional cell
+eligibility rule. NativeOutput publishes a complete T; it does not transfer
+ownership of a resource represented by T. An integer handle initializes an
+integer. A pointer initializes its pointer cell, not its pointee. Copying
+either value acquires no resource right, lease, release obligation or typed
+interface identity.
+
+A foreign acquisition or borrow therefore needs an additional authored
+unsafe provider contract. A checked Terrum owner or typed interface may be
+published only by an ordinary authored wrapper whose separate contract
+establishes resource origin, validity, backing/retention, unique
+responsibility, cleanup and failure behavior. No COM `AddRef`/`Release`
+operation, ownership flag, automatic adoption, synthesized release or
+owner-constructor name is inferred from the output value.
+
+For the bounded success-only acquisition candidate:
+
+1. On the declared normal-success result, the provider establishes both a
+   valid T and exactly the documented resource/reference responsibility. The
+   caller becomes responsible at successful normal return, not only if a
+   later owner constructor happens to succeed. Multiple acquisitions remain
+   separately responsible until transferred or settled.
+2. On the complementary normal result, the provider leaves no acquisition
+   that the caller must inspect or release through this output. A failure-live
+   diagnostic/error handle needs an independently admitted protocol.
+3. On an admitted foreign exception after invocation begins, no acquisition
+   transfers through the cell. The provider settles unpublished acquisitions;
+   the cell retains its indeterminate exceptional state, not vacancy.
+4. No fallible operation may intervene between successful machine return and
+   normal cell publication while an acquisition is hidden in unpublished
+   bytes. The initial resource-wrapper slice therefore admits only crossings
+   without fallible postconditions, consumed-owner phase cleanup or other
+   fallible work in that interval.
+
+The authored wrapper establishes release context, provider/code dependencies
+and exceptional cleanup structure before acquisition. It owns each raw
+responsibility while validation/adoption can fail. A failed adoption leaves
+responsibility with the wrapper unless that exact operation consumed or
+settled it; successful adoption transfers responsibility once to a unique
+owner. An operation named `Adopt`, an owner constructor, a cast or pointer
+equality proves no handoff. Several acquisitions must be settled in their
+actual required order on each failure path. This is not a general NoThrow
+promise; release failure must preserve its actual remaining responsibility
+and surface the result without a silent settlement or blind retry.
+
+A borrowed pointer/handle needs its actual backing, lease or guard and
+retention endpoint. No-retention applies to the **output cell address**; it
+does not authorize retaining arbitrary input addresses or extend the
+returned resource's lifetime. Pointer-cell publication, pointee validity and
+resource ownership remain separate facts.
+
+Non-null pointer bits do not identify a foreign interface, establish its
+vtable/slot contract or acquire a reference. Typed acquisition must fix the
+requested interface identity in authored library code or validate the actual
+identity under an independently admitted protocol before publishing a typed
+owner. A caller-selected IID plus `void**`, equal slot, common release prefix
+or cast is insufficient. Exact foreign interface/method identity and
+provider-binding remain separate decisions; this section assigns no IID,
+slot, resource catalog, adoption signature or release ABI.
+
+These are separate approval and support gates. A NativeOutput cell
+implementation alone does not establish foreign acquisition, checked
+ownership, COM identity or release behavior. Exact private persistence and
+outer provider/export binding remain separately owned and selected; no
+private revision or provider table validates a foreign ownership promise.
 
 The source-dependency applicability in this document is a separate
 unapproved decision: it reuses existing DependsOn/ForwardsBacking vocabulary
@@ -829,7 +898,7 @@ The shared cell contract does not absorb adjacent decisions:
 
 | Separate owner | Boundary |
 |---|---|
-| [NativeOutput resource ownership](native-pointer-output-ownership.md) | Authored acquisition/adoption, release, borrowed-resource lifetime and fixed/validated interface identity remain a distinct unsafe/resource contract. NativeOutput cell publication alone transfers no resource right or responsibility. |
+| [Resource ownership, adoption and typed interfaces](#resource-ownership-adoption-and-typed-interfaces) | This is a separate, unapproved unsafe/resource decision within the integrated cell owner. It does not follow from cell eligibility or publication. |
 | [Aggregate NativeOutput private persistence](aggregate-native-output-private-persistence.md), [direct-import provider binding](native-output-direct-import-provider-binding.md), and [foreign-interface identity](native-output-foreign-interface-method-identity.md) | Exact private bytes, outer provider/export binding, and nominal interface/method identity are separate decisions. None follows from the shared cell schema. |
 | [Checked function-pointer output parameters](function-pointer-checked-output-parameters.md) and [Standard NativeImport function-pointer obligations](standard-native-import-function-pointer-contracts.md) | Checked `ref<init T>` outputs and indirect callable-value contracts retain their own source, schema and runtime gates. This proposal does not widen either. |
 
@@ -879,6 +948,13 @@ not only the motivating graphics sample.
 | Vacant local, nested `Blittable Copy` aggregate, valid successful writes | Publish the complete value under the exact saved result condition without invoking any source constructor. Exercise direct import and independently admitted vtable dispatch. |
 | Vacant scalar cell and raw-pointer cell with the same result partition | Apply the same reservation/publication rules to exact admitted T types; the scalar/pointer cell's own extent/alignment is used, not a handle-name or pointee-size heuristic. |
 | Pointer-valued T is null or non-null on claimed success | Publish only the pointer descriptor promised by the provider. Do not infer pointee validity, extent, lifetime, access, ownership or interface identity. |
+| Scalar or pointer cell denotes a foreign resource | Publish only the complete T value. A separate authored provider/wrapper contract must establish any acquisition, borrow, unique responsibility, backing, retention and release obligation. |
+| Successful acquisition followed by wrapper validation/adoption failure | The wrapper retains and settles every still-held responsibility exactly once; successful adoption transfers it exactly once to the complete unique owner. |
+| False result or foreign exception after partial resource acquisition | No resource responsibility transfers through the cell. The provider settles unpublished acquisitions; the false cell remains vacant and the exceptional cell remains indeterminate. |
+| Fallible work between native success and cell publication | Reject the bounded checked-acquisition wrapper unless that operation settles the acquisition before failure can escape. Do not publish early or infer NoThrow. |
+| Borrowed pointer/handle whose descriptor slot or input address expires | Preserve the actual backing lease/guard and endpoint. Cell no-retention does not extend referent lifetime or permit adopting/releasing a borrow. |
+| Caller-selected IID plus `void**`, wrong returned IID or equal vtable slot | Do not publish a typed interface owner without fixed or validated interface identity and the independent method/provider binding. |
+| Release failure or numeric handle reuse | Preserve remaining responsibility and surface the release result; do not silently settle or blindly retry. |
 | NonZero receives `2` or signed `-1`; NonNegative receives `0` | Apply the exact integral tests, not Boolean-one, HRESULT-name or sample heuristics. |
 | False result after no writes, one field written, or all bytes written | Keep vacant; reject value reads/default inference and perform no complete-`T` cleanup or rollback. |
 | Live, maybe-live, partial or already-reserved output place | Reject formation until ordinary state/dependency rules establish whole vacancy. No implicit retirement of an old value. |

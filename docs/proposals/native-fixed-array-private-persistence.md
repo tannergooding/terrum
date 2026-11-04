@@ -11,10 +11,11 @@ reasoning, then continue with it being treated as a provisional
 approval/direction.” This recommendation supplies that provisional direction;
 adoption and implementation remain separate.
 
-The unapproved [artifact-local metadata companion](native-fixed-array-private-metadata-boundary.md)
-governs projection and replacement of metadata-only recipes in this candidate.
-It provisionally supersedes those obligations below; the byte schema, flat
-runtime boundary and approval status remain unchanged.
+The [artifact-local metadata boundary](#metadata-only-nested-and-zero-payload-types)
+and its [projection/replacement rules](#dependencies-structural-remapping-and-replacement)
+are integrated here as part of this revision-100 candidate. The separate
+[decision record](native-fixed-array-private-metadata-boundary.md) retains the
+independent approval boundary; it changes no bytes, runtime scope or status.
 
 ## Decision and scope
 

@@ -1,61 +1,37 @@
-# Artifact-local fixed-array metadata in private revision 100
+# Artifact-local fixed-array metadata boundary
 
 **Status: unapproved; provisionally actionable only under the user's explicit
-missing-contract authorization.** This remains a separate projection and
+missing-contract authorization.** This is a separate projection and
 replacement decision for
 [private fixed-array persistence](native-fixed-array-private-persistence.md).
 It changes no bytes, schema identity, runtime admission or approval status.
 
-## Decision and owner
+The complete revision-100 metadata and projection contract is integrated in
+the owner's [metadata-only nested and zero-payload types](native-fixed-array-private-persistence.md#metadata-only-nested-and-zero-payload-types)
+and [dependencies, structural remapping and replacement](native-fixed-array-private-persistence.md#dependencies-structural-remapping-and-replacement)
+sections. This record preserves the independently unapproved choice:
 
-Recommend artifact-local metadata recipes under the exact candidate
-`terrum/private-semantic-100-structural-fixed-arrays-1`. The complete
-candidate behavior is integrated into
-[Dependencies, structural remapping and replacement](native-fixed-array-private-persistence.md#dependencies-structural-remapping-and-replacement)
-and the linked identity/metadata-only sections. Those sections are the
-implementation-facing owners; this companion records the independently
-unapproved scope decision.
+* Full modules, sets, graph libraries and source-free execution artifacts
+  retain the complete closure of their retained implementation records,
+  including valid descriptive nested-array, nominal-field, pointer-chain and
+  function-pointer recipes.
+* Bodyless references and Contract-only projections retain only existing
+  legally exported runtime roots and their required dependencies. Unrooted
+  metadata-only recipes may be pruned; a type name, implementation row or
+  metadata presence does not create a type-only export/import identity.
+* Pruning cannot repair malformed selected input, admit an excluded runtime
+  occurrence, erase an offending export, or discard a non-array fact actually
+  relied on by a retained contract. A pruned bodyless reference cannot
+  recreate implementation bodies or descriptions.
 
-Full persisted modules, sets, graph libraries and source-free execution
-artifacts retain the complete closure of their retained implementation
-records, including descriptive nested-array, nominal-field, pointer-chain and
-function-pointer recipes. Bodyless references and Contract-only projections
-are rooted only in existing legally exported runtime contracts and their
-required declarations/dependencies. Unrooted metadata-only recipes may be
-pruned. A public type name, implementation row or metadata presence is not a
-type-only export/import identity; revision 100 adds none.
+The exact candidate remains
+`terrum/private-semantic-100-structural-fixed-arrays-1`. The private byte
+layout, revision-100 selection, flat direct-local operations and Standard A2
+separation remain owned by the base proposal. This decision adds no source,
+API, wire carrier, provider search, compatibility reader or runtime feature;
+formal approval and implementation qualification remain outstanding.
 
-Replacement preserves every original retained legal expectation and
-non-array fact actually relied on, but does not compare unrelated
-implementation-local metadata recipes as if they were exported contracts.
-Changing/removing a valid unrelated recipe is permitted. An incompatible
-provider origin/layout/Copy/access or other non-array fact required by a
-retained contract still rejects. Pruning never repairs malformed selected
-input, admits an excluded runtime occurrence, or erases an offending export.
-A pruned bodyless reference cannot restore implementation bodies/descriptions;
-source-free re-emission requires the corresponding full artifact.
-
-## Preserved contracts and approval boundaries
-
-All revision-100 bytes and exact selection remain unchanged: the revision-99
-composition, 44-byte array table, tags 43–46, flat direct-local runtime scope,
-metadata-only nested/zero-payload exclusions, geometry/cycle/resource checks,
-canonical remapping and Standard A2 separation remain owned by the base
-proposal. This decision adds no source/API/wire carrier, nominal origin codec,
-provider search, resilient layout or compatibility reader. A future type-only
-export/import contract would require its own explicit identity, origin,
-closure, binding, replacement and consumer decisions.
-
-If adopted, this companion supersedes only the base proposal's broader
-interpretation of metadata-only roots and the corresponding projection/
-replacement closure rules. It does not weaken full-artifact retention or the
-base's rejection of nested-array, ptr-to-array and non-unit zero-payload
-runtime operations. Formal approval of this boundary and candidate revision
-100 remains outstanding.
-
-The base proposal's
-[acceptance cases](native-fixed-array-private-persistence.md#required-tests-and-implementation-dependencies)
-cover full-artifact closure, bodyless pruning, malformed-input rejection,
-compatible/incompatible replacement and exact remapping. Current implementation
-support belongs in the implementation inventories; those cases are not test
-results.
+Current support belongs in the
+[implementation inventories](../implementation.md), not this decision record.
+Passing prototypes or a private projection test would not
+approve the candidate or establish Standard TRRM support.
