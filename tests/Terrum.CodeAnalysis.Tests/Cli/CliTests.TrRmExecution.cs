@@ -549,6 +549,175 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task RunBuildAndLibraryTrRmResolveA2NativeAddressProvidersAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string providerIdentity = "a2-cli-native-address-provider";
+        const string consumerIdentity = "a2-cli-native-address-consumer";
+        const string libraryIdentity = "a2-cli-native-address-library";
+        const string providerSource = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            public extern void Observe(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            internal int32 ProviderBody() {
+                int32 zeroIndex = 0;
+                mut [int32; 2] values = [0, -1];
+                mut int32 observed = values[zeroIndex];
+                uint64 byteCount = 0;
+                unsafe {
+                    var callback = &Observe;
+                    callback(&observed, &values[zeroIndex], byteCount);
+                }
+                return observed;
+            }
+            """;
+
+        static string CreateConsumerSource(string functionDeclaration)
+            => $$"""
+                {{functionDeclaration}} {
+                    int32 zeroIndex = 0;
+                    mut int32 sequence = 0;
+                    mut [[[int32; 2]; 2]; 2] values = [
+                        [[0, -1], [-1, 0]],
+                        [[-1, 0], [0, -1]]];
+                    uint64 byteCount = 0;
+                    unsafe {
+                        var callback = &Observe;
+                        callback(&sequence,
+                            &values[sequence++][zeroIndex][zeroIndex],
+                            byteCount);
+                    }
+                    return sequence;
+                }
+                """;
+
+        var coreReference = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests
+                .CreateRegistration());
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), coreReference);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, []);
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(CreateConsumerSource("int32 Main()")),
+            providerReference, options);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program!, consumerIdentity, schemaIdentity, 1);
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(CreateConsumerSource("public int32 Exercise()")),
+            providerReference, options);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var libraryArtifact = TrRmExecutableCompiler.EmitStandard(
+            libraryCompilation.Program!, libraryIdentity, schemaIdentity, 1);
+
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-a2-native-address-provider-");
+        try
+        {
+            var providerPath = Path.Combine(directory, "provider.trrm");
+            var consumerPath = Path.Combine(directory, "consumer.trrm");
+            var executablePath = Path.Combine(directory, "consumer.exe");
+            var libraryArtifactPath
+                = Path.Combine(directory, "library.trrm");
+            var libraryPath = Path.Combine(directory, "consumer.dll");
+            await File.WriteAllBytesAsync(providerPath, providerArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(consumerPath, consumerArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(libraryArtifactPath, libraryArtifact)
+                .ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                consumerPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", consumerIdentity,
+                "--trrm-provider", schemaIdentity, providerPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(ran, Is.EqualTo(1),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", consumerPath, "-o", executablePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity, "--trrm-module",
+                consumerIdentity, "--trrm-provider", schemaIdentity,
+                providerPath, "--json").ConfigureAwait(true);
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            using (var buildResult = JsonDocument.Parse(buildOutput))
+            {
+                Assert.That(buildResult.RootElement
+                    .GetProperty("success").GetBoolean(), Is.True);
+            }
+            Assert.That(await ExecuteTrRmImageAsync(executablePath)
+                .ConfigureAwait(true), Is.EqualTo(1));
+
+            var (libraryBuilt, libraryOutput, libraryError) = await RunAsync(
+                [], "build-trrm-library", libraryArtifactPath, "--export",
+                "Exercise", "-o", libraryPath, "--runtime", "fail-fast",
+                "--trrm-schema", schemaIdentity, "--trrm-module",
+                libraryIdentity, "--trrm-provider", schemaIdentity,
+                providerPath, "--json").ConfigureAwait(true);
+            Assert.That(libraryBuilt, Is.Zero,
+                $"{libraryOutput}{Environment.NewLine}{libraryError}");
+            Assert.That(libraryError, Is.Empty);
+            using (var libraryResult = JsonDocument.Parse(libraryOutput))
+            {
+                Assert.That(libraryResult.RootElement
+                    .GetProperty("success").GetBoolean(), Is.True);
+            }
+
+            var library = NativeLibrary.Load(libraryPath);
+            try
+            {
+                var exercise = Marshal.GetDelegateForFunctionPointer<
+                    StandardFNativeFunction>(NativeLibrary.GetExport(
+                        library, "Exercise"));
+                Assert.That(exercise(), Is.EqualTo(1));
+            }
+            finally
+            {
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task RegisterExceptionRegionsStandardProfileRunsAndBuildsScalarBodiesAsync()
     {
         const string schemaIdentity
