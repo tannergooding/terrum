@@ -2056,7 +2056,9 @@ internal static class TrRmRegisterBodyMapValidator
             else if (body.Schema
                     .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
                 && ReadByte(body, store, 2) == 2
-                && ReadByte(body, store, 3) == 1)
+                && ReadByte(body, store, 3) == 1
+                && IsFieldReplacementPlaceSelection(body, store,
+                    registerTypes))
             {
                 ValidateArrayFieldReplacementStore(body, store,
                     registerTypes, fields, typeSpecs, 2, 2);
@@ -2065,8 +2067,8 @@ internal static class TrRmRegisterBodyMapValidator
                     .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
                 && ReadByte(body, store, 2) == 1
                 && ReadByte(body, store, 3) == 1
-                && IsScalarFieldInitializationSelection(body, store,
-                    registerTypes, fields, typeSpecs))
+                && IsFieldReplacementPlaceSelection(body, store,
+                    registerTypes))
             {
                 ValidateArrayFieldReplacementStore(body, store,
                     registerTypes, fields, typeSpecs, 1, 3);
@@ -2086,8 +2088,15 @@ internal static class TrRmRegisterBodyMapValidator
                 && (ReadByte(body, store, 1) == 2
                     || ReadUInt16(body, store, 6) < 14))
             {
-                ValidateArrayElementValueStore(body, store,
-                    registerTypes, typeSpecs);
+                var place = GetRegisterTypeState(body, registerTypes,
+                    ReadUInt16(body, store, 4));
+                if (!allowIncompletePlaceFlow
+                    || !place.IsPlaceHandle
+                    || place.PlaceOrigins.Length != 0)
+                {
+                    ValidateArrayElementValueStore(body, store,
+                        registerTypes, typeSpecs, constantValues);
+                }
             }
             return;
         }
@@ -2130,7 +2139,8 @@ internal static class TrRmRegisterBodyMapValidator
 
             var typeMapIndex = ReadUInt16(body, home, 2);
             if (!IsCopyableRegisterValueType(typeSpecs,
-                GetTypeMapTypeSpecRef(body, typeMapIndex), constantValues))
+                    GetTypeMapTypeSpecRef(body, typeMapIndex),
+                    constantValues, body.Schema))
             {
                 throw InvalidMap();
             }
@@ -2162,7 +2172,7 @@ internal static class TrRmRegisterBodyMapValidator
             if (parameters.GetMode(parameterRow) != 0
                 || parameters.GetFlags(parameterRow) != 0
                 || !IsCopyableRegisterValueType(typeSpecs, typeSpecRef,
-                    constantValues))
+                    constantValues, body.Schema))
             {
                 throw InvalidMap();
             }
@@ -2196,7 +2206,7 @@ internal static class TrRmRegisterBodyMapValidator
                 if (parameters.GetMode(parameterRow) != 0
                     || parameters.GetFlags(parameterRow) != 0
                     || !IsCopyableRegisterValueType(typeSpecs, typeSpecRef,
-                        constantValues))
+                        constantValues, body.Schema))
                 {
                     throw InvalidMap();
                 }
@@ -2220,7 +2230,7 @@ internal static class TrRmRegisterBodyMapValidator
             var constant = body.ConstantMap.Slice(constantIndex * 8, 8);
             var typeSpecRef = ReadUInt32(body, constant, 0);
             if (!IsCopyableRegisterValueType(typeSpecs, typeSpecRef,
-                constantValues))
+                    constantValues, body.Schema))
             {
                 throw InvalidMap();
             }
@@ -2242,7 +2252,8 @@ internal static class TrRmRegisterBodyMapValidator
             var home = GetHomeMapEntry(body, homeIndex);
             var typeMapIndex = ReadUInt16(body, home, 2);
             if (!IsCopyableRegisterValueType(typeSpecs,
-                    GetTypeMapTypeSpecRef(body, typeMapIndex), constantValues))
+                    GetTypeMapTypeSpecRef(body, typeMapIndex),
+                    constantValues, body.Schema))
             {
                 throw InvalidMap();
             }
@@ -2489,6 +2500,199 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (opcode == 0xD0
+            && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
+        {
+            var control = operand;
+            var sourceRegister = control & 0x0F;
+            var destination = control >> 4;
+            var typeMapIndex = ReadUInt16(body, instruction, 2);
+            if (sourceRegister >= 14 || destination >= 14
+                || typeMapIndex >= body.TypeCount)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = GetRegisterTypeState(body, registerTypes,
+                sourceRegister);
+            if (sourceState.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            var destinationTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                typeMapIndex);
+            if (!IsCopyableRegisterValueType(typeSpecs,
+                    destinationTypeSpecRef, constantValues, body.Schema))
+            {
+                throw InvalidMap();
+            }
+
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromTypeMap(typeMapIndex));
+            return;
+        }
+
+        if (opcode == 0xC0
+            && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
+        {
+            var payload = ReadUInt16(body, instruction, 2);
+            var destination = payload & 0x0F;
+            var result1 = (payload >> 4) & 0x0F;
+            var source0 = (payload >> 8) & 0x0F;
+            var source1 = payload >> 12;
+            var isUnary = operand is 0x04 or 0x08 or 0x25;
+            var isFloating = operand is >= 0x20 and <= 0x25;
+            var isSupportedOperation = operand is (>= 0x01 and <= 0x08)
+                or 0x0C or 0x0D or (>= 0x20 and <= 0x25);
+            if (!isSupportedOperation || destination >= 14
+                || result1 != 15 || source0 >= 14
+                || (isUnary ? source1 != 15 : source1 >= 14))
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = GetRegisterTypeState(
+                body, registerTypes, source0);
+            if (sourceState.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceType = GetRegisterTypeSpecRef(body, sourceState);
+            if (!IsRegisterArithmeticType(typeSpecs, sourceType,
+                    isFloating))
+            {
+                throw InvalidMap();
+            }
+            if (!isUnary)
+            {
+                var rightState = GetRegisterTypeState(
+                    body, registerTypes, source1);
+                if (rightState.IsPlaceHandle
+                    || !typeSpecs.AreEquivalentTypeSpecRefs(sourceType,
+                        GetRegisterTypeSpecRef(body, rightState)))
+                {
+                    throw InvalidMap();
+                }
+            }
+
+            SetRegisterTypeState(body, registerTypes, destination,
+                sourceState);
+            return;
+        }
+
+        if (opcode == 0xC1
+            && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
+        {
+            var payload = ReadUInt16(body, instruction, 2);
+            var destination = payload & 0x0F;
+            var result1 = (payload >> 4) & 0x0F;
+            var source0 = (payload >> 8) & 0x0F;
+            var source1 = payload >> 12;
+            if (operand is not (0x01 or 0x02 or 0x03)
+                || destination >= 14 || result1 != 15
+                || source0 >= 14 || source1 >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = GetRegisterTypeState(
+                body, registerTypes, source0);
+            var rightState = GetRegisterTypeState(
+                body, registerTypes, source1);
+            var sourceType = GetRegisterTypeSpecRef(body, sourceState);
+            if (sourceState.IsPlaceHandle || rightState.IsPlaceHandle
+                || !IsRegisterArithmeticType(typeSpecs, sourceType,
+                    isFloating: false)
+                || !typeSpecs.AreEquivalentTypeSpecRefs(sourceType,
+                    GetRegisterTypeSpecRef(body, rightState)))
+            {
+                throw InvalidMap();
+            }
+
+            SetRegisterTypeState(body, registerTypes, destination,
+                sourceState);
+            return;
+        }
+
+        if (opcode == 0xC2
+            && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
+        {
+            var payload = ReadUInt16(body, instruction, 2);
+            var destination = payload & 0x0F;
+            var secondResult = (payload >> 4) & 0x0F;
+            var source0 = (payload >> 8) & 0x0F;
+            var source1 = payload >> 12;
+            if (destination >= 14 || secondResult != 15
+                || source0 >= 14 || source1 >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var leftState = GetRegisterTypeState(
+                body, registerTypes, source0);
+            var rightState = GetRegisterTypeState(
+                body, registerTypes, source1);
+            var leftType = GetRegisterTypeSpecRef(body, leftState);
+            var rightType = GetRegisterTypeSpecRef(body, rightState);
+            if (leftState.IsPlaceHandle || rightState.IsPlaceHandle
+                || !typeSpecs.AreEquivalentTypeSpecRefs(leftType,
+                    rightType))
+            {
+                throw InvalidMap();
+            }
+
+            if (operand == 0)
+            {
+                if (!IsRegisterArithmeticType(typeSpecs, leftType,
+                        isFloating: false)
+                    && !IsRegisterArithmeticType(typeSpecs, leftType,
+                        isFloating: true))
+                {
+                    throw InvalidMap();
+                }
+            }
+            else if (operand is 1 or 2)
+            {
+                if (!typeSpecs.AreEquivalentTypeSpecRefs(leftType,
+                        BooleanTypeSpecRef))
+                {
+                    throw InvalidMap();
+                }
+
+                SetRegisterTypeState(body, registerTypes, destination,
+                    RegisterTypeState.FromTypeSpecRef(
+                        BooleanTypeSpecRef));
+            }
+            else
+            {
+                throw InvalidMap();
+            }
+
+            return;
+        }
+
+        if (opcode == 0xC3
+            && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
+        {
+            var payload = ReadUInt16(body, instruction, 2);
+            var destination = payload & 0x0F;
+            var conditionRegister = (payload >> 4) & 0x0F;
+            var unused0 = (payload >> 8) & 0x0F;
+            var unused1 = payload >> 12;
+            if (operand is not (1 or 2 or 3 or 4 or 6 or 13)
+                || destination >= 14 || conditionRegister >= 14
+                || unused0 != 15 || unused1 != 15)
+            {
+                throw InvalidMap();
+            }
+
+            SetRegisterTypeState(body, registerTypes, destination,
+                RegisterTypeState.FromTypeSpecRef(BooleanTypeSpecRef));
+            return;
+        }
+
         if (opcode == 0xC0
             && operand is 0x01 or 0x02 or 0x05 or 0x06)
         {
@@ -2595,20 +2799,14 @@ internal static class TrRmRegisterBodyMapValidator
         var typeMapIndex = ReadUInt16(body, selection, 16);
         var selectedTypeSpecRef = GetTypeMapTypeSpecRef(body, typeMapIndex);
         var placeTypeSpecRef = GetRegisterTypeSpecRef(body, place);
-        var isScalar = TrRmNativeImportTypeContract.TryGetScalarType(
-                typeSpecs, selectedTypeSpecRef, out var elementType)
-            && DirectNativeImportContract.IsScalar(elementType);
         if (ReadByte(body, selection, 0) is not (2 or 3)
             || ReadByte(body, selection, 1) != 1
             || ReadByte(body, selection, 2) != 1
             || ReadUInt16(body, selection, 4) != destination
             || !typeSpecs.AreEquivalentTypeSpecRefs(
                 selectedTypeSpecRef, placeTypeSpecRef)
-            || (!isScalar
-                && !IsNativeDataPointerTypeSpecRef(typeSpecs,
-                    selectedTypeSpecRef))
             || !IsCopyableRegisterValueType(typeSpecs,
-                selectedTypeSpecRef, constantValues))
+                selectedTypeSpecRef, constantValues, body.Schema))
         {
             throw InvalidMap();
         }
@@ -2921,7 +3119,6 @@ internal static class TrRmRegisterBodyMapValidator
             || fieldRow is 0 or > 0xFF_FFFF
             || fieldRow > (uint)fields.Count
             || referentTypeMapIndex >= body.TypeCount
-            || payload[17] != 0
             || ReadUInt16(body, payload, 18) != 0)
         {
             throw InvalidMap();
@@ -3254,15 +3451,18 @@ internal static class TrRmRegisterBodyMapValidator
     private static void ValidateArrayElementValueStore(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
         RegisterTypeState[] registerTypes,
-        TrRmTypeSpecTableReader typeSpecs)
+        TrRmTypeSpecTableReader typeSpecs,
+        ConstantSourceValueContext constantValues)
     {
         var placeIndex = ReadUInt16(body, payload, 4);
         var sourceIndex = ReadUInt16(body, payload, 6);
         var sourceKind = ReadByte(body, payload, 1);
+        var transition = ReadByte(body, payload, 2);
+        var expectedAccessKind = transition == 1 ? (byte)3 : (byte)2;
         if (payload.Length != 16
             || ReadByte(body, payload, 0) != 1
             || sourceKind is not (1 or 2)
-            || ReadByte(body, payload, 2) != 1
+            || transition is not (1 or 2)
             || ReadByte(body, payload, 3) != 1
             || placeIndex > 13
             || (sourceKind == 1
@@ -3276,7 +3476,7 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         var place = GetRegisterTypeState(body, registerTypes, placeIndex);
-        if (!place.IsPlaceHandle || place.AccessKind != 3
+        if (!place.IsPlaceHandle || place.AccessKind != expectedAccessKind
             || place.PlaceOrigins.Length == 0
             || place.PlaceSelectionRecordIndex < 0)
         {
@@ -3295,7 +3495,8 @@ internal static class TrRmRegisterBodyMapValidator
                 ReadUInt16(body, sourceHome, 2));
             var sourceType = typeSpecs.GetTypeSpecRef(
                 sourceHomeTypeSpecRef);
-            if (ReadByte(body, selection, 0) != 2
+            if (transition != 1
+                || ReadByte(body, selection, 0) != 2
                 || ReadByte(body, selection, 1) != 3
                 || ReadByte(body, selection, 2) != 1
                 || ReadByte(body, selection, 9) != 1
@@ -3326,13 +3527,17 @@ internal static class TrRmRegisterBodyMapValidator
         var isPointer = IsNativeDataPointerTypeSpecRef(typeSpecs,
             placeTypeSpecRef);
         if (ReadByte(body, selection, 0) != 3
-            || ReadByte(body, selection, 1) != 3
+            || ReadByte(body, selection, 1) != expectedAccessKind
             || ReadByte(body, selection, 2) != 1
             || !typeSpecs.AreEquivalentTypeSpecRefs(
                 selectedTypeSpecRef, placeTypeSpecRef)
             || !typeSpecs.AreEquivalentTypeSpecRefs(
                 sourceTypeSpecRef, placeTypeSpecRef)
-            || (!isScalar && !isPointer))
+            || (!isScalar && !isPointer
+                && (body.Schema
+                        != TrRmArtifactSchema.LocalAggregateLayoutDraft
+                    || !IsCopyableRegisterValueType(typeSpecs,
+                        placeTypeSpecRef, constantValues, body.Schema))))
         {
             throw InvalidMap();
         }
@@ -3484,6 +3689,12 @@ internal static class TrRmRegisterBodyMapValidator
 
         if (sourceKind == 1 && sourceIndex >= 14)
         {
+            if (!TrRmNativeImportTypeContract.TryGetScalarType(
+                    typeSpecs, placeTypeSpecRef, out var scalarType)
+                || !DirectNativeImportContract.IsScalar(scalarType))
+            {
+                throw InvalidMap();
+            }
             return;
         }
 
@@ -3506,10 +3717,9 @@ internal static class TrRmRegisterBodyMapValidator
         }
     }
 
-    private static bool IsScalarFieldInitializationSelection(
+    private static bool IsFieldReplacementPlaceSelection(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
-        RegisterTypeState[] registerTypes, TrRmFieldDefTableReader fields,
-        TrRmTypeSpecTableReader typeSpecs)
+        RegisterTypeState[] registerTypes)
     {
         var placeIndex = ReadUInt16(body, payload, 4);
         if (placeIndex > 13)
@@ -3525,14 +3735,8 @@ internal static class TrRmRegisterBodyMapValidator
 
         var selection = GetRecordPayload(body,
             place.PlaceSelectionRecordIndex);
-        var fieldRow = ReadUInt32(body, selection, 12);
         return ReadByte(body, selection, 0) == 2
-            && ReadByte(body, selection, 1) == 3
-            && fieldRow is > 0 and <= 0xFF_FFFF
-            && fieldRow <= (uint)fields.Count
-            && TrRmNativeImportTypeContract.TryGetScalarType(typeSpecs,
-                fields.GetTypeSpecRef(checked((int)fieldRow)), out var fieldType)
-            && DirectNativeImportContract.IsScalar(fieldType);
+            && ReadByte(body, selection, 9) == 1;
     }
 
     private static bool IsNativeDataPointerTypeSpecRef(
@@ -3776,7 +3980,8 @@ internal static class TrRmRegisterBodyMapValidator
 
     private static bool IsCopyableRegisterValueType(
         TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef,
-        ConstantSourceValueContext constantValues)
+        ConstantSourceValueContext constantValues,
+        TrRmArtifactSchema schema)
     {
         var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
         if (type.Form == 0x11 && type.Qualifiers == 0)
@@ -3791,7 +3996,12 @@ internal static class TrRmRegisterBodyMapValidator
         {
             var typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
                 constantValues.TypeDefs, constantValues.Imports);
-            return constantValues.TypeDefs.GetKind(typeDefRow) == 4;
+            var typeKind = constantValues.TypeDefs.GetKind(typeDefRow);
+            return typeKind == 4
+                || (schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
+                    && typeKind == 1
+                    && constantValues.TypeDefs.HasDeclaredCopy(
+                        typeDefRow));
         }
 
         return type.Form == 0x0D
