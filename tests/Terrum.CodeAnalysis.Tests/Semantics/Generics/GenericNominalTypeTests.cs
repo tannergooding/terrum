@@ -97,6 +97,16 @@ public sealed class GenericNominalTypeTests
                 + program.Structures.IndexOf(unsignedCell))));
     }
 
+    [TestCase("struct Cell<T = U, U = int32> { public T First; public U Second; } int32 Read(Cell value) { return value.Second; } int32 Main() { return 0; }")]
+    [TestCase("struct Cell<T = T> { public T Value; } int32 Read(Cell value) { return value.Value; } int32 Main() { return 0; }")]
+    public void RejectsGenericStructDefaultsThatReferenceCurrentOrForwardFormals(
+        string source)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"), Is.True);
+    }
+
     [TestCase("public struct Box<T> { T value; }")]
     [TestCase("class Box<T> { int32 value; }")]
     [TestCase("interface I<T> {} struct Box<T> : I<T> { T value; }")]
