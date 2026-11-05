@@ -9,17 +9,18 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
-public sealed class NativeManagedNodeTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeManagedNodeTests
 {
     private const string Cycle = """
         bool Retain(out write ManagedNode result) {
@@ -58,7 +59,7 @@ public sealed class NativeManagedNodeTests
         [Blittable] [Layout(LayoutKind.Sequential)] public unique struct UniqueValue {
             public int32 Value;
             public UniqueValue(int32 value) { Value = value; }
-            [NoThrow] [Cleanup] public void Close() {}
+             [Cleanup] public void Close() {}
         }
         int32 PrivateProof() {
             require ManagedNode.TryCreate(42, out var node);
@@ -77,12 +78,29 @@ public sealed class NativeManagedNodeTests
         public void Ping() {}
         """;
 
+    private static CompilationOptions LayoutOptions(
+        BoundRuntimePolicy policy)
+    {
+        var nativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        return new CompilationOptions {
+            RuntimePolicy = policy,
+            NativeCoreRegistration = nativeRegistration,
+            LayoutCoreRegistration = NativeCoreRegistrationTests
+                .CreateLayoutRegistration(nativeRegistration),
+        };
+    }
+
     [Test]
     public async Task TracesCopiedHandlesAndCollectsUnreachableCyclesAsync()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Cycle));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(Compilation.GetNativeProfileVersion(program), Is.EqualTo("native-18"));
         Assert.That(await RunAsync(program).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -97,7 +115,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         Assert.That(code.ManagedRuntimeOffset >= 0, Is.True);
         Assert.That(code.HostDataLength, Is.EqualTo(0));
@@ -130,7 +152,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))()).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))()).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     [Test]
@@ -158,9 +184,13 @@ public sealed class NativeManagedNodeTests
                 require ManagedHeap.Collect() == 0;
                 return count + first.Value + second.Value;
             }
-            """));
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))()).ConfigureAwait(true), Is.EqualTo(43));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))()).ConfigureAwait(true), Is.EqualTo(43));
     }
 
     [Test]
@@ -182,7 +212,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))()).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))()).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     [Test]
@@ -191,7 +225,11 @@ public sealed class NativeManagedNodeTests
         var checkedCompilation = Compilation.Create(SyntaxTree.Parse(Cycle), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(checkedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, checkedCompilation.Diagnostics));
         Assert.That(Compilation.GetNativeProfileVersion(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = checkedCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))()), Is.EqualTo("native-18"));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual5 = checkedCompilation.Program;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual5!;
+            }))()), Is.EqualTo("native-18"));
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Proof() {
                 require ManagedNode.TryCreate(42, out var node);
@@ -199,7 +237,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = library.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = library.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         var module = ModuleCompiler.CreateProducer(program, ["Proof"]);
         Assert.That(ModuleCompiler.GetNativeProfileVersion(module, false), Is.EqualTo("native-18"));
         Assert.That(NativeEmitter.EmitLibrary(program, ["Proof"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
@@ -212,9 +254,14 @@ public sealed class NativeManagedNodeTests
     [TestCase("OwnedInput",BoundRuntimePolicy.CheckedExceptions)]
     public void ManagedImageRejectsOwningExportContracts(string name, BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary), policy);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(MixedLibrary), LayoutOptions(policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
         Assert.That(Compilation.GetNativeProfileVersion(program), Is.EqualTo("native-18"));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, [name],
             (NativeRuntimePolicy)policy))!;
@@ -231,10 +278,26 @@ public sealed class NativeManagedNodeTests
     [TestCase("OutScalar",BoundRuntimePolicy.CheckedExceptions)]
     public void ManagedImageRetainsCopyScalarAndVoidExports(string name, BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary), policy);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(MixedLibrary), LayoutOptions(policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
-        Assert.That(NativeEmitter.EmitLibrary(program, [name], (NativeRuntimePolicy)policy), Is.Not.Empty);
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
+        if (policy == BoundRuntimePolicy.CheckedExceptions
+            && name == "CopyReturn")
+        {
+            _ = Assert.Throws<ArgumentException>(() =>
+                NativeEmitter.EmitLibrary(program, [name],
+                    (NativeRuntimePolicy)policy));
+        }
+        else
+        {
+            Assert.That(NativeEmitter.EmitLibrary(program, [name],
+                (NativeRuntimePolicy)policy), Is.Not.Empty);
+        }
     }
     [TestCase(BoundRuntimePolicy.FailFast,"TRM3022")]
     [TestCase(BoundRuntimePolicy.CheckedExceptions,"TRM3021")]
@@ -257,7 +320,11 @@ public sealed class NativeManagedNodeTests
             }
             """), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         Assert.That(ModuleCompiler.CreateProducer(program, ["Proof"]), Is.Not.Empty);
         var functionIndex = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, static item => item.Name == "Proof"));
         var function = program.Functions[functionIndex];
@@ -277,13 +344,21 @@ public sealed class NativeManagedNodeTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             NativeFixture(Path.Combine("Storage", "Fixtures", "managed-node-abi.terrum"))));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         var exports = new[] { "RetainAcrossAllocationFailure", "Cycles", "AllocationFailure", "CollectWithScalar" };
         var image = NativeEmitter.EmitLibrary(program, exports, NativeRuntimePolicy.FailFast);
         using var stream = new MemoryStream(image);
         using var reader = new PEReader(stream);
         var headers = reader.PEHeaders;
-        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual11 = headers.PEHeader; Assert.That(__nunitActual11, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual11!; }))();
+        var header = ((global::System.Func<PEHeader>)(() => {
+            var __nunitActual11 = headers.PEHeader;
+            Assert.That(__nunitActual11, Is.TypeOf<PEHeader>());
+            return (PEHeader)__nunitActual11!;
+        }))();
         var text = global::System.Linq.Enumerable.Single(headers.SectionHeaders, static section => section.Name == ".text");
         var pdata = global::System.Linq.Enumerable.Single(headers.SectionHeaders, static section => section.Name == ".pdata");
         var edata = global::System.Linq.Enumerable.Single(headers.SectionHeaders, static section => section.Name == ".edata");
@@ -332,11 +407,16 @@ public sealed class NativeManagedNodeTests
             NativeFixture(Path.Combine("Unwind", "Fixtures", "managed-unwind-abi.terrum"))),
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
-        Assert.That(NativeEmitter.EmitLibrary(program, [
-            "SameFrame", "EscapingFrame", "LaterArgument", "OutputFailure", "ReturnAcrossCleanup",
-            "EscapeToNative", "CollectWithScalar",
-        ], NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))();
+        Assert.That(NativeEmitter.EmitLibrary(program, ["CollectWithScalar"],
+            NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.EmitLibrary(program, ["EscapeToNative"],
+                NativeRuntimePolicy.CheckedExceptions));
     }
 
     [Test]
@@ -346,7 +426,11 @@ public sealed class NativeManagedNodeTests
             public int32 Leaf() { return 1; }
             """));
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = library.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(),
+        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = library.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))(),
             ["Leaf"], "ManagedNodeDependency", NativeRuntimePolicy.FailFast);
         var managed = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Proof() {
@@ -355,7 +439,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(managed.HasErrors, Is.False, string.Join(Environment.NewLine, managed.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = managed.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = managed.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))();
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphProducer(program,
             ["Proof"], "ManagedNodeGraph", [leaf], NativeRuntimePolicy.FailFast))!;
         var consumer = Compilation.Create(SyntaxTree.Parse("""
@@ -366,7 +454,11 @@ public sealed class NativeManagedNodeTests
             """));
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = consumer.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), [leaf], NativeRuntimePolicy.FailFast))!;
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual15 = consumer.Program;
+                Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual15!;
+            }))(), [leaf], NativeRuntimePolicy.FailFast))!;
     }
 
     [Test]
@@ -379,7 +471,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual16 = compilation.Program;
+            Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual16!;
+        }))();
         var entry = program.Functions[program.EntryPoint];
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, null!),
@@ -411,7 +507,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual17 = compilation.Program;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual17!;
+        }))();
         var entry = program.Functions[program.EntryPoint];
         var forged = program with {
             Functions = program.Functions.SetItem(program.EntryPoint,
@@ -433,7 +533,11 @@ public sealed class NativeManagedNodeTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = compilation.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))();
         var entry = program.Functions[program.EntryPoint];
         var slot = global::System.Linq.Enumerable.Single(entry.Variables.Where(static variable => variable.Name == "kept"));
         var root = entry.Body;

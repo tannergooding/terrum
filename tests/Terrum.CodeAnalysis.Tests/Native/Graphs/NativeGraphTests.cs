@@ -8,15 +8,17 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Graphs;
 
-public sealed class NativeGraphTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeGraphTests
 {
     private const string CounterOutputImport = """
         [Blittable]
@@ -40,9 +42,14 @@ public sealed class NativeGraphTests
 
     private static byte[] Leaf(string source, NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            LayoutOptions(policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         return NativeModuleCompiler.CreateProducer(program,
             ["Leaf"], "NodeB", policy);
     }
@@ -51,9 +58,14 @@ public sealed class NativeGraphTests
         NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+            NativeModuleCompiler.CreateGraphReference([leaf]),
+            LayoutOptions(policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         return NativeModuleCompiler.CreateGraphProducer(program,
             ["Middle"], "NodeA", [leaf], policy);
     }
@@ -63,9 +75,26 @@ public sealed class NativeGraphTests
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Middle() + 1; }"),
             NativeModuleCompiler.CreateGraphReference([middle]), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         return NativeModuleCompiler.CreateGraphConsumer(program,
             [middle], policy);
+    }
+
+    private static CompilationOptions LayoutOptions(
+        NativeRuntimePolicy policy)
+    {
+        var nativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        return new() {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            LayoutCoreRegistration = NativeCoreRegistrationTests
+                .CreateLayoutRegistration(nativeRegistration),
+            NativeCoreRegistration = nativeRegistration,
+        };
     }
 
     private static byte[] WeakenRecordedImport(byte[] artifact, string name, string oldSuffix, string newSuffix)
@@ -330,9 +359,14 @@ public sealed class NativeGraphTests
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
                 $"[Blittable] [Layout(LayoutKind.Sequential)] public struct {structure} {{ public int32 Value; }} "
-                + $"public int32 Read{structure}({structure} value) {{ return value.Value; }}"));
+                + $"public int32 Read{structure}({structure} value) {{ return value.Value; }}"),
+                LayoutOptions(NativeRuntimePolicy.FailFast));
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
+            return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual3 = compilation.Program;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual3!;
+            }))(),
                 [$"Read{structure}"], identity, NativeRuntimePolicy.FailFast);
         }
 
@@ -352,7 +386,11 @@ public sealed class NativeGraphTests
             public int32 Alpha() { return 1; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(),
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(),
             ["Zebra", "Alpha"], "UnsortedExports", NativeRuntimePolicy.FailFast);
 
         Assert.That(NativeModuleCompiler.Inspect(producer).IsConsumer, Is.False);
@@ -367,7 +405,11 @@ public sealed class NativeGraphTests
             """));
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = providerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), ["Zebra", "Alpha"],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual5 = providerCompilation.Program;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual5!;
+            }))(), ["Zebra", "Alpha"],
             "MultipleImports", NativeRuntimePolicy.FailFast);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() { return Zebra() + Alpha(); }
@@ -375,7 +417,11 @@ public sealed class NativeGraphTests
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
         var consumer = NativeModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = consumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), provider, NativeRuntimePolicy.FailFast);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = consumerCompilation.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(), provider, NativeRuntimePolicy.FailFast);
 
         Assert.That(consumer, Is.Not.Empty);
     }
@@ -389,7 +435,11 @@ public sealed class NativeGraphTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var consumer = NativeModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), provider, NativeRuntimePolicy.FailFast);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual7 = compilation.Program;
+                Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual7!;
+            }))(), provider, NativeRuntimePolicy.FailFast);
 
         Assert.That(consumer, Is.Not.Empty);
     }
@@ -400,17 +450,25 @@ public sealed class NativeGraphTests
         var dependencyCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Node { public int32 Value; }
             public Node GetNode(Node value) { return value; }
-            """));
+            """), LayoutOptions(NativeRuntimePolicy.FailFast));
         Assert.That(dependencyCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, dependencyCompilation.Diagnostics));
         var dependency = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = dependencyCompilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), ["GetNode"], "NodeB",
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual8 = dependencyCompilation.Program;
+                Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual8!;
+            }))(), ["GetNode"], "NodeB",
             NativeRuntimePolicy.FailFast);
         var dependencyReference = NativeModuleCompiler.CreateGraphReference([dependency]);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public Node Identity(Node value) { return value; }"), dependencyReference);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), ["Identity"], "NodeA", [dependency],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = compilation.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))(), ["Identity"], "NodeA", [dependency],
             NativeRuntimePolicy.FailFast);
 
         Assert.That(provider, Is.Not.Empty);
@@ -436,7 +494,8 @@ public sealed class NativeGraphTests
                 }
                 return -1;
             }
-            """), NativeModuleCompiler.CreateGraphReference([leaf]));
+            """), NativeModuleCompiler.CreateGraphReference([leaf]),
+            LayoutOptions(NativeRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -465,7 +524,8 @@ public sealed class NativeGraphTests
                 return -1;
             }
             """),
-            NativeModuleCompiler.CreateGraphReference([provider]));
+            NativeModuleCompiler.CreateGraphReference([provider]),
+            LayoutOptions(NativeRuntimePolicy.FailFast));
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(consumerCompilation.Program!,
@@ -502,7 +562,8 @@ public sealed class NativeGraphTests
         var leaf = Leaf("public int32 Leaf() { return 40; }", policy);
         var middleCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(MiddleSource),
-            NativeModuleCompiler.CreateGraphReference([leaf]), boundPolicy);
+            NativeModuleCompiler.CreateGraphReference([leaf]),
+            LayoutOptions(policy));
         Assert.That(middleCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, middleCompilation.Diagnostics));
         var middle = NativeModuleCompiler.CreateGraphProducer(
@@ -528,7 +589,7 @@ public sealed class NativeGraphTests
         malformedMiddle[NativeOutputSelectorOffset(malformedMiddle)] = byte.MaxValue;
         SHA256.HashData(malformedMiddle.AsSpan(0, malformedMiddle.Length - 32))
             .CopyTo(malformedMiddle, malformedMiddle.Length - 32);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => NativeModuleCompiler.InspectGraphArtifact(malformedMiddle));
     }
 
@@ -540,7 +601,7 @@ public sealed class NativeGraphTests
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var counterCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(CounterOutputImport),
-            (BoundRuntimePolicy)policy);
+            LayoutOptions(policy));
         Assert.That(counterCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, counterCompilation.Diagnostics));
         var counterProvider = NativeModuleCompiler.CreateProducer(counterCompilation.Program!,
@@ -556,10 +617,10 @@ public sealed class NativeGraphTests
                 return Leaf();
             }
             """), NativeModuleCompiler.CreateGraphReference([counterProvider, leaf]),
-            (BoundRuntimePolicy)policy);
+            LayoutOptions(policy));
         Assert.That(middleCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, middleCompilation.Diagnostics));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.CreateGraphProducer(middleCompilation.Program!,
                 ["ReadCounter"], "NoDirectImportProxy", [counterProvider, leaf], policy));
         var middle = NativeModuleCompiler.CreateGraphProducer(middleCompilation.Program!,
@@ -574,7 +635,7 @@ public sealed class NativeGraphTests
                 return Middle();
             }
             """), NativeModuleCompiler.CreateGraphReference([middle, counterProvider]),
-            (BoundRuntimePolicy)policy);
+            LayoutOptions(policy));
         Assert.That(rootCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(rootCompilation.Program!,
@@ -586,7 +647,7 @@ public sealed class NativeGraphTests
             "ReadCounter", 3)] = (byte)'/';
         SHA256.HashData(malformedRoot.AsSpan(0, malformedRoot.Length - 32))
             .CopyTo(malformedRoot, malformedRoot.Length - 32);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => NativeModuleCompiler.InspectGraphArtifact(malformedRoot));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root,
             [middle, counterProvider, leaf], TimeSpan.FromSeconds(30), policy)
@@ -598,12 +659,12 @@ public sealed class NativeGraphTests
         var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             CounterOutputImport.Replace("QueryPerformanceCounter",
                 "QueryPerformanceFrequency", StringComparison.Ordinal)),
-            (BoundRuntimePolicy)policy);
+            LayoutOptions(policy));
         Assert.That(changedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, changedCompilation.Diagnostics));
         var changedProvider = NativeModuleCompiler.CreateProducer(changedCompilation.Program!,
             ["ReadCounter"], "CounterProvider", policy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(root, [middle, changedProvider, leaf]));
     }
 
@@ -619,7 +680,7 @@ public sealed class NativeGraphTests
             SyntaxTree.Parse(CounterOutputImport + """
                 public int32 FromLeaf() { return Leaf(); }
                 """), NativeModuleCompiler.CreateGraphReference([leaf]),
-            (BoundRuntimePolicy)policy);
+            LayoutOptions(policy));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateGraphProducer(providerCompilation.Program!,
@@ -651,13 +712,14 @@ public sealed class NativeGraphTests
             CounterOutputImport.Replace("QueryPerformanceCounter",
                 "QueryPerformanceFrequency", StringComparison.Ordinal)
             + "public int32 FromLeaf() { return Leaf(); }"),
-            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+            NativeModuleCompiler.CreateGraphReference([leaf]),
+            LayoutOptions(policy));
         Assert.That(changedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, changedCompilation.Diagnostics));
         var changedProvider = NativeModuleCompiler.CreateGraphProducer(
             changedCompilation.Program!, ["ReadCounter", "FromLeaf"],
             "CounterGraphProvider", [leaf], policy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(consumer, [changedProvider, leaf]));
 
         var uncalledCompilation = Compilation.Create(SyntaxTree.Parse(
@@ -669,7 +731,7 @@ public sealed class NativeGraphTests
             uncalledCompilation.Program!, [provider], policy);
         Assert.That(GraphMachineImportCount(uncalled), Is.Zero);
         NativeModuleCompiler.ValidateGraph(uncalled, [provider, leaf]);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(uncalled, [changedProvider, leaf]));
     }
 
@@ -679,7 +741,11 @@ public sealed class NativeGraphTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             " public int32 Leaf() { return 40; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         var provider = NativeModuleCompiler.CreateProducer(program, ["Leaf"], "NodeB",
             NativeRuntimePolicy.FailFast);
         var caseVariant = NativeModuleCompiler.CreateProducer(program, ["Leaf"], "nodeb",
@@ -688,7 +754,11 @@ public sealed class NativeGraphTests
             "int32 Main() { return Leaf() + 1; }"), NativeModuleCompiler.CreateGraphReference([provider]));
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = consumerCompilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), [provider], NativeRuntimePolicy.FailFast);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual11 = consumerCompilation.Program;
+                Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual11!;
+            }))(), [provider], NativeRuntimePolicy.FailFast);
 
         var error = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(consumer, [provider, caseVariant]))!;
@@ -706,11 +776,11 @@ public sealed class NativeGraphTests
         var originalMiddle = middle.ToArray();
         NativeModuleCompiler.ValidateGraph(root, [original, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, original],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         var replacement = Leaf(" public int32 Leaf() { return 41; }", policy);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(root, Is.EqualTo(originalRoot));
         Assert.That(middle, Is.EqualTo(originalMiddle));
         Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).Dependencies, Is.EqualTo(["NodeA"]));
@@ -727,8 +797,13 @@ public sealed class NativeGraphTests
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [leaf, middle, leaf]))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
             leaf, middle, NativeModuleCompiler.CreateProducer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = Compilation.CreateLibrary(
-                    SyntaxTree.Parse("public int32 Extra() { return 1; }")).Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(),
+                ((global::System.Func<BoundProgram>)(() =>
+                {
+                    var __nunitActual12 = Compilation.CreateLibrary(
+                        SyntaxTree.Parse("public int32 Extra() { return 1; }")).Program;
+                    Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual12!;
+                }))(),
                 ["Extra"], "Extra", NativeRuntimePolicy.FailFast)]))!;
         NativeModuleCompiler.ValidateGraph(root, [
             Leaf("public int32 Leaf() { return 40; }"), middle]);
@@ -772,9 +847,15 @@ public sealed class NativeGraphTests
             """;
         static byte[] CompileLeaf(string source)
         {
-            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source),
+                LayoutOptions(NativeRuntimePolicy.FailFast));
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual13 = compilation.Program;
+                Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual13!;
+            }))();
             return NativeModuleCompiler.CreateProducer(program,
                 ["New", "Take", "Token.Close"], "NodeB", NativeRuntimePolicy.FailFast);
         }
@@ -787,19 +868,27 @@ public sealed class NativeGraphTests
             """), NativeModuleCompiler.CreateGraphReference([leaf]));
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
         var middle = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = middleCompilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), ["Middle"], "NodeA",
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual14 = middleCompilation.Program;
+                Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual14!;
+            }))(), ["Middle"], "NodeA",
             [leaf], NativeRuntimePolicy.FailFast);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Middle(); }"),
             NativeModuleCompiler.CreateGraphReference([middle]));
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = rootCompilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = rootCompilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))(),
             [middle], NativeRuntimePolicy.FailFast);
         Assert.That(NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion, Is.EqualTo("native-13"));
         var replacement = CompileLeaf(LeafSource.Replace("new Token(20)", "new Token(21)", StringComparison.Ordinal));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(43));
         NativeModuleCompiler.ValidateGraph(root, [CompileLeaf(LeafSource), middle]);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
             CompileLeaf(LeafSource.Replace("public int32 Value;", "public int32 Other;", StringComparison.Ordinal)
@@ -827,7 +916,11 @@ public sealed class NativeGraphTests
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = rootCompilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual16 = rootCompilation.Program;
+            Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual16!;
+        }))(),
             [leaf], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [leaf]);
@@ -858,7 +951,11 @@ public sealed class NativeGraphTests
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = rootCompilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual17 = rootCompilation.Program;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual17!;
+        }))(),
             [leaf], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [leaf]);
@@ -889,7 +986,11 @@ public sealed class NativeGraphTests
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = rootCompilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = rootCompilation.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))(),
             [leaf], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [leaf]);
@@ -938,7 +1039,11 @@ public sealed class NativeGraphTests
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = rootCompilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual19 = rootCompilation.Program;
+            Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual19!;
+        }))(),
             [leaf], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [leaf]);
@@ -988,11 +1093,19 @@ public sealed class NativeGraphTests
             (BoundRuntimePolicy)policy);
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = providerCompilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(), ["Fail", "Complete"], "NodeB", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual20 = providerCompilation.Program;
+                Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual20!;
+            }))(), ["Fail", "Complete"], "NodeB", policy);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource),
             NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = rootCompilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual21 = rootCompilation.Program;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual21!;
+        }))(),
             [provider], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [provider]);
@@ -1044,15 +1157,23 @@ public sealed class NativeGraphTests
             }
             """;
 
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource),
-            (BoundRuntimePolicy)policy);
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), LayoutOptions(policy));
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = providerCompilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))(), ["TryPublish"], "NodeB", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual22 = providerCompilation.Program;
+                Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual22!;
+            }))(), ["TryPublish"], "NodeB", policy);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = rootCompilation.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual23 = rootCompilation.Program;
+            Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual23!;
+        }))(),
             [provider], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [provider]);
@@ -1108,16 +1229,24 @@ public sealed class NativeGraphTests
             }
             """;
 
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource),
-            (BoundRuntimePolicy)policy);
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), LayoutOptions(policy));
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = providerCompilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))(), ["TryPublish", "Complete"],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual24 = providerCompilation.Program;
+                Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual24!;
+            }))(), ["TryPublish", "Complete"],
             "NodeB", policy);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = rootCompilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual25 = rootCompilation.Program;
+            Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual25!;
+        }))(),
             [provider], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [provider]);
@@ -1136,19 +1265,27 @@ public sealed class NativeGraphTests
             "public int32 Top() { return Middle() + Leaf(); }"),
             NativeModuleCompiler.CreateGraphReference([middle, leaf]));
         Assert.That(topCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, topCompilation.Diagnostics));
-        var top = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = topCompilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(),
+        var top = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual26 = topCompilation.Program;
+            Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual26!;
+        }))(),
             ["Top"], "NodeC", [middle, leaf], NativeRuntimePolicy.FailFast);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Top(); }"),
             NativeModuleCompiler.CreateGraphReference([top]));
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = rootCompilation.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual27 = rootCompilation.Program;
+            Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual27!;
+        }))(),
             [top], NativeRuntimePolicy.FailFast);
         NativeModuleCompiler.ValidateGraph(root, [top, leaf, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf, top],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(81));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(81));
         var replacement = Leaf("public int32 Leaf() { return 41; }");
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, top, middle],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(83));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(83));
     }
 
     [Test]
@@ -1157,23 +1294,39 @@ public sealed class NativeGraphTests
         var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Bravo() { return 40; }"));
         Assert.That(leafCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, leafCompilation.Diagnostics));
-        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = leafCompilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))(),
+        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual28 = leafCompilation.Program;
+            Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual28!;
+        }))(),
             ["Bravo"], "NodeB", NativeRuntimePolicy.FailFast);
         var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Alpha() { return Bravo(); }"), NativeModuleCompiler.CreateGraphReference([leaf]));
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
-        var middle = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual29 = middleCompilation.Program; Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual29!; }))(),
+        var middle = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual29 = middleCompilation.Program;
+            Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual29!;
+        }))(),
             ["Alpha"], "NodeA", [leaf], NativeRuntimePolicy.FailFast);
         var topCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Top() { return Alpha() + Bravo(); }"),
             NativeModuleCompiler.CreateGraphReference([leaf, middle]));
         Assert.That(topCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, topCompilation.Diagnostics));
-        var top = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual30 = topCompilation.Program; Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual30!; }))(),
+        var top = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual30 = topCompilation.Program;
+            Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual30!;
+        }))(),
             ["Top"], "NodeC", [middle, leaf], NativeRuntimePolicy.FailFast);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Top(); }"),
             NativeModuleCompiler.CreateGraphReference([top]));
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual31 = rootCompilation.Program; Assert.That(__nunitActual31, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual31!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual31 = rootCompilation.Program;
+            Assert.That(__nunitActual31, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual31!;
+        }))(),
             [top], NativeRuntimePolicy.FailFast);
 
         NativeModuleCompiler.ValidateGraph(root, [top, middle, leaf]);
@@ -1201,12 +1354,20 @@ public sealed class NativeGraphTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[DoesNotReturn] public void Halt() { while (true) { } }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual33 = compilation.Program; Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual33!; }))(),
+        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual33 = compilation.Program;
+            Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual33!;
+        }))(),
             ["Halt"], "NodeB", NativeRuntimePolicy.FailFast);
         var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Middle() { Halt(); }"), NativeModuleCompiler.CreateGraphReference([leaf]));
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
-        var middle = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual34 = middleCompilation.Program; Assert.That(__nunitActual34, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual34!; }))(),
+        var middle = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual34 = middleCompilation.Program;
+            Assert.That(__nunitActual34, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual34!;
+        }))(),
             ["Middle"], "NodeA", [leaf], NativeRuntimePolicy.FailFast);
         var root = Consumer(middle);
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
@@ -1223,7 +1384,11 @@ public sealed class NativeGraphTests
             "int32 Main() { Leaf(); return 42; }"),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual35 = rootCompilation.Program; Assert.That(__nunitActual35, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual35!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual35 = rootCompilation.Program;
+            Assert.That(__nunitActual35, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual35!;
+        }))(),
             [leaf], policy);
 
         NativeModuleCompiler.ValidateGraph(root, [leaf]);
@@ -1251,7 +1416,11 @@ public sealed class NativeGraphTests
             "public int32 Main() { return Leaf(); }"),
             NativeModuleCompiler.CreateGraphReference([leaf]));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual36 = compilation.Program; Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual36!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual36 = compilation.Program;
+            Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual36!;
+        }))();
         Assert.That(program.EntryPoint, Is.EqualTo(-1));
         var graph = NativeModuleCompiler.CreateGraphProducer(program, ["Main"], "NodeA",
             [leaf], NativeRuntimePolicy.FailFast);

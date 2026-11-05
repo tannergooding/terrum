@@ -7,17 +7,18 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class AggregateAbiTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class AggregateAbiTests
 {
     private const string Declarations = """
         [Blittable] [Layout(LayoutKind.Sequential)]
@@ -67,9 +68,14 @@ public sealed class AggregateAbiTests
     [TestCase("Wide w = Echo(Make(1 / 0), Make(2147483647 + 1), Make(3), Make(4), Make(5)); return w.Tail;",unchecked((int)0xE0540002))]
     public async Task IndirectAggregatesExecuteThroughAotAndCliJitAsync(string body, int expected)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(Declarations + " int32 Main() { " + body + " }"));
+        var compilation = CreateCompilation(SyntaxTree.Parse(
+            Declarations + " int32 Main() { " + body + " }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(program.Structures[0].Size, Is.EqualTo(3));
         Assert.That(program.Structures[1].Size, Is.EqualTo(6));
         Assert.That(program.Structures[2].Size, Is.EqualTo(12));
@@ -117,9 +123,14 @@ public sealed class AggregateAbiTests
                 .Append("if (copy.F0 || value.F0 || !replacement.F0) { return -3; }");
         }
         _ = source.Append("return 42; }");
-        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
+        var compilation = CreateCompilation(
+            SyntaxTree.Parse(source.ToString()));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(program.Structures[0].Size, Is.EqualTo(size));
         await ExecuteBothAsync(program, 42).ConfigureAwait(true);
     }
@@ -142,7 +153,7 @@ public sealed class AggregateAbiTests
         {
             _ = source.Append('F').Append(index).Append(index == lastField ? " = 42;" : " = 0;");
         }
-        _ = source.Append("} } [NoThrow] void Touch() {}")
+        _ = source.Append("} }  void Touch() {}")
             .Append("Bytes ReturnThroughFinally() { try { return new Bytes(); } finally { Touch(); } }")
             .Append("Bytes Fill(out Bytes output) { output = new Bytes(); return ReturnThroughFinally(); }")
             .Append("void FillTwo(out Bytes first, out Bytes second) { first = new Bytes(); second = new Bytes(); second.F")
@@ -152,9 +163,14 @@ public sealed class AggregateAbiTests
             .Append(lastField).Append(" != 43) { return -2; }")
             .Append("if (result.F").Append(lastField).Append(" != 42 || output.F").Append(lastField)
             .Append(" != 42) { return -1; } return 42; }");
-        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
+        var compilation = CreateCompilation(
+            SyntaxTree.Parse(source.ToString()));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(program.Structures[0].Size, Is.EqualTo(size));
         await ExecuteBothAsync(program, 42).ConfigureAwait(true);
     }
@@ -162,7 +178,7 @@ public sealed class AggregateAbiTests
     [Test]
     public async Task LargeUniqueReplacementAndCleanupUseFullAggregateScratchAsync()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = CreateCompilation(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             unique struct Owner {
                 public int64 First;
@@ -175,12 +191,12 @@ public sealed class AggregateAbiTests
                     Third = value + 2;
                     Fourth = value + 3;
                 }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Fourth == 4) { Host.Trace[0] = Host.Trace[0] ^ 4; }
                     else if (Fourth == 43) { Host.Trace[0] = Host.Trace[0] ^ 43; }
                     else { Host.Trace[0] = -100; }
                 }
-                [NoThrow] public int64 Read() { return Fourth; }
+                 public int64 Read() { return Fourth; }
             }
             int32 Main() {
                 {
@@ -192,9 +208,24 @@ public sealed class AggregateAbiTests
             }
             """), [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(program.Structures.Single(static structure => structure.Name == "Owner").Size, Is.EqualTo(32));
         await ExecuteAotAsync(program, 47).ConfigureAwait(true);
+    }
+
+    private static Compilation CreateCompilation(SyntaxTree tree,
+        ImmutableArray<HostBuffer> buffers = default)
+    {
+        var options = new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
+        return buffers.IsDefault
+            ? Compilation.Create(tree, options)
+            : Compilation.Create([tree], buffers, options);
     }
 
     private static async Task ExecuteAotAsync(BoundProgram program, int expected)
@@ -223,7 +254,11 @@ public sealed class AggregateAbiTests
             await File.WriteAllBytesAsync(executable, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
             await RunAsync(executable, [], expected).ConfigureAwait(true);
             var unused = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Unused() { return 0; }"));
-            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = unused.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Unused"]);
+            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = unused.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), ["Unused"]);
             await File.WriteAllBytesAsync(producer, producerBytes).ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumer, ModuleCompiler.CreateConsumer(program, producerBytes)).ConfigureAwait(true);
             var framework = new DirectoryInfo(AppContext.BaseDirectory);

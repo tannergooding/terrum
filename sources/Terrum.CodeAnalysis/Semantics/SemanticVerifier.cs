@@ -10426,14 +10426,20 @@ public static partial class SemanticVerifier
             nestedIndex < assignment.NestedFields.Length;
             nestedIndex++)
         {
-            if (!HasFields(program, ownerType)
-                || (uint)field >= (uint)Fields(program, ownerType).Length)
+            if (!HasFields(program, ownerType))
             {
                 fieldPath = default;
                 return false;
             }
 
-            var fieldType = Fields(program, ownerType)[field].Type;
+            var fields = Fields(program, ownerType);
+            if (field < 0 || field >= fields.Length)
+            {
+                fieldPath = default;
+                return false;
+            }
+
+            var fieldType = fields[field].Type;
             fieldPath = fieldPath.Append(ownerType, field);
             ownerType = fieldType;
             if (nestedIndex + 1 < assignment.NestedFields.Length)

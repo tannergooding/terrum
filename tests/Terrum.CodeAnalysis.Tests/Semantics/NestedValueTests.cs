@@ -6,18 +6,22 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class NestedValueTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NestedValueTests
 {
+    private static CompilationOptions LayoutOptions { get; } = new() {
+        LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+    };
+
     private const string Values = """
         [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
             public mut Unit First;
@@ -41,9 +45,15 @@ public sealed class NestedValueTests
     [TestCase("Pair pair = new Pair(1, 2); mut Pair copy = pair; copy.Second.Value = 39; return pair.Second.Value + copy.First.Value + copy.Second.Value;",42)]
     public async Task NestedValuesExecuteThroughAotAndJitAsync(string body, int expected)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(Values + "int32 Main() { " + body + " }"));
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(Values + "int32 Main() { " + body + " }"),
+            LayoutOptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), expected).ConfigureAwait(true);
+        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), expected).ConfigureAwait(true);
     }
 
     [Test]
@@ -76,9 +86,13 @@ public sealed class NestedValueTests
                 if (Forward(false, out var invalid)) { return 99; }
                 return value.Value.First.Value + value.Value.Second.Value + value.Tail;
             }
-            """));
+            """), LayoutOptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), 42).ConfigureAwait(true);
+        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), 42).ConfigureAwait(true);
     }
 
     [Test]
@@ -103,7 +117,11 @@ public sealed class NestedValueTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), 42).ConfigureAwait(true);
+        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), 42).ConfigureAwait(true);
     }
     [TestCase("Pair value = new Pair(1, 2); value.First.Value = 3;")]
     [TestCase("new Pair(1, 2).First.Value = 3;")]
@@ -111,7 +129,9 @@ public sealed class NestedValueTests
     [TestCase("mut Pair value = new Pair(1, 2); value.First.Value.Missing = 3;")]
     public void InvalidNestedPlacesAreRejected(string body)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(Values + "int32 Main() { " + body + " return 0; }"));
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(Values + "int32 Main() { " + body + " return 0; }"),
+            LayoutOptions);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
@@ -124,7 +144,7 @@ public sealed class NestedValueTests
             """ + constructor + """
             } }
             int32 Main() { Box value = new Box(); return 0; }
-            """));
+            """), LayoutOptions);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
@@ -161,7 +181,7 @@ public sealed class NestedValueTests
                 value.First.Value = Replace(out value);
                 return value.First.Value;
             }
-            """));
+            """), LayoutOptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;
@@ -185,11 +205,20 @@ public sealed class NestedValueTests
     public void ForgedNestedFieldPathsCannotReachNativeCode()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values
-            + "int32 Main() { mut Pair value = new Pair(1, 2); value.First.Value = 40; return value.First.Value; }"));
+            + "int32 Main() { mut Pair value = new Pair(1, 2); value.First.Value = 40; return value.First.Value; }"),
+            LayoutOptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         var function = program.Functions[program.EntryPoint];
-        var assignment = ((global::System.Func<BoundFieldAssignment>)(() => { var __nunitActual4 = function.Body.Statements[1]; Assert.That(__nunitActual4, Is.TypeOf<BoundFieldAssignment>()); return (BoundFieldAssignment)__nunitActual4!; }))();
+        var assignment = ((global::System.Func<BoundFieldAssignment>)(() => {
+            var __nunitActual4 = function.Body.Statements[1];
+            Assert.That(__nunitActual4, Is.TypeOf<BoundFieldAssignment>());
+            return (BoundFieldAssignment)__nunitActual4!;
+        }))();
         foreach (var path in new ImmutableArray<int>[] { default, [-1], [int.MaxValue], [0, 0] })
         {
             var malformed = function with {
@@ -197,9 +226,14 @@ public sealed class NestedValueTests
                     Statements = function.Body.Statements.SetItem(1, assignment with { NestedFields = path }),
                 },
             };
+            var pathDescription = path.IsDefault
+                ? "default" : string.Join(",", path);
             _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(
-                program with { Functions = program.Functions.SetItem(program.EntryPoint, malformed) },
-                NativeRuntimePolicy.FailFast))!;
+                    program with {
+                        Functions = program.Functions.SetItem(
+                            program.EntryPoint, malformed),
+                    }, NativeRuntimePolicy.FailFast),
+                $"Nested field path [{pathDescription}] must be rejected.")!;
         }
     }
 
@@ -225,9 +259,13 @@ public sealed class NestedValueTests
                 Box copy = Echo(value, value, value, value, value);
                 return copy.Value.First.Value + copy.Value.Second.Value;
             }
-            """));
+            """), LayoutOptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), 42).ConfigureAwait(true);
+        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(), 42).ConfigureAwait(true);
     }
 
     [Test]
@@ -256,7 +294,11 @@ public sealed class NestedValueTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         Assert.That(program.Structures[0].Size, Is.EqualTo(8));
         Assert.That(program.Structures[0].Fields[1].Offset, Is.EqualTo(2));
         Assert.That(program.Structures[0].Fields[2].Offset, Is.EqualTo(6));
@@ -278,8 +320,14 @@ public sealed class NestedValueTests
     [Test]
     public void ForgedRecursiveAndMisalignedLayoutsCannotReachEmission()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(Values + "int32 Main() { return 0; }"));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(Values + "int32 Main() { return 0; }"),
+            LayoutOptions);
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
         var pair = program.Structures[0];
         foreach (var field in new[] {
             pair.Fields[0] with { Type = (PrimitiveType)100 },
@@ -304,9 +352,13 @@ public sealed class NestedValueTests
             + "int32 Main() { Wrapper value = new Wrapper(); return value.Value.Value; }", "outer.terrum");
         var inner = SyntaxTree.Parse("namespace Model; [Blittable] [Layout(LayoutKind.Sequential)] public struct Unit { public int32 Value; "
             + "public Unit(int32 value) { Value = value; } }", "inner.terrum");
-        var compilation = Compilation.Create([outer, inner]);
+        var compilation = Compilation.Create([outer, inner], LayoutOptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), 42).ConfigureAwait(true);
+        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))(), 42).ConfigureAwait(true);
     }
     [TestCase("Outer value = new Outer(); return value.Value.Secret;")]
     [TestCase("Outer value = new Outer(); value.Value = new Inner(); return 0;")]
@@ -329,10 +381,14 @@ public sealed class NestedValueTests
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct Hidden { public int32 Value; public Hidden() { Value = 42; } }
             public Outer Make() { return new Outer(); }
-            """));
+            """), LayoutOptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         _ = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), ["Make"]))!;
+            ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = compilation.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))(), ["Make"]))!;
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -355,32 +411,52 @@ public sealed class NestedValueTests
     [Test]
     public async Task NestedModuleLayoutsRemapTransitivelyAndRejectReplacementChangesAsync()
     {
-        var library = Compilation.CreateLibrary(SyntaxTree.Parse(Values + "public Pair Make() { return new Pair(19, 23); }"));
+        var library = Compilation.CreateLibrary(
+            SyntaxTree.Parse(Values
+                + "public Pair Make() { return new Pair(19, 23); }"),
+            LayoutOptions);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = library.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = library.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Make"]);
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.Structures.Length, Is.EqualTo(2));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Pair value = Make(); return value.First.Value + value.Second.Value; }"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = consumerCompilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = consumerCompilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))(), producer);
         var reordered = Compilation.CreateLibrary(SyntaxTree.Parse("""
             struct Hidden { public int32 X; public Hidden() { X = 0; } }
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Unit { public mut int32 Value; public Unit(int32 value) { Value = value; } }
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public mut Unit First; public mut Unit Second;
                 public Pair(int32 a, int32 b) { First = new Unit(a); Second = new Unit(b); } }
             public Pair Make() { Hidden hidden = new Hidden(); return new Pair(20, 22); }
-            """));
+            """), LayoutOptions);
         Assert.That(reordered.HasErrors, Is.False, string.Join(Environment.NewLine, reordered.Diagnostics));
-        var replacement = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = reordered.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), ["Make"]);
+        var replacement = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = reordered.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))(), ["Make"]);
         await ExecuteBothAsync(ModuleCompiler.Link(consumer, replacement), 42).ConfigureAwait(true);
         var changed = Compilation.CreateLibrary(SyntaxTree.Parse(Values.Replace("public mut int32 Value;",
             "public mut uint32 Value;", StringComparison.Ordinal).Replace("this.Value = value;",
-            "this.Value = uint32(value);", StringComparison.Ordinal) + "public Pair Make() { return new Pair(1, 2); }"));
+            "this.Value = uint32(value);", StringComparison.Ordinal) + "public Pair Make() { return new Pair(1, 2); }"),
+            LayoutOptions);
         Assert.That(changed.HasErrors, Is.False, string.Join(Environment.NewLine, changed.Diagnostics));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer,
-            ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = changed.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), ["Make"])))!;
+            ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual13 = changed.Program;
+                Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual13!;
+            }))(), ["Make"])))!;
     }
 
     private static async Task ExecuteBothAsync(BoundProgram program, int expected)
@@ -394,7 +470,11 @@ public sealed class NestedValueTests
             await File.WriteAllBytesAsync(executable, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
             await RunAsync(executable, [], expected).ConfigureAwait(true);
             var unused = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Unused() { return 0; }"));
-            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = unused.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), ["Unused"]);
+            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual14 = unused.Program;
+                Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual14!;
+            }))(), ["Unused"]);
             await File.WriteAllBytesAsync(producer, producerBytes).ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumer, ModuleCompiler.CreateConsumer(program, producerBytes)).ConfigureAwait(true);
             var framework = new DirectoryInfo(AppContext.BaseDirectory);
