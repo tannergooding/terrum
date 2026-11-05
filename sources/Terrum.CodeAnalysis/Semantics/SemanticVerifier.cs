@@ -6872,6 +6872,8 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
 
+                using var elementScratch = _resources.ReserveState(
+                    new BigInteger(TemplateBytes.Length));
                 var elementBytes = Get(index);
                 for (var byteIndex = 0; byteIndex < bytes.Length;
                     byteIndex++)
@@ -8740,6 +8742,8 @@ public static partial class SemanticVerifier
                 var changed = false;
                 if (elementIndex is ulong selectedIndex)
                 {
+                    using var mergedScratch = RepeatResources.ReserveState(
+                        new BigInteger(defaultBytes.Length));
                     var mergedBytes = stagedState.Get(selectedIndex);
                     for (var byteIndex = 0;
                         byteIndex < mergedBytes.Length;
