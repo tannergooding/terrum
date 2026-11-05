@@ -20,6 +20,12 @@ internal static partial class Program
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private const string A2EUScalarFrozenValuesSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+    private const string A2R1ReturnCoverageSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
+    private const string A2R1RepeatInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
+    private const string LocalAggregateLayoutSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-1";
     private const string RegisterExceptionRegionsSchemaIdentity
         = "trrm/1-draft-register-exception-regions-1";
 
@@ -37,6 +43,11 @@ internal static partial class Program
         string? identity = null;
         string? schemaIdentity = null;
         string? moduleIdentity = null;
+        string? layoutCoreManifestPath = null;
+        string? nativeCoreManifestPath = null;
+        var nativeCoreManifestFirst = false;
+        LayoutCoreRegistrationSet? layoutCoreRegistration = null;
+        NativeCoreRegistrationSet? nativeCoreRegistration = null;
         var library = false;
         var runtime = false;
         var hasArithmeticProfile = false;
@@ -104,8 +115,9 @@ internal static partial class Program
                     continue;
                 }
                 if (i + 1 == count
-                    || (args[i] is "--trrm-schema" or "--trrm-module")
-                        && args[i + 1].StartsWith("-", StringComparison.Ordinal))
+                    || ((args[i] is "--trrm-schema" or "--trrm-module")
+                        && args[i + 1].StartsWith('-',
+                            StringComparison.Ordinal)))
                 {
                     WriteInputError(json, "TRM2000", Usage);
                     return 2;
@@ -131,6 +143,27 @@ internal static partial class Program
                     case "--source" when command == "compile-trrm" && paths.Count < 256
                         && !paths.Contains(value, StringComparer.OrdinalIgnoreCase):
                         paths.Add(value);
+                        break;
+                    case "--layout-core-manifest" when command == "compile-trrm"
+                        && layoutCoreManifestPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-',
+                            StringComparison.Ordinal)
+                        && TryGetFullPath(value, out var manifestFullPath):
+                        layoutCoreManifestPath = manifestFullPath;
+                        if (nativeCoreManifestPath is null)
+                        {
+                            nativeCoreManifestFirst = false;
+                        }
+                        break;
+                    case "--native-core-manifest" when command == "compile-trrm"
+                        && nativeCoreManifestPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-',
+                            StringComparison.Ordinal)
+                        && TryGetFullPath(value, out var nativeManifestFullPath):
+                        nativeCoreManifestPath = nativeManifestFullPath;
+                        nativeCoreManifestFirst = layoutCoreManifestPath is null;
                         break;
                     case "--export" when command == "build-trrm-library" && uniqueExports.Add(value):
                         exports.Add(value);
@@ -192,11 +225,11 @@ internal static partial class Program
                 return 2;
             }
 
-            if (command == "compile-trrm"
-                && (moduleIdentity is not null || providers.Count != 0)
-                || isArtifactCommand
+            if ((command == "compile-trrm"
+                && (moduleIdentity is not null || providers.Count != 0))
+                || (isArtifactCommand
                     && ((schemaIdentity is null) != (moduleIdentity is null)
-                        || schemaIdentity is null && providers.Count != 0))
+                        || (schemaIdentity is null && providers.Count != 0))))
             {
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
@@ -209,7 +242,10 @@ internal static partial class Program
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1"
                         or A2EUScalarFrozenValuesSchemaIdentity
+                        or A2R1ReturnCoverageSchemaIdentity
+                        or A2R1RepeatInitializationSchemaIdentity
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
+                        or LocalAggregateLayoutSchemaIdentity
                         or RegisterExceptionRegionsSchemaIdentity)
                     || providers.Exists(static provider =>
                         provider.SchemaIdentity is not (
@@ -219,7 +255,10 @@ internal static partial class Program
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1"
                             or A2EUScalarFrozenValuesSchemaIdentity
+                            or A2R1ReturnCoverageSchemaIdentity
+                            or A2R1RepeatInitializationSchemaIdentity
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
+                            or LocalAggregateLayoutSchemaIdentity
                             or RegisterExceptionRegionsSchemaIdentity))))
             {
                 WriteInputError(json, "TRM2000", Usage);
@@ -240,25 +279,75 @@ internal static partial class Program
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
             }
-            if (!runtime || command == "compile-trrm" && identity is null
-                || command is "build-trrm" or "build-trrm-library" && args[1] == "-"
-                || command == "run-trrm" && (output is not null || args[1] == "-")
-                || command != "run-trrm" && output is null
-                || command == "build-trrm-library" && exports.Count == 0
-                || output is not null && (!Path.GetExtension(output).Equals(
+            if (!runtime || (command == "compile-trrm" && identity is null)
+                || (command is "build-trrm" or "build-trrm-library" && args[1] == "-")
+                || (command == "run-trrm" && (output is not null || args[1] == "-"))
+                || (command != "run-trrm" && output is null)
+                || (command == "build-trrm-library" && exports.Count == 0)
+                || (output is not null && (!Path.GetExtension(output).Equals(
                     command switch { "compile-trrm" => ".trrm", "build-trrm" => ".exe", _ => ".dll" },
                     StringComparison.OrdinalIgnoreCase)
-                    || paths.Any(path => path != "-" && Path.GetFullPath(path).Equals(output, StringComparison.OrdinalIgnoreCase))))
+                    || paths.Any(path => path != "-" && PathsAlias(output,
+                        path)))))
             {
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
             }
             if (output is not null && providers.Any(provider =>
-                    Path.GetFullPath(provider.Path).Equals(output,
-                        StringComparison.OrdinalIgnoreCase)))
+                    PathsAlias(output, provider.Path)))
             {
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
+            }
+            if (layoutCoreManifestPath is not null
+                || nativeCoreManifestPath is not null)
+            {
+                if ((layoutCoreManifestPath is not null
+                        && ((output is not null
+                                && PathsAlias(layoutCoreManifestPath, output))
+                            || paths.Any(path => path != "-"
+                                && PathsAlias(layoutCoreManifestPath, path))))
+                    || (nativeCoreManifestPath is not null
+                        && ((output is not null
+                                && PathsAlias(nativeCoreManifestPath, output))
+                            || paths.Any(path => path != "-"
+                                && PathsAlias(nativeCoreManifestPath, path))))
+                    || (layoutCoreManifestPath is not null
+                        && nativeCoreManifestPath is not null
+                        && PathsAlias(layoutCoreManifestPath,
+                            nativeCoreManifestPath)))
+                {
+                    WriteInputError(json, "TRM2002",
+                        "Core manifests must be distinct from one another, the source and artifact output.");
+                    return 2;
+                }
+
+                var usingModuleIdentity = identity
+                    ?? throw new InvalidOperationException(
+                        "Missing compile-trrm identity.");
+                var definitions = ReadCoreManifestDefinitions(
+                    layoutCoreManifestPath, nativeCoreManifestPath,
+                    nativeCoreManifestFirst);
+                if ((definitions.Layout is LayoutCoreManifestDefinition
+                        layoutDefinition
+                        && !StringComparer.Ordinal.Equals(
+                            layoutDefinition.UsingModuleIdentity,
+                            usingModuleIdentity))
+                    || (definitions.Native is
+                        NativeCoreManifestDefinition nativeDefinition
+                        && !StringComparer.Ordinal.Equals(
+                            nativeDefinition.UsingModuleIdentity,
+                            usingModuleIdentity)))
+                {
+                    WriteInputError(json, "TRM2000",
+                        "Each Core manifest usingModuleIdentity must exactly match --identity.");
+                    return 2;
+                }
+                var registrations = CoreManifestRegistrationComposer.Create(
+                    definitions.Layout, definitions.Native,
+                    layoutCoreManifestPath, nativeCoreManifestPath);
+                layoutCoreRegistration = registrations.Layout;
+                nativeCoreRegistration = registrations.Native;
             }
 
             byte[] artifact;
@@ -273,6 +362,8 @@ internal static partial class Program
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
                     RuntimePolicy = BoundRuntimePolicy.FailFast,
+                    LayoutCoreRegistration = layoutCoreRegistration,
+                    NativeCoreRegistration = nativeCoreRegistration,
                 };
                 var compilation = library
                     ? snapshots.Length == 1 ? Compilation.CreateLibrary(snapshots[0], options)
@@ -414,8 +505,8 @@ internal static partial class Program
                     catch (Exception exception)
                         when (StringComparer.Ordinal.Equals(schemaIdentity,
                                 A3FixedArraySchemaIdentity)
-                            && exception is (InvalidDataException
-                                or OverflowException or NotSupportedException))
+                            && exception is InvalidDataException
+                                or OverflowException or NotSupportedException)
                     {
                         a3AdmissionCallFailed = true;
                         throw;
@@ -432,8 +523,8 @@ internal static partial class Program
                     catch (Exception exception)
                         when (StringComparer.Ordinal.Equals(schemaIdentity,
                                 A3FixedArraySchemaIdentity)
-                            && exception is (InvalidDataException
-                                or OverflowException or NotSupportedException))
+                            && exception is InvalidDataException
+                                or OverflowException or NotSupportedException)
                     {
                         a3AdmissionCallFailed = true;
                         throw;
@@ -450,8 +541,8 @@ internal static partial class Program
                     catch (Exception exception)
                         when (StringComparer.Ordinal.Equals(schemaIdentity,
                                 A3FixedArraySchemaIdentity)
-                            && exception is (InvalidDataException
-                                or OverflowException or NotSupportedException))
+                            && exception is InvalidDataException
+                                or OverflowException or NotSupportedException)
                     {
                         a3AdmissionCallFailed = true;
                         throw;
@@ -489,14 +580,14 @@ internal static partial class Program
         {
             throw;
         }
-        catch (Exception exception) when (exception is InvalidDataException or ArgumentException and not DecoderFallbackException
+        catch (Exception exception) when (exception is InvalidDataException or (ArgumentException and not DecoderFallbackException)
             or NotSupportedException)
         {
             WriteInputError(json, "TRM5001", exception.Message);
             return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-            or DecoderFallbackException)
+            or DecoderFallbackException or FormatException)
         {
             WriteInputError(json, "TRM2001", exception.Message);
             return 2;
