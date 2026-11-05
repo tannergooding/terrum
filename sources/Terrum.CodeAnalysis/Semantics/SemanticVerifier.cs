@@ -7916,6 +7916,8 @@ public static partial class SemanticVerifier
             RepeatSnapshotReservationScope? snapshotScope)
         {
             var repeatStateBytes = RawUnionArrayLogicalBytes();
+            using var repeatFrame = repeatStateBytes.IsZero
+                ? null : RepeatResources.EnterFrame();
             using var repeatInputState
                 = snapshotScope?.TracksState(this) == true
                     || _repeatSnapshotScope?.TracksState(this) == true
@@ -7981,6 +7983,7 @@ public static partial class SemanticVerifier
                     }
                 }
 
+                repeatFrame?.Complete();
                 if (snapshotScope is not null)
                 {
                     snapshotScope.TrackState(result, repeatOutputState);
@@ -8006,6 +8009,9 @@ public static partial class SemanticVerifier
             var sourceRepeatBytes = RawUnionArrayLogicalBytes();
             var destinationRepeatBytes
                 = destination.RawUnionArrayLogicalBytes();
+            using var repeatFrame = sourceRepeatBytes.IsZero
+                    && destinationRepeatBytes.IsZero
+                ? null : RepeatResources.EnterFrame();
             using var repeatSourceState = RepeatResources.ReserveState(
                 sourceRepeatBytes);
             using var repeatDestinationState = RepeatResources.ReserveState(
@@ -8032,6 +8038,7 @@ public static partial class SemanticVerifier
                     rawUnionArrayReplacement.Add(key, clonedState);
                 }
             }
+            repeatFrame?.Complete();
             Array.Copy(_possibilities, destination._possibilities, Length);
             Array.Copy(_possibleFieldMasks, destination._possibleFieldMasks, Length);
             Array.Copy(_nativeOutputDestinations, destination._nativeOutputDestinations, Length);
