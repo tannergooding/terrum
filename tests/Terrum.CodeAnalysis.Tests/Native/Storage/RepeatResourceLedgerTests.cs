@@ -256,4 +256,27 @@ internal sealed class RepeatResourceLedgerTests
 
         Assert.That(ledger.LiveStateBytes, Is.Zero);
     }
+
+    [Test]
+    public void PersistentStateLeaseCanReceiveAndReleaseOwnedBytes()
+    {
+        var ledger = new RepeatResourceLedger();
+        using (ledger.BeginCallable())
+        {
+            using var scratch = ledger.ReserveState(8);
+            using var output = ledger.ReservePersistentState(16);
+            output.TransferFrom(scratch, 8, 32);
+            Assert.That(ledger.LiveStateBytes, Is.EqualTo(56));
+            Assert.That(output.ReservedBytes,
+                Is.EqualTo(new BigInteger(56)));
+
+            scratch.Dispose();
+            output.Remove(8);
+            Assert.That(ledger.LiveStateBytes, Is.EqualTo(48));
+            Assert.That(output.ReservedBytes,
+                Is.EqualTo(new BigInteger(48)));
+        }
+
+        Assert.That(ledger.LiveStateBytes, Is.Zero);
+    }
 }

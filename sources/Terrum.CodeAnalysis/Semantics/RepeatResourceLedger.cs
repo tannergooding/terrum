@@ -300,6 +300,22 @@ internal sealed class RepeatResourceLedger
             _bytes += bytes;
         }
 
+        internal void Remove(BigInteger bytes)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(bytes,
+                BigInteger.Zero, nameof(bytes));
+            var owner = _owner ?? throw new ObjectDisposedException(
+                nameof(StateLease));
+            if (bytes > _bytes)
+            {
+                throw new InvalidOperationException(
+                    "Repeat resource state reservation underflowed.");
+            }
+
+            owner.ReleaseState(bytes);
+            _bytes -= bytes;
+        }
+
         internal void TransferFrom(StateLease source, BigInteger bytes,
             BigInteger additionalBytes)
         {
@@ -312,8 +328,7 @@ internal sealed class RepeatResourceLedger
                 nameof(StateLease));
             if (!ReferenceEquals(owner, source._owner)
                 || ReferenceEquals(this, source)
-                || _persistent || source._persistent
-                || bytes > source._bytes)
+                || source._persistent || bytes > source._bytes)
             {
                 throw new InvalidOperationException(
                     "Repeat resource state reservations cannot be transferred.");
