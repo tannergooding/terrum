@@ -8788,9 +8788,11 @@ public static partial class SemanticVerifier
             RawUnionArrayElementState existingState, ulong index,
             ReadOnlySpan<byte> bytes)
         {
+            using var repeatFrame = RepeatResources.EnterFrame();
             if (!existingState.TryGetSetPlan(index, bytes,
                 out var position, out var hasIndex, out var removesEntry))
             {
+                repeatFrame.Complete();
                 return false;
             }
 
@@ -8831,6 +8833,7 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            repeatFrame.Complete();
             _rawUnionArrayElementBytes = replacement;
             UpdateRepeatSnapshotStateLease();
             return true;
@@ -8925,6 +8928,7 @@ public static partial class SemanticVerifier
             ulong index, ReadOnlySpan<byte> bytes,
             RawUnionArrayElementState? inheritedState = null)
         {
+            using var repeatFrame = RepeatResources.EnterFrame();
             var position = 0;
             var hasIndex = false;
             var removesEntry = false;
@@ -8932,12 +8936,14 @@ public static partial class SemanticVerifier
             {
                 if (PayloadBytesEqual(defaultBytes, bytes))
                 {
+                    repeatFrame.Complete();
                     return false;
                 }
             }
             else if (!inheritedState.TryGetSetPlan(index, bytes,
                 out position, out hasIndex, out removesEntry))
             {
+                repeatFrame.Complete();
                 return false;
             }
 
@@ -8982,7 +8988,9 @@ public static partial class SemanticVerifier
                     index, bytes, inheritedState, position, hasIndex,
                     removesEntry, outputState);
             }
-            _rawUnionArrayElementBytes = replacement ?? throw Invalid();
+            var completedReplacement = replacement ?? throw Invalid();
+            repeatFrame.Complete();
+            _rawUnionArrayElementBytes = completedReplacement;
             UpdateRepeatSnapshotStateLease();
             return true;
         }
