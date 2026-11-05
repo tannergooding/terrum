@@ -18,14 +18,17 @@ internal sealed class RepeatResourceLedgerTests
         var exactLedger = new RepeatResourceLedger();
         using (exactLedger.BeginCallable())
         {
-            exactLedger.ConsumeWork(RepeatResourceLedger.WorkLimit - 7);
-            using (exactLedger.EnterFrame())
+            exactLedger.ConsumeWork(RepeatResourceLedger.WorkLimit - 8);
+            using (var frame = exactLedger.EnterFrame())
             {
                 Assert.That(exactLedger.WorkUsed,
-                    Is.EqualTo(RepeatResourceLedger.WorkLimit));
+                    Is.EqualTo(RepeatResourceLedger.WorkLimit - 1));
                 Assert.That(exactLedger.ActiveDepth, Is.EqualTo(1));
                 Assert.That(exactLedger.LiveStateBytes, Is.EqualTo(48));
+                frame.Complete();
             }
+            Assert.That(exactLedger.WorkUsed,
+                Is.EqualTo(RepeatResourceLedger.WorkLimit));
             Assert.That(exactLedger.ActiveDepth, Is.Zero);
             Assert.That(exactLedger.LiveStateBytes, Is.Zero);
         }
@@ -33,16 +36,21 @@ internal sealed class RepeatResourceLedgerTests
         var shortLedger = new RepeatResourceLedger();
         using (shortLedger.BeginCallable())
         {
-            shortLedger.ConsumeWork(RepeatResourceLedger.WorkLimit - 6);
+            shortLedger.ConsumeWork(RepeatResourceLedger.WorkLimit - 7);
+            using var frame = shortLedger.EnterFrame();
+            Assert.That(shortLedger.WorkUsed,
+                Is.EqualTo(RepeatResourceLedger.WorkLimit));
             var exception = Assert.Throws<SemanticRepeatResourceLimitException>(
-                () => shortLedger.EnterFrame());
+                frame.Complete);
             Assert.That(exception!.Dimension,
                 Is.EqualTo(SemanticResourceDimension.Work));
             Assert.That(exception.Required,
                 Is.EqualTo((BigInteger)RepeatResourceLedger.WorkLimit + 1));
-            Assert.That(shortLedger.ActiveDepth, Is.Zero);
-            Assert.That(shortLedger.LiveStateBytes, Is.Zero);
         }
+        Assert.That(shortLedger.WorkUsed,
+            Is.EqualTo(RepeatResourceLedger.WorkLimit));
+        Assert.That(shortLedger.ActiveDepth, Is.Zero);
+        Assert.That(shortLedger.LiveStateBytes, Is.Zero);
 
         var stateLedger = new RepeatResourceLedger();
         using (stateLedger.BeginCallable())
@@ -108,7 +116,7 @@ internal sealed class RepeatResourceLedgerTests
             {
                 for (var index = frames.Count - 1; index >= 0; index--)
                 {
-                    frames[index].Dispose();
+                    frames[index].Complete();
                 }
             }
         }

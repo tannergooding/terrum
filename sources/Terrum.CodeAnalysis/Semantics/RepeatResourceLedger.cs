@@ -51,6 +51,7 @@ internal sealed class RepeatResourceLedger
     internal const ulong LiveStateByteLimit = 16_777_216;
     internal const ulong DepthLimit = SemanticVerifier.MaximumDepth;
     private const ulong RepeatFrameWork = 7;
+    private const ulong RepeatFrameExitWork = 1;
     private const ulong RepeatFrameBytes = 48;
 
     private ulong _work;
@@ -228,12 +229,17 @@ internal sealed class RepeatResourceLedger
         ReleaseState(bytes);
     }
 
-    private void ExitFrame()
+    private void ExitFrame(bool completed)
     {
         if (_depth == 0 || RepeatFrameBytes > _liveStateBytes)
         {
             throw new InvalidOperationException(
                 "The Repeat resource ledger has no active frame.");
+        }
+
+        if (completed)
+        {
+            ConsumeWork(RepeatFrameExitWork);
         }
 
         _depth--;
@@ -367,11 +373,19 @@ internal sealed class RepeatResourceLedger
             _owner = owner;
         }
 
+        internal void Complete()
+        {
+            var owner = _owner ?? throw new ObjectDisposedException(
+                nameof(FrameLease));
+            owner.ExitFrame(completed: true);
+            _owner = null;
+        }
+
         public void Dispose()
         {
             var owner = _owner;
             _owner = null;
-            owner?.ExitFrame();
+            owner?.ExitFrame(completed: false);
             GC.SuppressFinalize(this);
         }
     }

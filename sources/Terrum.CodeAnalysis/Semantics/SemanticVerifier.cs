@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Numerics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Text;
@@ -95,16 +96,24 @@ public static partial class SemanticVerifier
     }
 
     internal static void VerifyReferences(BoundProgram program)
+        => VerifyReferences(program, nativeLoweringAgreement: null);
+
+    internal static void VerifyReferences(
+        BoundProgram program, string? nativeLoweringAgreement)
     {
         ArgumentNullException.ThrowIfNull(program);
-        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement: null);
+        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement);
         _ = VerifyCore(program, requireEntryPoint: true, allowExternal: true);
     }
 
     internal static void VerifyLibraryReferences(BoundProgram program)
+        => VerifyLibraryReferences(program, nativeLoweringAgreement: null);
+
+    internal static void VerifyLibraryReferences(
+        BoundProgram program, string? nativeLoweringAgreement)
     {
         ArgumentNullException.ThrowIfNull(program);
-        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement: null);
+        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement);
         _ = VerifyCore(program, requireEntryPoint: false, allowExternal: true);
     }
 
@@ -113,7 +122,8 @@ public static partial class SemanticVerifier
         string? nativeLoweringAgreement)
     {
         if (nativeLoweringAgreement is not
-            (null or CompilationOptions.WindowsX64NormalBackingAgreement))
+            (null or CompilationOptions.WindowsX64NormalBackingAgreement
+                or CompilationOptions.WindowsX64RootlessReferencesAgreement))
         {
             throw new ArgumentException("The native lowering agreement is unsupported.",
                 nameof(nativeLoweringAgreement));
@@ -222,6 +232,15 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (program.LayoutCoreRegistration is LayoutCoreRegistrationSet layoutRegistration
+            && (!BoundEnumTypes.MatchesLayoutRegistration(
+                    program.EnumDefinitions, layoutRegistration)
+                || (program.NativeCoreRegistration is NativeCoreRegistrationSet nativeRegistration
+                    && !ReferenceEquals(nativeRegistration.ModuleBindings,
+                        layoutRegistration.ModuleBindings))))
+        {
+            throw Invalid();
+        }
         if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes, program.Structures,
                 program.NativeFunctionPointerSignatures,
                 program.NativeFixedArrayTypes))
@@ -288,11 +307,7 @@ public static partial class SemanticVerifier
             var firstParameter = function.IsConstructor ? 1 : 0;
             for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
             {
-                var variable = function.Variables[variableIndex];
-                if (variable is null)
-                {
-                    throw Invalid();
-                }
+                var variable = function.Variables[variableIndex] ?? throw Invalid();
                 var isParameter = variableIndex >= firstParameter
                     && variableIndex - firstParameter < function.ParameterCount;
                 if (variable.IsImplicitRef
@@ -376,7 +391,6 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
             }
-
         }
         if (program.Buffers.Any(static buffer => buffer.IsInvocationScoped) && !program.RequiresSourceGrant)
         {
@@ -391,6 +405,7 @@ public static partial class SemanticVerifier
             StringComparer.Ordinal);
         var layoutStates = new byte[program.Structures.Length];
         var alignments = new int[program.Structures.Length];
+        var requiredAlignments = new int[program.Structures.Length];
         var layoutHeights = new int[program.Structures.Length];
         for (var index = 0; index < program.Structures.Length; index++)
         {
@@ -411,7 +426,7 @@ public static partial class SemanticVerifier
             var offset = 0;
             var maximumClassFieldSize = program.NativeLoweringAgreement
                 == CompilationOptions.WindowsX64NormalBackingAgreement
-                ? ValueLayout.MaximumStructureSize : ValueLayout.MaximumSize;
+                ? ValueLayout.MaximumAddressStorageSize : ValueLayout.MaximumSize;
             var fieldNames = new HashSet<string>(@class.Fields.Length, StringComparer.Ordinal);
             foreach (var field in @class.Fields)
             {
@@ -433,6 +448,12 @@ public static partial class SemanticVerifier
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures,
                     program.CheckedReferenceTypes, program.NativeLoweringAgreement);
+                if (width > int.MaxValue || field.Offset > int.MaxValue
+                    || field.Size > int.MaxValue)
+                {
+                    throw Invalid();
+                }
+                var classFieldWidth = checked((int)width);
                 var nested = !NativePointerTypes.IsType(field.Type) && !NativeFunctionPointerTypes.IsType(field.Type)
                     && !BoundEnumTypes.IsType(field.Type)
                     && (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
@@ -443,15 +464,18 @@ public static partial class SemanticVerifier
                         program.NativeLoweringAgreement,
                         program.NativeFixedArrayTypes);
                 offset = (offset + alignment - 1) & -alignment;
-                if (field.Size != width || field.Offset != offset || (field.IsMutable && !@class.IsMutable)
-                    || width < 1 || width > maximumClassFieldSize
-                    || offset + width > ManagedClassTypes.MaximumPayload
+                if (field.Size != (ulong)classFieldWidth
+                    || field.Offset != (ulong)offset
+                    || (field.IsMutable && !@class.IsMutable)
+                    || classFieldWidth < 1
+                    || classFieldWidth > maximumClassFieldSize
+                    || offset + classFieldWidth > ManagedClassTypes.MaximumPayload
                     || string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal))
                 {
                     throw Invalid();
                 }
-                offset += width;
+                offset += classFieldWidth;
             }
             if (((offset + 7) & ~7) != @class.Size)
             {
@@ -484,7 +508,22 @@ public static partial class SemanticVerifier
                     or NativeManagedNodeIntrinsics.HeapName
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
-                || structure.Size is < 1 or > ValueLayout.MaximumStructureSize)
+                || structure.Size < (structure.IsTransparent ? 0UL : 1UL)
+                || structure.Alignment < (structure.IsTransparent ? 0 : 1)
+                || structure.Alignment > 8192
+                || (structure.Alignment != 0
+                    && (structure.Alignment & (structure.Alignment - 1)) != 0)
+                || structure.RequiredAlignment is < 1 or > 8192
+                || (structure.RequiredAlignment
+                    & (structure.RequiredAlignment - 1)) != 0
+                || (structure.IsSequential || structure.IsUnion
+                    ? structure.Packing is not (1 or 2 or 4 or 8 or 16)
+                    : structure.Packing != 0)
+                || (structure.DeclaredAlignment is int declaredAlignment
+                    && ((!structure.IsSequential && !structure.IsUnion)
+                        || declaredAlignment is < 1 or > 8192
+                        || (declaredAlignment
+                            & (declaredAlignment - 1)) != 0)))
             {
                 throw Invalid();
             }
@@ -503,8 +542,9 @@ public static partial class SemanticVerifier
             {
                 structNames.Add(structure.Name, isDuplicateNameView);
             }
-            var offset = 0;
-            var alignment = 1;
+            ulong offset = 0;
+            var alignment = structure.IsTransparent ? 0 : 1;
+            var requiredAlignment = 1;
             var height = 1;
             var fieldNames = new HashSet<string>(structure.Fields.Length, StringComparer.Ordinal);
             foreach (var field in structure.Fields)
@@ -541,8 +581,9 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var fixedArrayField = NativeFixedArrayTypes.IsType(field.Type);
-                int width;
+                ulong width;
                 int fieldAlignment;
+                int fieldRequiredAlignment;
                 if (fixedArrayField)
                 {
                     var arrayIndex = NativeFixedArrayTypes.Index(field.Type);
@@ -556,14 +597,15 @@ public static partial class SemanticVerifier
                             array.ElementType, array.ElementCount,
                             program.Structures, program.NativeFixedArrayTypes,
                             out var layout)
-                        || layout.ByteExtent > int.MaxValue
-                        || layout.Alignment > int.MaxValue)
+                        || layout.Alignment > int.MaxValue
+                        || layout.RequiredAlignment > int.MaxValue)
                     {
                         throw Invalid();
                     }
 
-                    width = (int)layout.ByteExtent;
+                    width = layout.ByteExtent;
                     fieldAlignment = (int)layout.Alignment;
+                    fieldRequiredAlignment = (int)layout.RequiredAlignment;
                 }
                 else
                 {
@@ -575,29 +617,76 @@ public static partial class SemanticVerifier
                             program.Structures, program.CheckedReferenceTypes,
                             program.NativeLoweringAgreement,
                             program.NativeFixedArrayTypes);
+                    fieldRequiredAlignment = nested >= 0
+                        ? requiredAlignments[nested]
+                        : ValueLayout.RequiredAlignment(field.Type,
+                            program.Structures, program.NativeFixedArrayTypes);
+                }
+                var fieldPlacementAlignment = fieldAlignment;
+                if ((structure.IsSequential || structure.IsUnion)
+                    && width != 0)
+                {
+                    fieldPlacementAlignment = Math.Max(
+                        Math.Min(fieldAlignment, structure.Packing),
+                        fieldRequiredAlignment);
                 }
                 var alignedOffset = structure.IsTransparent || structure.IsUnion
-                    ? 0
-                    : fieldAlignment == 0 ? offset
-                    : (offset + fieldAlignment - 1) & -fieldAlignment;
+                    ? 0UL : width == 0 ? offset
+                    : AlignLayout(offset, fieldPlacementAlignment);
+                if (alignedOffset > ulong.MaxValue - width)
+                {
+                    throw Invalid();
+                }
+                var fieldEnd = alignedOffset + width;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal)
                     || (width == 0 && !fixedArrayField)
-                    || field.Size != width || field.Offset != alignedOffset
-                    || alignedOffset + width > ValueLayout.MaximumStructureSize)
+                    || field.Size != width || field.Offset != alignedOffset)
                 {
                     throw Invalid();
                 }
                 offset = structure.IsUnion
-                    ? Math.Max(offset, width) : alignedOffset + width;
-                alignment = Math.Max(alignment, fieldAlignment);
+                    ? Math.Max(offset, width) : fieldEnd;
+                if (structure.IsTransparent)
+                {
+                    alignment = fieldAlignment;
+                }
+                else if (width != 0)
+                {
+                    alignment = Math.Max(alignment,
+                        fieldPlacementAlignment);
+                }
+                requiredAlignment = Math.Max(requiredAlignment,
+                    fieldRequiredAlignment);
             }
-            if (((offset + alignment - 1) & -alignment) != structure.Size || structure.Fields.Length > ValueLayout.MaximumSize)
+            if (structure.DeclaredAlignment is int explicitAlignment)
+            {
+                if (explicitAlignment < alignment)
+                {
+                    throw Invalid();
+                }
+                alignment = explicitAlignment;
+                requiredAlignment = Math.Max(requiredAlignment,
+                    explicitAlignment);
+            }
+            if (!structure.IsTransparent && offset == 0)
+            {
+                offset = 1;
+            }
+            var size = structure.IsTransparent ? offset
+                : AlignLayout(offset, alignment);
+            if (size != structure.Size || structure.Alignment != alignment
+                || structure.RequiredAlignment != requiredAlignment)
             {
                 throw Invalid();
             }
             if (structure.IsTransparent && (structure.IsUnique || structure.Fields.Length != 1
-                || PrimitiveTypeFacts.ScalarWidth(structure.Fields[0].Type) <= 0
+                || (structure.BlittableTargetRequirement == 0
+                    ? PrimitiveTypeFacts.ScalarWidth(
+                        structure.Fields[0].Type) <= 0
+                    : !NativeFixedArrayContract.IsSupportedElementType(
+                        structure.Fields[0].Type, program.Structures,
+                        program.NativeFixedArrayTypes))
                 || structure.Fields[0].Offset != 0 || structure.Fields[0].Size != structure.Size))
             {
                 throw Invalid();
@@ -608,7 +697,8 @@ public static partial class SemanticVerifier
             if (structure.Size > ValueLayout.MaximumSize
                 && structure.BlittableTargetRequirement == 0
                 && !isSupportedFixedArrayElement
-                && program.NativeLoweringAgreement is null)
+                && program.NativeLoweringAgreement
+                    != CompilationOptions.WindowsX64NormalBackingAgreement)
             {
                 throw Invalid();
             }
@@ -620,6 +710,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             alignments[index] = alignment;
+            requiredAlignments[index] = requiredAlignment;
             layoutHeights[index] = height;
             layoutStates[index] = 2;
         }
@@ -652,10 +743,8 @@ public static partial class SemanticVerifier
                     && !function.RequiresUnsafeCaller)
                 || function.ReturnType == PrimitiveType.NativeStorageAddress
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
-                || NativeFixedArrayContract.HasMetadataOnlyArrayType(
-                    function.ReturnType, program.Structures,
-                    program.NativeFixedArrayTypes, program.NativePointerTypes,
-                    program.NativeFunctionPointerSignatures)
+                || HasUnsupportedMetadataOnlyArrayType(
+                    function.ReturnType, program)
                 || (function.NativeFunctionPointerType is PrimitiveType functionPointerType
                     && NativeFixedArrayContract.HasMetadataOnlyArrayType(
                         functionPointerType, program.Structures,
@@ -668,7 +757,9 @@ public static partial class SemanticVerifier
                 || function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
                 || function.Body is null)
             {
-                throw Invalid();
+                throw new ArgumentException(
+                    $"Invalid bound program function '{function?.Name}' (return={function?.ReturnType}, private={function?.IsPrivate}, internal={function?.IsInternal}, external={function?.IsExternal}, variables={function?.Variables.Length}, parameters={function?.ParameterCount}).",
+                    nameof(program));
             }
             if (function.Variables.Length > MaximumVariables || function.ParameterCount > MaximumArguments)
             {
@@ -698,14 +789,11 @@ public static partial class SemanticVerifier
                                 || !NativeFixedArrayContract.MatchesLayout(fixedArrayLayout, program)
                                 || !NativeFixedArrayContract.MatchesProgram(program)))
                                 || (!NativeFixedArrayContract.IsCarrier(variable.Type)
-                                    && NativeFixedArrayContract.HasMetadataOnlyArrayType(
-                                        variable.Type, program.Structures,
-                                        program.NativeFixedArrayTypes,
-                                        program.NativePointerTypes,
-                                        program.NativeFunctionPointerSignatures)
-                                    && !IsSupportedLocalFixedArrayFieldAggregate(
-                                        variableIndex, variable.Type, function,
-                                        program))
+                                    && HasUnsupportedMetadataOnlyArrayType(
+                                        variable.Type, program)
+                                    && !IsSupportedFixedArrayFieldAggregateVariable(
+                                        variableIndex, variable.Type,
+                                        function, program))
                                 || (variable.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                             && (!function.IsExternal || variableIndex >= function.ParameterCount)
                                     && !(function.RequiresUnsafeCaller
@@ -816,6 +904,51 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            if (function.ConstructionHomeIndex < -1)
+            {
+                throw Invalid();
+            }
+            if (function.ConstructionHomeIndex >= 0)
+            {
+                var constructionHomeIndex = function.ConstructionHomeIndex;
+                var constructionTypeIndex
+                    = (int)function.ReturnType - 100;
+                if (function.IsConstructor || function.IsClassConstructor
+                    || function.IsExternal || function.IsCleanup
+                    || !function.IsPrivate || function.IsInternal
+                    || !function.IsStatic
+                    || function.DirectNativeImport is not null
+                    || function.ModuleImport is not null
+                    || function.NativeFunctionPointerType is not null
+                    || constructionHomeIndex != function.ParameterCount
+                    || constructionHomeIndex >= function.Variables.Length
+                    || (uint)constructionTypeIndex
+                        >= (uint)program.Structures.Length
+                    || function.Variables[constructionHomeIndex].Type
+                        != function.ReturnType
+                    || !function.Variables[constructionHomeIndex].IsMutable
+                    || !function.Variables[constructionHomeIndex]
+                        .IsInitializationLocal
+                    || function.Variables[constructionHomeIndex].IsOut
+                    || function.Variables[constructionHomeIndex].IsInit
+                    || function.Variables[constructionHomeIndex]
+                        .IsImplicitRef
+                    || program.Structures[constructionTypeIndex].IsUnique
+                    || program.Structures[constructionTypeIndex].CleanupMethod
+                        is not null
+                    || program.Structures[constructionTypeIndex]
+                        .BlittableTargetRequirement
+                        != FixedLayoutStorage.WindowsX64TargetRequirement
+                    || function.Body.Statements.IsDefaultOrEmpty
+                    || function.Body.Statements[0]
+                        is not BoundVacantLocal {
+                            Variable: var vacantConstructionHome,
+                        }
+                    || vacantConstructionHome != constructionHomeIndex)
+                {
+                    throw Invalid();
+                }
+            }
             var declaringType = -1;
             if (function.DeclaringStruct is string declaringStruct)
             {
@@ -867,7 +1000,9 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
             }
-            else if (function.IsConstructor || function.IsPrivate)
+            else if (function.IsConstructor
+                || (function.IsPrivate
+                    && function.ConstructionHomeIndex < 0))
             {
                 throw Invalid();
             }
@@ -1054,6 +1189,7 @@ public static partial class SemanticVerifier
                 recursiveCopyOriginFunctions,
                 recursiveRawUnionReturnCoverageFunctions)
             : [.. Enumerable.Range(0, program.Functions.Length)];
+        var repeatResourceLedger = new RepeatResourceLedger();
         foreach (var functionIndex in functionOrder)
         {
             var function = program.Functions[functionIndex];
@@ -1069,6 +1205,7 @@ public static partial class SemanticVerifier
             {
                 continue;
             }
+            using var repeatResourceCallable = repeatResourceLedger.BeginCallable();
             if (CarriesRawUnionPayloadFacts(
                 program, function.ReturnType))
             {
@@ -1092,21 +1229,23 @@ public static partial class SemanticVerifier
                 = CarriesRawUnionPayloadFacts(
                     program, function.ReturnType)
                     ? new RawUnionReturnCoverageBuilder(
-                        ValueLayout.Size(function.ReturnType,
-                            program.Structures,
-                            program.CheckedReferenceTypes,
-                            program.NativeLoweringAgreement))
+                        MaterializedPayloadSize(function.ReturnType, program))
                     : null;
+            var statementInputs = function.Variables.Any(variable => variable.Type is
+                PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
+                ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null;
+            using var repeatStatementInputState = statementInputs is null ? null
+                : new RepeatSnapshotReservationScope(repeatResourceLedger);
             var initialized = new InitializationState(program, function.Variables.Length,
                 hasNativeOutputContracts, hasDoesNotReturnFunctions) {
-                StatementInputs = function.Variables.Any(variable => variable.Type is
-                    PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
-                    ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
+                StatementInputs = statementInputs,
+                StatementInputSnapshotScope = repeatStatementInputState,
                 Dependencies = backingDependencies,
                 NativePointerCaptureEffects = nativePointerCaptureEffects,
                 ScopeActivation = BackingDependencies.RootScopeActivation,
                 RawUnionReturnCoverage = rawUnionReturnCoverageBuilder,
                 RawUnionReturnCoverageSummaries = rawUnionReturnCoverage,
+                RepeatResources = repeatResourceLedger,
             };
             if (function.IsConstructor)
             {
@@ -1135,8 +1274,8 @@ public static partial class SemanticVerifier
                 if (CarriesRawUnionPayloadFacts(
                         program, function.Variables[i].Type))
                 {
-                    var size = ValueLayout.Size(
-                        function.Variables[i].Type, program.Structures);
+                    var size = MaterializedPayloadSize(
+                        function.Variables[i].Type, program);
                     var initialBytes = initialized[i]
                         ? GuaranteedInitializedPayloadBytes(
                             function.Variables[i].Type, program)
@@ -1185,7 +1324,9 @@ public static partial class SemanticVerifier
                 {
                     if (!declarations.Contains(i))
                     {
-                        throw Invalid();
+                        throw new ArgumentException(
+                            $"Invalid bound program: function '{function.Name}' has undeclared local '{function.Variables[i].Name}' at index {i} (type {function.Variables[i].Type}).",
+                            nameof(program));
                     }
                 }
             }
@@ -1225,8 +1366,8 @@ public static partial class SemanticVerifier
 
         VerifySourceGrantNativeCallables(program, requireEntryPoint);
         return new VerificationSummaries(
-            ImmutableArray.CreateRange(copyOriginSummaries),
-            ImmutableArray.CreateRange(rawUnionReturnCoverage));
+            [.. copyOriginSummaries],
+            [.. rawUnionReturnCoverage]);
 
         bool HasFieldName(int owner, string name)
         {
@@ -1384,6 +1525,13 @@ public static partial class SemanticVerifier
                         Expression(element, scope, depth + 1);
                     }
                     break;
+                case BoundNativeFixedArrayRepeatInitialization repeat:
+                    if (repeat.Seed is null)
+                    {
+                        throw Invalid();
+                    }
+                    Expression(repeat.Seed, scope, depth + 1);
+                    break;
                 case BoundNativeFixedArrayElement fixedArrayElement:
                     Expression(fixedArrayElement.Index, scope, depth + 1);
                     break;
@@ -1438,7 +1586,16 @@ public static partial class SemanticVerifier
                     break;
                 case BoundIsSome pattern:
                     Expression(pattern.Value, scope, depth + 1);
-                    Declare(pattern.Variable, scope, pattern.Span);
+                    if ((uint)pattern.Variable
+                        >= (uint)function.Variables.Length)
+                    {
+                        throw InvalidEffect(pattern.Span, "Ownership");
+                    }
+                    if (IsManagedLifetimeValue(program,
+                            function.Variables[pattern.Variable].Type))
+                    {
+                        Declare(pattern.Variable, scope, pattern.Span);
+                    }
                     break;
                 case BoundIsVariablePattern pattern:
                     Expression(pattern.Value, scope, depth + 1);
@@ -1876,13 +2033,15 @@ public static partial class SemanticVerifier
         var remaining = MaximumAnalysisVisits;
 
         bool IsActiveLease(int variable)
-            => (uint)variable < (uint)activeCapabilitiesByView.Length
-                && activeCapabilitiesByView[variable] is CapabilityKey capability
-                && capability.Contract.Kind == CapabilityKind.Lease
-                && capability.Contract.Type == function.Variables[variable].Type
-                && capability.Contract.SupportingPlace == backing[variable]
-                && capability.Contract.Projection.Kind == StorageProjectionKind.WholeObject
-                && activeCapabilities.Contains(capability);
+        {
+            return (uint)variable < (uint)activeCapabilitiesByView.Length
+                        && activeCapabilitiesByView[variable] is CapabilityKey capability
+                        && capability.Contract.Kind == CapabilityKind.Lease
+                        && capability.Contract.Type == function.Variables[variable].Type
+                        && capability.Contract.SupportingPlace == backing[variable]
+                        && capability.Contract.Projection.Kind == StorageProjectionKind.WholeObject
+                        && activeCapabilities.Contains(capability);
+        }
 
         void Expression(BoundExpression expression, int depth, int acquiringRoot = -1)
         {
@@ -1994,6 +2153,9 @@ public static partial class SemanticVerifier
                     {
                         Expression(element, depth + 1, acquiringRoot);
                     }
+                    break;
+                case BoundNativeFixedArrayRepeatInitialization repeat:
+                    Expression(repeat.Seed, depth + 1, acquiringRoot);
                     break;
                 case BoundRead localRead when localRead.Type is PrimitiveType.ReadonlyInt32BufferView
                     or PrimitiveType.MutableInt32BufferView:
@@ -2229,18 +2391,30 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(view.Span, "Ownership");
                     }
                     activeCapabilitiesByView[view.Variable] = capability;
+                    bool ReleaseCapability()
+                    {
+                        var isCurrent = activeCapabilitiesByView[
+                                view.Variable] == capability
+                            && activeCapabilities.Remove(capability);
+                        activeCapabilitiesByView[view.Variable] = null;
+                        return isCurrent;
+                    }
+
                     try
                     {
                         Statement(view.Body, depth + 1);
                     }
-                    finally
+                    catch
                     {
-                        if (activeCapabilitiesByView[view.Variable] != capability
-                            || !activeCapabilities.Remove(capability))
+                        if (!ReleaseCapability())
                         {
                             throw Invalid(view.Span);
                         }
-                        activeCapabilitiesByView[view.Variable] = null;
+                        throw;
+                    }
+                    if (!ReleaseCapability())
+                    {
+                        throw Invalid(view.Span);
                     }
                     break;
                 case BoundLocal local:
@@ -2669,16 +2843,27 @@ public static partial class SemanticVerifier
 
     internal static void RejectSourceNativeImports(BoundProgram program, string target,
         bool allowDirectNativeImports = false,
-        bool allowFixedArrayStorage = false)
+        bool allowFixedArrayStorage = false,
+        bool allowVerifiedFixedArrayBodies = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
-        var invalidFixedArrayUse = HasInvalidSourceFixedArrayUse(
-            program, allowFixedArrayStorage);
+        var hasRetiredFixedArrayCarrier
+            = HasRetiredFixedArrayCarrier(program);
+        var verifiedFixedArrayFailure = allowVerifiedFixedArrayBodies
+            ? GetVerifiedFixedArrayUseFailure(program) : null;
+        var invalidFixedArrayUse = hasRetiredFixedArrayCarrier
+            || (allowVerifiedFixedArrayBodies
+                ? verifiedFixedArrayFailure is not null
+                : HasInvalidSourceFixedArrayUse(program,
+                    allowFixedArrayStorage));
         if (invalidFixedArrayUse)
         {
             throw new NotSupportedException(
-                $"Fixed-array runtime forms are not supported by {target}.");
+                $"Fixed-array runtime forms are not supported by {target}"
+                + (allowVerifiedFixedArrayBodies
+                    ? $" ({verifiedFixedArrayFailure ?? "retired carrier"})."
+                    : "."));
         }
         if ((!allowDirectNativeImports
                 && program.Functions.Any(static function => function.DirectNativeImport is not null
@@ -2706,23 +2891,6 @@ public static partial class SemanticVerifier
         BoundProgram program,
         bool allowFixedArrayStorage)
     {
-        var hasRetiredFixedArrayCarrier =
-            program.Functions.Any(static function =>
-                function.ReturnType == PrimitiveType.NativeFixedArray
-                || function.Variables.Any(static variable =>
-                    variable.Type == PrimitiveType.NativeFixedArray))
-            || program.Structures.Any(static structure =>
-                structure.Fields.Any(static field =>
-                    field.Type == PrimitiveType.NativeFixedArray))
-            || (!program.Classes.IsDefaultOrEmpty
-                && program.Classes.Any(static @class =>
-                    @class.Fields.Any(static field =>
-                        field.Type == PrimitiveType.NativeFixedArray)));
-        if (hasRetiredFixedArrayCarrier)
-        {
-            return true;
-        }
-
         var hasFixedArrayData = !program.NativeFixedArrayTypes.IsDefaultOrEmpty
             || program.Functions.Any(static function =>
                 NativeFixedArrayContract.IsCarrier(function.ReturnType)
@@ -2749,10 +2917,8 @@ public static partial class SemanticVerifier
         foreach (var function in program.Functions)
         {
             if (NativeFixedArrayContract.IsCarrier(function.ReturnType)
-                || NativeFixedArrayContract.HasMetadataOnlyArrayType(
-                    function.ReturnType, program.Structures,
-                    program.NativeFixedArrayTypes, program.NativePointerTypes,
-                    program.NativeFunctionPointerSignatures)
+                || HasUnsupportedMetadataOnlyArrayType(
+                    function.ReturnType, program)
                 || (function.NativeFunctionPointerType is PrimitiveType functionPointerType
                     && NativeFixedArrayContract.HasMetadataOnlyArrayType(
                         functionPointerType, program.Structures,
@@ -2772,12 +2938,9 @@ public static partial class SemanticVerifier
                 var variable = function.Variables[variableIndex];
                 if (!NativeFixedArrayContract.IsCarrier(variable.Type))
                 {
-                    if (NativeFixedArrayContract.HasMetadataOnlyArrayType(
-                            variable.Type, program.Structures,
-                            program.NativeFixedArrayTypes,
-                            program.NativePointerTypes,
-                            program.NativeFunctionPointerSignatures)
-                        && !IsSupportedLocalFixedArrayFieldAggregate(
+                    if (HasUnsupportedMetadataOnlyArrayType(
+                            variable.Type, program)
+                        && !IsSupportedFixedArrayFieldAggregateVariable(
                             variableIndex, variable.Type, function, program))
                     {
                         return true;
@@ -2807,6 +2970,78 @@ public static partial class SemanticVerifier
                         NativeFixedArrayContract.IsCarrier(field.Type)));
     }
 
+    private static string? GetVerifiedFixedArrayUseFailure(
+        BoundProgram program)
+    {
+        if (!NativeFixedArrayContract.MatchesProgram(program))
+        {
+            return "fixed-array table does not match the program";
+        }
+
+        foreach (var function in program.Functions)
+        {
+            if (NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                || HasUnsupportedMetadataOnlyArrayType(
+                    function.ReturnType, program))
+            {
+                return $"unsupported return type in {function.Name}";
+            }
+
+            var firstLocal = function.ParameterCount
+                + (function.IsConstructor ? 1 : 0);
+            for (var variableIndex = 0;
+                variableIndex < function.Variables.Length;
+                variableIndex++)
+            {
+                var variable = function.Variables[variableIndex];
+                if (!NativeFixedArrayContract.IsCarrier(variable.Type))
+                {
+                    if (HasUnsupportedMetadataOnlyArrayType(
+                            variable.Type, program)
+                        && !IsSupportedFixedArrayFieldAggregateVariable(
+                            variableIndex, variable.Type, function, program))
+                    {
+                        return $"unsupported local type in {function.Name}";
+                    }
+
+                    continue;
+                }
+
+                var hasLayout = NativeFixedArrayContract.TryGetLayout(
+                    variable.Type, program.Structures,
+                    program.NativeFixedArrayTypes, out var layout);
+                var matchesLayout = hasLayout
+                    && NativeFixedArrayContract.MatchesLayout(layout,
+                        program);
+                if (function.IsExternal || variableIndex < firstLocal
+                    || variable.IsOut
+                    || variable.IsInit || !matchesLayout)
+                {
+                    return $"unsupported array local {variableIndex} in {function.Name}";
+                }
+            }
+        }
+
+        return !program.Classes.IsDefaultOrEmpty
+            && program.Classes.Any(static @class =>
+                @class.Fields.Any(static field =>
+                    NativeFixedArrayContract.IsCarrier(field.Type)))
+            ? "fixed-array class field" : null;
+    }
+
+    private static bool HasRetiredFixedArrayCarrier(BoundProgram program)
+        => program.Functions.Any(static function =>
+                function.ReturnType == PrimitiveType.NativeFixedArray
+                || function.Variables.Any(static variable =>
+                    variable.Type == PrimitiveType.NativeFixedArray))
+            || program.Structures.Any(static structure =>
+                structure.Fields.Any(static field =>
+                    field.Type == PrimitiveType.NativeFixedArray))
+            || (!program.Classes.IsDefaultOrEmpty
+                && program.Classes.Any(static @class =>
+                    @class.Fields.Any(static field =>
+                        field.Type == PrimitiveType.NativeFixedArray)));
+
     private static bool IsSupportedLocalFixedArrayFieldAggregate(
         int variable, PrimitiveType type, BoundFunction function,
         BoundProgram program)
@@ -2820,6 +3055,57 @@ public static partial class SemanticVerifier
             && !IsUnique(program, type)
             && NativeFixedArrayContract.IsRootlessCopyFieldType(type,
                 program.Structures, program.NativeFixedArrayTypes);
+    }
+
+    private static bool HasUnsupportedMetadataOnlyArrayType(
+        PrimitiveType type, BoundProgram program)
+        => NativeFixedArrayContract.HasMetadataOnlyArrayType(type,
+                program.Structures, program.NativeFixedArrayTypes,
+                program.NativePointerTypes,
+                program.NativeFunctionPointerSignatures)
+            && !NativeFixedArrayContract
+                .IsRootlessCopyAggregateWithFixedArrayFields(type,
+                    program.Structures, program.NativeFixedArrayTypes,
+                    program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures);
+
+    private static bool IsSupportedFixedArrayFieldAggregateVariable(
+        int variable, PrimitiveType type, BoundFunction function,
+        BoundProgram program)
+    {
+        if (IsSupportedLocalFixedArrayFieldAggregate(variable, type,
+                function, program))
+        {
+            return true;
+        }
+
+        if (function.IsExternal
+            || !NativeFixedArrayContract
+                .IsRootlessCopyAggregateWithFixedArrayFields(type,
+                    program.Structures, program.NativeFixedArrayTypes,
+                    program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures))
+        {
+            return false;
+        }
+        if (function.IsConstructor && variable == 0
+            && type == function.ReturnType)
+        {
+            return true;
+        }
+
+        var firstParameter = function.DeclaringStruct is not null
+            && !function.IsStatic ? 1 : 0;
+        if (function.ParameterCount < 0 || variable < firstParameter
+            || (uint)(variable - firstParameter)
+                >= (uint)function.ParameterCount)
+        {
+            return false;
+        }
+
+        var parameter = function.Variables[variable];
+        return !parameter.IsOut && !parameter.IsInit
+            && !parameter.IsImplicitRef && !parameter.IsInitializationLocal;
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
@@ -2850,24 +3136,10 @@ public static partial class SemanticVerifier
             VerificationSummaries summaries;
             if (hasCopyOriginSummaryCandidates)
             {
-                try
-                {
-                    summaries = VerifyCore(program,
-                        requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
-                        allowGenericProofDependencies: allowGenericProofDependencies,
-                        deriveCopyOriginSummaries: true);
-                }
-                catch (NotSupportedException)
-                {
-                    var ordinarySummaries = VerifyCore(program,
-                        requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
-                        allowGenericProofDependencies: allowGenericProofDependencies);
-                    summaries = new VerificationSummaries(
-                        [.. program.Functions.Select((function, index) =>
-                        IsCopyOriginSummarySourceFunction(function)
-                            ? null : ordinarySummaries.CopyOrigin[index])],
-                        ordinarySummaries.RawUnionReturnCoverage);
-                }
+                summaries = VerifyCore(program,
+                    requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
+                    allowGenericProofDependencies: allowGenericProofDependencies,
+                    deriveCopyOriginSummaries: true);
             }
             else
             {
@@ -2896,9 +3168,11 @@ public static partial class SemanticVerifier
             span = exception.Data[SourceSpanKey] is TextSpan sourceSpan
                 ? sourceSpan : program.Functions.IsDefaultOrEmpty ? default : program.Functions[functionIndex].Span;
             exceededWorkLimit = exception is NotSupportedException;
-            invalidEffect = exception.Data[InvalidEffectKey] is string effect
-                ? effect
-                : exception.Message;
+            invalidEffect = exception is SemanticRepeatResourceLimitException resourceLimit
+                ? $"SemanticResourceLimit:{resourceLimit.Dimension}"
+                : exception.Data[InvalidEffectKey] is string effect
+                    ? effect
+                    : $"{exception.Message} in function '{program.Functions[functionIndex].Name}'{Environment.NewLine}{exception.StackTrace}";
             return false;
         }
     }
@@ -2914,6 +3188,13 @@ public static partial class SemanticVerifier
         ProvidesNoFailureGuarantee(target)
         || (!caller.NoFailureProof && caller.NativeFunctionPointerType is not null
             && (target.DirectNativeImport is not null || target.NativeVTableMethod is not null));
+
+    private static bool IsConstructionHome(BoundFunction function,
+        int variable) =>
+        function.ConstructionHomeIndex >= 0
+            ? variable == function.ConstructionHomeIndex
+            : (function.IsConstructor || function.IsClassConstructor)
+                && variable == 0;
 
     private static bool Statement(BoundStatement statement, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true,
@@ -2940,8 +3221,11 @@ public static partial class SemanticVerifier
                 initialized.EnterStorageScope(block);
                 try
                 {
-                    var counted = inCleanup && loops.Exists(static scope => scope.IsCleanupSwitch)
-                        ? RecognizeCleanupCountedLoop(block, function, program, ref remaining, depth + 1) : null;
+                    var counted = inCleanup
+                        && loops.Exists(static scope => scope.IsCleanupSwitch)
+                        ? RecognizeCleanupCountedLoop(block, function, program,
+                            ref remaining, depth + 1)
+                        : null;
                     var returns = false;
                     foreach (var child in block.Statements)
                     {
@@ -2978,11 +3262,13 @@ public static partial class SemanticVerifier
                 if (!CanCompleteNormally(local.Initializer, initialized, program,
                     ref remaining, depth + 1))
                 {
+                    using var repeatSnapshotState
+                        = CreateRepeatSnapshotScopeIfNeeded(initialized);
                     var beforeCall = initialized.Clone();
                     var beforeMasks = (uint[])fieldMasks.Clone();
                     if (NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type))
                     {
-                        VerifyNativeFixedArrayInitialization(local.Initializer, local.Variable, initialized,
+                        VerifyNativeFixedArrayConstruction(local.Initializer, local.Variable, initialized,
                             fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                     }
                     else
@@ -3000,7 +3286,7 @@ public static partial class SemanticVerifier
                 }
                 if (NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type))
                 {
-                    VerifyNativeFixedArrayInitialization(local.Initializer, local.Variable, initialized,
+                    VerifyNativeFixedArrayConstruction(local.Initializer, local.Variable, initialized,
                         fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 }
                 else
@@ -3027,6 +3313,18 @@ public static partial class SemanticVerifier
                 {
                     _ = initialized.CopyRawUnionArrayFacts(local.Variable,
                         localAggregateRead.Variable);
+                }
+                if (local.Initializer is BoundCall localCall
+                    && initialized.Dependencies is BackingDependencies
+                        localCallDependencies
+                    && localCallDependencies.TryGetRawUnionArrayCallResult(
+                        localCall, out var localArrayFacts))
+                {
+                    _ = initialized.SetRawUnionArrayFacts(local.Variable,
+                        StorageProjection.WholeObject, localArrayFacts,
+                        ref remaining, depth + 1);
+                    localCallDependencies.ClearRawUnionArrayCallResult(
+                        localCall);
                 }
                 if (CarriesRawUnionPayloadFacts(
                         program, local.Initializer.Type))
@@ -3107,10 +3405,15 @@ public static partial class SemanticVerifier
                     if (IsNativePointerFieldAggregateStorage(
                         local.Initializer.Type, program))
                     {
-                        SetNativePointerFieldValuesFromExpression(local.Variable,
-                            StorageProjection.WholeObject, local.Initializer.Type,
-                            local.Initializer, localPointerDependencies, function,
-                            program, ref remaining, depth + 1);
+                        if (local.Initializer
+                            is not BoundNativeFixedArrayRepeatInitialization)
+                        {
+                            SetNativePointerFieldValuesFromExpression(
+                                local.Variable, StorageProjection.WholeObject,
+                                local.Initializer.Type, local.Initializer,
+                                localPointerDependencies, function, program,
+                                ref remaining, depth + 1);
+                        }
                         RefreshNativePointerAggregateProvenance(local.Variable,
                             local.Initializer.Type, localPointerDependencies,
                             program, ref remaining, depth + 1);
@@ -3268,6 +3571,8 @@ public static partial class SemanticVerifier
                         if (IsUnique(program, fields[fieldIndex].Type)
                             && CleanupMayFail(fields[fieldIndex].Type, program))
                         {
+                            using var repeatSnapshotState
+                                = CreateRepeatSnapshotScopeIfNeeded(initialized);
                             var failureState = initialized.Clone();
                             failureState.MarkConditional(0);
                             var failureMasks = (uint[])fieldMasks.Clone();
@@ -3281,7 +3586,7 @@ public static partial class SemanticVerifier
             case BoundAssignment assignment:
                 if (assignment.Variable < 0 || assignment.Variable >= initialized.Length
                     || (assignment.Variable < function.ParameterCount && !function.Variables[assignment.Variable].IsOut)
-                    || (function.IsConstructor && assignment.Variable == 0)
+                    || IsConstructionHome(function, assignment.Variable)
                     || (!initialized[assignment.Variable] && !function.Variables[assignment.Variable].IsOut
                         && !declarations.Contains(assignment.Variable))
                     || (!function.Variables[assignment.Variable].IsMutable
@@ -3302,6 +3607,11 @@ public static partial class SemanticVerifier
                     = NativeFixedArrayContract.IsCarrier(
                         function.Variables[assignment.Variable].Type)
                         && assignment.Value is BoundRead or BoundMove;
+                var wholeArrayRepeatInitialization
+                    = NativeFixedArrayContract.IsCarrier(
+                        function.Variables[assignment.Variable].Type)
+                        && assignment.Value
+                            is BoundNativeFixedArrayRepeatInitialization;
                 var assignmentCouldComplete = nullaryArrayInitialization
                     || CanCompleteNormally(assignment.Value, initialized,
                         program, ref remaining, depth + 1);
@@ -3331,19 +3641,38 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(assignment.Span, "NativeImport");
                     }
 
-                    VerifyNativeFixedArrayInitialization(assignment.Value,
+                    VerifyNativeFixedArrayConstruction(assignment.Value,
                         assignment.Variable, initialized, fieldMasks,
                         declarations, function, program, ref remaining,
                         depth + 1, failures);
                     assignmentCompletes = true;
                 }
-                else if (wholeArrayValueCopy)
+                else if (wholeArrayValueCopy
+                    || wholeArrayRepeatInitialization)
                 {
-                    VerifyNativeFixedArrayInitialization(assignment.Value,
-                        assignment.Variable, initialized, fieldMasks,
-                        declarations, function, program, ref remaining,
-                        depth + 1, failures);
-                    assignmentCompletes = true;
+                    if (wholeArrayRepeatInitialization
+                        && !assignmentCouldComplete)
+                    {
+                        using var repeatSnapshotState
+                            = CreateRepeatSnapshotScopeIfNeeded(initialized);
+                        var beforeCall = initialized.Clone();
+                        var beforeMasks = (uint[])fieldMasks.Clone();
+                        VerifyNativeFixedArrayConstruction(assignment.Value,
+                            assignment.Variable, initialized, fieldMasks,
+                            declarations, function, program, ref remaining,
+                            depth + 1, failures);
+                        beforeCall.CopyTo(initialized);
+                        beforeMasks.CopyTo(fieldMasks, 0);
+                        assignmentCompletes = false;
+                    }
+                    else
+                    {
+                        VerifyNativeFixedArrayConstruction(assignment.Value,
+                            assignment.Variable, initialized, fieldMasks,
+                            declarations, function, program, ref remaining,
+                            depth + 1, failures);
+                        assignmentCompletes = true;
+                    }
                 }
                 else
                 {
@@ -3383,6 +3712,20 @@ public static partial class SemanticVerifier
                     _ = initialized.CopyRawUnionArrayFacts(
                         assignment.Variable,
                         assignmentAggregateRead.Variable);
+                }
+                if (assignment.Value is BoundCall assignmentCall
+                    && initialized.Dependencies is BackingDependencies
+                        assignmentCallDependencies
+                    && assignmentCallDependencies
+                        .TryGetRawUnionArrayCallResult(assignmentCall,
+                            out var assignmentArrayFacts))
+                {
+                    _ = initialized.SetRawUnionArrayFacts(
+                        assignment.Variable,
+                        StorageProjection.WholeObject,
+                        assignmentArrayFacts, ref remaining, depth + 1);
+                    assignmentCallDependencies
+                        .ClearRawUnionArrayCallResult(assignmentCall);
                 }
                 if (CarriesRawUnionPayloadFacts(
                         program, assignment.Value.Type))
@@ -3487,6 +3830,7 @@ public static partial class SemanticVerifier
                 }
                 return false;
             case BoundOptionalAssignment optionalAssignment:
+            {
                 if (optionalAssignment.Place is null || optionalAssignment.Value is null
                     || !IsSupportedOptionalType(optionalAssignment.Place.Type, program)
                     || optionalAssignment.Value.Type != optionalAssignment.Place.Type)
@@ -3498,7 +3842,7 @@ public static partial class SemanticVerifier
                     if (localPlace.Variable < 0 || localPlace.Variable >= initialized.Length
                         || (localPlace.Variable < function.ParameterCount
                             && !function.Variables[localPlace.Variable].IsOut)
-                        || (function.IsConstructor && localPlace.Variable == 0)
+                        || IsConstructionHome(function, localPlace.Variable)
                         || !function.Variables[localPlace.Variable].IsMutable)
                     {
                         throw Invalid(optionalAssignment.Span);
@@ -3527,6 +3871,8 @@ public static partial class SemanticVerifier
                         declarations, function, program, ref remaining, depth + 1);
                     return true;
                 }
+                using var repeatSnapshotState
+                    = CreateRepeatSnapshotScopeIfNeeded(initialized);
                 var assignedState = initialized.Clone();
                 var assignedMasks = (uint[])fieldMasks.Clone();
                 var assignedDeclarations = new HashSet<int>(declarations);
@@ -3584,6 +3930,7 @@ public static partial class SemanticVerifier
                     fieldMasks[index] &= assignedMasks[index];
                 }
                 return false;
+            }
             case BoundFieldAssignment fieldAssignment:
                 if (fieldAssignment.Variable < 0 || fieldAssignment.Variable >= initialized.Length
                     || (!function.Variables[fieldAssignment.Variable].IsMutable
@@ -3615,8 +3962,10 @@ public static partial class SemanticVerifier
                         && Fields(program, segment.OwnerType)[
                             segment.Field].IsMutable);
                 var initializesVacantArrayAggregateField =
-                    function.Variables[fieldAssignment.Variable]
-                        .IsInitializationLocal
+                    (IsConstructionHome(function,
+                        fieldAssignment.Variable)
+                        || function.Variables[fieldAssignment.Variable]
+                            .IsInitializationLocal)
                     && NativeFixedArrayContract
                         .HasInlineFixedArrayFieldStorage(ownerType,
                             program.Structures,
@@ -3662,8 +4011,8 @@ public static partial class SemanticVerifier
                     = fieldSegments.Length > 1
                     && IsRawUnionType(program,
                         fieldSegments[^1].OwnerType)
-                    && function.IsConstructor
-                    && fieldAssignment.Variable == 0;
+                    && IsConstructionHome(function,
+                        fieldAssignment.Variable);
                 var initializesNestedRawUnionPath
                     = initializesVacantNestedUnion
                         || initializesNestedRawUnionInConstructor;
@@ -3673,8 +4022,8 @@ public static partial class SemanticVerifier
                     || (!initialized[fieldAssignment.Variable]
                         && !initialized.HasPartialValue(fieldAssignment.Variable)
                         && !initializesVacantNestedRawUnion
-                        && (!(function.IsConstructor || function.IsClassConstructor)
-                            || fieldAssignment.Variable != 0)))
+                        && !IsConstructionHome(function,
+                            fieldAssignment.Variable)))
                 {
                     throw Invalid();
                 }
@@ -3787,12 +4136,13 @@ public static partial class SemanticVerifier
                     pathOwnerType = Fields(program, pathOwnerType)[segment.Field].Type;
                 }
                 var isConstructorFieldInitializationBefore =
-                    function.IsConstructor
-                    && fieldAssignment.Variable == 0
+                    IsConstructionHome(function,
+                        fieldAssignment.Variable)
                     && fieldSegments.Length == 1
                     && fieldIsDefinitelyVacantBefore;
                 var ownerPathCanBePartial = fieldPathIsUnique
-                    && ((function.IsConstructor && fieldAssignment.Variable == 0)
+                    && (IsConstructionHome(function,
+                            fieldAssignment.Variable)
                         || (!function.IsConstructor && !function.IsClassConstructor
                             && !(fieldAssignment.Variable == 0
                                 && function.DeclaringStruct is not null && !function.IsStatic)
@@ -3975,8 +4325,8 @@ public static partial class SemanticVerifier
                         & leafFieldBit) != 0;
                 var fieldIsDefinitelyVacantAfter = !fieldMayBeLiveAfter;
                 var isConstructorFieldInitialization =
-                    function.IsConstructor
-                    && fieldAssignment.Variable == 0
+                    IsConstructionHome(function,
+                        fieldAssignment.Variable)
                     && fieldSegments.Length == 1
                     && fieldIsDefinitelyVacantAfter;
                 var ownerPlaceIsPartialAfter = fieldOwnerPath.Segments.IsEmpty
@@ -4293,6 +4643,8 @@ public static partial class SemanticVerifier
                 }
                 if (!expressionCompletes)
                 {
+                    using var repeatSnapshotState
+                        = CreateRepeatSnapshotScopeIfNeeded(initialized);
                     var beforeExpression = initialized.Clone();
                     var beforeMasks = (uint[])fieldMasks.Clone();
                     Expression(expressionStatement.Expression, initialized, fieldMasks, declarations,
@@ -4306,6 +4658,9 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, failures, statementCompound: effect is BoundCompoundAssignment);
                 return false;
             case BoundIf conditional:
+            {
+                using var repeatSnapshotState = new RepeatSnapshotReservationScope(
+                    initialized.RepeatResources);
                 if (!CanCompleteNormally(conditional.Condition, initialized, program,
                     ref remaining, depth + 1))
                 {
@@ -4313,20 +4668,23 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    var beforeNonCompletingCondition = initialized.Clone();
+                    var beforeNonCompletingCondition = initialized.Clone(
+                        repeatSnapshotState);
                     var beforeMasks = (uint[])fieldMasks.Clone();
                     Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program,
                         ref remaining, depth + 1, failures);
                     beforeNonCompletingCondition.CopyTo(initialized);
                     beforeMasks.CopyTo(fieldMasks, 0);
-                    var unreachableThenState = initialized.Clone();
+                    var unreachableThenState = initialized.Clone(
+                        repeatSnapshotState);
                     var unreachableThenMasks = (uint[])fieldMasks.Clone();
                     _ = Statement(conditional.Then, unreachableThenState, unreachableThenMasks,
                         declarations, function, program, ref remaining, depth + 1,
                         false, cleanups, inCleanup, inUnsafe, failures, loops);
                     if (conditional.Else is not null)
                     {
-                        var unreachableElseState = initialized.Clone();
+                        var unreachableElseState = initialized.Clone(
+                            repeatSnapshotState);
                         var unreachableElseMasks = (uint[])fieldMasks.Clone();
                         _ = Statement(conditional.Else, unreachableElseState, unreachableElseMasks,
                             declarations, function, program, ref remaining, depth + 1,
@@ -4334,7 +4692,7 @@ public static partial class SemanticVerifier
                     }
                     return true;
                 }
-                var beforeCondition = initialized.Clone();
+                var beforeCondition = initialized.Clone(repeatSnapshotState);
                 Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (conditional.Condition.Type != PrimitiveType.Bool || conditional.Then is null)
                 {
@@ -4342,14 +4700,16 @@ public static partial class SemanticVerifier
                 }
                 var thenReachable = CanBe(conditional.Condition, true, ref remaining, initialized);
                 var elseReachable = CanBe(conditional.Condition, false, ref remaining, initialized);
-                var thenState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
+                var thenState = Outcome(conditional.Condition, beforeCondition,
+                    true, ref remaining, repeatSnapshotState);
                 CopyOptionalReferencePatternFacts(
                     conditional.Condition, initialized, thenState, program);
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
                 var thenReturns = Statement(conditional.Then, thenState, thenMasks, declarations, function, program, ref remaining, depth + 1,
                     reachable && thenReachable, cleanups, inCleanup, inUnsafe, failures, loops);
-                var elseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
+                var elseState = Outcome(conditional.Condition, beforeCondition,
+                    false, ref remaining, repeatSnapshotState);
                 var elseMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(elseState, elseMasks, function, program);
                 var elseReturns = conditional.Else is not null
@@ -4406,7 +4766,11 @@ public static partial class SemanticVerifier
                 _ = initialized.MergeNativeOutputState(thenState, thenReachable && !thenReturns,
                     elseState, elseReachable && !elseReturns);
                 return (!thenReachable || thenReturns) && (!elseReachable || elseReturns);
+            }
             case BoundWhile loop:
+            {
+                using var repeatLoopState = new RepeatSnapshotReservationScope(
+                    initialized.RepeatResources);
                 if (inCleanup && IsMisidentifiedCleanupSwitchDispatcher(loop, function))
                 {
                     throw Invalid(loop.Span);
@@ -4436,39 +4800,53 @@ public static partial class SemanticVerifier
                 if (!loop.IsPostTested && !CanCompleteNormally(loop.Condition, initialized,
                     program, ref remaining, depth + 1))
                 {
-                    var beforeNonCompletingLoopCondition = initialized.Clone();
+                    var beforeNonCompletingLoopCondition = initialized.Clone(
+                        repeatLoopState);
                     var beforeMasks = (uint[])fieldMasks.Clone();
                     Expression(loop.Condition, initialized, fieldMasks, declarations, function,
                         program, ref remaining, depth + 1, failures);
                     beforeNonCompletingLoopCondition.CopyTo(initialized);
                     beforeMasks.CopyTo(fieldMasks, 0);
 
-                    var unreachableScope = new LoopScope(cleanups.Count) {
+                    using var unreachableLoopState
+                        = new RepeatSnapshotReservationScope(
+                            initialized.RepeatResources);
+                    using var unreachableScope = new LoopScope(cleanups.Count,
+                        unreachableLoopState) {
                         IsCleanupSwitch = inCleanup && loop.SwitchArmVariable >= 0,
                         ScopeActivation = initialized.ScopeActivation,
                     };
                     loops.Add(unreachableScope);
-                    _ = Statement(verifiedBody, initialized.Clone(), (uint[])fieldMasks.Clone(),
+                    _ = Statement(verifiedBody,
+                        initialized.Clone(unreachableLoopState),
+                        (uint[])fieldMasks.Clone(),
                         declarations, function, program, ref remaining, depth + 1,
                         false, cleanups, inCleanup, inUnsafe, failures, loops);
                     if (verifiedIterator is not null)
                     {
-                        _ = Statement(verifiedIterator, initialized.Clone(), (uint[])fieldMasks.Clone(),
+                        _ = Statement(verifiedIterator,
+                            initialized.Clone(unreachableLoopState),
+                            (uint[])fieldMasks.Clone(),
                             declarations, function, program, ref remaining, depth + 1,
                             false, cleanups, inCleanup, inUnsafe, failures, loops);
                     }
                     loops.RemoveAt(loops.Count - 1);
                     return true;
                 }
-                var entryState = initialized.Clone();
+                var entryState = initialized.Clone(repeatLoopState);
                 var entryMasks = (uint[])fieldMasks.Clone();
-                var headState = entryState.Clone();
+                var headState = entryState.Clone(repeatLoopState);
                 var headMasks = (uint[])entryMasks.Clone();
                 var priorDeclarations = new HashSet<int>(declarations);
                 for (var iteration = 0; iteration <= initialized.Length * 9; iteration++)
                 {
-                    var conditionInput = headState.Clone();
-                    var conditionState = headState.Clone();
+                    using var iterationSnapshotState
+                        = new RepeatSnapshotReservationScope(
+                            initialized.RepeatResources);
+                    var conditionInput = headState.Clone(
+                        iterationSnapshotState);
+                    var conditionState = headState.Clone(
+                        iterationSnapshotState);
                     var conditionMasks = (uint[])headMasks.Clone();
                     var iterationDeclarations = new HashSet<int>(priorDeclarations);
                     if (!loop.IsPostTested)
@@ -4480,8 +4858,10 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    var bodyState = loop.IsPostTested ? headState.Clone()
-                        : Outcome(loop.Condition, conditionInput, true, ref remaining);
+                    var bodyState = loop.IsPostTested
+                        ? headState.Clone(iterationSnapshotState)
+                        : Outcome(loop.Condition, conditionInput, true,
+                            ref remaining, iterationSnapshotState);
                     var bodyMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(bodyState, bodyMasks, function, program);
                     var bodyReachable = loop.IsPostTested || CanCompleteAs(
@@ -4489,7 +4869,8 @@ public static partial class SemanticVerifier
                     var exitReachable = CanCompleteAs(
                         loop.Condition, false, conditionInput, program, ref remaining, depth + 1);
                     var iteratorDeclarations = new HashSet<int>(iterationDeclarations);
-                    var loopScope = new LoopScope(cleanups.Count) {
+                    using var loopScope = new LoopScope(cleanups.Count,
+                        iterationSnapshotState) {
                         IsCleanupSwitch = inCleanup && loop.SwitchArmVariable >= 0,
                         ScopeActivation = initialized.ScopeActivation,
                     };
@@ -4508,11 +4889,14 @@ public static partial class SemanticVerifier
                         bodyState.ScopeActivation = previousLoopActivation;
                     }
                     loops.RemoveAt(loops.Count - 1);
-                    var exitState = loop.IsPostTested ? conditionState.Clone()
-                        : Outcome(loop.Condition, conditionInput, false, ref remaining);
+                    var exitState = loop.IsPostTested
+                        ? conditionState.Clone(iterationSnapshotState)
+                        : Outcome(loop.Condition, conditionInput, false,
+                            ref remaining, iterationSnapshotState);
                     var exitMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(exitState, exitMasks, function, program);
-                    var backEdges = new FailureEdges();
+                    using var backEdges = new FailureEdges(
+                        iterationSnapshotState);
                     if (bodyReachable && !bodyReturns)
                     {
                         backEdges.Add(bodyState, bodyMasks);
@@ -4523,7 +4907,9 @@ public static partial class SemanticVerifier
                     }
                     if (verifiedIterator is not null)
                     {
-                        var iteratorState = backEdges.HasEdges ? backEdges.State : bodyState.Clone();
+                        var iteratorState = backEdges.HasEdges
+                            ? backEdges.State
+                            : bodyState.Clone(iterationSnapshotState);
                         var iteratorMasks = backEdges.HasEdges ? backEdges.Masks : (uint[])bodyMasks.Clone();
                         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
                             slot < iteratorState.Length; slot++)
@@ -4538,7 +4924,7 @@ public static partial class SemanticVerifier
                             function, program, ref remaining, depth + 1, reachable && backEdges.HasEdges,
                             cleanups, inCleanup, inUnsafe, failures, loops, cleanupCounterStep: countedLoop?.Step);
                         iterationDeclarations.UnionWith(iteratorDeclarations);
-                        backEdges = new FailureEdges();
+                        backEdges.Reset();
                         if (!iteratorReturns && bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns))
                         {
                             backEdges.Add(iteratorState, iteratorMasks);
@@ -4546,7 +4932,9 @@ public static partial class SemanticVerifier
                     }
                     if (loop.IsPostTested)
                     {
-                        var conditionInputState = backEdges.HasEdges ? backEdges.State : bodyState.Clone();
+                        var conditionInputState = backEdges.HasEdges
+                            ? backEdges.State
+                            : bodyState.Clone(iterationSnapshotState);
                         var conditionInputMasks = backEdges.HasEdges ? backEdges.Masks : (uint[])bodyMasks.Clone();
                         var conditionDeclarations = new HashSet<int>(iterationDeclarations);
                         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
@@ -4558,7 +4946,8 @@ public static partial class SemanticVerifier
                                 conditionInputMasks[slot] = 0;
                             }
                         }
-                        var evaluatedState = conditionInputState.Clone();
+                        var evaluatedState = conditionInputState.Clone(
+                            iterationSnapshotState);
                         var evaluatedMasks = (uint[])conditionInputMasks.Clone();
                         Expression(loop.Condition, evaluatedState, evaluatedMasks, conditionDeclarations,
                             function, program, ref remaining, depth + 1, failures);
@@ -4566,14 +4955,18 @@ public static partial class SemanticVerifier
                             conditionInputState, program, ref remaining, depth + 1);
                         var conditionContinuesFalse = CanCompleteAs(loop.Condition, false,
                             conditionInputState, program, ref remaining, depth + 1);
-                        var falseState = Outcome(loop.Condition, conditionInputState, false, ref remaining);
-                        var trueState = Outcome(loop.Condition, conditionInputState, true, ref remaining);
+                        var falseState = Outcome(loop.Condition,
+                            conditionInputState, false, ref remaining,
+                            iterationSnapshotState);
+                        var trueState = Outcome(loop.Condition,
+                            conditionInputState, true, ref remaining,
+                            iterationSnapshotState);
                         var trueMasks = (uint[])evaluatedMasks.Clone();
                         MarkOutMasks(falseState, evaluatedMasks, function, program);
                         MarkOutMasks(trueState, trueMasks, function, program);
                         exitState = falseState;
                         exitMasks = evaluatedMasks;
-                        backEdges = new FailureEdges();
+                        backEdges.Reset();
                         if (bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns)
                             && conditionContinuesTrue)
                         {
@@ -4583,7 +4976,8 @@ public static partial class SemanticVerifier
                             && bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns);
                         iterationDeclarations.UnionWith(conditionDeclarations);
                     }
-                    var exits = new FailureEdges();
+                    using var exits = new FailureEdges(
+                        iterationSnapshotState);
                     if (exitReachable)
                     {
                         exits.Add(exitState, exitMasks);
@@ -4620,7 +5014,8 @@ public static partial class SemanticVerifier
                             ? headState.MergeProvenanceSlot(i, backState)
                             : headState.CopyProvenanceSlot(i, entryState);
                     }
-                    var mergedNativeState = entryState.Clone();
+                    var mergedNativeState = entryState.Clone(
+                        iterationSnapshotState);
                     if (backState is not null)
                     {
                         _ = mergedNativeState.MergeNativeOutputState(entryState, true, backState, true);
@@ -4647,13 +5042,17 @@ public static partial class SemanticVerifier
                     }
                 }
                 throw Limit();
+            }
             case BoundBreak or BoundContinue:
+            {
                 var targetDepth = statement is BoundBreak exit ? exit.TargetDepth
                     : ((BoundContinue)statement).TargetDepth;
                 if (targetDepth <= 0 || targetDepth > loops.Count)
                 {
                     throw InvalidEffect(statement.Span, inCleanup ? "FinallyReturn" : "LoopTransfer");
                 }
+                using var repeatSnapshotState
+                    = CreateRepeatSnapshotScopeIfNeeded(initialized);
                 var target = loops[^targetDepth];
                 var transferState = initialized.Clone();
                 var transferMasks = (uint[])fieldMasks.Clone();
@@ -4668,10 +5067,14 @@ public static partial class SemanticVerifier
                     (statement is BoundBreak ? target.Breaks : target.Continues).Add(transferState, transferMasks);
                 }
                 return true;
+            }
             case BoundTryFinally cleanup:
                 return TryFinallyStatement(cleanup, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
             case BoundViewScope view:
+            {
+                using var repeatSnapshotState
+                    = CreateRepeatSnapshotScopeIfNeeded(initialized);
                 if (view.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || view.Variable >= initialized.Length || view.Variable < 0
                     || function.Variables[view.Variable].Type != (view.IsMutable
@@ -4771,6 +5174,7 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
                 initialized[view.Variable] = false;
                 return viewReturns;
+            }
             case BoundUnsafe unsafeBlock:
                 if (unsafeBlock.Body is null)
                 {
@@ -4782,6 +5186,9 @@ public static partial class SemanticVerifier
                 return TryCatchStatement(recovery, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
             case BoundRequire requirement:
+            {
+                using var repeatSnapshotState
+                    = CreateRepeatSnapshotScopeIfNeeded(initialized);
                 if (!CanCompleteNormally(requirement.Condition, initialized, program,
                     ref remaining, depth + 1))
                 {
@@ -4810,16 +5217,24 @@ public static partial class SemanticVerifier
                 }
                 if (CanBe(requirement.Condition, false, ref remaining, initialized))
                 {
-                    var rejected = Outcome(requirement.Condition, beforeRequirement, false, ref remaining);
+                    var rejected = Outcome(requirement.Condition,
+                        beforeRequirement, false, ref remaining,
+                        repeatSnapshotState);
                     var rejectedMasks = (uint[])fieldMasks.Clone();
                     MarkOutMasks(rejected, rejectedMasks, function, program);
                     failures?.Add(rejected, rejectedMasks);
                 }
-                var accepted = Outcome(requirement.Condition, beforeRequirement, true, ref remaining);
+                var accepted = Outcome(requirement.Condition,
+                    beforeRequirement, true, ref remaining,
+                    repeatSnapshotState);
                 accepted.CopyTo(initialized);
                 MarkOutMasks(initialized, fieldMasks, function, program);
                 return !CanBe(requirement.Condition, true, ref remaining, initialized);
+            }
             case BoundReturn result:
+            {
+                using var repeatSnapshotState
+                    = CreateRepeatSnapshotScopeIfNeeded(initialized);
                 if (inCleanup)
                 {
                     throw InvalidEffect(result.Span, "FinallyReturn");
@@ -4857,16 +5272,42 @@ public static partial class SemanticVerifier
                 }
                 else
                 {
+                    if (function.ConstructionHomeIndex >= 0
+                        && (result.Value is not BoundRead constructionRead
+                            || constructionRead.Variable
+                                != function.ConstructionHomeIndex))
+                    {
+                        throw Invalid(result.Span);
+                    }
                     if (function.IsConstructor && result.Value is not BoundRead { Variable: 0 })
                     {
                         throw Invalid(result.Span);
                     }
-                    if (function.IsConstructor && IsUnique(program, function.ReturnType)
-                        && result.Value is BoundRead { Variable: 0 } receiver)
+                    if (result.Value is BoundRead homeResultRead
+                        && IsConstructionHome(function,
+                            homeResultRead.Variable))
                     {
-                        if (!initialized[0] || receiver.Type != function.ReturnType)
+                        if (!initialized[homeResultRead.Variable]
+                            || homeResultRead.Type != function.ReturnType
+                            || fieldMasks[homeResultRead.Variable]
+                                != FullMask(program, function.ReturnType))
                         {
-                            throw Invalid(result.Span);
+                            throw InvalidEffect(result.Span, "Ownership");
+                        }
+
+                        if (function.IsConstructor
+                            && IsUnique(program, function.ReturnType))
+                        {
+                            if (homeResultRead.Variable != 0)
+                            {
+                                throw Invalid(result.Span);
+                            }
+                        }
+                        else
+                        {
+                            Expression(result.Value, initialized, fieldMasks,
+                                declarations, function, program,
+                                ref remaining, depth + 1, failures);
                         }
                     }
                     else
@@ -4941,7 +5382,9 @@ public static partial class SemanticVerifier
                             {
                                 continue;
                             }
-                            var returnState = Outcome(boolResult, beforeReturn, predicate, ref remaining);
+                            var returnState = Outcome(boolResult, beforeReturn,
+                                predicate, ref remaining,
+                                repeatSnapshotState);
                             var returnMasks = (uint[])fieldMasks.Clone();
                             MarkOutMasks(returnState, returnMasks, function, program);
                             var returnDeclarations = new HashSet<int>(declarations);
@@ -5046,6 +5489,7 @@ public static partial class SemanticVerifier
                         rawUnionReturnBytes);
                 }
                 return true;
+            }
             default:
                 throw Invalid();
         }
@@ -5059,7 +5503,9 @@ public static partial class SemanticVerifier
         {
             throw Invalid(cleanup.Span);
         }
-        var cleanupFailures = program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
+        using var cleanupFailures = program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
             ? new FailureEdges() : null;
         var cleanupScope = new CleanupScope(cleanup.Finally, [.. declarations], failures);
         cleanups.Add(cleanupScope);
@@ -5120,10 +5566,12 @@ public static partial class SemanticVerifier
         {
             throw Invalid(recovery.Span);
         }
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         var recoveryEntryState = initialized.Clone();
         var recoveryEntryMasks = (uint[])fieldMasks.Clone();
         var recoveryDeclarations = new HashSet<int>(declarations);
-        var caughtFailures = new FailureEdges();
+        using var caughtFailures = new FailureEdges();
         var recoveryScope = recovery.Finally is null ? null
             : new CleanupScope(recovery.Finally, [.. declarations], failures);
         if (recovery.Finally is not null)
@@ -5143,7 +5591,7 @@ public static partial class SemanticVerifier
                 catchMasks[index] = 0;
             }
         }
-        var catchFailures = failures is not null || recovery.Finally is not null
+        using var catchFailures = failures is not null || recovery.Finally is not null
             ? new FailureEdges() : null;
         var catchReturns = Statement(recovery.Catch, catchState, catchMasks, declarations, function,
             program, ref remaining, depth + 1, reachable && caughtFailures.HasEdges, cleanups,
@@ -5227,6 +5675,8 @@ public static partial class SemanticVerifier
         }
         var outputTransfer = successfulReturn == true
             && cleanup.Statements is [BoundDrop { IsOutput: true }];
+        using var repeatSnapshotState = outputTransfer
+            ? CreateRepeatSnapshotScopeIfNeeded(initialized) : null;
         var checkState = outputTransfer ? initialized.Clone() : initialized;
         var checkMasks = outputTransfer ? (uint[])fieldMasks.Clone() : fieldMasks;
         return Statement(cleanup, checkState, checkMasks, declarations, function,
@@ -5470,6 +5920,8 @@ public static partial class SemanticVerifier
         {
             return;
         }
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         var failureState = initialized.Clone();
         failureState.MarkConditional(variable);
         var failureMasks = (uint[])fieldMasks.Clone();
@@ -5522,13 +5974,115 @@ public static partial class SemanticVerifier
         }
     }
 
-    private sealed class LoopScope(int cleanupDepth)
+    private sealed class LoopScope : IDisposable
     {
-        internal int CleanupDepth { get; } = cleanupDepth;
+        internal int CleanupDepth { get; }
         internal bool IsCleanupSwitch { get; init; }
         internal int ScopeActivation { get; init; }
-        internal FailureEdges Breaks { get; } = new();
-        internal FailureEdges Continues { get; } = new();
+        internal FailureEdges Breaks { get; }
+        internal FailureEdges Continues { get; }
+
+        internal LoopScope(int cleanupDepth,
+            RepeatSnapshotReservationScope? snapshotScope = null)
+        {
+            CleanupDepth = cleanupDepth;
+            Breaks = new(snapshotScope);
+            Continues = new(snapshotScope);
+        }
+
+        public void Dispose()
+        {
+            Breaks.Dispose();
+            Continues.Dispose();
+        }
+    }
+
+    private sealed class RepeatSnapshotReservationScope(
+        RepeatResourceLedger resources) : IDisposable
+    {
+        private readonly List<IDisposable> _leases = [];
+        private readonly Dictionary<InitializationState,
+            RepeatResourceLedger.StateLease> _states
+                = new(ReferenceEqualityComparer.Instance);
+
+        internal void Adopt(IDisposable? lease)
+        {
+            if (lease is null)
+            {
+                return;
+            }
+            if (lease is RepeatResourceLedger.StateLease stateLease
+                && !stateLease.IsOwnedBy(resources))
+            {
+                throw Invalid();
+            }
+            _leases.Add(lease);
+        }
+
+        internal void TrackState(InitializationState state,
+            RepeatResourceLedger.StateLease lease,
+            bool adoptDependencies = true)
+        {
+            ArgumentNullException.ThrowIfNull(state);
+            ArgumentNullException.ThrowIfNull(lease);
+            if (!lease.IsOwnedBy(resources)
+                || lease.ReservedBytes
+                    != state.GetRawUnionArrayStateBytes()
+                || !_states.TryAdd(state, lease))
+            {
+                throw Invalid();
+            }
+
+            state.SetRepeatSnapshotScope(this);
+            if (adoptDependencies)
+            {
+                Adopt(state.Dependencies);
+            }
+        }
+
+        internal void TrackExistingState(InitializationState state,
+            BigInteger bytes)
+        {
+            ArgumentNullException.ThrowIfNull(state);
+            TrackState(state, resources.ReserveState(bytes),
+                adoptDependencies: false);
+        }
+
+        internal bool TracksState(InitializationState state)
+            => _states.ContainsKey(state);
+
+        internal void UpdateState(InitializationState state,
+            BigInteger bytes)
+        {
+            if (!_states.TryGetValue(state, out var lease))
+            {
+                return;
+            }
+
+            if (bytes > lease.ReservedBytes)
+            {
+                lease.Add(bytes - lease.ReservedBytes);
+            }
+            else if (bytes < lease.ReservedBytes)
+            {
+                lease.Remove(lease.ReservedBytes - bytes);
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var (state, lease) in _states)
+            {
+                state.SetRepeatSnapshotScope(null);
+                lease.Dispose();
+            }
+            _states.Clear();
+            for (var index = _leases.Count - 1; index >= 0; index--)
+            {
+                _leases[index].Dispose();
+            }
+            _leases.Clear();
+        }
     }
 
     private sealed class InitializationState
@@ -5537,130 +6091,1034 @@ public static partial class SemanticVerifier
         private readonly record struct RawUnionArrayStateKey(
             int Variable, StorageProjection ArrayPrefix);
 
-        private sealed class RawUnionArrayElementState
+        private sealed class RawUnionArrayStateKeyComparer
+            : IComparer<RawUnionArrayStateKey>
         {
-            private readonly Dictionary<ulong, byte[]> _elementBytes = [];
+            internal static RawUnionArrayStateKeyComparer Instance { get; }
+                = new();
 
+            public int Compare(
+                RawUnionArrayStateKey left, RawUnionArrayStateKey right)
+            {
+                var variable = left.Variable.CompareTo(right.Variable);
+                return variable != 0 ? variable
+                    : StorageProjectionComparer.Instance.Compare(
+                        left.ArrayPrefix, right.ArrayPrefix);
+            }
+        }
+
+        internal sealed class RawUnionArrayElementState
+        {
+            private readonly RepeatResourceLedger _resources;
+            private List<KeyValuePair<ulong, byte[]>> _elementBytes = [];
+
+            internal RepeatResourceLedger Resources => _resources;
             internal BoundNativeFixedArrayLayout Layout { get; }
             internal ulong ElementCount => Layout.ElementCount;
             internal byte[] GuaranteedBytes { get; }
-            internal IEnumerable<ulong> ElementIndexes => _elementBytes.Keys;
+            internal byte[] TemplateBytes { get; private set; }
 
             internal RawUnionArrayElementState(
-                BoundNativeFixedArrayLayout layout, byte[] guaranteedBytes)
+                BoundNativeFixedArrayLayout layout, byte[] guaranteedBytes,
+                RepeatResourceLedger resources)
+                : this(layout, guaranteedBytes, guaranteedBytes, resources)
             {
+            }
+
+            internal RawUnionArrayElementState(
+                BoundNativeFixedArrayLayout layout, byte[] guaranteedBytes,
+                ReadOnlySpan<byte> templateBytes,
+                RepeatResourceLedger resources,
+                bool constructionWorkCharged = false)
+            {
+                ArgumentNullException.ThrowIfNull(guaranteedBytes);
+                ArgumentNullException.ThrowIfNull(resources);
                 Layout = layout;
-                GuaranteedBytes = [.. guaranteedBytes];
+                GuaranteedBytes = guaranteedBytes;
+                _resources = resources;
+                if (!constructionWorkCharged)
+                {
+                    ChargeWork(8);
+                }
+                TemplateBytes = CopyPayload(templateBytes);
+            }
+
+            private RawUnionArrayElementState(
+                BoundNativeFixedArrayLayout layout, byte[] guaranteedBytes,
+                byte[] templateBytes, RepeatResourceLedger resources,
+                bool constructionWorkCharged, bool takeTemplateOwnership)
+            {
+                ArgumentNullException.ThrowIfNull(guaranteedBytes);
+                ArgumentNullException.ThrowIfNull(templateBytes);
+                ArgumentNullException.ThrowIfNull(resources);
+                Layout = layout;
+                GuaranteedBytes = guaranteedBytes;
+                _resources = resources;
+                if (!constructionWorkCharged)
+                {
+                    ChargeWork(8);
+                }
+                TemplateBytes = takeTemplateOwnership
+                    ? templateBytes : CopyPayload(templateBytes);
             }
 
             internal RawUnionArrayElementState Clone()
             {
+                using var repeatFrame = _resources.EnterFrame();
+                RawUnionArrayElementState result;
+                if (!_resources.IsStateTreeReservationActive)
+                {
+                    var stateBytes = LogicalBytes();
+                    using var inputState = _resources.ReserveState(
+                        stateBytes);
+                    using var outputState = _resources.ReserveState(
+                        stateBytes);
+                    result = CloneCore();
+                }
+                else
+                {
+                    result = CloneCore();
+                }
+                repeatFrame.Complete();
+                return result;
+            }
+
+            private RawUnionArrayElementState CloneCore()
+            {
                 var result = new RawUnionArrayElementState(
-                    Layout, GuaranteedBytes);
+                    Layout, GuaranteedBytes, TemplateBytes, _resources);
+                ChargeWork(8);
                 foreach (var (index, bytes) in _elementBytes)
                 {
-                    result._elementBytes.Add(index, [.. bytes]);
+                    ChargeWork(15);
+                    result._elementBytes.Add(new KeyValuePair<ulong, byte[]>(
+                        index, CopyPayload(bytes)));
                 }
                 return result;
             }
 
             internal byte[] Get(ulong index)
-                => _elementBytes.TryGetValue(index, out var bytes)
-                    ? [.. bytes] : [.. GuaranteedBytes];
+            {
+                var found = TryFind(index, out var position);
+                return CopyPayload(found
+                    ? _elementBytes[position].Value : TemplateBytes);
+            }
+
+            private int LowerBound(ulong index)
+            {
+                var low = 0;
+                var high = _elementBytes.Count;
+                while (true)
+                {
+                    ChargeWork();
+                    if (low >= high)
+                    {
+                        break;
+                    }
+
+                    ChargeWork(3);
+                    var middle = low + ((high - low) / 2);
+                    ChargeWork(3);
+                    if (_elementBytes[middle].Key < index)
+                    {
+                        ChargeWork();
+                        low = middle + 1;
+                    }
+                    else
+                    {
+                        high = middle;
+                    }
+                }
+                return low;
+            }
+
+            private bool TryFind(ulong index, out int position)
+            {
+                ChargeWork();
+                if (index >= Layout.ElementCount)
+                {
+                    throw Invalid();
+                }
+                position = LowerBound(index);
+                ChargeWork();
+                if (position >= _elementBytes.Count)
+                {
+                    return false;
+                }
+
+                ChargeWork(3);
+                return _elementBytes[position].Key == index;
+            }
+
+            private void ChargeWork(ulong units = 1)
+                => _resources.ConsumeWork(units);
+
+            private byte[] CopyPayload(ReadOnlySpan<byte> bytes)
+            {
+                var result = new byte[bytes.Length];
+                for (var index = 0; index < bytes.Length; index++)
+                {
+                    ChargeWork(4);
+                    result[index] = bytes[index];
+                }
+                return result;
+            }
+
+            private bool PayloadEquals(
+                ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+            {
+                if (left.Length != right.Length)
+                {
+                    return false;
+                }
+                for (var index = 0; index < left.Length; index++)
+                {
+                    ChargeWork(5);
+                    if (left[index] != right[index])
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            private byte[] MeetPayload(
+                ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+            {
+                if (left.Length != right.Length)
+                {
+                    throw Invalid();
+                }
+
+                var result = new byte[left.Length];
+                for (var index = 0; index < left.Length; index++)
+                {
+                    ChargeWork(7);
+                    result[index] = (byte)(left[index] & right[index]);
+                }
+                return result;
+            }
+
+            internal BigInteger LogicalBytes()
+            {
+                ChargeWork(7);
+                var bytes = new BigInteger(56) + TemplateBytes.Length;
+                foreach (var (_, elementBytes) in _elementBytes)
+                {
+                    ChargeWork(7);
+                    bytes += 48 + elementBytes.Length;
+                }
+                return bytes;
+            }
 
             internal byte[] Common()
             {
+                ChargeWork(2);
                 if (Layout.ElementCount == 0)
                 {
                     return [];
                 }
 
-                byte[]? common = (ulong)_elementBytes.Count
-                    < Layout.ElementCount ? [.. GuaranteedBytes] : null;
-                foreach (var bytes in _elementBytes.Values)
+                var common = (ulong)_elementBytes.Count
+                    < Layout.ElementCount ? CopyPayload(TemplateBytes) : null;
+                foreach (var entry in _elementBytes)
                 {
+                    ChargeWork();
+                    var bytes = entry.Value;
                     if (common is null)
                     {
-                        common = [.. bytes];
+                        common = CopyPayload(bytes);
                         continue;
                     }
-                    for (var index = 0; index < common.Length; index++)
-                    {
-                        common[index] &= bytes[index];
-                    }
+                    ChargeWork();
+                    common = MeetPayload(common, bytes);
                 }
-                return common ?? [.. GuaranteedBytes];
+                ChargeWork();
+                return common ?? CopyPayload(TemplateBytes);
             }
 
             internal bool Set(ulong index, ReadOnlySpan<byte> bytes)
             {
-                if (index >= Layout.ElementCount
-                    || bytes.Length != GuaranteedBytes.Length)
+                ChargeWork(3);
+                if (bytes.Length != GuaranteedBytes.Length)
                 {
                     throw Invalid();
                 }
 
-                if (bytes.SequenceEqual(GuaranteedBytes))
+                var hasIndex = TryFind(index, out var position);
+                if (PayloadEquals(bytes, TemplateBytes))
                 {
-                    return _elementBytes.Remove(index);
+                    if (!hasIndex)
+                    {
+                        return false;
+                    }
+
+                    var inputBytes = LogicalBytes();
+                    var outputBytes = inputBytes - 48
+                        - _elementBytes[position].Value.Length;
+                    using var inputState
+                        = _resources.IsStateTreeReservationActive
+                            ? null : _resources.ReserveState(inputBytes);
+                    using var outputState
+                        = _resources.IsStateTreeReservationActive
+                            ? null : _resources.ReserveState(outputBytes);
+                    ChargeWork(2);
+                    var retained = new List<KeyValuePair<ulong, byte[]>>(
+                        _elementBytes.Count - 1);
+                    for (var item = 0; item < _elementBytes.Count; item++)
+                    {
+                        ChargeWork(3);
+                        if (item == position)
+                        {
+                            ChargeWork(2);
+                            continue;
+                        }
+                        ChargeWork(4);
+                        retained.Add(_elementBytes[item]);
+                    }
+                    _elementBytes = retained;
+                    return true;
                 }
 
-                if (_elementBytes.TryGetValue(index, out var current)
-                    && current.AsSpan().SequenceEqual(bytes))
+                if (hasIndex && PayloadEquals(
+                    _elementBytes[position].Value, bytes))
                 {
                     return false;
                 }
-                _elementBytes[index] = bytes.ToArray();
+
+                var existingBytes = LogicalBytes();
+                var replacementBytes = existingBytes
+                    + (hasIndex ? BigInteger.Zero
+                        : new BigInteger(48) + bytes.Length);
+                using var inputReservation
+                    = _resources.IsStateTreeReservationActive
+                        ? null : _resources.ReserveState(existingBytes);
+                using var outputReservation
+                    = _resources.IsStateTreeReservationActive
+                        ? null : _resources.ReserveState(replacementBytes);
+                var storedBytes = CopyPayload(bytes);
+                ChargeWork(7);
+                if (hasIndex)
+                {
+                    ChargeWork();
+                }
+                var replacement = new List<KeyValuePair<ulong, byte[]>>(
+                    checked(_elementBytes.Count + (hasIndex ? 0 : 1)));
+                for (var item = 0; item < position; item++)
+                {
+                    ChargeWork(7);
+                    replacement.Add(_elementBytes[item]);
+                }
+                if (hasIndex)
+                {
+                    ChargeWork(3);
+                }
+                ChargeWork(4);
+                replacement.Add(new KeyValuePair<ulong, byte[]>(
+                    index, storedBytes));
+                for (var item = position + (hasIndex ? 1 : 0);
+                    item < _elementBytes.Count; item++)
+                {
+                    ChargeWork(7);
+                    replacement.Add(_elementBytes[item]);
+                }
+                _elementBytes = replacement;
                 return true;
             }
 
-            internal bool ApplyUnknownIndexWrite(ReadOnlySpan<byte> bytes)
+            internal bool TryGetSetPlan(ulong index,
+                ReadOnlySpan<byte> bytes, out int position,
+                out bool hasIndex, out bool removesEntry)
+            {
+                ChargeWork(3);
+                if (bytes.Length != GuaranteedBytes.Length)
+                {
+                    throw Invalid();
+                }
+
+                hasIndex = TryFind(index, out position);
+                removesEntry = PayloadEquals(bytes, TemplateBytes);
+                return removesEntry
+                    ? hasIndex
+                    : !hasIndex || !PayloadEquals(
+                        _elementBytes[position].Value, bytes);
+            }
+
+            private void AppendSetEntry(
+                RawUnionArrayElementState result, ulong index,
+                ReadOnlySpan<byte> bytes,
+                RepeatResourceLedger.StateLease outputState)
+            {
+                ChargeWork(15);
+                outputState.Add(new BigInteger(48) + bytes.Length);
+                result._elementBytes.Add(new KeyValuePair<ulong, byte[]>(
+                    index, CopyPayload(bytes)));
+            }
+
+            internal RawUnionArrayElementState CreateSet(ulong index,
+                ReadOnlySpan<byte> bytes, int position, bool hasIndex,
+                bool removesEntry,
+                RepeatResourceLedger.StateLease outputState)
+            {
+                using var repeatFrame = _resources.EnterFrame();
+                if (position < 0 || position > _elementBytes.Count
+                    || (hasIndex && position == _elementBytes.Count)
+                    || (removesEntry && !hasIndex))
+                {
+                    throw Invalid();
+                }
+
+                ChargeWork(8);
+                outputState.Add(new BigInteger(56) + TemplateBytes.Length);
+                var result = new RawUnionArrayElementState(
+                    Layout, GuaranteedBytes, TemplateBytes, _resources,
+                    constructionWorkCharged: true);
+                var entryAdded = false;
+                for (var item = 0; item < _elementBytes.Count; item++)
+                {
+                    ChargeWork(7);
+                    if (!hasIndex && !entryAdded && item == position)
+                    {
+                        AppendSetEntry(result, index, bytes, outputState);
+                        entryAdded = true;
+                    }
+
+                    if (hasIndex && item == position)
+                    {
+                        if (!removesEntry)
+                        {
+                            AppendSetEntry(result, index, bytes,
+                                outputState);
+                            entryAdded = true;
+                        }
+                        else
+                        {
+                            ChargeWork(2);
+                        }
+                        continue;
+                    }
+
+                    var entry = _elementBytes[item];
+                    AppendSetEntry(result, entry.Key, entry.Value,
+                        outputState);
+                }
+
+                if (!hasIndex && !entryAdded)
+                {
+                    if (position != _elementBytes.Count)
+                    {
+                        throw Invalid();
+                    }
+                    AppendSetEntry(result, index, bytes, outputState);
+                }
+                repeatFrame.Complete();
+                return result;
+            }
+
+            internal static RawUnionArrayElementState CreateInitializedSet(
+                BoundNativeFixedArrayLayout layout, byte[] defaultBytes,
+                ulong index, ReadOnlySpan<byte> bytes,
+                RepeatResourceLedger resources,
+                RepeatResourceLedger.StateLease outputState)
+            {
+                using var repeatFrame = resources.EnterFrame();
+                resources.ConsumeWork();
+                if (bytes.Length != defaultBytes.Length
+                    || index >= layout.ElementCount)
+                {
+                    throw Invalid();
+                }
+
+                resources.ConsumeWork(8);
+                outputState.Add(new BigInteger(56) + defaultBytes.Length);
+                var result = new RawUnionArrayElementState(layout,
+                    defaultBytes, defaultBytes, resources,
+                    constructionWorkCharged: true);
+                result.ChargeWork(15);
+                outputState.Add(new BigInteger(48) + bytes.Length);
+                result._elementBytes.Add(new KeyValuePair<ulong, byte[]>(
+                    index, result.CopyPayload(bytes)));
+                repeatFrame.Complete();
+                return result;
+            }
+
+            internal BigInteger MergeLogicalBytes(
+                RawUnionArrayElementState other)
+            {
+                using var repeatFrame = _resources.EnterFrame();
+                ChargeWork();
+                if (Layout != other.Layout
+                    || !ReferenceEquals(_resources, other._resources)
+                    || !PayloadEquals(GuaranteedBytes,
+                        other.GuaranteedBytes))
+                {
+                    throw Invalid();
+                }
+
+                using var templateScratch = _resources.ReserveState(
+                    new BigInteger(TemplateBytes.Length));
+                var mergedTemplate = MergeTemplate(other, templateScratch,
+                    null, outputAlreadyReserved: true);
+                var resultBytes = new BigInteger(56)
+                    + mergedTemplate.Length;
+                ForEachMergedOverride(other, mergedTemplate,
+                    (index, mergedBytes, scratch) =>
+                    {
+                        _ = index;
+                        _ = scratch;
+                        resultBytes += new BigInteger(48)
+                            + mergedBytes.Length;
+                    });
+                repeatFrame.Complete();
+                return resultBytes;
+            }
+
+            private byte[] MergeTemplate(
+                RawUnionArrayElementState other,
+                RepeatResourceLedger.StateLease templateScratch,
+                RepeatResourceLedger.StateLease? outputState,
+                bool outputAlreadyReserved)
+            {
+                ChargeWork(9);
+                ChargeWork(8);
+                if (!outputAlreadyReserved)
+                {
+                    (outputState ?? throw Invalid()).Add(56);
+                }
+                var mergedTemplate = MeetPayload(
+                    TemplateBytes, other.TemplateBytes);
+                ChargeWork();
+                _ = PayloadEquals(TemplateBytes, mergedTemplate);
+                if (!outputAlreadyReserved)
+                {
+                    (outputState ?? throw Invalid()).TransferFrom(
+                        templateScratch,
+                        new BigInteger(mergedTemplate.Length),
+                        BigInteger.Zero);
+                }
+
+                return mergedTemplate;
+            }
+
+            private void ForEachMergedOverride(
+                RawUnionArrayElementState other, byte[] mergedTemplate,
+                Action<ulong, byte[], RepeatResourceLedger.StateLease> emit)
+            {
+                var leftIndex = 0;
+                var rightIndex = 0;
+                var leftLoaded = false;
+                var rightLoaded = false;
+                ulong leftKey = 0;
+                ulong rightKey = 0;
+                while (true)
+                {
+                    ChargeWork();
+                    var hasLeft = leftLoaded
+                        || leftIndex < _elementBytes.Count;
+                    if (hasLeft && !leftLoaded)
+                    {
+                        ChargeWork(2);
+                        leftKey = _elementBytes[leftIndex].Key;
+                        leftLoaded = true;
+                    }
+
+                    ChargeWork();
+                    var hasRight = rightLoaded
+                        || rightIndex < other._elementBytes.Count;
+                    if (hasRight && !rightLoaded)
+                    {
+                        ChargeWork(2);
+                        rightKey = other._elementBytes[rightIndex].Key;
+                        rightLoaded = true;
+                    }
+
+                    if (!hasLeft && !hasRight)
+                    {
+                        break;
+                    }
+
+                    var comparison = 0;
+                    if (hasLeft && hasRight)
+                    {
+                        ChargeWork();
+                        comparison = leftKey.CompareTo(rightKey);
+                    }
+
+                    ulong index;
+                    var leftOverride = false;
+                    var rightOverride = false;
+                    if (!hasRight || (hasLeft && comparison < 0))
+                    {
+                        index = leftKey;
+                        leftOverride = true;
+                        leftIndex++;
+                        leftLoaded = false;
+                    }
+                    else if (!hasLeft || comparison > 0)
+                    {
+                        index = rightKey;
+                        rightOverride = true;
+                        rightIndex++;
+                        rightLoaded = false;
+                    }
+                    else
+                    {
+                        index = leftKey;
+                        leftOverride = true;
+                        rightOverride = true;
+                        leftIndex++;
+                        rightIndex++;
+                        leftLoaded = false;
+                        rightLoaded = false;
+                    }
+
+                    var leftValue = leftOverride
+                        ? _elementBytes[leftIndex - 1].Value
+                        : TemplateBytes;
+                    var rightValue = rightOverride
+                        ? other._elementBytes[rightIndex - 1].Value
+                        : other.TemplateBytes;
+                    ChargeWork(10);
+                    using var candidateScratch = _resources.ReserveState(
+                        new BigInteger(TemplateBytes.Length));
+                    var mergedBytes = MeetPayload(leftValue, rightValue);
+                    ChargeWork();
+                    var equalsTemplate = PayloadEquals(
+                        mergedBytes, mergedTemplate);
+                    _ = PayloadEquals(leftValue, mergedBytes);
+                    if (!equalsTemplate)
+                    {
+                        ChargeWork(9);
+                        emit(index, mergedBytes, candidateScratch);
+                    }
+                    else if (leftOverride)
+                    {
+                        ChargeWork(2);
+                    }
+                }
+            }
+
+            internal RawUnionArrayElementState CreateMerge(
+                RawUnionArrayElementState other,
+                RepeatResourceLedger.StateLease outputState,
+                bool outputAlreadyReserved = false)
+            {
+                using var repeatFrame = _resources.EnterFrame();
+                ChargeWork();
+                if (Layout != other.Layout
+                    || !ReferenceEquals(_resources, other._resources)
+                    || !PayloadEquals(GuaranteedBytes,
+                        other.GuaranteedBytes))
+                {
+                    throw Invalid();
+                }
+
+                using var templateScratch = _resources.ReserveState(
+                    new BigInteger(TemplateBytes.Length));
+                var mergedTemplate = MergeTemplate(other, templateScratch,
+                    outputState, outputAlreadyReserved);
+                var result = new RawUnionArrayElementState(
+                    Layout, GuaranteedBytes, mergedTemplate, _resources,
+                    constructionWorkCharged: true,
+                    takeTemplateOwnership: true);
+
+                ForEachMergedOverride(other, mergedTemplate,
+                    (index, mergedBytes, candidateScratch) =>
+                    {
+                        if (!outputAlreadyReserved)
+                        {
+                            outputState.TransferFrom(candidateScratch,
+                                new BigInteger(mergedBytes.Length), 48);
+                        }
+                        result._elementBytes.Add(
+                            new KeyValuePair<ulong, byte[]>(
+                                index, mergedBytes));
+                    });
+
+                repeatFrame.Complete();
+                return result;
+            }
+
+            internal RawUnionArrayElementState CloneTo(
+                RepeatResourceLedger.StateLease outputState,
+                bool outputAlreadyReserved = false)
+            {
+                using var repeatFrame = _resources.EnterFrame();
+                ChargeWork(8);
+                if (!outputAlreadyReserved)
+                {
+                    outputState.Add(new BigInteger(56)
+                        + TemplateBytes.Length);
+                }
+                var result = new RawUnionArrayElementState(
+                    Layout, GuaranteedBytes, TemplateBytes, _resources,
+                    constructionWorkCharged: true);
+                foreach (var (index, bytes) in _elementBytes)
+                {
+                    ChargeWork(15);
+                    if (!outputAlreadyReserved)
+                    {
+                        outputState.Add(new BigInteger(48) + bytes.Length);
+                    }
+                    result._elementBytes.Add(
+                        new KeyValuePair<ulong, byte[]>(
+                            index, CopyPayload(bytes)));
+                }
+                repeatFrame.Complete();
+                return result;
+            }
+
+            internal bool WriteRange(ulong index, int offset,
+                ReadOnlySpan<byte> bytes)
+            {
+                ChargeWork(4);
+                if (index >= Layout.ElementCount || offset < 0
+                    || offset > TemplateBytes.Length
+                    || bytes.Length > TemplateBytes.Length - offset)
+                {
+                    throw Invalid();
+                }
+
+                using var scratchState
+                    = _resources.ReserveState(
+                        new BigInteger(TemplateBytes.Length));
+                var elementBytes = Get(index);
+                for (var byteIndex = 0; byteIndex < bytes.Length; byteIndex++)
+                {
+                    ChargeWork(4);
+                    elementBytes[offset + byteIndex] = bytes[byteIndex];
+                }
+                return Set(index, elementBytes);
+            }
+
+            internal bool HasTemplateChange(ReadOnlySpan<byte> bytes)
             {
                 if (bytes.Length != GuaranteedBytes.Length)
                 {
                     throw Invalid();
                 }
 
-                var changed = false;
-                foreach (var index in _elementBytes.Keys.ToArray())
+                var changed = !PayloadEquals(TemplateBytes, bytes);
+                foreach (var (_, elementBytes) in _elementBytes)
                 {
-                    var mergedBytes = Get(index);
-                    for (var byteIndex = 0;
-                        byteIndex < mergedBytes.Length;
-                        byteIndex++)
+                    ChargeWork();
+                    if (PayloadEquals(elementBytes, bytes))
                     {
-                        mergedBytes[byteIndex] &= bytes[byteIndex];
+                        changed = true;
                     }
-                    changed |= Set(index, mergedBytes);
                 }
+                ChargeWork();
                 return changed;
             }
 
-            internal bool Merge(RawUnionArrayElementState other)
+            internal RawUnionArrayElementState CreateSetTemplate(
+                ReadOnlySpan<byte> bytes,
+                RepeatResourceLedger.StateLease? outputState)
             {
+                using var repeatFrame = _resources.EnterFrame();
+                if (bytes.Length != GuaranteedBytes.Length)
+                {
+                    throw Invalid();
+                }
+
+                ChargeWork(8);
+                outputState?.Add(new BigInteger(56) + bytes.Length);
+                var result = new RawUnionArrayElementState(
+                    Layout, GuaranteedBytes, bytes, _resources,
+                    constructionWorkCharged: true);
+                foreach (var (index, elementBytes) in _elementBytes)
+                {
+                    ChargeWork();
+                    if (PayloadEquals(elementBytes, bytes))
+                    {
+                        ChargeWork(2);
+                        continue;
+                    }
+
+                    ChargeWork(15);
+                    outputState?.Add(new BigInteger(48)
+                        + elementBytes.Length);
+                    result._elementBytes.Add(
+                        new KeyValuePair<ulong, byte[]>(
+                            index, CopyPayload(elementBytes)));
+                }
+                repeatFrame.Complete();
+                return result;
+            }
+
+            internal bool ApplyUnknownRangeWrite(int offset,
+                ReadOnlySpan<byte> bytes)
+            {
+                ChargeWork(2);
+                if (Layout.ElementCount == 0)
+                {
+                    throw Invalid();
+                }
+                if (Layout.ElementCount == 1)
+                {
+                    return WriteRange(0, offset, bytes);
+                }
+                return ApplyPossibleUnknownRangeWrite(offset, bytes);
+            }
+
+            internal bool ApplyPossibleExactRangeWrite(ulong index,
+                int offset, ReadOnlySpan<byte> bytes)
+            {
+                ChargeWork(4);
+                if (index >= Layout.ElementCount || offset < 0
+                    || offset > TemplateBytes.Length
+                    || bytes.Length > TemplateBytes.Length - offset)
+                {
+                    throw Invalid();
+                }
+
+                var elementBytes = Get(index);
+                for (var byteIndex = 0; byteIndex < bytes.Length;
+                    byteIndex++)
+                {
+                    ChargeWork(7);
+                    elementBytes[offset + byteIndex]
+                        = (byte)(elementBytes[offset + byteIndex]
+                            & bytes[byteIndex]);
+                }
+                return Set(index, elementBytes);
+            }
+
+            internal bool ApplyPossibleUnknownRangeWrite(int offset,
+                ReadOnlySpan<byte> bytes)
+            {
+                ChargeWork(3);
+                if (Layout.ElementCount == 0 || offset < 0
+                    || offset > TemplateBytes.Length
+                    || bytes.Length > TemplateBytes.Length - offset)
+                {
+                    throw Invalid();
+                }
+
+                var mergedTemplate = CopyPayload(TemplateBytes);
+                ChargeWork();
+                for (var byteIndex = 0; byteIndex < bytes.Length;
+                    byteIndex++)
+                {
+                    ChargeWork(7);
+                    mergedTemplate[offset + byteIndex]
+                        = (byte)(mergedTemplate[offset + byteIndex]
+                            & bytes[byteIndex]);
+                }
+
+                var changed = !PayloadEquals(TemplateBytes, mergedTemplate);
+                var mergedElements
+                    = new List<KeyValuePair<ulong, byte[]>>(
+                        _elementBytes.Count);
+                foreach (var (index, elementBytes) in _elementBytes)
+                {
+                    ChargeWork();
+                    var mergedBytes = CopyPayload(elementBytes);
+                    for (var byteIndex = 0; byteIndex < bytes.Length;
+                        byteIndex++)
+                    {
+                        ChargeWork(7);
+                        mergedBytes[offset + byteIndex]
+                            = (byte)(mergedBytes[offset + byteIndex]
+                                & bytes[byteIndex]);
+                    }
+                    var equalsTemplate = PayloadEquals(
+                        mergedBytes, mergedTemplate);
+                    var equalsOriginal = PayloadEquals(
+                        elementBytes, mergedBytes);
+                    if (!equalsTemplate)
+                    {
+                        ChargeWork(6);
+                        mergedElements.Add(new KeyValuePair<ulong, byte[]>(
+                            index, mergedBytes));
+                    }
+                    else
+                    {
+                        ChargeWork(2);
+                    }
+                    changed |= !equalsOriginal || equalsTemplate;
+                }
+
+                ChargeWork();
+                _elementBytes = mergedElements;
+                TemplateBytes = mergedTemplate;
+                return changed;
+            }
+
+            internal bool ApplyUnknownIndexWrite(ReadOnlySpan<byte> bytes)
+            {
+                ChargeWork(3);
+                if (bytes.Length != GuaranteedBytes.Length)
+                {
+                    throw Invalid();
+                }
+                if (Layout.ElementCount == 0)
+                {
+                    throw Invalid();
+                }
+                if (Layout.ElementCount == 1)
+                {
+                    return Set(0, bytes);
+                }
+
+                var mergedTemplate = MeetPayload(TemplateBytes, bytes);
+                ChargeWork();
+                var changed = !PayloadEquals(TemplateBytes, mergedTemplate);
+                var mergedElements
+                    = new List<KeyValuePair<ulong, byte[]>>(
+                        _elementBytes.Count);
+                foreach (var (index, elementBytes) in _elementBytes)
+                {
+                    ChargeWork();
+                    var mergedBytes = MeetPayload(elementBytes, bytes);
+                    var equalsTemplate = PayloadEquals(
+                        mergedBytes, mergedTemplate);
+                    var equalsOriginal = PayloadEquals(
+                        elementBytes, mergedBytes);
+                    if (!equalsTemplate)
+                    {
+                        ChargeWork(6);
+                        mergedElements.Add(new KeyValuePair<ulong, byte[]>(
+                            index, mergedBytes));
+                    }
+                    else
+                    {
+                        ChargeWork(2);
+                    }
+                    changed |= !equalsOriginal || equalsTemplate;
+                }
+
+                ChargeWork();
+                _elementBytes = mergedElements;
+                TemplateBytes = mergedTemplate;
+                return changed;
+            }
+
+            internal bool Merge(RawUnionArrayElementState other,
+                RepeatResourceLedger.StateLease? stateOwner = null)
+            {
+                ChargeWork();
                 if (Layout != other.Layout
-                    || !GuaranteedBytes.AsSpan().SequenceEqual(
+                    || !ReferenceEquals(_resources, other._resources)
+                    || !PayloadEquals(GuaranteedBytes,
                         other.GuaranteedBytes))
                 {
                     throw Invalid();
                 }
 
-                var indexes = new HashSet<ulong>(_elementBytes.Keys);
-                indexes.UnionWith(other._elementBytes.Keys);
-                var changed = false;
-                foreach (var index in indexes)
+                var inputBytes = LogicalBytes();
+                var otherInputBytes = other.LogicalBytes();
+                if (stateOwner is not null
+                    && !stateOwner.IsOwnedBy(_resources))
                 {
-                    var mergedBytes = Get(index);
-                    var otherBytes = other.Get(index);
-                    for (var byteIndex = 0;
-                        byteIndex < mergedBytes.Length;
-                        byteIndex++)
-                    {
-                        mergedBytes[byteIndex] &= otherBytes[byteIndex];
-                    }
-                    changed |= Set(index, mergedBytes);
+                    throw Invalid();
                 }
-                return changed;
+                using var inputState = stateOwner is null
+                    ? _resources.ReserveState(inputBytes) : null;
+                using var otherInputState = stateOwner is null
+                    ? _resources.ReserveState(otherInputBytes) : null;
+                using var outputState
+                    = _resources.ReserveState(BigInteger.Zero);
+                var merged = CreateMerge(other, outputState);
+                var changed = !SemanticallyEquals(merged);
+                if (!changed)
+                {
+                    return false;
+                }
+                if (stateOwner is not null)
+                {
+                    var mergedBytes = merged.LogicalBytes();
+                    if (mergedBytes > inputBytes)
+                    {
+                        stateOwner.Add(mergedBytes - inputBytes);
+                    }
+                    else if (mergedBytes < inputBytes)
+                    {
+                        stateOwner.Remove(inputBytes - mergedBytes);
+                    }
+                }
+                TemplateBytes = merged.TemplateBytes;
+                _elementBytes = merged._elementBytes;
+                return true;
+            }
+
+            internal bool SemanticallyEquals(
+                RawUnionArrayElementState other)
+            {
+                ChargeWork(6);
+                if (Layout != other.Layout)
+                {
+                    return false;
+                }
+                ChargeWork();
+                if (ElementCount != other.ElementCount
+                    || !PayloadEquals(GuaranteedBytes, other.GuaranteedBytes)
+                    || !PayloadEquals(TemplateBytes, other.TemplateBytes))
+                {
+                    return false;
+                }
+
+                var leftIndex = 0;
+                var rightIndex = 0;
+                while (true)
+                {
+                    ChargeWork();
+                    var hasLeft = leftIndex < _elementBytes.Count;
+                    if (hasLeft)
+                    {
+                        ChargeWork(2);
+                    }
+                    ChargeWork();
+                    var hasRight = rightIndex < other._elementBytes.Count;
+                    if (hasRight)
+                    {
+                        ChargeWork(2);
+                    }
+                    if (!hasLeft && !hasRight)
+                    {
+                        return true;
+                    }
+
+                    var comparison = hasLeft && hasRight
+                        ? _elementBytes[leftIndex].Key.CompareTo(
+                            other._elementBytes[rightIndex].Key)
+                        : hasLeft ? -1 : 1;
+                    if (hasLeft && hasRight)
+                    {
+                        ChargeWork();
+                    }
+                    var leftOverride = false;
+                    var rightOverride = false;
+                    if (comparison < 0)
+                    {
+                        leftIndex++;
+                        leftOverride = true;
+                    }
+                    else if (comparison > 0)
+                    {
+                        rightIndex++;
+                        rightOverride = true;
+                    }
+                    else
+                    {
+                        leftIndex++;
+                        rightIndex++;
+                        leftOverride = true;
+                        rightOverride = true;
+                    }
+
+                    var leftValue = leftOverride
+                        ? _elementBytes[leftIndex - 1].Value
+                        : TemplateBytes;
+                    var rightValue = rightOverride
+                        ? other._elementBytes[rightIndex - 1].Value
+                        : other.TemplateBytes;
+                    ChargeWork(10);
+                    if (!PayloadEquals(leftValue, rightValue))
+                    {
+                        return false;
+                    }
+                }
             }
         }
 
@@ -5672,8 +7130,9 @@ public static partial class SemanticVerifier
         private Dictionary<FieldGenerationKey, long> _fieldPlaceGenerations;
         private Dictionary<NestedOwnerStateKey, NestedOwnerFieldState> _nestedOwnerStates;
         private readonly Dictionary<int, byte[]> _rawUnionInitializedBytes = [];
-        private readonly Dictionary<RawUnionArrayStateKey,
-            RawUnionArrayElementState> _rawUnionArrayElementBytes = [];
+        private SortedDictionary<RawUnionArrayStateKey,
+            RawUnionArrayElementState> _rawUnionArrayElementBytes
+                = new(RawUnionArrayStateKeyComparer.Instance);
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
         private readonly Dictionary<BoundExpression, byte> _completionShapeFacts;
@@ -5682,17 +7141,22 @@ public static partial class SemanticVerifier
         private readonly NativeOutputDestinationState?[] _nativeOutputDestinations;
         private readonly NativeOutputCallFact?[] _nativeOutputResults;
         private readonly List<ActiveStorageScope> _activeStorageScopes = [];
+        private RepeatSnapshotReservationScope? _repeatSnapshotScope;
         private int _nativeOutputStateCount;
         internal bool MayHaveNativeOutputState => _nativeOutputStateCount != 0;
         internal bool HasNativeOutputContracts { get; }
         internal bool HasDoesNotReturnFunctions { get; }
         internal BoundProgram Program { get; }
+        internal RepeatSnapshotReservationScope? RepeatSnapshotScope
+            => _repeatSnapshotScope;
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
+        internal RepeatSnapshotReservationScope? StatementInputSnapshotScope { get; init; }
         internal BackingDependencies? Dependencies { get; init; }
         internal HashSet<NativePointerWriteEffect>[]? NativePointerCaptureEffects { get; init; }
         internal RawUnionReturnCoverageBuilder? RawUnionReturnCoverage { get; init; }
         internal ImmutableArray<byte>[] RawUnionReturnCoverageSummaries
         { get; init; } = [];
+        internal RepeatResourceLedger RepeatResources { get; init; } = new();
         internal int ScopeActivation { get; set; }
 
         internal InitializationState(BoundProgram program, int length,
@@ -6308,42 +7772,266 @@ public static partial class SemanticVerifier
             return false;
         }
 
-        internal InitializationState Clone()
+        private void ChargeRepeatRootListHeader()
+            => ChargeRepeatRootListHeader(RepeatResources);
+
+        internal static void ChargeRepeatRootListHeader(
+            RepeatResourceLedger resources)
+            => resources.ConsumeWork(2);
+
+        private void ChargeRepeatRootListHeaderForFirstEntry()
         {
-            var result = new InitializationState(Program, Length, _canBeFacts, _flowFacts,
-                _completionShapeFacts, _completionFacts, _nativeOutputFlowFacts,
-                HasNativeOutputContracts, HasDoesNotReturnFunctions,
-                _fieldGenerationContext,
-                new Dictionary<FieldGenerationKey, long>(_fieldPlaceGenerations),
-                new Dictionary<NestedOwnerStateKey, NestedOwnerFieldState>(_nestedOwnerStates)) {
-                StatementInputs = StatementInputs,
-                Dependencies = Dependencies?.Clone(),
-                NativePointerCaptureEffects = NativePointerCaptureEffects,
-                RawUnionReturnCoverage = RawUnionReturnCoverage,
-                RawUnionReturnCoverageSummaries
-                    = RawUnionReturnCoverageSummaries,
-                ScopeActivation = ScopeActivation,
-            };
-            result._activeStorageScopes.AddRange(_activeStorageScopes);
-            Array.Copy(_possibilities, result._possibilities, Length);
-            Array.Copy(_possibleFieldMasks, result._possibleFieldMasks, Length);
-            Array.Copy(_nativeOutputDestinations, result._nativeOutputDestinations, Length);
-            Array.Copy(_nativeOutputResults, result._nativeOutputResults, Length);
-            result._nativeOutputStateCount = _nativeOutputStateCount;
-            foreach (var (variable, bytes) in _rawUnionInitializedBytes)
+            if (_rawUnionArrayElementBytes.Count == 0)
             {
-                result._rawUnionInitializedBytes.Add(variable,
-                    (byte[])bytes.Clone());
+                ChargeRepeatRootListHeader();
             }
+        }
+
+        private void ChargeRepeatRoot(StorageProjection prefix)
+            => ChargeRepeatRoot(RepeatResources, prefix);
+
+        internal static void ChargeRepeatRoot(
+            RepeatResourceLedger resources, StorageProjection prefix)
+        {
+            resources.ConsumeWork(5);
+            var segments = prefix.ProjectionPath.Segments;
+            if (segments.IsEmpty)
+            {
+                return;
+            }
+
+            resources.ConsumeWork(2);
+            foreach (var _ in segments)
+            {
+                resources.ConsumeWork(3);
+            }
+        }
+
+        internal static BigInteger RawUnionArrayRootLogicalBytes(
+            StorageProjection prefix)
+        {
+            var pathLength = prefix.ProjectionPath.Segments.Length;
+            return pathLength == 0
+                ? new BigInteger(32)
+                : new BigInteger(48) + (16 * pathLength);
+        }
+
+        internal static BigInteger RawUnionArrayFactsLogicalBytes(
+            IReadOnlyDictionary<StorageProjection,
+                RawUnionArrayElementState> values)
+        {
+            ArgumentNullException.ThrowIfNull(values);
+            if (values.Count == 0)
+            {
+                return BigInteger.Zero;
+            }
+
+            using var enumerator = values.GetEnumerator();
+            if (!enumerator.MoveNext())
+            {
+                throw Invalid();
+            }
+
+            var firstState = enumerator.Current.Value ?? throw Invalid();
+            var resources = firstState.Resources;
+            ChargeRepeatRootListHeader(resources);
+            var bytes = new BigInteger(16);
+            do
+            {
+                var (prefix, state) = enumerator.Current;
+                if (state is null || !ReferenceEquals(state.Resources,
+                        resources))
+                {
+                    throw Invalid();
+                }
+
+                ChargeRepeatRoot(resources, prefix);
+                bytes += RawUnionArrayRootLogicalBytes(prefix)
+                    + state.LogicalBytes();
+            }
+            while (enumerator.MoveNext());
+
+            return bytes;
+        }
+
+        private BigInteger RawUnionArrayLogicalBytes()
+        {
+            if (_rawUnionArrayElementBytes.Count == 0)
+            {
+                return BigInteger.Zero;
+            }
+
+            ChargeRepeatRootListHeader();
+            var bytes = new BigInteger(16);
             foreach (var (key, state) in _rawUnionArrayElementBytes)
             {
-                result._rawUnionArrayElementBytes.Add(key, state.Clone());
+                ChargeRepeatRoot(key.ArrayPrefix);
+                var pathLength = key.ArrayPrefix.ProjectionPath.Segments.Length;
+                bytes += 32;
+                if (pathLength != 0)
+                {
+                    bytes += 16 + (16 * pathLength);
+                }
+                bytes += state.LogicalBytes();
             }
-            return result;
+            return bytes;
+        }
+
+        private void ChargeRepeatRootLookup(RawUnionArrayStateKey target)
+        {
+            if (_rawUnionArrayElementBytes.Count == 0)
+            {
+                RepeatResources.ConsumeWork();
+                return;
+            }
+
+            ChargeRepeatRootListHeader();
+            foreach (var (key, _) in _rawUnionArrayElementBytes)
+            {
+                ChargeRepeatRoot(key.ArrayPrefix);
+                RepeatResources.ConsumeWork();
+                if (key == target)
+                {
+                    return;
+                }
+            }
+            RepeatResources.ConsumeWork();
+        }
+
+        internal InitializationState Clone()
+            => Clone(_repeatSnapshotScope);
+
+        internal void SetRepeatSnapshotScope(
+            RepeatSnapshotReservationScope? snapshotScope)
+            => _repeatSnapshotScope = snapshotScope;
+
+        internal BigInteger GetRawUnionArrayStateBytes()
+            => RawUnionArrayLogicalBytes();
+
+        private void UpdateRepeatSnapshotStateLease()
+            => _repeatSnapshotScope?.UpdateState(this,
+                RawUnionArrayLogicalBytes());
+
+        internal InitializationState Clone(
+            RepeatSnapshotReservationScope? snapshotScope)
+        {
+            var repeatStateBytes = RawUnionArrayLogicalBytes();
+            using var repeatInputState
+                = snapshotScope?.TracksState(this) == true
+                    || _repeatSnapshotScope?.TracksState(this) == true
+                    ? null : RepeatResources.ReserveState(repeatStateBytes);
+            var repeatOutputState
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            var repeatOutputStateTransferred = false;
+            try
+            {
+                var clonedDependencies = Dependencies?.Clone();
+
+                var result = new InitializationState(Program, Length,
+                    _canBeFacts, _flowFacts, _completionShapeFacts,
+                    _completionFacts, _nativeOutputFlowFacts,
+                    HasNativeOutputContracts, HasDoesNotReturnFunctions,
+                    _fieldGenerationContext,
+                    new Dictionary<FieldGenerationKey, long>(
+                        _fieldPlaceGenerations),
+                    new Dictionary<NestedOwnerStateKey,
+                        NestedOwnerFieldState>(_nestedOwnerStates)) {
+                    StatementInputs = StatementInputs,
+                    StatementInputSnapshotScope
+                        = StatementInputSnapshotScope,
+                    Dependencies = clonedDependencies,
+                    NativePointerCaptureEffects
+                        = NativePointerCaptureEffects,
+                    RawUnionReturnCoverage = RawUnionReturnCoverage,
+                    RawUnionReturnCoverageSummaries
+                        = RawUnionReturnCoverageSummaries,
+                    RepeatResources = RepeatResources,
+                    ScopeActivation = ScopeActivation,
+                };
+                result._activeStorageScopes.AddRange(_activeStorageScopes);
+                Array.Copy(_possibilities, result._possibilities, Length);
+                Array.Copy(_possibleFieldMasks, result._possibleFieldMasks,
+                    Length);
+                Array.Copy(_nativeOutputDestinations,
+                    result._nativeOutputDestinations, Length);
+                Array.Copy(_nativeOutputResults,
+                    result._nativeOutputResults, Length);
+                result._nativeOutputStateCount = _nativeOutputStateCount;
+                foreach (var (variable, bytes)
+                    in _rawUnionInitializedBytes)
+                {
+                    result._rawUnionInitializedBytes.Add(variable,
+                        (byte[])bytes.Clone());
+                }
+                if (_rawUnionArrayElementBytes.Count != 0)
+                {
+                    ChargeRepeatRootListHeader();
+                    repeatOutputState.Add(16);
+                    foreach (var (key, state)
+                        in _rawUnionArrayElementBytes)
+                    {
+                        ChargeRepeatRoot(key.ArrayPrefix);
+                        repeatOutputState.Add(
+                            RawUnionArrayRootLogicalBytes(
+                                key.ArrayPrefix));
+                        var clonedState = state.CloneTo(
+                            repeatOutputState);
+                        result._rawUnionArrayElementBytes.Add(key,
+                            clonedState);
+                    }
+                }
+
+                if (snapshotScope is not null)
+                {
+                    snapshotScope.TrackState(result, repeatOutputState);
+                    repeatOutputStateTransferred = true;
+                }
+                return result;
+            }
+            finally
+            {
+                if (!repeatOutputStateTransferred)
+                {
+                    repeatOutputState.Dispose();
+                }
+            }
         }
 
         internal void CopyTo(InitializationState destination)
         {
+            if (!ReferenceEquals(RepeatResources, destination.RepeatResources))
+            {
+                throw Invalid();
+            }
+            var sourceRepeatBytes = RawUnionArrayLogicalBytes();
+            var destinationRepeatBytes
+                = destination.RawUnionArrayLogicalBytes();
+            using var repeatSourceState = RepeatResources.ReserveState(
+                sourceRepeatBytes);
+            using var repeatDestinationState = RepeatResources.ReserveState(
+                destinationRepeatBytes);
+            using var repeatOutputState = RepeatResources.ReserveState(
+                BigInteger.Zero);
+            if (_rawUnionArrayElementBytes.Count != 0)
+            {
+                ChargeRepeatRootListHeader();
+                repeatOutputState.Add(16);
+            }
+            var rawUnionArrayReplacement
+                = new SortedDictionary<RawUnionArrayStateKey,
+                    RawUnionArrayElementState>(
+                        RawUnionArrayStateKeyComparer.Instance);
+            if (_rawUnionArrayElementBytes.Count != 0)
+            {
+                foreach (var (key, state) in _rawUnionArrayElementBytes)
+                {
+                    ChargeRepeatRoot(key.ArrayPrefix);
+                    repeatOutputState.Add(
+                        RawUnionArrayRootLogicalBytes(key.ArrayPrefix));
+                    var clonedState = state.CloneTo(repeatOutputState);
+                    rawUnionArrayReplacement.Add(key, clonedState);
+                }
+            }
             Array.Copy(_possibilities, destination._possibilities, Length);
             Array.Copy(_possibleFieldMasks, destination._possibleFieldMasks, Length);
             Array.Copy(_nativeOutputDestinations, destination._nativeOutputDestinations, Length);
@@ -6359,11 +8047,8 @@ public static partial class SemanticVerifier
                 destination._rawUnionInitializedBytes.Add(variable,
                     (byte[])bytes.Clone());
             }
-            destination._rawUnionArrayElementBytes.Clear();
-            foreach (var (key, state) in _rawUnionArrayElementBytes)
-            {
-                destination._rawUnionArrayElementBytes.Add(key, state.Clone());
-            }
+            destination._rawUnionArrayElementBytes = rawUnionArrayReplacement;
+            destination.UpdateRepeatSnapshotStateLease();
             destination._nativeOutputStateCount = _nativeOutputStateCount;
             destination.ScopeActivation = ScopeActivation;
             destination._activeStorageScopes.Clear();
@@ -6476,13 +8161,41 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
-            foreach (var key in _rawUnionArrayElementBytes.Keys
-                .Where(key => key.Variable == variable
-                    && prefix.ProjectionPath.IsPrefixOf(
-                        key.ArrayPrefix.ProjectionPath)).ToArray())
+
+            var inputBytes = RawUnionArrayLogicalBytes();
+            using var inputState
+                = RepeatResources.ReserveState(inputBytes);
+            using var outputState
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            var retained = new SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>(
+                    RawUnionArrayStateKeyComparer.Instance);
+            var outputHeaderWritten = false;
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
             {
-                _ = _rawUnionArrayElementBytes.Remove(key);
+                ChargeRepeatRoot(key.ArrayPrefix);
+                if (key.Variable != variable
+                    || !prefix.ProjectionPath.IsPrefixOf(
+                        key.ArrayPrefix.ProjectionPath))
+                {
+                    if (!outputHeaderWritten)
+                    {
+                        ChargeRepeatRootListHeader();
+                        outputState.Add(16);
+                        outputHeaderWritten = true;
+                    }
+                    ChargeRepeatRoot(key.ArrayPrefix);
+                    outputState.Add(RawUnionArrayRootLogicalBytes(
+                        key.ArrayPrefix));
+                    retained.Add(key, state.CloneTo(outputState));
+                }
+                else
+                {
+                    RepeatResources.ConsumeWork();
+                }
             }
+            _rawUnionArrayElementBytes = retained;
+            UpdateRepeatSnapshotStateLease();
         }
 
         internal bool CopyRawUnionArrayFacts(int destination,
@@ -6506,45 +8219,394 @@ public static partial class SemanticVerifier
                 return false;
             }
 
-            var prior = _rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == destination
-                    && destinationPrefix.ProjectionPath.IsPrefixOf(
-                        pair.Key.ArrayPrefix.ProjectionPath))
-                .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                    static pair => pair.Value.Clone());
-            var incoming = _rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == source
-                    && sourcePrefix.ProjectionPath.IsPrefixOf(
-                        pair.Key.ArrayPrefix.ProjectionPath))
-                .Select(pair => (
-                    Prefix: StorageProjection.Rebase(
-                        destinationPrefix, sourcePrefix,
-                        pair.Key.ArrayPrefix),
-                    State: pair.Value.Clone()))
-                .ToArray();
-            if (incoming.Any(static item =>
-                    item.Prefix.Kind == StorageProjectionKind.UnknownElement))
+            var inputBytes = RawUnionArrayLogicalBytes();
+            using var repeatInputState
+                = RepeatResources.ReserveState(inputBytes);
+            using var repeatOutputState
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            var replacement = new SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>(
+                    RawUnionArrayStateKeyComparer.Instance);
+            var outputHeaderWritten = false;
+
+            var leftEnumerator = _rawUnionArrayElementBytes.GetEnumerator();
+            var rightEnumerator = _rawUnionArrayElementBytes.GetEnumerator();
+            var hasLeft = false;
+            var hasRight = false;
+            var leftKey = default(RawUnionArrayStateKey);
+            var rightKey = default(RawUnionArrayStateKey);
+            RawUnionArrayElementState? leftState = null;
+            RawUnionArrayElementState? rightState = null;
+
+            void AdvanceLeft()
             {
-                throw Invalid();
+                hasLeft = false;
+                leftState = null;
+                while (true)
+                {
+                    if (!leftEnumerator.MoveNext())
+                    {
+                        RepeatResources.ConsumeWork();
+                        return;
+                    }
+
+                    RepeatResources.ConsumeWork();
+                    var candidateKey = leftEnumerator.Current.Key;
+                    ChargeRepeatRoot(candidateKey.ArrayPrefix);
+                    RepeatResources.ConsumeWork(2);
+                    if (candidateKey.Variable == destination
+                        && destinationPrefix.ProjectionPath.IsPrefixOf(
+                            candidateKey.ArrayPrefix.ProjectionPath))
+                    {
+                        continue;
+                    }
+
+                    leftKey = candidateKey;
+                    leftState = leftEnumerator.Current.Value;
+                    hasLeft = true;
+                    return;
+                }
             }
 
-            ClearRawUnionArrayFacts(destination, destinationPrefix);
-            foreach (var (prefix, state) in incoming)
+            void AdvanceRight()
             {
-                if (!_rawUnionArrayElementBytes.TryAdd(
-                        new RawUnionArrayStateKey(destination, prefix),
-                        state))
+                hasRight = false;
+                rightState = null;
+                while (true)
+                {
+                    if (!rightEnumerator.MoveNext())
+                    {
+                        RepeatResources.ConsumeWork();
+                        return;
+                    }
+
+                    RepeatResources.ConsumeWork();
+                    var candidateKey = rightEnumerator.Current.Key;
+                    ChargeRepeatRoot(candidateKey.ArrayPrefix);
+                    RepeatResources.ConsumeWork(2);
+                    if (candidateKey.Variable != source
+                        || !sourcePrefix.ProjectionPath.IsPrefixOf(
+                            candidateKey.ArrayPrefix.ProjectionPath))
+                    {
+                        continue;
+                    }
+
+                    var prefix = StorageProjection.Rebase(
+                        destinationPrefix, sourcePrefix,
+                        candidateKey.ArrayPrefix);
+                    if (prefix.Kind
+                        == StorageProjectionKind.UnknownElement)
+                    {
+                        throw Invalid();
+                    }
+                    rightKey = new RawUnionArrayStateKey(destination, prefix);
+                    rightState = rightEnumerator.Current.Value;
+                    hasRight = true;
+                    return;
+                }
+            }
+
+            void AppendOutput(RawUnionArrayStateKey key,
+                RawUnionArrayElementState state)
+            {
+                if (!outputHeaderWritten)
+                {
+                    ChargeRepeatRootListHeader();
+                    repeatOutputState.Add(16);
+                    outputHeaderWritten = true;
+                }
+                ChargeRepeatRoot(key.ArrayPrefix);
+                repeatOutputState.Add(RawUnionArrayRootLogicalBytes(
+                    key.ArrayPrefix));
+                var output = state.CloneTo(repeatOutputState);
+                if (!replacement.TryAdd(key, output))
                 {
                     throw Invalid();
                 }
             }
-            return !RawUnionArrayStatesEqual(prior,
-                _rawUnionArrayElementBytes
-                    .Where(pair => pair.Key.Variable == destination
+
+            AdvanceLeft();
+            AdvanceRight();
+            while (hasLeft || hasRight)
+            {
+                var comparison = 0;
+                if (hasLeft && hasRight)
+                {
+                    RepeatResources.ConsumeWork();
+                    comparison = RawUnionArrayStateKeyComparer.Instance
+                        .Compare(leftKey, rightKey);
+                    if (comparison == 0)
+                    {
+                        throw Invalid();
+                    }
+                }
+
+                if (!hasRight || (hasLeft && comparison < 0))
+                {
+                    AppendOutput(leftKey, leftState ?? throw Invalid());
+                    AdvanceLeft();
+                }
+                else
+                {
+                    AppendOutput(rightKey, rightState ?? throw Invalid());
+                    AdvanceRight();
+                }
+            }
+            var changed = !RawUnionArrayFactPrefixEquals(
+                _rawUnionArrayElementBytes, replacement, destination,
+                destinationPrefix);
+            _rawUnionArrayElementBytes = replacement;
+            UpdateRepeatSnapshotStateLease();
+            return changed;
+        }
+
+        internal SortedDictionary<StorageProjection,
+            RawUnionArrayElementState> SnapshotRawUnionArrayFacts(
+            int variable, StorageProjection prefix,
+            ref int remaining, int depth,
+            out RepeatResourceLedger.StateLease? outputState)
+        {
+            outputState = null;
+            Count(ref remaining, depth);
+            if ((uint)variable >= (uint)Length)
+            {
+                throw Invalid();
+            }
+
+            using var inputState = RepeatResources.ReserveState(
+                RawUnionArrayLogicalBytes());
+            var snapshotState = RepeatResources.ReserveState(
+                BigInteger.Zero);
+            var snapshotStateTransferred = false;
+            try
+            {
+                var result = new SortedDictionary<StorageProjection,
+                    RawUnionArrayElementState>(
+                        StorageProjectionComparer.Instance);
+                var outputHeaderWritten = false;
+                foreach (var (key, state) in _rawUnionArrayElementBytes)
+                {
+                    Count(ref remaining, depth + 1);
+                    ChargeRepeatRoot(key.ArrayPrefix);
+                    RepeatResources.ConsumeWork();
+                    if (key.Variable != variable
+                        || !prefix.ProjectionPath.IsPrefixOf(
+                            key.ArrayPrefix.ProjectionPath))
+                    {
+                        continue;
+                    }
+
+                    var relativePrefix = StorageProjection.Rebase(
+                        StorageProjection.WholeObject, prefix,
+                        key.ArrayPrefix);
+                    if (relativePrefix.Kind
+                        == StorageProjectionKind.UnknownElement)
+                    {
+                        throw Invalid();
+                    }
+                    var rootBytes
+                        = RawUnionArrayRootLogicalBytes(relativePrefix);
+                    if (!outputHeaderWritten)
+                    {
+                        ChargeRepeatRootListHeader();
+                        snapshotState.Add(16);
+                        outputHeaderWritten = true;
+                    }
+                    ChargeRepeatRoot(relativePrefix);
+                    snapshotState.Add(rootBytes);
+                    var snapshot = state.CloneTo(snapshotState);
+                    if (!result.TryAdd(relativePrefix, snapshot))
+                    {
+                        throw Invalid();
+                    }
+                }
+
+                if (result.Count == 0)
+                {
+                    return result;
+                }
+
+                outputState = snapshotState;
+                snapshotStateTransferred = true;
+                return result;
+            }
+            finally
+            {
+                if (!snapshotStateTransferred)
+                {
+                    snapshotState.Dispose();
+                }
+            }
+        }
+
+        private bool TryGetNextRawUnionArraySnapshot(
+            ref SortedDictionary<StorageProjection,
+                RawUnionArrayElementState>.Enumerator snapshots,
+            ref int remaining, int depth, int variable,
+            StorageProjection destinationPrefix,
+            RepeatResourceLedger.StateLease snapshotInputs,
+            out RawUnionArrayStateKey key,
+            out RawUnionArrayElementState state)
+        {
+            if (!snapshots.MoveNext())
+            {
+                RepeatResources.ConsumeWork();
+                key = default;
+                state = null!;
+                return false;
+            }
+
+            RepeatResources.ConsumeWork();
+            Count(ref remaining, depth + 1);
+            var relativePrefix = snapshots.Current.Key;
+            state = snapshots.Current.Value;
+            if (state is null
+                || !NativeFixedArrayContract.MatchesLayout(state.Layout,
+                    Program)
+                || !CarriesRawUnionPayloadFacts(
+                    Program, state.Layout.ElementType))
+            {
+                throw Invalid();
+            }
+
+            ChargeRepeatRoot(relativePrefix);
+            var arrayPrefix = StorageProjection.Rebase(
+                destinationPrefix, StorageProjection.WholeObject,
+                relativePrefix);
+            if (arrayPrefix.Kind == StorageProjectionKind.UnknownElement)
+            {
+                throw Invalid();
+            }
+
+            key = new RawUnionArrayStateKey(variable, arrayPrefix);
+            snapshotInputs.Add(RawUnionArrayRootLogicalBytes(relativePrefix)
+                + state.LogicalBytes());
+            return true;
+        }
+
+        internal bool SetRawUnionArrayFacts(int variable,
+            StorageProjection destinationPrefix,
+            SortedDictionary<StorageProjection,
+                RawUnionArrayElementState> snapshots,
+            ref int remaining, int depth)
+        {
+            Count(ref remaining, depth);
+            if ((uint)variable >= (uint)Length || snapshots is null)
+            {
+                throw Invalid();
+            }
+
+            var inputBytes = RawUnionArrayLogicalBytes();
+            using var inputState
+                = RepeatResources.ReserveState(inputBytes);
+            using var snapshotInputs
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            if (snapshots.Count != 0)
+            {
+                ChargeRepeatRootListHeader();
+                snapshotInputs.Add(16);
+            }
+            using var outputState
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            var replacement = new SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>(
+                    RawUnionArrayStateKeyComparer.Instance);
+            var outputHeaderWritten = false;
+            var leftEnumerator = _rawUnionArrayElementBytes.GetEnumerator();
+            var rightEnumerator = snapshots.GetEnumerator();
+            var hasLeft = false;
+            var leftKey = default(RawUnionArrayStateKey);
+            RawUnionArrayElementState? leftState = null;
+
+            void AdvanceLeft()
+            {
+                hasLeft = false;
+                leftState = null;
+                while (true)
+                {
+                    if (!leftEnumerator.MoveNext())
+                    {
+                        RepeatResources.ConsumeWork();
+                        return;
+                    }
+
+                    RepeatResources.ConsumeWork();
+                    var candidateKey = leftEnumerator.Current.Key;
+                    ChargeRepeatRoot(candidateKey.ArrayPrefix);
+                    RepeatResources.ConsumeWork(2);
+                    if (candidateKey.Variable == variable
                         && destinationPrefix.ProjectionPath.IsPrefixOf(
-                            pair.Key.ArrayPrefix.ProjectionPath))
-                    .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                        static pair => pair.Value.Clone()));
+                            candidateKey.ArrayPrefix.ProjectionPath))
+                    {
+                        continue;
+                    }
+
+                    leftKey = candidateKey;
+                    leftState = leftEnumerator.Current.Value;
+                    hasLeft = true;
+                    return;
+                }
+            }
+
+            void AppendOutput(RawUnionArrayStateKey key,
+                RawUnionArrayElementState state)
+            {
+                if (!outputHeaderWritten)
+                {
+                    ChargeRepeatRootListHeader();
+                    outputState.Add(16);
+                    outputHeaderWritten = true;
+                }
+
+                ChargeRepeatRoot(key.ArrayPrefix);
+                outputState.Add(RawUnionArrayRootLogicalBytes(
+                    key.ArrayPrefix));
+                var output = state.CloneTo(outputState);
+                if (!replacement.TryAdd(key, output))
+                {
+                    throw Invalid();
+                }
+            }
+
+            AdvanceLeft();
+            var hasRight = TryGetNextRawUnionArraySnapshot(ref rightEnumerator,
+                ref remaining, depth, variable, destinationPrefix,
+                snapshotInputs, out var rightKey, out var rightState);
+            while (hasLeft || hasRight)
+            {
+                var comparison = 0;
+                if (hasLeft && hasRight)
+                {
+                    RepeatResources.ConsumeWork();
+                    comparison = RawUnionArrayStateKeyComparer.Instance
+                        .Compare(leftKey, rightKey);
+                    if (comparison == 0)
+                    {
+                        throw Invalid();
+                    }
+                }
+
+                if (!hasRight || (hasLeft && comparison < 0))
+                {
+                    AppendOutput(leftKey, leftState ?? throw Invalid());
+                    AdvanceLeft();
+                }
+                else
+                {
+                    AppendOutput(rightKey, rightState ?? throw Invalid());
+                    hasRight = TryGetNextRawUnionArraySnapshot(
+                        ref rightEnumerator, ref remaining, depth, variable,
+                        destinationPrefix, snapshotInputs, out rightKey,
+                        out rightState);
+                }
+            }
+
+            var changed = !RawUnionArrayFactPrefixEquals(
+                _rawUnionArrayElementBytes, replacement, variable,
+                destinationPrefix);
+            _rawUnionArrayElementBytes = replacement;
+            UpdateRepeatSnapshotStateLease();
+            return changed;
         }
 
         internal void SetRawUnionArrayElementBytes(int variable,
@@ -6567,57 +8629,623 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
 
+            var key = new RawUnionArrayStateKey(variable, arrayPrefix);
+            ChargeRepeatRootLookup(key);
+            var hasExactState = _rawUnionArrayElementBytes.TryGetValue(
+                key, out var currentState);
             if (arrayPrefix.Kind == StorageProjectionKind.WholeObject
-                || arrayPrefix.ProjectionPath.IsConcrete)
+                || arrayPrefix.ProjectionPath.IsConcrete
+                || hasExactState)
             {
-                var key = new RawUnionArrayStateKey(variable, arrayPrefix);
-                if (!_rawUnionArrayElementBytes.TryGetValue(key,
-                        out var state))
+                if (hasExactState && elementIndex is ulong exactIndex)
                 {
-                    state = new RawUnionArrayElementState(layout,
-                        defaultBytes);
-                    _rawUnionArrayElementBytes.Add(key, state);
-                }
-                else if (state.Layout != layout)
-                {
-                    throw Invalid();
+                    var existingState = currentState ?? throw Invalid();
+                    if (existingState.Layout != layout)
+                    {
+                        throw Invalid();
+                    }
+                    _ = ReplaceRawUnionArrayElementState(key,
+                        existingState, exactIndex, initializedBytes);
+                    return;
                 }
 
-                if (elementIndex is ulong index)
+                RawUnionArrayElementState? templateState = null;
+                var hasTemplateState = !hasExactState
+                    && TryGetRawUnionArrayTemplateState(variable,
+                        arrayPrefix, layout, out templateState);
+                if (!hasExactState && elementIndex is ulong selectedIndex)
                 {
-                    _ = state.Set(index, initializedBytes);
+                    _ = InsertRawUnionArrayElementState(key, layout,
+                        defaultBytes, selectedIndex, initializedBytes,
+                        hasTemplateState
+                            ? templateState ?? throw Invalid() : null);
+                    return;
+                }
+
+                RawUnionArrayElementState stagedState;
+                if (hasExactState)
+                {
+                    var existingState = currentState ?? throw Invalid();
+                    if (existingState.Layout != layout)
+                    {
+                        throw Invalid();
+                    }
+                    stagedState = existingState.Clone();
+                }
+                else if (hasTemplateState)
+                {
+                    stagedState = templateState ?? throw Invalid();
                 }
                 else
                 {
-                    _ = state.ApplyUnknownIndexWrite(initializedBytes);
+                    stagedState = new RawUnionArrayElementState(layout,
+                        defaultBytes, RepeatResources);
                 }
-                return;
-            }
 
-            foreach (var (key, state) in _rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == variable
-                    && arrayPrefix.ProjectionPath.IsPrefixOf(
-                        pair.Key.ArrayPrefix.ProjectionPath)).ToArray())
-            {
-                if (state.Layout != layout)
+                if (stagedState.Layout != layout)
                 {
                     throw Invalid();
                 }
-                if (elementIndex is ulong index)
+
+                var changed = elementIndex is ulong index
+                    ? stagedState.Set(index, initializedBytes)
+                    : stagedState.ApplyUnknownIndexWrite(initializedBytes);
+                if (!changed)
                 {
-                    var mergedBytes = state.Get(index);
+                    return;
+                }
+
+                ChargeRepeatRootListHeaderForFirstEntry();
+                var replacement = CopyRawUnionArrayStateMap();
+                replacement[key] = stagedState;
+                _rawUnionArrayElementBytes = replacement;
+                UpdateRepeatSnapshotStateLease();
+                return;
+            }
+
+            var updated = CopyRawUnionArrayStateMap();
+            var changedAny = false;
+            foreach (var (matchedKey, matchedState) in
+                _rawUnionArrayElementBytes)
+            {
+                if (matchedKey.Variable != variable
+                    || !arrayPrefix.ProjectionPath.IsPrefixOf(
+                        matchedKey.ArrayPrefix.ProjectionPath))
+                {
+                    continue;
+                }
+                if (matchedState.Layout != layout)
+                {
+                    throw Invalid();
+                }
+                var stagedState = matchedState.Clone();
+                var changed = false;
+                if (elementIndex is ulong selectedIndex)
+                {
+                    var mergedBytes = stagedState.Get(selectedIndex);
                     for (var byteIndex = 0;
                         byteIndex < mergedBytes.Length;
                         byteIndex++)
                     {
                         mergedBytes[byteIndex] &= initializedBytes[byteIndex];
                     }
-                    _ = state.Set(index, mergedBytes);
+                    changed = stagedState.Set(selectedIndex, mergedBytes);
                 }
                 else
                 {
-                    _ = state.ApplyUnknownIndexWrite(initializedBytes);
+                    changed = stagedState.ApplyUnknownIndexWrite(
+                        initializedBytes);
                 }
+                if (changed)
+                {
+                    updated[matchedKey] = stagedState;
+                    changedAny = true;
+                }
+            }
+            if (changedAny)
+            {
+                _rawUnionArrayElementBytes = updated;
+                UpdateRepeatSnapshotStateLease();
+            }
+        }
+
+        private SortedDictionary<RawUnionArrayStateKey,
+            RawUnionArrayElementState> CopyRawUnionArrayStateMap()
+        {
+            var result = new SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>(
+                    RawUnionArrayStateKeyComparer.Instance);
+            if (_rawUnionArrayElementBytes.Count != 0)
+            {
+                ChargeRepeatRootListHeader();
+                ChargeRepeatRootListHeader();
+            }
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            {
+                ChargeRepeatRoot(key.ArrayPrefix);
+                ChargeRepeatRoot(key.ArrayPrefix);
+                result.Add(key, state);
+            }
+            return result;
+        }
+
+        private bool ReplaceRawUnionArrayElementState(
+            RawUnionArrayStateKey target,
+            RawUnionArrayElementState existingState, ulong index,
+            ReadOnlySpan<byte> bytes)
+        {
+            if (!existingState.TryGetSetPlan(index, bytes,
+                out var position, out var hasIndex, out var removesEntry))
+            {
+                return false;
+            }
+
+            var inputBytes = RawUnionArrayLogicalBytes();
+            using var inputState
+                = RepeatResources.ReserveState(inputBytes);
+            using var outputState
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>? replacement = null;
+            var targetWritten = false;
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            {
+                ChargeRepeatRoot(key.ArrayPrefix);
+                var isTarget = key.Equals(target);
+                RepeatResources.ConsumeWork();
+                if (replacement is null)
+                {
+                    ChargeRepeatRootListHeader();
+                    outputState.Add(16);
+                    replacement = new SortedDictionary<
+                        RawUnionArrayStateKey,
+                        RawUnionArrayElementState>(
+                            RawUnionArrayStateKeyComparer.Instance);
+                }
+
+                outputState.Add(RawUnionArrayRootLogicalBytes(
+                    key.ArrayPrefix));
+                var output = isTarget
+                    ? existingState.CreateSet(index, bytes, position,
+                        hasIndex, removesEntry, outputState)
+                    : state.CloneTo(outputState);
+                targetWritten |= isTarget;
+                replacement.Add(key, output);
+            }
+
+            if (replacement is null || !targetWritten)
+            {
+                throw Invalid();
+            }
+            _rawUnionArrayElementBytes = replacement;
+            UpdateRepeatSnapshotStateLease();
+            return true;
+        }
+
+        private void EnsureRawUnionArrayRootOutputList(
+            ref SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>? roots,
+            ref bool headerWritten,
+            RepeatResourceLedger.StateLease outputState)
+        {
+            if (headerWritten)
+            {
+                return;
+            }
+
+            ChargeRepeatRootListHeader();
+            outputState.Add(16);
+            roots = new SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>(
+                    RawUnionArrayStateKeyComparer.Instance);
+            headerWritten = true;
+        }
+
+        private void AppendRawUnionArrayRootClone(
+            ref SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>? roots,
+            ref bool headerWritten,
+            RawUnionArrayStateKey key,
+            RawUnionArrayElementState state,
+            RepeatResourceLedger.StateLease outputState)
+        {
+            EnsureRawUnionArrayRootOutputList(ref roots,
+                ref headerWritten, outputState);
+            ChargeRepeatRoot(key.ArrayPrefix);
+            outputState.Add(RawUnionArrayRootLogicalBytes(
+                key.ArrayPrefix));
+            var clonedState = state.CloneTo(outputState);
+            (roots ?? throw Invalid()).Add(key, clonedState);
+        }
+
+        private void AppendRawUnionArrayTemplateRoot(
+            ref SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>? roots,
+            ref bool headerWritten,
+            RawUnionArrayStateKey key,
+            BoundNativeFixedArrayLayout layout,
+            byte[] defaultBytes, ReadOnlySpan<byte> templateBytes,
+            RepeatResourceLedger.StateLease outputState)
+        {
+            EnsureRawUnionArrayRootOutputList(ref roots,
+                ref headerWritten, outputState);
+            ChargeRepeatRoot(key.ArrayPrefix);
+            outputState.Add(RawUnionArrayRootLogicalBytes(
+                key.ArrayPrefix));
+            RepeatResources.ConsumeWork(8);
+            outputState.Add(new BigInteger(56) + templateBytes.Length);
+            var state = new RawUnionArrayElementState(layout,
+                defaultBytes, templateBytes, RepeatResources,
+                constructionWorkCharged: true);
+            (roots ?? throw Invalid()).Add(key, state);
+        }
+
+        private void AppendRawUnionArrayElementRoot(
+            ref SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>? roots,
+            ref bool headerWritten,
+            RawUnionArrayStateKey key,
+            BoundNativeFixedArrayLayout layout, byte[] defaultBytes,
+            ulong index, ReadOnlySpan<byte> bytes,
+            RawUnionArrayElementState? inheritedState, int position,
+            bool hasIndex, bool removesEntry,
+            RepeatResourceLedger.StateLease outputState)
+        {
+            EnsureRawUnionArrayRootOutputList(ref roots,
+                ref headerWritten, outputState);
+            ChargeRepeatRoot(key.ArrayPrefix);
+            outputState.Add(RawUnionArrayRootLogicalBytes(
+                key.ArrayPrefix));
+            var state = inheritedState is null
+                ? RawUnionArrayElementState.CreateInitializedSet(
+                    layout, defaultBytes, index, bytes, RepeatResources,
+                    outputState)
+                : inheritedState.CreateSet(index, bytes, position,
+                    hasIndex, removesEntry, outputState);
+            (roots ?? throw Invalid()).Add(key, state);
+        }
+
+        private bool InsertRawUnionArrayElementState(
+            RawUnionArrayStateKey target,
+            BoundNativeFixedArrayLayout layout, byte[] defaultBytes,
+            ulong index, ReadOnlySpan<byte> bytes,
+            RawUnionArrayElementState? inheritedState = null)
+        {
+            var position = 0;
+            var hasIndex = false;
+            var removesEntry = false;
+            if (inheritedState is null)
+            {
+                if (PayloadBytesEqual(defaultBytes, bytes))
+                {
+                    return false;
+                }
+            }
+            else if (!inheritedState.TryGetSetPlan(index, bytes,
+                out position, out hasIndex, out removesEntry))
+            {
+                return false;
+            }
+
+            var inputBytes = RawUnionArrayLogicalBytes();
+            using var inputState
+                = RepeatResources.ReserveState(inputBytes);
+            using var inheritedInputState = inheritedState is null
+                ? null
+                : RepeatResources.ReserveState(
+                    inheritedState.LogicalBytes());
+            using var outputState
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>? replacement = null;
+            var headerWritten = false;
+            var targetWritten = false;
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            {
+                RepeatResources.ConsumeWork();
+                var comparison = RawUnionArrayStateKeyComparer.Instance
+                    .Compare(key, target);
+                if (comparison == 0)
+                {
+                    throw Invalid();
+                }
+                if (comparison > 0 && !targetWritten)
+                {
+                    AppendRawUnionArrayElementRoot(ref replacement,
+                        ref headerWritten, target, layout, defaultBytes,
+                        index, bytes, inheritedState, position, hasIndex,
+                        removesEntry, outputState);
+                    targetWritten = true;
+                }
+                AppendRawUnionArrayRootClone(ref replacement,
+                    ref headerWritten, key, state, outputState);
+            }
+
+            if (!targetWritten)
+            {
+                AppendRawUnionArrayElementRoot(ref replacement,
+                    ref headerWritten, target, layout, defaultBytes,
+                    index, bytes, inheritedState, position, hasIndex,
+                    removesEntry, outputState);
+            }
+            _rawUnionArrayElementBytes = replacement ?? throw Invalid();
+            UpdateRepeatSnapshotStateLease();
+            return true;
+        }
+
+        private bool PayloadBytesEqual(
+            ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+        {
+            if (left.Length != right.Length)
+            {
+                throw Invalid();
+            }
+            for (var index = 0; index < left.Length; index++)
+            {
+                RepeatResources.ConsumeWork(5);
+                if (left[index] != right[index])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        internal void SetRawUnionArrayTemplateBytes(int variable,
+            StorageProjection arrayPrefix,
+            BoundNativeFixedArrayLayout layout,
+            ReadOnlySpan<byte> initializedBytes)
+        {
+            if ((uint)variable >= (uint)Length
+                || !NativeFixedArrayContract.MatchesLayout(layout, Program)
+                || !CarriesRawUnionPayloadFacts(Program,
+                    layout.ElementType))
+            {
+                throw Invalid();
+            }
+
+            var defaultBytes = GuaranteedInitializedPayloadBytes(
+                layout.ElementType, Program);
+            if (initializedBytes.Length != defaultBytes.Length)
+            {
+                throw Invalid();
+            }
+
+            var key = new RawUnionArrayStateKey(variable, arrayPrefix);
+            ChargeRepeatRootLookup(key);
+            var hasState = _rawUnionArrayElementBytes.TryGetValue(key,
+                out var currentState);
+            if (hasState)
+            {
+                var existingState = currentState ?? throw Invalid();
+                if (existingState.Layout != layout)
+                {
+                    throw Invalid();
+                }
+                if (!existingState.HasTemplateChange(initializedBytes))
+                {
+                    return;
+                }
+
+                var inputMapBytes = RawUnionArrayLogicalBytes();
+                using var repeatInputState
+                    = RepeatResources.ReserveState(inputMapBytes);
+                using var repeatOutputState
+                    = RepeatResources.ReserveState(BigInteger.Zero);
+                SortedDictionary<RawUnionArrayStateKey,
+                    RawUnionArrayElementState>? replacement = null;
+                var headerWritten = false;
+                var targetWritten = false;
+                foreach (var (candidateKey, state) in
+                    _rawUnionArrayElementBytes)
+                {
+                    ChargeRepeatRoot(candidateKey.ArrayPrefix);
+                    var isTarget = candidateKey.Equals(key);
+                    RepeatResources.ConsumeWork();
+                    EnsureRawUnionArrayRootOutputList(ref replacement,
+                        ref headerWritten, repeatOutputState);
+                    repeatOutputState.Add(RawUnionArrayRootLogicalBytes(
+                        candidateKey.ArrayPrefix));
+                    var output = isTarget
+                        ? existingState.CreateSetTemplate(initializedBytes,
+                            repeatOutputState)
+                        : state.CloneTo(repeatOutputState);
+                    replacement!.Add(candidateKey, output);
+                    targetWritten |= isTarget;
+                }
+
+                if (replacement is null || !targetWritten)
+                {
+                    throw Invalid();
+                }
+                _rawUnionArrayElementBytes = replacement;
+                UpdateRepeatSnapshotStateLease();
+                return;
+            }
+
+            if (!PayloadBytesEqual(defaultBytes, initializedBytes))
+            {
+                var inputMapBytes = RawUnionArrayLogicalBytes();
+                using var repeatInputState
+                    = RepeatResources.ReserveState(inputMapBytes);
+                using var repeatOutputState
+                    = RepeatResources.ReserveState(BigInteger.Zero);
+                SortedDictionary<RawUnionArrayStateKey,
+                    RawUnionArrayElementState>? replacement = null;
+                var headerWritten = false;
+                var targetWritten = false;
+                foreach (var (candidateKey, state) in
+                    _rawUnionArrayElementBytes)
+                {
+                    RepeatResources.ConsumeWork();
+                    var comparison = RawUnionArrayStateKeyComparer.Instance
+                        .Compare(candidateKey, key);
+                    if (comparison == 0)
+                    {
+                        throw Invalid();
+                    }
+                    if (comparison > 0 && !targetWritten)
+                    {
+                        AppendRawUnionArrayTemplateRoot(ref replacement,
+                            ref headerWritten, key, layout, defaultBytes,
+                            initializedBytes, repeatOutputState);
+                        targetWritten = true;
+                    }
+
+                    AppendRawUnionArrayRootClone(ref replacement,
+                        ref headerWritten, candidateKey, state,
+                        repeatOutputState);
+                }
+
+                if (!targetWritten)
+                {
+                    AppendRawUnionArrayTemplateRoot(ref replacement,
+                        ref headerWritten, key, layout, defaultBytes,
+                        initializedBytes, repeatOutputState);
+                }
+                _rawUnionArrayElementBytes = replacement ?? throw Invalid();
+                UpdateRepeatSnapshotStateLease();
+                return;
+            }
+        }
+
+        internal void WriteRawUnionArrayElementByteRange(int variable,
+            StorageProjection arrayPrefix,
+            BoundNativeFixedArrayLayout layout, ulong? elementIndex,
+            int offset, ReadOnlySpan<byte> initializedBytes)
+        {
+            if ((uint)variable >= (uint)Length
+                || !NativeFixedArrayContract.MatchesLayout(layout, Program)
+                || !CarriesRawUnionPayloadFacts(Program,
+                    layout.ElementType))
+            {
+                throw Invalid();
+            }
+
+            var defaultBytes = GuaranteedInitializedPayloadBytes(
+                layout.ElementType, Program);
+            if (offset < 0 || offset > defaultBytes.Length
+                || initializedBytes.Length > defaultBytes.Length - offset)
+            {
+                throw Invalid();
+            }
+
+            var key = new RawUnionArrayStateKey(variable, arrayPrefix);
+            ChargeRepeatRootLookup(key);
+            var locationIsExact
+                = arrayPrefix.Kind == StorageProjectionKind.WholeObject
+                    || arrayPrefix.ProjectionPath.IsConcrete
+                    || arrayPrefix.ProjectionPath.ExpectedMatchCount == 1;
+            var hasState = _rawUnionArrayElementBytes.TryGetValue(key,
+                out var currentState);
+            if (hasState && elementIndex is ulong exactIndex
+                && locationIsExact)
+            {
+                var existingState = currentState ?? throw Invalid();
+                if (existingState.Layout != layout)
+                {
+                    throw Invalid();
+                }
+
+                using var rangeScratch
+                    = RepeatResources.ReserveState(
+                        new BigInteger(defaultBytes.Length));
+                var elementBytes = existingState.Get(exactIndex);
+                for (var byteIndex = 0;
+                    byteIndex < initializedBytes.Length;
+                    byteIndex++)
+                {
+                    RepeatResources.ConsumeWork(4);
+                    elementBytes[offset + byteIndex]
+                        = initializedBytes[byteIndex];
+                }
+                _ = ReplaceRawUnionArrayElementState(key, existingState,
+                    exactIndex, elementBytes);
+                return;
+            }
+
+            if (!hasState && !locationIsExact)
+            {
+                var replacement = CopyRawUnionArrayStateMap();
+                var changedAny = false;
+                var matchedAny = false;
+                foreach (var (matchedKey, matchedState) in
+                    _rawUnionArrayElementBytes)
+                {
+                    if (matchedKey.Variable != variable
+                        || !arrayPrefix.ProjectionPath.IsPrefixOf(
+                            matchedKey.ArrayPrefix.ProjectionPath))
+                    {
+                        continue;
+                    }
+                    matchedAny = true;
+                    if (matchedState.Layout != layout)
+                    {
+                        throw Invalid();
+                    }
+
+                    var stagedState = matchedState.Clone();
+                    var changed = elementIndex is ulong selectedIndex
+                        ? stagedState.ApplyPossibleExactRangeWrite(
+                            selectedIndex, offset, initializedBytes)
+                        : stagedState.ApplyPossibleUnknownRangeWrite(
+                            offset, initializedBytes);
+                    if (changed)
+                    {
+                        replacement[matchedKey] = stagedState;
+                        changedAny = true;
+                    }
+                }
+                if (changedAny)
+                {
+                    _rawUnionArrayElementBytes = replacement;
+                    UpdateRepeatSnapshotStateLease();
+                    return;
+                }
+                if (matchedAny)
+                {
+                    return;
+                }
+            }
+
+            RawUnionArrayElementState state;
+            if (hasState)
+            {
+                var existingState = currentState ?? throw Invalid();
+                if (existingState.Layout != layout)
+                {
+                    throw Invalid();
+                }
+                state = existingState.Clone();
+            }
+            else if (TryGetRawUnionArrayTemplateState(variable,
+                arrayPrefix, layout, out var templateState))
+            {
+                state = templateState;
+            }
+            else
+            {
+                state = new RawUnionArrayElementState(layout, defaultBytes,
+                    RepeatResources);
+            }
+
+            var stateChanged = elementIndex is ulong index
+                ? locationIsExact
+                    ? state.WriteRange(index, offset, initializedBytes)
+                    : state.ApplyPossibleExactRangeWrite(index, offset,
+                        initializedBytes)
+                : locationIsExact
+                    ? state.ApplyUnknownRangeWrite(
+                        offset, initializedBytes)
+                    : state.ApplyPossibleUnknownRangeWrite(
+                        offset, initializedBytes);
+            if (stateChanged)
+            {
+                ChargeRepeatRootListHeaderForFirstEntry();
+                var replacement = CopyRawUnionArrayStateMap();
+                replacement[key] = state;
+                _rawUnionArrayElementBytes = replacement;
+                UpdateRepeatSnapshotStateLease();
             }
         }
 
@@ -6635,36 +9263,53 @@ public static partial class SemanticVerifier
 
             var defaultBytes = GuaranteedInitializedPayloadBytes(
                 layout.ElementType, Program);
-            if (arrayPrefix.Kind == StorageProjectionKind.WholeObject
-                || arrayPrefix.ProjectionPath.IsConcrete)
+            var key = new RawUnionArrayStateKey(variable, arrayPrefix);
+            ChargeRepeatRootLookup(key);
+            if (_rawUnionArrayElementBytes.TryGetValue(key,
+                    out var exactState))
             {
-                if (!_rawUnionArrayElementBytes.TryGetValue(
-                        new RawUnionArrayStateKey(variable, arrayPrefix),
-                        out var exactState))
-                {
-                    return defaultBytes;
-                }
                 if (exactState.Layout != layout)
                 {
                     throw Invalid();
                 }
-                return elementIndex is ulong index
+                var bytes = elementIndex is ulong index
                     ? exactState.Get(index) : exactState.Common();
+                return bytes;
+            }
+
+            if (arrayPrefix.Kind == StorageProjectionKind.WholeObject
+                || arrayPrefix.ProjectionPath.IsConcrete)
+            {
+                if (!TryGetRawUnionArrayTemplateState(variable,
+                        arrayPrefix, layout, out var templateState))
+                {
+                    return defaultBytes;
+                }
+                return elementIndex is ulong index
+                    ? templateState.Get(index) : templateState.Common();
             }
 
             var expected = arrayPrefix.ProjectionPath.ExpectedMatchCount;
+            RepeatResources.ConsumeWork();
             if (expected == 0)
             {
                 return defaultBytes;
             }
 
             var matched = 0UL;
+            var coversExpectedDomain = false;
             byte[]? commonBytes = null;
-            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            if (_rawUnionArrayElementBytes.Count != 0)
             {
-                if (key.Variable != variable
+                ChargeRepeatRootListHeader();
+            }
+            foreach (var (stateKey, state) in _rawUnionArrayElementBytes)
+            {
+                ChargeRepeatRoot(stateKey.ArrayPrefix);
+                RepeatResources.ConsumeWork();
+                if (stateKey.Variable != variable
                     || !arrayPrefix.ProjectionPath.IsPrefixOf(
-                        key.ArrayPrefix.ProjectionPath))
+                        stateKey.ArrayPrefix.ProjectionPath))
                 {
                     continue;
                 }
@@ -6672,7 +9317,19 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                matched++;
+                if (stateKey.ArrayPrefix.Kind
+                        == StorageProjectionKind.ElementRange
+                    && stateKey.ArrayPrefix.ProjectionPath.Segments.Length
+                        == arrayPrefix.ProjectionPath.Segments.Length
+                    && arrayPrefix.ProjectionPath.IsPrefixOf(
+                        stateKey.ArrayPrefix.ProjectionPath))
+                {
+                    coversExpectedDomain = true;
+                }
+                if (!coversExpectedDomain)
+                {
+                    matched++;
+                }
                 var elementBytes = elementIndex is ulong index
                     ? state.Get(index) : state.Common();
                 if (commonBytes is null)
@@ -6684,128 +9341,451 @@ public static partial class SemanticVerifier
                     byteIndex < commonBytes.Length;
                     byteIndex++)
                 {
-                    commonBytes[byteIndex] &= elementBytes[byteIndex];
+                    RepeatResources.ConsumeWork(7);
+                    commonBytes[byteIndex] = (byte)(commonBytes[byteIndex]
+                        & elementBytes[byteIndex]);
                 }
             }
 
-            return matched < expected || commonBytes is null
+            RepeatResources.ConsumeWork();
+            var result = (!coversExpectedDomain && matched < expected)
+                || commonBytes is null
                 ? defaultBytes : commonBytes;
+            return result;
+        }
+
+        private bool TryGetRawUnionArrayTemplateState(int variable,
+            StorageProjection arrayPrefix,
+            BoundNativeFixedArrayLayout layout,
+            out RawUnionArrayElementState state)
+        {
+            state = null!;
+            var bestSpecificity = -1;
+            if (_rawUnionArrayElementBytes.Count != 0)
+            {
+                ChargeRepeatRootListHeader();
+            }
+            foreach (var (key, candidate) in _rawUnionArrayElementBytes)
+            {
+                ChargeRepeatRoot(key.ArrayPrefix);
+                RepeatResources.ConsumeWork();
+                if (key.Variable != variable || candidate.Layout != layout
+                    || !key.ArrayPrefix.ProjectionPath.IsPrefixOf(
+                        arrayPrefix.ProjectionPath))
+                {
+                    continue;
+                }
+
+                var specificity = key.ArrayPrefix.ProjectionPath.Segments.Length;
+                if (specificity > bestSpecificity)
+                {
+                    state = candidate.Clone();
+                    bestSpecificity = specificity;
+                }
+                else if (specificity == bestSpecificity)
+                {
+                    _ = state.Merge(candidate);
+                }
+            }
+            return bestSpecificity >= 0;
         }
 
         private bool CopyRawUnionArrayFacts(int variable,
             InitializationState other)
         {
-            var prior = _rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == variable)
-                .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                    static pair => pair.Value.Clone());
-            var incoming = other._rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == variable)
-                .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                    static pair => pair.Value.Clone());
-            ClearRawUnionArrayFacts(variable);
+            if (!ReferenceEquals(RepeatResources, other.RepeatResources))
+            {
+                throw Invalid();
+            }
+            var incoming = new SortedDictionary<StorageProjection,
+                RawUnionArrayElementState>(StorageProjectionComparer.Instance);
+            if (other._rawUnionArrayElementBytes.Count != 0)
+            {
+                RepeatResources.ConsumeWork(2);
+            }
+            var incomingHeaderWritten = false;
+            foreach (var (key, state) in other._rawUnionArrayElementBytes)
+            {
+                ChargeRepeatRoot(key.ArrayPrefix);
+                if (key.Variable == variable)
+                {
+                    if (!incomingHeaderWritten)
+                    {
+                        ChargeRepeatRootListHeader();
+                        incomingHeaderWritten = true;
+                    }
+                    ChargeRepeatRoot(key.ArrayPrefix);
+                    incoming.Add(key.ArrayPrefix, state.Clone());
+                }
+            }
+
+            var replacement = new SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>(
+                    RawUnionArrayStateKeyComparer.Instance);
+            if (_rawUnionArrayElementBytes.Count != 0)
+            {
+                RepeatResources.ConsumeWork(2);
+            }
+            var outputHeaderWritten = false;
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            {
+                ChargeRepeatRoot(key.ArrayPrefix);
+                if (key.Variable != variable)
+                {
+                    if (!outputHeaderWritten)
+                    {
+                        ChargeRepeatRootListHeader();
+                        outputHeaderWritten = true;
+                    }
+                    ChargeRepeatRoot(key.ArrayPrefix);
+                    replacement.Add(key, state);
+                }
+                else
+                {
+                    RepeatResources.ConsumeWork();
+                }
+            }
             foreach (var (prefix, state) in incoming)
             {
-                _rawUnionArrayElementBytes.Add(
-                    new RawUnionArrayStateKey(variable, prefix), state);
+                if (!outputHeaderWritten)
+                {
+                    ChargeRepeatRootListHeader();
+                    outputHeaderWritten = true;
+                }
+                ChargeRepeatRoot(prefix);
+                replacement.Add(new RawUnionArrayStateKey(variable,
+                    prefix), state);
             }
-            return !RawUnionArrayStatesEqual(prior, incoming);
+            var changed = !RawUnionArrayFactPrefixEquals(
+                _rawUnionArrayElementBytes, replacement, variable,
+                StorageProjection.WholeObject);
+            _rawUnionArrayElementBytes = replacement;
+            UpdateRepeatSnapshotStateLease();
+            return changed;
         }
 
         private bool MergeRawUnionArrayFacts(int variable,
             InitializationState first, InitializationState second)
         {
-            var firstStates = first._rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == variable)
-                .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                    static pair => pair.Value);
-            var secondStates = second._rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == variable)
-                .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                    static pair => pair.Value);
-            var currentStates = _rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == variable)
-                .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                    static pair => pair.Value);
-            var prefixes = new HashSet<StorageProjection>(
-                firstStates.Keys);
-            prefixes.UnionWith(secondStates.Keys);
-            prefixes.UnionWith(currentStates.Keys);
-            var changed = false;
-            foreach (var prefix in prefixes)
+            if (!ReferenceEquals(RepeatResources, first.RepeatResources)
+                || !ReferenceEquals(RepeatResources, second.RepeatResources))
             {
-                _ = firstStates.TryGetValue(prefix, out var firstState);
-                _ = secondStates.TryGetValue(prefix, out var secondState);
-                if (firstState is null || secondState is null)
-                {
-                    if (currentStates.Remove(prefix))
-                    {
-                        _ = _rawUnionArrayElementBytes.Remove(
-                            new RawUnionArrayStateKey(variable, prefix));
-                        changed = true;
-                    }
-                    continue;
-                }
-
-                var mergedState = firstState.Clone();
-                _ = mergedState.Merge(secondState);
-                if (currentStates.TryGetValue(prefix,
-                    out var currentState)
-                    && RawUnionArrayStatesEqual(
-                        new Dictionary<StorageProjection,
-                            RawUnionArrayElementState> {
-                                [prefix] = currentState,
-                            },
-                        new Dictionary<StorageProjection,
-                            RawUnionArrayElementState> {
-                                [prefix] = mergedState,
-                            }))
-                {
-                    continue;
-                }
-                _rawUnionArrayElementBytes[
-                    new RawUnionArrayStateKey(variable, prefix)]
-                    = mergedState;
-                changed = true;
+                throw Invalid();
             }
-            return changed;
-        }
 
-        private static bool RawUnionArrayStatesEqual(
-            IReadOnlyDictionary<StorageProjection,
-                RawUnionArrayElementState> left,
-            IReadOnlyDictionary<StorageProjection,
-                RawUnionArrayElementState> right)
-        {
-            if (left.Count != right.Count)
+            if (_rawUnionArrayElementBytes.Count == 0
+                && first._rawUnionArrayElementBytes.Count == 0
+                && second._rawUnionArrayElementBytes.Count == 0)
             {
                 return false;
             }
-            foreach (var (prefix, leftState) in left)
+
+            using var repeatFrame = RepeatResources.EnterFrame();
+            var currentBytes = RawUnionArrayLogicalBytes();
+            var firstBytes = first.RawUnionArrayLogicalBytes();
+            var secondBytes = second.RawUnionArrayLogicalBytes();
+            using var currentState = RepeatResources.ReserveState(currentBytes);
+            using var firstState = RepeatResources.ReserveState(firstBytes);
+            using var secondState = RepeatResources.ReserveState(secondBytes);
+            using var outputState
+                = RepeatResources.ReserveState(BigInteger.Zero);
+            var replacement = new SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>(
+                    RawUnionArrayStateKeyComparer.Instance);
+            var outputHeaderWritten = false;
+            var currentCursor = _rawUnionArrayElementBytes.GetEnumerator();
+            var hasCurrent = false;
+            var currentKey = default(RawUnionArrayStateKey);
+            RawUnionArrayElementState? currentFact = null;
+            var firstCursor = first._rawUnionArrayElementBytes.GetEnumerator();
+            var secondCursor = second._rawUnionArrayElementBytes.GetEnumerator();
+            RepeatResources.ConsumeWork();
+            var hasFirstEntry = firstCursor.MoveNext();
+            RepeatResources.ConsumeWork();
+            var hasSecondEntry = secondCursor.MoveNext();
+            var hasFirst = TryFindNextVariableRoot(ref firstCursor,
+                ref hasFirstEntry, variable, out var firstRoot);
+            var hasSecond = TryFindNextVariableRoot(ref secondCursor,
+                ref hasSecondEntry, variable, out var secondRoot);
+            var hasMerged = false;
+            var mergedKey = default(RawUnionArrayStateKey);
+            RawUnionArrayElementState? mergedLeft = null;
+            RawUnionArrayElementState? mergedRight = null;
+
+            void AdvanceCurrent()
             {
-                if (!right.TryGetValue(prefix, out var rightState)
-                    || leftState.Layout != rightState.Layout
-                    || !leftState.GuaranteedBytes.AsSpan().SequenceEqual(
-                        rightState.GuaranteedBytes)
-                    || leftState.ElementCount != rightState.ElementCount)
+                hasCurrent = false;
+                currentFact = null;
+                while (true)
+                {
+                    if (!currentCursor.MoveNext())
+                    {
+                        RepeatResources.ConsumeWork();
+                        return;
+                    }
+
+                    RepeatResources.ConsumeWork();
+                    var candidate = currentCursor.Current;
+                    ChargeRepeatRoot(candidate.Key.ArrayPrefix);
+                    RepeatResources.ConsumeWork();
+                    if (candidate.Key.Variable == variable)
+                    {
+                        continue;
+                    }
+
+                    currentKey = candidate.Key;
+                    currentFact = candidate.Value;
+                    hasCurrent = true;
+                    return;
+                }
+            }
+
+            void AdvanceMerged(bool consumeCurrent)
+            {
+                if (consumeCurrent)
+                {
+                    hasFirst = TryFindNextVariableRoot(ref firstCursor,
+                        ref hasFirstEntry, variable, out firstRoot);
+                    hasSecond = TryFindNextVariableRoot(ref secondCursor,
+                        ref hasSecondEntry, variable, out secondRoot);
+                }
+
+                hasMerged = false;
+                while (hasFirst || hasSecond)
+                {
+                    RepeatResources.ConsumeWork(2);
+                    if (!hasFirst)
+                    {
+                        hasSecond = TryFindNextVariableRoot(
+                            ref secondCursor, ref hasSecondEntry,
+                            variable, out secondRoot);
+                        continue;
+                    }
+                    if (!hasSecond)
+                    {
+                        hasFirst = TryFindNextVariableRoot(
+                            ref firstCursor, ref hasFirstEntry,
+                            variable, out firstRoot);
+                        continue;
+                    }
+
+                    RepeatResources.ConsumeWork();
+                    var comparison = StorageProjectionComparer.Instance
+                        .Compare(firstRoot.Key.ArrayPrefix,
+                            secondRoot.Key.ArrayPrefix);
+                    if (comparison < 0)
+                    {
+                        hasFirst = TryFindNextVariableRoot(
+                            ref firstCursor, ref hasFirstEntry,
+                            variable, out firstRoot);
+                        continue;
+                    }
+                    if (comparison > 0)
+                    {
+                        hasSecond = TryFindNextVariableRoot(
+                            ref secondCursor, ref hasSecondEntry,
+                            variable, out secondRoot);
+                        continue;
+                    }
+
+                    mergedKey = new RawUnionArrayStateKey(variable,
+                        firstRoot.Key.ArrayPrefix);
+                    mergedLeft = firstRoot.Value;
+                    mergedRight = secondRoot.Value;
+                    hasMerged = true;
+                    return;
+                }
+            }
+
+            void EnsureOutputHeader()
+            {
+                if (outputHeaderWritten)
+                {
+                    return;
+                }
+
+                ChargeRepeatRootListHeader();
+                outputState.Add(16);
+                outputHeaderWritten = true;
+            }
+
+            void AppendOutput(RawUnionArrayStateKey key,
+                RawUnionArrayElementState state)
+            {
+                EnsureOutputHeader();
+                ChargeRepeatRoot(key.ArrayPrefix);
+                outputState.Add(RawUnionArrayRootLogicalBytes(
+                    key.ArrayPrefix));
+                var output = state.CloneTo(outputState);
+                replacement.Add(key, output);
+            }
+
+            AdvanceCurrent();
+            AdvanceMerged(consumeCurrent: false);
+            while (hasCurrent || hasMerged)
+            {
+                var comparison = 0;
+                if (hasCurrent && hasMerged)
+                {
+                    RepeatResources.ConsumeWork();
+                    comparison = RawUnionArrayStateKeyComparer.Instance
+                        .Compare(currentKey, mergedKey);
+                    if (comparison == 0)
+                    {
+                        throw Invalid();
+                    }
+                }
+
+                if (!hasMerged || (hasCurrent && comparison < 0))
+                {
+                    AppendOutput(currentKey,
+                        currentFact ?? throw Invalid());
+                    AdvanceCurrent();
+                }
+                else
+                {
+                    EnsureOutputHeader();
+                    ChargeRepeatRoot(mergedKey.ArrayPrefix);
+                    outputState.Add(RawUnionArrayRootLogicalBytes(
+                        mergedKey.ArrayPrefix));
+                    var mergedState = (mergedLeft ?? throw Invalid())
+                        .CreateMerge(mergedRight ?? throw Invalid(),
+                            outputState);
+                    replacement.Add(mergedKey, mergedState);
+                    AdvanceMerged(consumeCurrent: true);
+                }
+            }
+
+            var changed = !RawUnionArrayFactPrefixEquals(
+                _rawUnionArrayElementBytes, replacement, variable,
+                StorageProjection.WholeObject);
+            repeatFrame.Complete();
+            _rawUnionArrayElementBytes = replacement;
+            UpdateRepeatSnapshotStateLease();
+            return changed;
+        }
+
+        private bool TryFindNextVariableRoot(
+            ref SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>.Enumerator cursor,
+            ref bool hasEntry, int variable,
+            out KeyValuePair<RawUnionArrayStateKey,
+                RawUnionArrayElementState> root)
+        {
+            while (true)
+            {
+                RepeatResources.ConsumeWork();
+                if (!hasEntry)
+                {
+                    root = default;
+                    return false;
+                }
+
+                var candidate = cursor.Current;
+                ChargeRepeatRoot(candidate.Key.ArrayPrefix);
+                RepeatResources.ConsumeWork();
+                hasEntry = cursor.MoveNext();
+                if (candidate.Key.Variable > variable)
+                {
+                    root = default;
+                    return false;
+                }
+                if (candidate.Key.Variable == variable)
+                {
+                    root = candidate;
+                    return true;
+                }
+            }
+        }
+
+        private bool RawUnionArrayFactPrefixEquals(
+            SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState> left,
+            SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState> right,
+            int variable, StorageProjection prefix)
+        {
+            if (left.Count != 0)
+            {
+                ChargeRepeatRootListHeader();
+            }
+            if (right.Count != 0)
+            {
+                ChargeRepeatRootListHeader();
+            }
+
+            var leftCursor = left.GetEnumerator();
+            var rightCursor = right.GetEnumerator();
+            var hasLeftEntry = leftCursor.MoveNext();
+            var hasRightEntry = rightCursor.MoveNext();
+            var hasLeft = TryFindNextRoot(ref leftCursor, ref hasLeftEntry,
+                variable, prefix, out var leftRoot);
+            var hasRight = TryFindNextRoot(ref rightCursor, ref hasRightEntry,
+                variable, prefix, out var rightRoot);
+            while (hasLeft || hasRight)
+            {
+                if (!hasLeft || !hasRight)
                 {
                     return false;
                 }
 
-                var indexes = new HashSet<ulong>(
-                    leftState.ElementIndexes);
-                indexes.UnionWith(rightState.ElementIndexes);
-                foreach (var index in indexes)
+                RepeatResources.ConsumeWork();
+                if (StorageProjectionComparer.Instance.Compare(
+                        leftRoot.Key.ArrayPrefix,
+                        rightRoot.Key.ArrayPrefix) != 0
+                    || !RawUnionArrayElementStatesEqual(
+                        leftRoot.Value, rightRoot.Value))
                 {
-                    if (!leftState.Get(index).AsSpan().SequenceEqual(
-                        rightState.Get(index)))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
+
+                hasLeft = TryFindNextRoot(ref leftCursor, ref hasLeftEntry,
+                    variable, prefix, out leftRoot);
+                hasRight = TryFindNextRoot(ref rightCursor, ref hasRightEntry,
+                    variable, prefix, out rightRoot);
             }
             return true;
         }
+
+        private bool TryFindNextRoot(
+            ref SortedDictionary<RawUnionArrayStateKey,
+                RawUnionArrayElementState>.Enumerator cursor,
+            ref bool hasEntry, int variable, StorageProjection prefix,
+            out KeyValuePair<RawUnionArrayStateKey,
+                RawUnionArrayElementState> root)
+        {
+            while (true)
+            {
+                RepeatResources.ConsumeWork();
+                if (!hasEntry)
+                {
+                    root = default;
+                    return false;
+                }
+
+                var candidate = cursor.Current;
+                ChargeRepeatRoot(candidate.Key.ArrayPrefix);
+                RepeatResources.ConsumeWork();
+                hasEntry = cursor.MoveNext();
+                if (candidate.Key.Variable > variable)
+                {
+                    root = default;
+                    return false;
+                }
+                if (candidate.Key.Variable == variable
+                    && prefix.ProjectionPath.IsPrefixOf(
+                        candidate.Key.ArrayPrefix.ProjectionPath))
+                {
+                    root = candidate;
+                    return true;
+                }
+            }
+        }
+
+        private static bool RawUnionArrayElementStatesEqual(
+            RawUnionArrayElementState left,
+            RawUnionArrayElementState right)
+            => left.SemanticallyEquals(right);
 
         internal bool CopyRawUnionInitializedBytes(int variable,
             InitializationState other)
@@ -7042,54 +10022,120 @@ public static partial class SemanticVerifier
             }
             else
             {
-                StatementInputs.Add(statement, Clone());
+                StatementInputs.Add(statement,
+                    Clone(StatementInputSnapshotScope));
             }
         }
     }
 
-    private sealed class FailureEdges
+    private sealed class FailureEdges : IDisposable
     {
         private InitializationState? _state;
         private uint[]? _masks;
+        private RepeatSnapshotReservationScope? _snapshotScope;
+        private bool _ownsSnapshotScope;
+
+        internal FailureEdges(
+            RepeatSnapshotReservationScope? snapshotScope = null)
+        {
+            _snapshotScope = snapshotScope;
+        }
 
         internal bool HasEdges => _state is not null;
 
-        internal InitializationState State => (_state ?? throw Invalid()).Clone();
+        internal InitializationState State
+            => (_state ?? throw Invalid()).Clone(GetSnapshotScope());
 
         internal uint[] Masks => (uint[])(_masks ?? throw Invalid()).Clone();
 
         internal void Add(InitializationState state, uint[] masks)
         {
-            var failureState = state.Clone();
-            failureState.CancelUninvokedNativeOutputReservations();
-            if (failureState.Dependencies is BackingDependencies dependencies)
+            if (masks.Length != state.Length)
             {
-                // Staged reference arguments expire when the call evaluation unwinds.
-                for (var index = 0; index < dependencies.Staged.Count; index++)
-                {
-                    var staged = dependencies.Staged[index];
-                    if (staged.ReferenceTargets.Count != 0
-                        || staged.ReferenceObligations.Count != 0
-                        || staged.ReferenceFieldValues.Count != 0)
-                    {
-                        dependencies.Staged[index] = staged with {
-                            ReferenceTargets = [],
-                            ReferenceObligations = [],
-                            ReferenceFieldValues = [],
-                        };
-                    }
-                }
+                throw Invalid();
             }
             if (_state is null)
             {
-                _state = failureState;
+                _state = state.Clone(GetSnapshotScope(state));
+                _state.CancelUninvokedNativeOutputReservations();
                 _masks = (uint[])masks.Clone();
+                ClearStagedReferenceFacts(_state);
                 return;
             }
+
+            using var incomingSnapshotScope
+                = new RepeatSnapshotReservationScope(
+                    state.RepeatResources);
+            var failureState = state.Clone(incomingSnapshotScope);
+            failureState.CancelUninvokedNativeOutputReservations();
+            ClearStagedReferenceFacts(failureState);
             for (var index = 0; index < failureState.Length; index++)
             {
                 _state.Merge(index, failureState);
                 _masks![index] &= masks[index];
+            }
+        }
+
+        internal void Reset()
+        {
+            if (_ownsSnapshotScope)
+            {
+                _snapshotScope?.Dispose();
+                _snapshotScope = null;
+                _ownsSnapshotScope = false;
+            }
+            _state = null;
+            _masks = null;
+        }
+
+        public void Dispose()
+        {
+            if (_ownsSnapshotScope)
+            {
+                _snapshotScope?.Dispose();
+            }
+            _state = null;
+            _masks = null;
+            _snapshotScope = null;
+            _ownsSnapshotScope = false;
+        }
+
+        private RepeatSnapshotReservationScope GetSnapshotScope()
+            => _snapshotScope ?? throw Invalid();
+
+        private RepeatSnapshotReservationScope GetSnapshotScope(
+            InitializationState state)
+        {
+            if (_snapshotScope is null)
+            {
+                _snapshotScope = new RepeatSnapshotReservationScope(
+                    state.RepeatResources);
+                _ownsSnapshotScope = true;
+            }
+            return _snapshotScope;
+        }
+
+        private static void ClearStagedReferenceFacts(
+            InitializationState failureState)
+        {
+            if (failureState.Dependencies is not BackingDependencies dependencies)
+            {
+                return;
+            }
+            // Staged reference arguments expire when the call evaluation unwinds.
+            for (var index = 0; index < dependencies.Staged.Count; index++)
+            {
+                var staged = dependencies.Staged[index];
+                if (staged.ReferenceTargets.Count != 0
+                    || staged.ReferenceObligations.Count != 0
+                    || staged.ReferenceFieldValues.Count != 0)
+                {
+                    dependencies.Staged[index] = staged with {
+                        ReferenceTargets = [],
+                        ReferenceObligations = [],
+                        ReferenceFieldValues = [],
+                    };
+                }
             }
         }
     }
@@ -7486,10 +10532,10 @@ public static partial class SemanticVerifier
 
     private static void InvalidateOverlappingRawUnionFacts(
         int variable, PrimitiveType rootType,
-        FieldProjectionPath fieldPath, int writeSize,
+        FieldProjectionPath fieldPath, ulong writeSize,
         BackingDependencies dependencies, BoundProgram program)
     {
-        if (writeSize <= 0
+        if (writeSize == 0
             || !TryGetFieldPathByteOffset(rootType, fieldPath, program,
                 out var rootWriteOffset))
         {
@@ -7520,16 +10566,17 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
 
-            var unionWriteOffset = rootWriteOffset - unionOffset;
+            var unionWriteOffset
+                = checked((ulong)(rootWriteOffset - unionOffset));
             var writtenAlternative = segments[unionOwnerIndex].Field;
             var writeEnd = checked(unionWriteOffset + writeSize);
+            var unionSize = program.Structures[
+                (int)unionType - 100].Size;
             var unionFields = program.Structures[
                 (int)unionType - 100].Fields;
             if ((uint)writtenAlternative >= (uint)unionFields.Length
-                || unionWriteOffset > program.Structures[
-                    (int)unionType - 100].Size
-                || writeSize > program.Structures[
-                    (int)unionType - 100].Size - unionWriteOffset)
+                || unionWriteOffset > unionSize
+                || writeSize > unionSize - unionWriteOffset)
             {
                 throw Invalid();
             }
@@ -7823,7 +10870,9 @@ public static partial class SemanticVerifier
             Count(ref remaining, depth + index);
         }
 
-        var beforeLeft = initialized.Clone();
+        using var repeatSnapshotState = new RepeatSnapshotReservationScope(
+            initialized.RepeatResources);
+        var beforeLeft = initialized.Clone(repeatSnapshotState);
         var beforeMasks = (uint[])fieldMasks.Clone();
         var leftCompletes = EvaluateExpression(chain[^1].Left, initialized,
             fieldMasks, declarations, function, program, ref remaining,
@@ -7832,7 +10881,8 @@ public static partial class SemanticVerifier
         {
             var binary = chain[index];
             var evaluateWhenTrue = binary.Operator == TokenKind.AmpersandAmpersand;
-            var rightState = Outcome(binary.Left, beforeLeft, evaluateWhenTrue, ref remaining);
+            var rightState = Outcome(binary.Left, beforeLeft,
+                evaluateWhenTrue, ref remaining, repeatSnapshotState);
             var rightMasks = (uint[])beforeMasks.Clone();
             MarkOutMasks(rightState, rightMasks, function, program);
             var evaluates = leftCompletes
@@ -7847,7 +10897,8 @@ public static partial class SemanticVerifier
                     declarations, function, program, ref remaining, depth + index + 1);
             }
 
-            var skippedState = Outcome(binary.Left, beforeLeft, !evaluateWhenTrue, ref remaining);
+            var skippedState = Outcome(binary.Left, beforeLeft,
+                !evaluateWhenTrue, ref remaining, repeatSnapshotState);
             var skippedMasks = (uint[])beforeMasks.Clone();
             MarkOutMasks(skippedState, skippedMasks, function, program);
             var skips = leftCompletes
@@ -8169,12 +11220,17 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(formation.Span, "CheckedReference");
                 }
-                _ = ReferenceTargetsOfExpression(formation, formationDependencies,
-                    initialized, function, program, ref remaining, depth + 1,
-                    fieldMasks);
                 ExpressionReferencePlace(formation.Place, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth + 1,
                     failures);
+                foreach (var referenceTarget in ReferenceTargetsOfExpression(
+                    formation, formationDependencies, initialized, function,
+                    program, ref remaining, depth + 1, fieldMasks))
+                {
+                    ValidateRawUnionReferenceFieldFormation(formation,
+                        referenceTarget, initialized, function, program,
+                        ref remaining, depth + 1);
+                }
                 break;
             case BoundReferenceReborrow reborrow:
                 if (!CheckedReferenceTypeContract.IsValidType(
@@ -8296,6 +11352,13 @@ public static partial class SemanticVerifier
                         ValidateReferenceTarget(referenceTarget, writeReference.ReferentType,
                             writeDependencies, initialized, function, program,
                             referenceWrite.Span, fieldMasks);
+                    }
+                    foreach (var referenceTarget in referenceWriteTargets)
+                    {
+                        _ = writeDependencies
+                            .InvalidateCopyOriginEntryReferent(
+                                referenceTarget, program, ref remaining,
+                                depth + 1);
                     }
 
                     if (uniqueStore)
@@ -8746,7 +11809,8 @@ public static partial class SemanticVerifier
                 }
                 initialized.InvalidateNativeOutputCorrelations();
                 break;
-            case BoundNativeFixedArrayInitialization:
+            case BoundNativeFixedArrayInitialization
+                or BoundNativeFixedArrayRepeatInitialization:
                 throw InvalidEffect(expression.Span, "NativeImport");
             case BoundNativeStorageAddress or BoundNativeOutputReservation:
                 throw InvalidEffect(expression.Span, "NativeImport");
@@ -8790,6 +11854,7 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, failures);
                 break;
             case BoundCoalesce coalesce:
+            {
                 if (coalesce.Optional is null || coalesce.Fallback is null
                     || !TryGetOptionalPayloadType(
                         coalesce.Optional.Type, program, out var coalescePayloadType)
@@ -8815,9 +11880,12 @@ public static partial class SemanticVerifier
                 var optionalPresence = KnownOptionalPresence(coalesce.Optional, initialized, ref remaining);
                 var presentPossible = optionalPresence != false;
                 var absentPossible = optionalPresence != true;
-                var presentState = initialized.Clone();
+                using var repeatSnapshotState
+                    = new RepeatSnapshotReservationScope(
+                        initialized.RepeatResources);
+                var presentState = initialized.Clone(repeatSnapshotState);
                 var presentMasks = (uint[])fieldMasks.Clone();
-                var absentState = initialized.Clone();
+                var absentState = initialized.Clone(repeatSnapshotState);
                 var absentMasks = (uint[])fieldMasks.Clone();
                 var absentDeclarations = new HashSet<int>(declarations);
                 var absentCompletes = absentPossible && EvaluateExpression(coalesce.Fallback,
@@ -8854,6 +11922,7 @@ public static partial class SemanticVerifier
                         presentState, false, absentState, true);
                 }
                 break;
+            }
             case BoundReadonlyProjection projection:
                 if (projection.Value is null
                     || !SourceOptionalTypes.IsReadonlyProjection(
@@ -9007,6 +12076,15 @@ public static partial class SemanticVerifier
                             program));
                 if (hasTrackedRootPath)
                 {
+                    if (!IsUnique(program,
+                            function.Variables[fieldRootVariable].Type)
+                        && !function.Variables[fieldRootVariable]
+                            .IsInitializationLocal
+                        && !initialized[fieldRootVariable]
+                        && !initialized.HasPartialValue(fieldRootVariable))
+                    {
+                        throw Invalid(fieldRead.Span);
+                    }
                     _ = VerifyFieldPathLeafLive(fieldRead, initialized, fieldMasks,
                         function, program, ref remaining, depth + 1);
                 }
@@ -9022,6 +12100,10 @@ public static partial class SemanticVerifier
                         throw Invalid(fieldRead.Span);
                     }
                 }
+                else if (IsUnique(program, readType))
+                {
+                    throw InvalidEffect(fieldRead.Span, "Ownership");
+                }
                 else
                 {
                     Expression(fieldRead.Receiver, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
@@ -9035,13 +12117,14 @@ public static partial class SemanticVerifier
                         = InitializedPayloadBytesOfExpression(
                             fieldRead.Receiver, fieldRead.Receiver.Type,
                             initialized, function, program);
-                    if (rawUnionField.Offset < 0
-                        || rawUnionField.Size < 0
-                        || rawUnionField.Offset > initializedBytes.Length
-                        || rawUnionField.Size
-                            > initializedBytes.Length - rawUnionField.Offset
-                        || initializedBytes.AsSpan(rawUnionField.Offset,
-                            rawUnionField.Size).Contains((byte)0))
+                    var fieldOffset
+                        = MaterializedPayloadOffset(rawUnionField.Offset);
+                    var fieldSize
+                        = MaterializedPayloadSize(rawUnionField.Size);
+                    if (fieldOffset > initializedBytes.Length
+                        || fieldSize > initializedBytes.Length - fieldOffset
+                        || initializedBytes.AsSpan(fieldOffset, fieldSize)
+                            .Contains((byte)0))
                     {
                         throw Invalid(fieldRead.Span);
                     }
@@ -9614,6 +12697,7 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundBinary binary:
+            {
                 if (TryEvaluateLongLeftLogicalChain(binary, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth,
                     failures, cleanupCounterStep))
@@ -9626,14 +12710,19 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                var beforeLeft = initialized.Clone();
+                using var repeatSnapshotState
+                    = new RepeatSnapshotReservationScope(
+                        initialized.RepeatResources);
+                var beforeLeft = initialized.Clone(repeatSnapshotState);
                 var leftCompletes = EvaluateExpression(binary.Left, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth + 1, failures);
                 var binaryCompletes = false;
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {
                     var evaluateWhenTrue = binary.Operator == TokenKind.AmpersandAmpersand;
-                    var rightState = Outcome(binary.Left, beforeLeft, evaluateWhenTrue, ref remaining);
+                    var rightState = Outcome(binary.Left, beforeLeft,
+                        evaluateWhenTrue, ref remaining,
+                        repeatSnapshotState);
                     var rightMasks = (uint[])fieldMasks.Clone();
                     MarkOutMasks(rightState, rightMasks, function, program);
                     var evaluates = leftCompletes
@@ -9647,7 +12736,9 @@ public static partial class SemanticVerifier
                         ValidateUnreachableExpression(binary.Right, rightState, rightMasks,
                             declarations, function, program, ref remaining, depth + 1);
                     }
-                    var skippedState = Outcome(binary.Left, beforeLeft, !evaluateWhenTrue, ref remaining);
+                    var skippedState = Outcome(binary.Left, beforeLeft,
+                        !evaluateWhenTrue, ref remaining,
+                        repeatSnapshotState);
                     var skippedMasks = (uint[])fieldMasks.Clone();
                     MarkOutMasks(skippedState, skippedMasks, function, program);
                     var skips = leftCompletes
@@ -9709,7 +12800,9 @@ public static partial class SemanticVerifier
                 VerifyBinaryOperation(binary, binaryCompletes, initialized,
                     fieldMasks, function, program, failures, cleanupCounterStep);
                 break;
+            }
             case BoundConditional conditional:
+            {
                 if (conditional.Condition is null || conditional.WhenTrue is null || conditional.WhenFalse is null
                     || conditional.Condition.Type != PrimitiveType.Bool
                     || conditional.WhenTrue.Type != conditional.Type
@@ -9717,7 +12810,10 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var beforeCondition = initialized.Clone();
+                using var repeatSnapshotState
+                    = new RepeatSnapshotReservationScope(
+                        initialized.RepeatResources);
+                var beforeCondition = initialized.Clone(repeatSnapshotState);
                 if (!EvaluateExpression(conditional.Condition, initialized, fieldMasks, declarations,
                     function, program, ref remaining, depth + 1, failures))
                 {
@@ -9731,8 +12827,12 @@ public static partial class SemanticVerifier
                     program, ref remaining, depth + 1);
                 var falseFeasible = CanCompleteAs(conditional.Condition, false, beforeCondition,
                     program, ref remaining, depth + 1);
-                var trueState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
-                var falseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
+                var trueState = Outcome(conditional.Condition,
+                    beforeCondition, true, ref remaining,
+                    repeatSnapshotState);
+                var falseState = Outcome(conditional.Condition,
+                    beforeCondition, false, ref remaining,
+                    repeatSnapshotState);
                 var trueMasks = (uint[])fieldMasks.Clone();
                 var falseMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(trueState, trueMasks, function, program);
@@ -9803,6 +12903,7 @@ public static partial class SemanticVerifier
                         falseState, falseCompletes);
                 }
                 break;
+            }
             case BoundIndirectCall call:
                 VerifyIndirectCall(call, function, program);
                 var indirectSignature = program.NativeFunctionPointerSignatures[
@@ -9930,6 +13031,7 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundCall call:
+            {
                 if (call.Function < 0 || call.Function >= program.Functions.Length || call.Arguments.IsDefault)
                 {
                     throw Invalid();
@@ -9957,6 +13059,9 @@ public static partial class SemanticVerifier
                 var copyOriginInputViews = copyOriginSummary is null
                     ? null : CopyOriginSummaryInputViews(target, copyOriginSummary);
                 var stagedCopyOriginInputs = new Dictionary<int, StagedCopyOriginInput>();
+                using var stagedRawUnionSnapshotState
+                    = new RepeatSnapshotReservationScope(
+                        initialized.RepeatResources);
                 if (initialized.Dependencies is BackingDependencies copyOriginDependencies)
                 {
                     copyOriginDependencies.ClearCopyOriginCallResult(call);
@@ -9964,6 +13069,7 @@ public static partial class SemanticVerifier
                     copyOriginDependencies.ClearReferenceFieldCallResult(call);
                     copyOriginDependencies.ClearNativePointerCallResult(call);
                     copyOriginDependencies.ClearRawUnionCallCoverageResult(call);
+                    copyOriginDependencies.ClearRawUnionArrayCallResult(call);
                 }
                 if (target.IsCleanup || target.IsClassConstructor)
                 {
@@ -10092,6 +13198,9 @@ public static partial class SemanticVerifier
                         Dictionary<StorageProjection, ReferenceFieldValue>?
                             preMoveReferenceSnapshot = null;
                         byte[]? preMoveRawUnionInitializedBytes = null;
+                        SortedDictionary<StorageProjection,
+                            InitializationState.RawUnionArrayElementState>?
+                            preMoveRawUnionArraySnapshot = null;
                         if (argumentsComplete && argument is BoundMove or BoundFieldMove
                             && copyOriginInputViews?.ContainsKey(parameterIndex) == true)
                         {
@@ -10127,6 +13236,18 @@ public static partial class SemanticVerifier
                                     = InitializedPayloadBytesOfExpression(
                                         preMoveValue, argument.Type, initialized,
                                         function, program);
+                            }
+                            if (CarriesRawUnionArrayFacts(program,
+                                    argument.Type))
+                            {
+                                preMoveRawUnionArraySnapshot
+                                    = RawUnionArrayFactsOfExpression(
+                                        preMoveValue, initialized, function,
+                                        program, ref remaining,
+                                        depth + 1,
+                                        out var preMoveSnapshotState);
+                                stagedRawUnionSnapshotState
+                                    .Adopt(preMoveSnapshotState);
                             }
                         }
                         if (target.Variables[parameterSlot].IsImplicitRef)
@@ -10404,7 +13525,9 @@ public static partial class SemanticVerifier
                                         function, program, ref remaining, depth + 1, failures))
                                     {
                                         argumentsComplete = false;
-                                        nonCompletingArgumentState = initialized.Clone();
+                                        nonCompletingArgumentState
+                                            = initialized.Clone(
+                                                stagedRawUnionSnapshotState);
                                         nonCompletingArgumentMasks = (uint[])fieldMasks.Clone();
                                     }
                                     else if (directNativeParameter is not null
@@ -10502,10 +13625,62 @@ public static partial class SemanticVerifier
                                             argument, argument.Type, initialized,
                                             function, program)
                                     : null;
+                            SortedDictionary<StorageProjection,
+                                InitializationState.RawUnionArrayElementState>?
+                                rawUnionArraySnapshot = null;
+                            RepeatResourceLedger.StateLease? rawUnionArraySnapshotState
+                                = null;
+                            if (snapshotEntryValue
+                                && CarriesRawUnionArrayFacts(
+                                    program, argument.Type))
+                            {
+                                if (preMoveRawUnionArraySnapshot is not null)
+                                {
+                                    rawUnionArraySnapshot
+                                        = preMoveRawUnionArraySnapshot;
+                                }
+                                else
+                                {
+                                    rawUnionArraySnapshot
+                                        = RawUnionArrayFactsOfExpression(
+                                            argument, initialized, function,
+                                            program, ref remaining,
+                                            depth + 1,
+                                            out rawUnionArraySnapshotState);
+                                }
+                            }
+                            if (rawUnionArraySnapshot is not null)
+                            {
+                                if (argument is BoundCall
+                                        rawUnionInputCall
+                                    && initialized.Dependencies
+                                        is BackingDependencies
+                                            rawUnionInputDependencies
+                                    && rawUnionInputDependencies
+                                        .TryGetRawUnionArrayCallResult(
+                                            rawUnionInputCall,
+                                            out var storedRawUnionFacts)
+                                    && ReferenceEquals(
+                                        rawUnionArraySnapshot,
+                                        storedRawUnionFacts))
+                                {
+                                    rawUnionArraySnapshot
+                                        = BackingDependencies
+                                            .CloneRawUnionArrayCallResultSnapshot(
+                                                storedRawUnionFacts,
+                                                stagedRawUnionSnapshotState);
+                                }
+                                else
+                                {
+                                    stagedRawUnionSnapshotState.Adopt(
+                                        rawUnionArraySnapshotState);
+                                }
+                            }
                             if (!stagedCopyOriginInputs.TryAdd(parameterIndex,
                                 new StagedCopyOriginInput(sourceView, argument, snapshot,
                                     backingSnapshot, nativePointerSnapshot,
-                                    referenceSnapshot, rawUnionInitializedBytes)))
+                                    referenceSnapshot, rawUnionInitializedBytes,
+                                    rawUnionArraySnapshot)))
                             {
                                 throw Invalid(argument.Span);
                             }
@@ -10552,6 +13727,38 @@ public static partial class SemanticVerifier
                             .SetRawUnionCallCoverageResult(call,
                                 rawUnionCallCoverage);
                     }
+                    if (CarriesRawUnionArrayFacts(program, call.Type)
+                        && initialized.Dependencies
+                            is BackingDependencies rawUnionArrayDependencies)
+                    {
+                        var rawUnionArrayCallFacts
+                            = RawUnionArrayFactsForCall(call, target,
+                                copyOriginSummary, stagedCopyOriginInputs,
+                                initialized, function, program,
+                                ref remaining, depth + 1,
+                                out var rawUnionArrayCallState);
+                        try
+                        {
+                            if (rawUnionArrayCallFacts.Count != 0)
+                            {
+                                rawUnionArrayDependencies
+                                    .SetRawUnionArrayCallResult(call,
+                                        rawUnionArrayCallFacts,
+                                        rawUnionArrayCallState
+                                            ?? throw Invalid());
+                                rawUnionArrayCallState = null;
+                            }
+                            else
+                            {
+                                rawUnionArrayDependencies
+                                    .ClearRawUnionArrayCallResult(call);
+                            }
+                        }
+                        finally
+                        {
+                            rawUnionArrayCallState?.Dispose();
+                        }
+                    }
                     var backingCallResult =
                         initialized.Dependencies is BackingDependencies backingResultDependencies
                         ? CreateBackingCallResult(call, target, copyOriginSummary,
@@ -10594,8 +13801,11 @@ public static partial class SemanticVerifier
                     }
                     ApplyReferenceOwnerStoreCallEffects(call, target, initialized,
                         fieldMasks, function, program, ref remaining, depth + 1);
-                    ApplyCopyOriginCallEffects(call, target, initialized, function,
-                        program, ref remaining, depth + 1);
+                    ApplyCopyOriginCallEffects(call, target, initialized,
+                        fieldMasks, function, program, ref remaining,
+                        depth + 1);
+                    ApplyRawUnionArrayCallEffects(call, target, initialized,
+                        function, program, ref remaining, depth + 1);
                     ApplyBackingCallEffects(call, target, initialized, function,
                         program, ref remaining, depth + 1);
                     ApplyReferenceBackingCallEffects(call, target, initialized,
@@ -10662,6 +13872,7 @@ public static partial class SemanticVerifier
                     }
                 }
                 break;
+            }
             default:
                 throw Invalid();
         }
@@ -11110,7 +14321,7 @@ public static partial class SemanticVerifier
         PrimitiveType type)
     {
         var typeValue = (int)type;
-        if (typeValue < 100 || typeValue >= BoundEnumTypes.First)
+        if (typeValue is < 100 or >= BoundEnumTypes.First)
         {
             return false;
         }
@@ -11155,6 +14366,55 @@ public static partial class SemanticVerifier
         }
 
         return carriesRawUnion;
+    }
+
+    private static bool CarriesRawUnionArrayFacts(
+        BoundProgram program, PrimitiveType type)
+    {
+        var pending = new Stack<(PrimitiveType Type,
+            bool IsArrayElement)>();
+        var visited = new HashSet<(PrimitiveType Type,
+            bool IsArrayElement)>();
+        pending.Push((type, false));
+        while (pending.TryPop(out var item))
+        {
+            if (NativeFixedArrayTypes.IsType(item.Type))
+            {
+                if (!NativeFixedArrayContract.TryGetLayout(item.Type,
+                        program.Structures, program.NativeFixedArrayTypes,
+                        out var layout))
+                {
+                    throw InvalidEffect(default, "NativeImport");
+                }
+                if (layout.ElementCount != 0)
+                {
+                    pending.Push((layout.ElementType,
+                        IsArrayElement: true));
+                }
+                continue;
+            }
+
+            if (IsRawUnionType(program, item.Type))
+            {
+                if (item.IsArrayElement)
+                {
+                    return true;
+                }
+                continue;
+            }
+            if (!HasFields(program, item.Type)
+                || !visited.Add(item))
+            {
+                continue;
+            }
+
+            foreach (var field in Fields(program, item.Type))
+            {
+                pending.Push((field.Type, item.IsArrayElement));
+            }
+        }
+
+        return false;
     }
 
     private static bool IsUnion(BoundProgram program, PrimitiveType type)
@@ -11423,13 +14683,12 @@ public static partial class SemanticVerifier
         return GuaranteedInitializedPayloadBytes(type, program);
     }
 
-    private static bool TryGetFieldPathByteOffset(PrimitiveType rootType,
+    private static bool TryGetFieldPathOffset(PrimitiveType rootType,
         FieldProjectionPath fieldPath, BoundProgram program,
-        out int byteOffset)
+        out ulong byteOffset)
     {
         byteOffset = 0;
         var currentType = rootType;
-        ulong offset = 0;
         foreach (var segment in fieldPath.Segments)
         {
             if (segment.OwnerType != currentType
@@ -11441,21 +14700,25 @@ public static partial class SemanticVerifier
             }
 
             var field = Fields(program, currentType)[segment.Field];
-            if (field.Offset < 0)
-            {
-                return false;
-            }
-            offset = checked(offset + (uint)field.Offset);
+            byteOffset = checked(byteOffset + field.Offset);
             currentType = field.Type;
         }
 
-        if (fieldPath.Segments.IsDefaultOrEmpty
-            || offset > int.MaxValue)
+        return !fieldPath.Segments.IsDefaultOrEmpty;
+    }
+
+    private static bool TryGetFieldPathByteOffset(PrimitiveType rootType,
+        FieldProjectionPath fieldPath, BoundProgram program,
+        out int byteOffset)
+    {
+        byteOffset = 0;
+        if (!TryGetFieldPathOffset(rootType, fieldPath, program,
+                out var offset))
         {
             return false;
         }
 
-        byteOffset = checked((int)offset);
+        byteOffset = MaterializedPayloadOffset(offset);
         return true;
     }
 
@@ -11471,12 +14734,7 @@ public static partial class SemanticVerifier
             throw Invalid(call.Span);
         }
 
-        var resultSize = ValueLayout.Size(call.Type, program.Structures,
-            program.CheckedReferenceTypes, program.NativeLoweringAgreement);
-        if (resultSize < 0)
-        {
-            throw Invalid(call.Span);
-        }
+        var resultSize = MaterializedPayloadSize(call.Type, program);
 
         var initializedBytes = GuaranteedInitializedPayloadBytes(
             call.Type, program);
@@ -11514,11 +14772,9 @@ public static partial class SemanticVerifier
                 throw Invalid(call.Span);
             }
 
-            var destinationSize = ValueLayout.Size(destinationType,
-                program.Structures, program.CheckedReferenceTypes,
-                program.NativeLoweringAgreement);
-            if (destinationSize < 0
-                || destinationOffset > initializedBytes.Length
+            var destinationSize = MaterializedPayloadSize(
+                destinationType, program);
+            if (destinationOffset > initializedBytes.Length
                 || destinationSize > initializedBytes.Length - destinationOffset)
             {
                 throw Invalid(call.Span);
@@ -11548,13 +14804,15 @@ public static partial class SemanticVerifier
                     break;
                 }
 
-                var sourceSize = ValueLayout.Size(sourceRootType,
-                    program.Structures, program.CheckedReferenceTypes,
-                    program.NativeLoweringAgreement);
-                if (sourceSize < 0 || sourceBytes.Length != sourceSize
+                var sourceSize = MaterializedPayloadSize(
+                    sourceRootType, program);
+                if (sourceBytes.Length != sourceSize
                     || !TryGetCopyOriginPathByteOffset(sourceRootType,
-                        origin.SourcePath, program, out var sourceOffset)
-                    || sourceOffset > sourceBytes.Length
+                        origin.SourcePath, program, out var sourceOffset))
+                {
+                    throw Invalid(call.Span);
+                }
+                if (sourceOffset > sourceBytes.Length
                     || destinationSize > sourceBytes.Length - sourceOffset)
                 {
                     throw Invalid(call.Span);
@@ -11629,13 +14887,18 @@ public static partial class SemanticVerifier
                     < (uint)initialized.RawUnionReturnCoverageSummaries.Length
                 && initialized.RawUnionReturnCoverageSummaries[
                     call.Function].Length
-                    == ValueLayout.Size(type, program.Structures,
-                        program.CheckedReferenceTypes,
-                        program.NativeLoweringAgreement))
+                    == MaterializedPayloadSize(type, program))
             {
                 return [.. initialized.RawUnionReturnCoverageSummaries[
                     call.Function]];
             }
+        }
+
+        if (expression is BoundReferenceRead referenceRead
+            && referenceRead.Type == type)
+        {
+            return InitializedRawUnionPayloadBytesOfReferenceRead(
+                referenceRead, type, initialized, function, program);
         }
 
         if (expression is BoundRead read && read.Type == type
@@ -11713,6 +14976,37 @@ public static partial class SemanticVerifier
                 pathElement.Variable, arrayPrefix, leafProjection.Layout,
                 elementIndex);
         }
+        if (expression is BoundFieldRead arrayElementField
+            && arrayElementField.Type == type
+            && TryGetNativeFixedArrayElementFieldPath(arrayElementField,
+                function, program, out var arrayVariable,
+                out var arrayFieldPlace, out var arrayProjections,
+                out var arrayLeafLayout, out var elementFieldPath)
+            && TryGetNativeFixedArrayArrayPrefix(arrayVariable,
+                arrayFieldPlace, arrayProjections[0].Layout, function,
+                program, out var arrayFieldPrefix)
+            && TryGetFieldPathByteOffset(arrayLeafLayout.ElementType,
+                elementFieldPath, program, out var fieldOffset))
+        {
+            var parentProjections = arrayProjections.Length == 1
+                ? [] : arrayProjections.RemoveAt(
+                    arrayProjections.Length - 1);
+            var arrayPrefix = GetNativeFixedArrayPathPrefix(
+                arrayFieldPrefix, parentProjections);
+            var leafProjection = arrayProjections[^1];
+            var elementIndex
+                = NativeFixedArrayContract.TryGetUnsignedIndex(
+                    leafProjection.Index, out var selectedIndex)
+                    ? selectedIndex : (ulong?)null;
+            var initializedBytes = initialized.RawUnionArrayElementBytes(
+                arrayVariable, arrayPrefix, arrayLeafLayout, elementIndex);
+            var size = MaterializedPayloadSize(type, program);
+            if (fieldOffset <= initializedBytes.Length
+                && size <= initializedBytes.Length - fieldOffset)
+            {
+                return initializedBytes.AsSpan(fieldOffset, size).ToArray();
+            }
+        }
         if (expression is BoundFieldRead fieldRead
             && fieldRead.Type == type
             && TryGetFieldProjectionPath(fieldRead, function, program,
@@ -11723,10 +15017,8 @@ public static partial class SemanticVerifier
             && initialized.TryGetRawUnionInitializedBytes(rootVariable,
                 out var rootBytes))
         {
-            var size = ValueLayout.Size(type, program.Structures,
-                program.CheckedReferenceTypes,
-                program.NativeLoweringAgreement);
-            if (size >= 0 && offset <= rootBytes.Length
+            var size = MaterializedPayloadSize(type, program);
+            if (offset <= rootBytes.Length
                 && size <= rootBytes.Length - offset)
             {
                 return rootBytes.AsSpan(offset, size).ToArray();
@@ -11736,22 +15028,376 @@ public static partial class SemanticVerifier
         return GuaranteedInitializedPayloadBytes(type, program);
     }
 
+    private static byte[] InitializedRawUnionPayloadBytesOfReferenceRead(
+        BoundReferenceRead referenceRead, PrimitiveType type,
+        InitializationState initialized, BoundFunction function,
+        BoundProgram program)
+    {
+        var fallback = GuaranteedInitializedPayloadBytes(type, program);
+        if (referenceRead.Descriptor is not BoundRead descriptor
+            || (uint)descriptor.Variable >= (uint)function.Variables.Length
+            || function.Variables[descriptor.Variable].Type
+                != descriptor.Type
+            || initialized.Dependencies is not BackingDependencies facts
+            || (uint)descriptor.Variable >= (uint)facts.ReferenceTargets.Length
+            || facts.ReferenceTargets[descriptor.Variable]
+                is not { Count: > 0 } targets)
+        {
+            return fallback;
+        }
+
+        byte[]? common = null;
+        foreach (var target in targets)
+        {
+            var targetBytes = fallback;
+            if ((target.Kind is ProvenanceAnchorKind.NativeStorage
+                    or ProvenanceAnchorKind.ReferencePlace)
+                && target.Storage is StorageKey storage
+                && storage.IsKnown
+                && target.Identity == storage.Site
+                && (uint)target.Identity < (uint)function.Variables.Length)
+            {
+                targetBytes = InitializedRawUnionPayloadBytesOfStoragePlace(
+                    target.Identity, storage.Projection, type, initialized,
+                    function, program, fallback);
+            }
+
+            if (common is null)
+            {
+                common = [.. targetBytes];
+                continue;
+            }
+            for (var index = 0; index < common.Length; index++)
+            {
+                common[index] &= targetBytes[index];
+            }
+        }
+
+        return common ?? fallback;
+    }
+
+    private static byte[] InitializedRawUnionPayloadBytesOfStoragePlace(
+        int variable, StorageProjection projection, PrimitiveType type,
+        InitializationState initialized, BoundFunction function,
+        BoundProgram program, byte[] fallback)
+    {
+        var rootType = function.Variables[variable].Type;
+        var segments = projection.ProjectionPath.Segments;
+        if (segments.IsEmpty)
+        {
+            return projection.Kind == StorageProjectionKind.WholeObject
+                && rootType == type
+                && initialized.TryGetRawUnionInitializedBytes(variable,
+                    out var storedBytes)
+                && storedBytes.Length == fallback.Length
+                    ? storedBytes : fallback;
+        }
+
+        var currentType = rootType;
+        var currentProjection = StorageProjection.WholeObject;
+        var rootFieldPath = default(FieldProjectionPath);
+        var crossedArray = false;
+        for (var index = 0; index < segments.Length; index++)
+        {
+            var segment = segments[index];
+            if (segment.Kind == StorageProjectionSegmentKind.Field)
+            {
+                if (segment.OwnerType != currentType
+                    || !HasFields(program, currentType)
+                    || (uint)segment.Field
+                        >= (uint)Fields(program, currentType).Length)
+                {
+                    return fallback;
+                }
+
+                currentProjection = currentProjection.AppendField(
+                    currentType, segment.Field);
+                rootFieldPath = rootFieldPath.Append(currentType,
+                    segment.Field);
+                currentType = Fields(program, currentType)[
+                    segment.Field].Type;
+                continue;
+            }
+
+            if (segment.Kind is not (
+                    StorageProjectionSegmentKind.ArrayIndex
+                    or StorageProjectionSegmentKind.ArrayRange)
+                || !NativeFixedArrayContract.TryGetLayout(currentType,
+                    program.Structures, program.NativeFixedArrayTypes,
+                    out var layout)
+                || !NativeFixedArrayContract.MatchesLayout(layout, program)
+                || (segment.Kind
+                        == StorageProjectionSegmentKind.ArrayIndex
+                    && segment.Start >= layout.ElementCount)
+                || (segment.Kind
+                        == StorageProjectionSegmentKind.ArrayRange
+                    && (segment.Length == 0
+                        || segment.Start >= layout.ElementCount
+                        || segment.Length
+                            > layout.ElementCount - segment.Start)))
+            {
+                return fallback;
+            }
+
+            crossedArray = true;
+            var elementIndex = segment.Kind
+                    == StorageProjectionSegmentKind.ArrayIndex
+                ? segment.Start : (ulong?)null;
+            if (index == segments.Length - 1
+                && layout.ElementType == type)
+            {
+                var elementBytes = initialized.RawUnionArrayElementBytes(
+                    variable, currentProjection, layout, elementIndex);
+                return elementBytes.Length == fallback.Length
+                    ? elementBytes : fallback;
+            }
+
+            if (CarriesRawUnionPayloadFacts(program, layout.ElementType))
+            {
+                var suffixPath = default(FieldProjectionPath);
+                var suffixType = layout.ElementType;
+                var suffixIsFields = true;
+                for (var suffixIndex = index + 1;
+                    suffixIndex < segments.Length; suffixIndex++)
+                {
+                    var suffix = segments[suffixIndex];
+                    if (suffix.Kind
+                            != StorageProjectionSegmentKind.Field
+                        || suffix.OwnerType != suffixType
+                        || !HasFields(program, suffixType)
+                        || (uint)suffix.Field
+                            >= (uint)Fields(program, suffixType).Length)
+                    {
+                        suffixIsFields = false;
+                        break;
+                    }
+
+                    suffixPath = suffixPath.Append(suffixType,
+                        suffix.Field);
+                    suffixType = Fields(program, suffixType)[
+                        suffix.Field].Type;
+                }
+
+                if (suffixIsFields && suffixType == type
+                    && TryGetFieldPathByteOffset(layout.ElementType,
+                        suffixPath, program, out var fieldOffset))
+                {
+                    var elementBytes
+                        = initialized.RawUnionArrayElementBytes(variable,
+                            currentProjection, layout, elementIndex);
+                    var size = fallback.Length;
+                    if (fieldOffset <= elementBytes.Length
+                        && size <= elementBytes.Length - fieldOffset)
+                    {
+                        return elementBytes.AsSpan(fieldOffset, size)
+                            .ToArray();
+                    }
+                    return fallback;
+                }
+            }
+
+            currentProjection = StorageProjection.Combine(
+                currentProjection,
+                elementIndex is ulong selectedIndex
+                    ? StorageProjection.ForArrayIndex(selectedIndex)
+                    : StorageProjection.ForArrayRange(
+                        segment.Start, segment.Length));
+            currentType = layout.ElementType;
+            rootFieldPath = default;
+        }
+
+        if (!crossedArray && currentType == type
+            && projection.Kind == StorageProjectionKind.InlineFieldPath
+            && TryGetFieldPathByteOffset(rootType, rootFieldPath, program,
+                out var offset)
+            && initialized.TryGetRawUnionInitializedBytes(variable,
+                out var rootBytes)
+            && offset <= rootBytes.Length
+            && fallback.Length <= rootBytes.Length - offset)
+        {
+            return rootBytes.AsSpan(offset, fallback.Length).ToArray();
+        }
+
+        return fallback;
+    }
+
+    private static void ValidateRawUnionReferenceFieldFormation(
+        BoundReferenceFormation formation, ProvenanceAnchor target,
+        InitializationState initialized, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth)
+    {
+        if (target.Kind is not (ProvenanceAnchorKind.NativeStorage
+                or ProvenanceAnchorKind.ReferencePlace)
+            || target.Storage is not StorageKey storage
+            || !storage.IsKnown || target.Identity != storage.Site
+            || (uint)target.Identity >= (uint)function.Variables.Length)
+        {
+            return;
+        }
+
+        var segments = storage.Projection.ProjectionPath.Segments;
+        if (segments.IsEmpty)
+        {
+            return;
+        }
+
+        var currentType = function.Variables[target.Identity].Type;
+        var currentProjection = StorageProjection.WholeObject;
+        foreach (var segment in segments)
+        {
+            Count(ref remaining, depth + 1);
+            if (segment.Kind == StorageProjectionSegmentKind.Field)
+            {
+                if (segment.OwnerType != currentType
+                    || !HasFields(program, currentType)
+                    || (uint)segment.Field
+                        >= (uint)Fields(program, currentType).Length)
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+
+                var field = Fields(program, currentType)[segment.Field];
+                if (IsRawUnionType(program, currentType))
+                {
+                    var unionBytes
+                        = InitializedRawUnionPayloadBytesOfStoragePlace(
+                            target.Identity, currentProjection, currentType,
+                            initialized, function, program,
+                            GuaranteedInitializedPayloadBytes(currentType,
+                                program));
+                    var fieldOffset
+                        = MaterializedPayloadOffset(field.Offset);
+                    var fieldSize = MaterializedPayloadSize(field.Size);
+                    if (fieldOffset > unionBytes.Length
+                        || fieldSize > unionBytes.Length - fieldOffset
+                        || unionBytes.AsSpan(fieldOffset, fieldSize)
+                            .Contains((byte)0))
+                    {
+                        throw Invalid(formation.Span);
+                    }
+                }
+
+                currentProjection = currentProjection.AppendField(
+                    currentType, segment.Field);
+                currentType = field.Type;
+                continue;
+            }
+
+            if (segment.Kind is not (
+                    StorageProjectionSegmentKind.ArrayIndex
+                    or StorageProjectionSegmentKind.ArrayRange)
+                || !NativeFixedArrayContract.TryGetLayout(currentType,
+                    program.Structures, program.NativeFixedArrayTypes,
+                    out var layout)
+                || !NativeFixedArrayContract.MatchesLayout(layout, program)
+                || (segment.Kind
+                        == StorageProjectionSegmentKind.ArrayIndex
+                    && segment.Start >= layout.ElementCount)
+                || (segment.Kind
+                        == StorageProjectionSegmentKind.ArrayRange
+                    && (segment.Length == 0
+                        || segment.Start >= layout.ElementCount
+                        || segment.Length
+                            > layout.ElementCount - segment.Start)))
+            {
+                throw InvalidEffect(formation.Span, "CheckedReference");
+            }
+
+            currentProjection = StorageProjection.Combine(
+                currentProjection,
+                segment.Kind == StorageProjectionSegmentKind.ArrayIndex
+                    ? StorageProjection.ForArrayIndex(segment.Start)
+                    : StorageProjection.ForArrayRange(segment.Start,
+                        segment.Length));
+            currentType = layout.ElementType;
+        }
+    }
+
+    private static bool TryGetNativeFixedArrayElementFieldPath(
+        BoundFieldRead fieldRead, BoundFunction function, BoundProgram program,
+        out int variable, out BoundExpression? fieldPlace,
+        out ImmutableArray<BoundNativeFixedArrayProjection> projections,
+        out BoundNativeFixedArrayLayout leafLayout,
+        out FieldProjectionPath fieldPath)
+    {
+        variable = -1;
+        fieldPlace = null;
+        projections = [];
+        leafLayout = default;
+        fieldPath = default;
+        var fields = new Stack<BoundFieldRead>();
+        BoundExpression root = fieldRead;
+        while (true)
+        {
+            while (root is BoundUnsafeExpression unsafeExpression)
+            {
+                root = unsafeExpression.Expression;
+            }
+            if (root is not BoundFieldRead current)
+            {
+                break;
+            }
+            fields.Push(current);
+            root = current.Receiver;
+        }
+
+        if (fields.Count == 0)
+        {
+            return false;
+        }
+        while (root is BoundUnsafeExpression unsafeExpression)
+        {
+            root = unsafeExpression.Expression;
+        }
+
+        switch (root)
+        {
+            case BoundNativeFixedArrayElement element:
+                variable = element.Variable;
+                fieldPlace = element.FieldPlace;
+                projections = [new BoundNativeFixedArrayProjection(
+                    element.Layout, element.Index)];
+                leafLayout = element.Layout;
+                break;
+            case BoundNativeFixedArrayPathElement pathElement
+                when !pathElement.Projections.IsDefaultOrEmpty:
+                variable = pathElement.Variable;
+                fieldPlace = pathElement.FieldPlace;
+                projections = pathElement.Projections;
+                leafLayout = pathElement.Projections[^1].Layout;
+                break;
+            default:
+                return false;
+        }
+
+        if (projections.Length + fields.Count > MaximumDepth)
+        {
+            return false;
+        }
+        var ownerType = leafLayout.ElementType;
+        while (fields.TryPop(out var field))
+        {
+            if (field.Receiver.Type != ownerType
+                || !HasFields(program, ownerType)
+                || (uint)field.Field
+                    >= (uint)Fields(program, ownerType).Length
+                || field.Type
+                    != Fields(program, ownerType)[field.Field].Type)
+            {
+                return false;
+            }
+            fieldPath = fieldPath.Append(ownerType, field.Field);
+            ownerType = field.Type;
+        }
+        return ownerType == fieldRead.Type;
+    }
+
     private static byte[] GuaranteedInitializedPayloadBytes(
         PrimitiveType type, BoundProgram program,
         HashSet<PrimitiveType> visiting, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
-        var size = NativeFixedArrayTypes.IsType(type)
-            ? checked((int)program.NativeFixedArrayTypes[
-                NativeFixedArrayTypes.Index(type)].ByteExtent)
-            : ValueLayout.Size(type, program.Structures,
-                program.CheckedReferenceTypes,
-                program.NativeLoweringAgreement);
-        if (size is < 0 or > ValueLayout.MaximumStructureSize)
-        {
-            throw Invalid();
-        }
-
+        var size = MaterializedPayloadSize(type, program);
         var result = new byte[size];
         if (size == 0)
         {
@@ -11813,20 +15459,21 @@ public static partial class SemanticVerifier
                         var fieldBytes = GuaranteedInitializedPayloadBytes(
                             field.Type, program, visiting, ref remaining,
                             depth + 1);
-                        if (field.Offset < 0
-                            || field.Offset > result.Length
-                            || fieldBytes.Length > result.Length - field.Offset
-                            || field.Size != fieldBytes.Length)
+                        if (field.Offset > (ulong)result.Length
+                            || (ulong)fieldBytes.Length
+                                > (ulong)result.Length - field.Offset
+                            || field.Size != (ulong)fieldBytes.Length)
                         {
                             throw Invalid();
                         }
 
+                        var fieldOffset = checked((int)field.Offset);
                         for (var index = 0; index < result.Length; index++)
                         {
                             var alternativeByte
-                                = index >= field.Offset
-                                    && index - field.Offset < fieldBytes.Length
-                                    ? fieldBytes[index - field.Offset]
+                                = index >= fieldOffset
+                                    && index - fieldOffset < fieldBytes.Length
+                                    ? fieldBytes[index - fieldOffset]
                                     : (byte)0;
                             result[index] &= alternativeByte;
                         }
@@ -11841,15 +15488,15 @@ public static partial class SemanticVerifier
                     var fieldBytes = GuaranteedInitializedPayloadBytes(
                         field.Type, program, visiting, ref remaining,
                         depth + 1);
-                    if (field.Offset < 0
-                        || field.Offset > result.Length
-                        || fieldBytes.Length > result.Length - field.Offset
-                        || field.Size != fieldBytes.Length)
+                    if (field.Offset > (ulong)result.Length
+                        || (ulong)fieldBytes.Length
+                            > (ulong)result.Length - field.Offset
+                        || field.Size != (ulong)fieldBytes.Length)
                     {
                         throw Invalid();
                     }
 
-                    fieldBytes.CopyTo(result, field.Offset);
+                    fieldBytes.CopyTo(result, checked((int)field.Offset));
                 }
             }
             finally
@@ -11862,6 +15509,38 @@ public static partial class SemanticVerifier
 
         Array.Fill(result, (byte)1);
         return result;
+    }
+
+    private static int MaterializedPayloadSize(
+        PrimitiveType type, BoundProgram program)
+    {
+        var size = NativeFixedArrayTypes.IsType(type)
+            ? program.NativeFixedArrayTypes[
+                NativeFixedArrayTypes.Index(type)].ByteExtent
+            : ValueLayout.Size(type, program.Structures,
+                program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement);
+        return MaterializedPayloadSize(size);
+    }
+
+    private static int MaterializedPayloadSize(ulong size)
+    {
+        if (size > (ulong)ValueLayout.MaximumStructureSize)
+        {
+            throw Limit();
+        }
+
+        return checked((int)size);
+    }
+
+    private static int MaterializedPayloadOffset(ulong offset)
+    {
+        if (offset > int.MaxValue)
+        {
+            throw Limit();
+        }
+
+        return checked((int)offset);
     }
 
     private static bool HasFields(BoundProgram program, PrimitiveType type) =>
@@ -11930,8 +15609,36 @@ public static partial class SemanticVerifier
             objectIdentity, program);
     }
 
-    private static InitializationState Outcome(BoundExpression expression, InitializationState initialized, bool result, ref int remaining)
+    private static InitializationState CloneOutcomeState(
+        InitializationState state,
+        RepeatSnapshotReservationScope? snapshotScope) =>
+        snapshotScope is null ? state.Clone() : state.Clone(snapshotScope);
+
+    private static RepeatSnapshotReservationScope?
+        CreateRepeatSnapshotScopeIfNeeded(InitializationState state)
     {
+        if (state.RepeatSnapshotScope is not null)
+        {
+            return null;
+        }
+
+        var stateBytes = state.GetRawUnionArrayStateBytes();
+        if (stateBytes.IsZero)
+        {
+            return null;
+        }
+
+        var snapshotScope = new RepeatSnapshotReservationScope(
+            state.RepeatResources);
+        snapshotScope.TrackExistingState(state, stateBytes);
+        return snapshotScope;
+    }
+
+    private static InitializationState Outcome(BoundExpression expression,
+        InitializationState initialized, bool result, ref int remaining,
+        RepeatSnapshotReservationScope? snapshotScope = null)
+    {
+        snapshotScope ??= initialized.RepeatSnapshotScope;
         var hasOutcomeEffects = HasOutcomeEffects(expression, initialized.FlowFacts, ref remaining);
         var hasNativeOutputEffect = initialized.HasNativeOutputContracts
             && HasNativeOutputFlowEffect(expression, initialized, ref remaining);
@@ -11939,7 +15646,7 @@ public static partial class SemanticVerifier
             HasNativePointerExtentFlowEffect(expression, initialized, ref remaining);
         if (!hasOutcomeEffects && !hasNativeOutputEffect && !hasNativePointerExtentEffect)
         {
-            return initialized.Clone();
+            return CloneOutcomeState(initialized, snapshotScope);
         }
         Count(ref remaining, 0);
         if (expression is BoundBinary logical
@@ -11962,74 +15669,97 @@ public static partial class SemanticVerifier
                 if (result == stopResult
                     && CanBe(operand, stopResult, ref remaining, logicalState))
                 {
-                    var operandStopState = Outcome(operand, logicalState, stopResult, ref remaining);
+                    var operandStopState = Outcome(operand, logicalState,
+                        stopResult, ref remaining, snapshotScope);
                     stopState = stopState is null
                         ? operandStopState
                         : Combine(stopState, true, operandStopState, true);
                 }
                 if (!CanBe(operand, continueResult, ref remaining, logicalState))
                 {
-                    return result == stopResult ? stopState ?? initialized.Clone()
-                        : initialized.Clone();
+                    return result == stopResult
+                        ? stopState ?? CloneOutcomeState(initialized,
+                            snapshotScope)
+                        : CloneOutcomeState(initialized, snapshotScope);
                 }
-                logicalState = Outcome(operand, logicalState, continueResult, ref remaining);
+                logicalState = Outcome(operand, logicalState, continueResult,
+                    ref remaining, snapshotScope);
             }
-            return result == continueResult ? logicalState : stopState ?? initialized.Clone();
+            return result == continueResult ? logicalState
+                : stopState ?? CloneOutcomeState(initialized, snapshotScope);
         }
         if (expression is BoundUnary { Operator: TokenKind.Bang } unary)
         {
-            return Outcome(unary.Operand, initialized, !result, ref remaining);
+            return Outcome(unary.Operand, initialized, !result, ref remaining,
+                snapshotScope);
         }
         if (expression is BoundUnsafeExpression unsafeExpression)
         {
-            return Outcome(unsafeExpression.Expression, initialized, result, ref remaining);
+            return Outcome(unsafeExpression.Expression, initialized, result,
+                ref remaining, snapshotScope);
         }
         if (expression is BoundBinary { Operator: TokenKind.AmpersandAmpersand } and)
         {
             if (result)
             {
-                var leftTrue = Outcome(and.Left, initialized, true, ref remaining);
-                return Outcome(and.Right, leftTrue, true, ref remaining);
+                var leftTrue = Outcome(and.Left, initialized, true,
+                    ref remaining, snapshotScope);
+                return Outcome(and.Right, leftTrue, true, ref remaining,
+                    snapshotScope);
             }
             var firstFalsePossible = CanBe(and.Left, false, ref remaining, initialized);
             var rightFalsePossible = CanBe(and.Left, true, ref remaining, initialized)
                 && CanBe(and.Right, false, ref remaining, initialized);
             if (firstFalsePossible && !rightFalsePossible)
             {
-                return Outcome(and.Left, initialized, false, ref remaining);
+                return Outcome(and.Left, initialized, false, ref remaining,
+                    snapshotScope);
             }
             if (!firstFalsePossible && rightFalsePossible)
             {
-                var leftTrue = Outcome(and.Left, initialized, true, ref remaining);
-                return Outcome(and.Right, leftTrue, false, ref remaining);
+                var leftTrue = Outcome(and.Left, initialized, true,
+                    ref remaining, snapshotScope);
+                return Outcome(and.Right, leftTrue, false, ref remaining,
+                    snapshotScope);
             }
-            var leftTrueState = Outcome(and.Left, initialized, true, ref remaining);
-            var firstFalse = Outcome(and.Left, initialized, false, ref remaining);
-            var rightFalse = Outcome(and.Right, leftTrueState, false, ref remaining);
+            var leftTrueState = Outcome(and.Left, initialized, true,
+                ref remaining, snapshotScope);
+            var firstFalse = Outcome(and.Left, initialized, false,
+                ref remaining, snapshotScope);
+            var rightFalse = Outcome(and.Right, leftTrueState, false,
+                ref remaining, snapshotScope);
             return Combine(firstFalse, firstFalsePossible, rightFalse, rightFalsePossible);
         }
         if (expression is BoundBinary { Operator: TokenKind.PipePipe } or)
         {
             if (!result)
             {
-                var leftFalse = Outcome(or.Left, initialized, false, ref remaining);
-                return Outcome(or.Right, leftFalse, false, ref remaining);
+                var leftFalse = Outcome(or.Left, initialized, false,
+                    ref remaining, snapshotScope);
+                return Outcome(or.Right, leftFalse, false, ref remaining,
+                    snapshotScope);
             }
             var firstTruePossible = CanBe(or.Left, true, ref remaining, initialized);
             var rightTruePossible = CanBe(or.Left, false, ref remaining, initialized)
                 && CanBe(or.Right, true, ref remaining, initialized);
             if (firstTruePossible && !rightTruePossible)
             {
-                return Outcome(or.Left, initialized, true, ref remaining);
+                return Outcome(or.Left, initialized, true, ref remaining,
+                    snapshotScope);
             }
             if (!firstTruePossible && rightTruePossible)
             {
-                var leftFalse = Outcome(or.Left, initialized, false, ref remaining);
-                return Outcome(or.Right, leftFalse, true, ref remaining);
+                var leftFalse = Outcome(or.Left, initialized, false,
+                    ref remaining, snapshotScope);
+                return Outcome(or.Right, leftFalse, true, ref remaining,
+                    snapshotScope);
             }
-            var leftFalseState = Outcome(or.Left, initialized, false, ref remaining);
-            var firstTrue = Outcome(or.Left, initialized, true, ref remaining);
-            var rightTrue = Outcome(or.Right, leftFalseState, true, ref remaining);
+            var leftFalseState = Outcome(or.Left, initialized, false,
+                ref remaining, snapshotScope);
+            var firstTrue = Outcome(or.Left, initialized, true,
+                ref remaining, snapshotScope);
+            var rightTrue = Outcome(or.Right, leftFalseState, true,
+                ref remaining, snapshotScope);
             return Combine(firstTrue, firstTruePossible, rightTrue, rightTruePossible);
         }
         if (expression is BoundConditional conditional)
@@ -12040,22 +15770,30 @@ public static partial class SemanticVerifier
                 && CanBe(conditional.WhenFalse, result, ref remaining, initialized);
             if (whenTruePossible && !whenFalsePossible)
             {
-                var trueConditionState = Outcome(conditional.Condition, initialized, true, ref remaining);
-                return Outcome(conditional.WhenTrue, trueConditionState, result, ref remaining);
+                var trueConditionState = Outcome(conditional.Condition,
+                    initialized, true, ref remaining, snapshotScope);
+                return Outcome(conditional.WhenTrue, trueConditionState,
+                    result, ref remaining, snapshotScope);
             }
             if (!whenTruePossible && whenFalsePossible)
             {
-                var falseConditionState = Outcome(conditional.Condition, initialized, false, ref remaining);
-                return Outcome(conditional.WhenFalse, falseConditionState, result, ref remaining);
+                var falseConditionState = Outcome(conditional.Condition,
+                    initialized, false, ref remaining, snapshotScope);
+                return Outcome(conditional.WhenFalse, falseConditionState,
+                    result, ref remaining, snapshotScope);
             }
-            var whenTrue = Outcome(conditional.Condition, initialized, true, ref remaining);
-            var whenFalse = Outcome(conditional.Condition, initialized, false, ref remaining);
-            return Combine(Outcome(conditional.WhenTrue, whenTrue, result, ref remaining),
+            var whenTrue = Outcome(conditional.Condition, initialized, true,
+                ref remaining, snapshotScope);
+            var whenFalse = Outcome(conditional.Condition, initialized,
+                false, ref remaining, snapshotScope);
+            return Combine(Outcome(conditional.WhenTrue, whenTrue, result,
+                    ref remaining, snapshotScope),
                 whenTruePossible,
-                Outcome(conditional.WhenFalse, whenFalse, result, ref remaining),
+                Outcome(conditional.WhenFalse, whenFalse, result,
+                    ref remaining, snapshotScope),
                 whenFalsePossible);
         }
-        var state = initialized.Clone();
+        var state = CloneOutcomeState(initialized, snapshotScope);
         var nativeOutputCalls = new Dictionary<BoundExpression, NativeOutputCallFact>(
             ReferenceEqualityComparer.Instance);
         if (hasNativeOutputEffect || hasNativePointerExtentEffect)
@@ -12135,6 +15873,8 @@ public static partial class SemanticVerifier
             return;
         }
         Count(ref remaining, 0);
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(state);
         switch (expression)
         {
             case BoundUnsafeExpression unsafeExpression:
@@ -12257,6 +15997,9 @@ public static partial class SemanticVerifier
                 {
                     VacateNestedOutputs(element, state, ref remaining);
                 }
+                break;
+            case BoundNativeFixedArrayRepeatInitialization repeat:
+                VacateNestedOutputs(repeat.Seed, state, ref remaining);
                 break;
             case BoundNativeFixedArrayElement fixedArrayElement:
                 VacateNestedOutputs(fixedArrayElement.Index, state, ref remaining);
@@ -12430,6 +16173,8 @@ public static partial class SemanticVerifier
             BoundIsNull test => FlowFacts(test.Value, flowFacts, ref remaining),
             BoundNativeFixedArrayInitialization fixedArray =>
                 FlowFacts(fixedArray.Elements, flowFacts, ref remaining),
+            BoundNativeFixedArrayRepeatInitialization repeat =>
+                FlowFacts(repeat.Seed, flowFacts, ref remaining),
             BoundNativeFixedArrayElement fixedArrayElement =>
                 FlowFacts(fixedArrayElement.Index, flowFacts, ref remaining),
             BoundNativeFixedArrayPathElement pathElement =>
@@ -12579,6 +16324,8 @@ public static partial class SemanticVerifier
             return completesNormally;
         }
 
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         completesNormally = CanCompleteNormallyCore(expression, initialized,
             program, ref remaining, depth);
         if (cacheable)
@@ -12686,6 +16433,8 @@ public static partial class SemanticVerifier
         {
             return true;
         }
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         Count(ref remaining, depth);
         if (expression is BoundBinary logical
             && TryGetLongLeftLogicalChain(logical, out var chain))
@@ -12781,6 +16530,8 @@ public static partial class SemanticVerifier
         FailureEdges? failures, bool statementCompound = false,
         BoundBinary? cleanupCounterStep = null)
     {
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         var completesNormally = CanCompleteNormally(expression, initialized, program,
             ref remaining, depth);
         if (completesNormally)
@@ -12803,6 +16554,8 @@ public static partial class SemanticVerifier
         InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth)
     {
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         var unreachableState = initialized.Clone();
         var unreachableMasks = (uint[])fieldMasks.Clone();
         Expression(expression, unreachableState, unreachableMasks, declarations,
@@ -12812,6 +16565,8 @@ public static partial class SemanticVerifier
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
         InitializationState initialized)
     {
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         if (expression is BoundBinary logical
             && TryGetLongLeftLogicalChain(logical, out var chain))
         {
@@ -12956,6 +16711,8 @@ public static partial class SemanticVerifier
     private static bool? KnownOptionalPresence(BoundExpression expression, InitializationState initialized,
         ref int remaining)
     {
+        using var repeatSnapshotState
+            = CreateRepeatSnapshotScopeIfNeeded(initialized);
         Count(ref remaining, 0);
         if (!ManagedClassTypes.IsOptional(expression.Type))
         {
@@ -13172,6 +16929,29 @@ public static partial class SemanticVerifier
         {
             throw Limit();
         }
+    }
+
+    private static ulong AlignLayout(ulong value, int alignment)
+    {
+        if (alignment <= 0 || (alignment & (alignment - 1)) != 0)
+        {
+            throw Invalid();
+        }
+
+        var wideAlignment = checked((ulong)alignment);
+        var remainder = value & (wideAlignment - 1);
+        if (remainder == 0)
+        {
+            return value;
+        }
+
+        var padding = wideAlignment - remainder;
+        if (value > ulong.MaxValue - padding)
+        {
+            throw Invalid();
+        }
+
+        return value + padding;
     }
 
     private static ArgumentException Invalid() =>

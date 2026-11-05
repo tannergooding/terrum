@@ -368,6 +368,7 @@ public static partial class SemanticVerifier
             throw InvalidEffect(initialization.Span, "NativeImport");
         }
 
+        using var repeatFrame = initialized.RepeatResources.EnterFrame();
         var hasElements = layout.ElementCount != 0;
         var elementPrefix = hasElements
             ? StorageProjection.Combine(destinationPrefix,
@@ -380,17 +381,20 @@ public static partial class SemanticVerifier
             ref remaining, depth + 1, failures);
         if (!seedCompletes)
         {
+            repeatFrame.Complete();
             return false;
         }
 
         if (!trackPointerFacts)
         {
+            repeatFrame.Complete();
             return true;
         }
         if (!hasElements)
         {
             initialized.ClearRawUnionArrayFacts(variable,
                 destinationPrefix);
+            repeatFrame.Complete();
             return true;
         }
 
@@ -412,6 +416,7 @@ public static partial class SemanticVerifier
                 facts, function, program, ref remaining, depth + 1,
                 allowArrayRangeTemplate: true);
         }
+        repeatFrame.Complete();
         return true;
     }
 
@@ -647,15 +652,15 @@ public static partial class SemanticVerifier
                 == layout.CarrierType;
         }
 
-        if (fieldPlace is not BoundFieldRead place
-            || place.Type != layout.CarrierType
-            || !TryGetFieldProjectionPath(place, function, program,
-                out var rootVariable, out var fieldPath)
+        var remaining = MaximumAnalysisVisits;
+        if (!TryGetNativeFixedArrayStoragePlace(fieldPlace, function,
+                program, 0, ref remaining, out var rootVariable,
+                out var placeType, out var projection, out _)
             || rootVariable != variable
-            || fieldPath.Segments.IsEmpty
+            || placeType != layout.CarrierType
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(
-                function.Variables[rootVariable].Type,
-                program.Structures, program.NativeFixedArrayTypes))
+                function.Variables[rootVariable].Type, program.Structures,
+                program.NativeFixedArrayTypes))
         {
             return false;
         }
@@ -669,28 +674,141 @@ public static partial class SemanticVerifier
             return false;
         }
 
-        var ownerType = function.Variables[rootVariable].Type;
-        foreach (var segment in fieldPath.Segments)
-        {
-            if (segment.OwnerType != ownerType
-                || IsUnique(program, ownerType)
-                || !IsInlineStructStorage(ownerType, program)
-                || !HasFields(program, ownerType)
-                || (uint)segment.Field
-                    >= (uint)Fields(program, ownerType).Length)
-            {
-                return false;
-            }
-            ownerType = Fields(program, ownerType)[segment.Field].Type;
-        }
+        arrayPrefix = projection;
+        return true;
+    }
 
-        if (ownerType != place.Type)
+    private static bool TryGetNativeFixedArrayStoragePlace(
+        BoundExpression place, BoundFunction function,
+        BoundProgram program, int depth, ref int remainingWork,
+        out int rootVariable, out PrimitiveType placeType,
+        out StorageProjection projection, out bool writable)
+    {
+        rootVariable = -1;
+        placeType = PrimitiveType.Void;
+        projection = StorageProjection.WholeObject;
+        writable = false;
+        if (depth > MaximumDepth || --remainingWork < 0)
         {
             return false;
         }
 
-        arrayPrefix = StorageProjection.ForFieldPath(fieldPath);
-        return true;
+        switch (place)
+        {
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != read.Type)
+                {
+                    return false;
+                }
+
+                rootVariable = read.Variable;
+                placeType = read.Type;
+                writable = function.Variables[read.Variable].IsMutable;
+                return true;
+            case BoundFieldRead field:
+            {
+                if (!TryGetNativeFixedArrayStoragePlace(field.Receiver,
+                        function, program, depth + 1,
+                        ref remainingWork, out rootVariable,
+                        out var ownerType, out projection, out writable)
+                    || !HasFields(program, ownerType)
+                    || (uint)field.Field
+                        >= (uint)Fields(program, ownerType).Length
+                    || !CanAccessField(function, program, ownerType,
+                        field.Field)
+                    || field.Type
+                        != Fields(program, ownerType)[field.Field].Type)
+                {
+                    return false;
+                }
+
+                writable &= Fields(program, ownerType)[field.Field]
+                    .IsMutable;
+                projection = projection.AppendField(ownerType,
+                    field.Field);
+                placeType = field.Type;
+                return true;
+            }
+            case BoundNativeFixedArrayElement element:
+            {
+                var basePlace = element.FieldPlace
+                    ?? ((uint)element.Variable
+                        < (uint)function.Variables.Length
+                            ? new BoundRead(element.Variable,
+                                function.Variables[element.Variable].Type,
+                                element.Span)
+                            : null);
+                if (basePlace is null
+                    || !TryGetNativeFixedArrayStoragePlace(basePlace,
+                        function, program, depth + 1,
+                        ref remainingWork, out rootVariable,
+                        out var carrierType, out projection, out writable)
+                    || rootVariable != element.Variable
+                    || carrierType != element.Layout.CarrierType
+                    || !NativeFixedArrayContract.MatchesLayout(
+                        element.Layout, program.Structures,
+                        program.NativeFixedArrayTypes)
+                    || !NativeFixedArrayContract.IsIndexType(
+                        element.Index.Type))
+                {
+                    return false;
+                }
+
+                writable &= NativeFixedArrayContract.AllowsElementWrites(
+                    element.Layout);
+                projection = StorageProjection.Combine(projection,
+                    StorageProjection.ForArrayElement(element.Index,
+                        element.Layout.ElementCount));
+                placeType = element.Type;
+                return placeType == element.Layout.ElementType;
+            }
+            case BoundNativeFixedArrayPathElement element:
+            {
+                var basePlace = element.FieldPlace
+                    ?? ((uint)element.Variable
+                        < (uint)function.Variables.Length
+                            ? new BoundRead(element.Variable,
+                                function.Variables[element.Variable].Type,
+                                element.Span)
+                            : null);
+                if (basePlace is null
+                    || element.Projections.IsDefaultOrEmpty
+                    || !TryGetNativeFixedArrayStoragePlace(basePlace,
+                        function, program, depth + 1,
+                        ref remainingWork, out rootVariable,
+                        out var carrierType, out projection, out writable)
+                    || rootVariable != element.Variable)
+                {
+                    return false;
+                }
+
+                foreach (var item in element.Projections)
+                {
+                    if (item.Layout.CarrierType != carrierType
+                        || !NativeFixedArrayContract.MatchesLayout(
+                            item.Layout, program.Structures,
+                            program.NativeFixedArrayTypes)
+                        || !NativeFixedArrayContract.IsIndexType(
+                            item.Index.Type))
+                    {
+                        return false;
+                    }
+
+                    writable &= NativeFixedArrayContract
+                        .AllowsElementWrites(item.Layout);
+                    projection = StorageProjection.Combine(projection,
+                        StorageProjection.ForArrayElement(item.Index,
+                            item.Layout.ElementCount));
+                    carrierType = item.Layout.ElementType;
+                }
+
+                placeType = carrierType;
+                return placeType == element.Type;
+            }
+            default:
+                return false;
+        }
     }
 
     private static bool TryGetNativeFixedArrayArrayPrefix(int variable,
@@ -764,34 +882,232 @@ public static partial class SemanticVerifier
         return true;
     }
 
+    private static void ApplyRawUnionArrayCallEffects(BoundCall call,
+        BoundFunction callee, InitializationState initialized,
+        BoundFunction caller, BoundProgram program, ref int remaining,
+        int depth)
+    {
+        for (var argumentIndex = 0;
+            argumentIndex < call.Arguments.Length; argumentIndex++)
+        {
+            Count(ref remaining, depth + 1);
+            var argument = call.Arguments[argumentIndex];
+            var parameterIndex = call.ParameterIndex(argumentIndex);
+            var parameterSlot = parameterIndex + (callee.IsConstructor ? 1 : 0);
+            if ((uint)parameterSlot >= (uint)callee.Variables.Length)
+            {
+                throw Invalid(call.Span);
+            }
+
+            var formal = callee.Variables[parameterSlot];
+            var place = argument switch
+            {
+                BoundReferenceFormation formation => formation.Place,
+                BoundMutableReceiverLoan mutableReceiver =>
+                    new BoundRead(mutableReceiver.Variable,
+                        mutableReceiver.Type, mutableReceiver.Span),
+                BoundMutableFieldLoan mutableField => mutableField.Place,
+                _ when formal.IsImplicitRef && formal.IsMutable => argument,
+                _ => null,
+            };
+            if (place is null)
+            {
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        formal.Type, program.CheckedReferenceTypes))
+                {
+                    continue;
+                }
+
+                var reference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(formal.Type)];
+                if (!reference.IsWritable
+                    || (!CarriesRawUnionPayloadFacts(program,
+                        reference.ReferentType)
+                        && !CarriesRawUnionArrayFacts(program,
+                            reference.ReferentType)))
+                {
+                    continue;
+                }
+
+                ClearAllRawUnionArrayFacts(initialized, caller,
+                    ref remaining, depth + 1);
+                continue;
+            }
+            if (argument is BoundReferenceFormation
+                && (!CheckedReferenceTypeContract.IsValidType(
+                        formal.Type, program.CheckedReferenceTypes)
+                    || !program.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(formal.Type)].IsWritable))
+            {
+                continue;
+            }
+
+            if (!InvalidateRawUnionArrayFactsForWritablePlace(place,
+                    initialized, caller, program, ref remaining,
+                    depth + 1))
+            {
+                ClearAllRawUnionArrayFacts(initialized, caller,
+                    ref remaining, depth + 1);
+            }
+        }
+    }
+
+    private static bool InvalidateRawUnionArrayFactsForWritablePlace(
+        BoundExpression place, InitializationState initialized,
+        BoundFunction function, BoundProgram program, ref int remaining,
+        int depth)
+    {
+        Count(ref remaining, depth);
+        if (place is BoundNativeFixedArrayElement element)
+        {
+            if (!TryGetNativeFixedArrayArrayPrefix(element.Variable,
+                    element.FieldPlace, element.Layout, function, program,
+                    out var arrayPrefix))
+            {
+                return false;
+            }
+
+            if (CarriesRawUnionPayloadFacts(program, element.Type))
+            {
+                var selectedIndex
+                    = NativeFixedArrayContract.TryGetUnsignedIndex(
+                        element.Index, out var index)
+                        ? index : (ulong?)null;
+                initialized.SetRawUnionArrayElementBytes(element.Variable,
+                    arrayPrefix, element.Layout, selectedIndex,
+                    GuaranteedInitializedPayloadBytes(element.Type, program));
+                return true;
+            }
+
+            if (CarriesRawUnionArrayFacts(program, element.Type))
+            {
+                var elementPrefix = GetNativeFixedArrayElementPrefix(
+                    arrayPrefix, element.Layout, element.Index);
+                initialized.ClearRawUnionArrayFacts(element.Variable,
+                    elementPrefix);
+                return true;
+            }
+        }
+        else if (place is BoundNativeFixedArrayPathElement pathElement)
+        {
+            var projections = pathElement.Projections;
+            if (projections.IsDefaultOrEmpty
+                || !TryGetNativeFixedArrayArrayPrefix(
+                    pathElement.Variable, pathElement.FieldPlace,
+                    projections[0].Layout, function, program,
+                    out var fieldArrayPrefix))
+            {
+                return false;
+            }
+
+            var leafProjection = projections[^1];
+            var parentProjections = projections.Length == 1
+                ? [] : projections.RemoveAt(projections.Length - 1);
+            var parentArrayPrefix = GetNativeFixedArrayPathPrefix(
+                fieldArrayPrefix, parentProjections);
+            if (CarriesRawUnionPayloadFacts(program, pathElement.Type))
+            {
+                var selectedIndex
+                    = NativeFixedArrayContract.TryGetUnsignedIndex(
+                        leafProjection.Index, out var index)
+                        ? index : (ulong?)null;
+                initialized.SetRawUnionArrayElementBytes(
+                    pathElement.Variable, parentArrayPrefix,
+                    leafProjection.Layout, selectedIndex,
+                    GuaranteedInitializedPayloadBytes(pathElement.Type,
+                        program));
+                return true;
+            }
+
+            if (CarriesRawUnionArrayFacts(program, pathElement.Type))
+            {
+                var elementPrefix = GetNativeFixedArrayElementPrefix(
+                    parentArrayPrefix, leafProjection.Layout,
+                    leafProjection.Index);
+                initialized.ClearRawUnionArrayFacts(
+                    pathElement.Variable, elementPrefix);
+                return true;
+            }
+        }
+        else if (place is BoundFieldRead field
+            && TryGetNativeFixedArrayElementFieldPath(field, function,
+                program, out var arrayVariable, out var arrayFieldPlace,
+                out var arrayProjections, out var arrayLayout, out _)
+            && TryGetNativeFixedArrayArrayPrefix(arrayVariable,
+                arrayFieldPlace, arrayProjections[0].Layout, function,
+                program, out var fieldArrayPrefix))
+        {
+            var parentProjections = arrayProjections.Length == 1
+                ? [] : arrayProjections.RemoveAt(
+                    arrayProjections.Length - 1);
+            var parentArrayPrefix = GetNativeFixedArrayPathPrefix(
+                fieldArrayPrefix, parentProjections);
+            var leafProjection = arrayProjections[^1];
+            var selectedIndex
+                = NativeFixedArrayContract.TryGetUnsignedIndex(
+                    leafProjection.Index, out var index)
+                    ? index : (ulong?)null;
+            initialized.SetRawUnionArrayElementBytes(arrayVariable,
+                parentArrayPrefix, arrayLayout, selectedIndex,
+                GuaranteedInitializedPayloadBytes(arrayLayout.ElementType,
+                    program));
+            return true;
+        }
+
+        var placeWork = MaximumAnalysisVisits;
+        if (TryGetNativeFixedArrayStoragePlace(place, function, program,
+                0, ref placeWork, out var variable, out var placeType,
+                out var projection, out _))
+        {
+            if (CarriesRawUnionArrayFacts(program, placeType))
+            {
+                if (projection.Kind is StorageProjectionKind.UnknownArrayElement
+                    or StorageProjectionKind.UnknownElement)
+                {
+                    initialized.ClearRawUnionArrayFacts(variable);
+                }
+                else
+                {
+                    initialized.ClearRawUnionArrayFacts(variable,
+                        projection);
+                }
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void ClearAllRawUnionArrayFacts(
+        InitializationState initialized, BoundFunction function,
+        ref int remaining, int depth)
+    {
+        for (var variable = 0; variable < function.Variables.Length;
+            variable++)
+        {
+            Count(ref remaining, depth + 1);
+            initialized.ClearRawUnionArrayFacts(variable);
+        }
+    }
+
     private static bool IsWritableNativeFixedArrayFieldPlace(
         int variable, BoundExpression? fieldPlace,
         BoundFunction function, BoundProgram program)
     {
-        if (fieldPlace is not BoundFieldRead place
-            || !function.Variables[variable].IsMutable
-            || !TryGetFieldProjectionPath(place, function, program,
-                out var rootVariable, out var fieldPath)
-            || rootVariable != variable)
+        if (fieldPlace is not BoundFieldRead
+            || (uint)variable >= (uint)function.Variables.Length
+            || !function.Variables[variable].IsMutable)
         {
             return false;
         }
 
-        var ownerType = function.Variables[variable].Type;
-        foreach (var segment in fieldPath.Segments)
-        {
-            if (segment.OwnerType != ownerType
-                || !HasFields(program, ownerType)
-                || (uint)segment.Field
-                    >= (uint)Fields(program, ownerType).Length
-                || !Fields(program, ownerType)[segment.Field].IsMutable)
-            {
-                return false;
-            }
-            ownerType = Fields(program, ownerType)[segment.Field].Type;
-        }
-
-        return ownerType == place.Type;
+        var remaining = MaximumAnalysisVisits;
+        return TryGetNativeFixedArrayStoragePlace(fieldPlace, function,
+                program, 0, ref remaining, out var rootVariable,
+                out var placeType, out _, out var writable)
+            && rootVariable == variable
+            && placeType == fieldPlace.Type
+            && writable;
     }
 
     private static StorageProjection GetNativeFixedArrayPathPrefix(
@@ -1205,8 +1521,8 @@ public static partial class SemanticVerifier
         var hasFieldPlace = write.FieldPlace is not null;
         var hasLeafFields = !write.LeafFields.IsDefaultOrEmpty;
         var targetType = PrimitiveType.Void;
-        var fieldOffset = 0;
-        var fieldSize = 0;
+        ulong fieldOffset = 0;
+        ulong fieldSize = 0;
         var fieldRequiresUnsafe = false;
         var pathValid = IsValidNativeFixedArrayPath(write.Variable,
             write.Projections, function, program, out var leafLayout,
@@ -1320,13 +1636,13 @@ public static partial class SemanticVerifier
             {
                 var initializedBytes = InitializedPayloadBytesOfExpression(
                     write.Value, targetType, initialized, function, program);
-                if (initializedBytes.Length != fieldSize)
+                if ((ulong)initializedBytes.Length != fieldSize)
                 {
                     throw Invalid(write.Span);
                 }
                 initialized.WriteRawUnionArrayElementByteRange(
                     write.Variable, arrayPrefix, leafLayout, selectedIndex,
-                    fieldOffset, initializedBytes);
+                    MaterializedPayloadOffset(fieldOffset), initializedBytes);
             }
             else
             {
@@ -1375,8 +1691,8 @@ public static partial class SemanticVerifier
         PrimitiveType elementType,
         ImmutableArray<BoundNativeFixedArrayFieldProjection> leafFields,
         BoundProgram program, out PrimitiveType fieldType,
-        out FieldProjectionPath fieldPath, out int fieldOffset,
-        out int fieldSize, out bool requiresUnsafe)
+        out FieldProjectionPath fieldPath, out ulong fieldOffset,
+        out ulong fieldSize, out bool requiresUnsafe)
     {
         fieldType = PrimitiveType.Void;
         fieldPath = default;
@@ -1423,12 +1739,12 @@ public static partial class SemanticVerifier
 
         var elementSize = ValueLayout.Size(elementType, program.Structures,
             program.CheckedReferenceTypes, program.NativeLoweringAgreement);
-        if (fieldSize < 0 || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+        if (!NativeFixedArrayContract.IsRootlessCopyFieldType(
                 ownerType, program.Structures,
                 program.NativeFixedArrayTypes)
-            || !TryGetFieldPathByteOffset(elementType, fieldPath, program,
+            || !TryGetFieldPathOffset(elementType, fieldPath, program,
                 out fieldOffset)
-            || elementSize < 0 || fieldOffset > elementSize
+            || fieldOffset > elementSize
             || fieldSize > elementSize - fieldOffset)
         {
             return false;
@@ -1446,25 +1762,53 @@ public static partial class SemanticVerifier
         {
             return false;
         }
-        if (fieldPlace is not BoundFieldRead place
-            || !TryGetFieldProjectionPath(place, function, program,
-                out _, out var fieldPath))
-        {
-            throw Invalid(fieldPlace.Span);
-        }
 
-        foreach (var segment in fieldPath.Segments)
+        var remaining = MaximumAnalysisVisits;
+        return NativeFixedArrayFieldPlaceRequiresUnsafe(fieldPlace,
+            function, program, 0, ref remaining);
+    }
+
+    private static bool NativeFixedArrayFieldPlaceRequiresUnsafe(
+        BoundExpression? expression, BoundFunction function,
+        BoundProgram program, int depth, ref int remaining)
+    {
+        if (expression is null)
         {
-            if (segment.OwnerType != PrimitiveType.Void
-                && HasFields(program, segment.OwnerType)
-                && (uint)segment.Field
-                    < (uint)Fields(program, segment.OwnerType).Length
-                && RequiresUnsafeFieldAccess(program, segment.OwnerType,
-                    Fields(program, segment.OwnerType)[segment.Field]))
-            {
-                return true;
-            }
+            return false;
         }
-        return false;
+        Count(ref remaining, depth);
+        switch (expression)
+        {
+            case BoundFieldRead field:
+            {
+                var ownerType = field.Receiver.Type;
+                if (!HasFields(program, ownerType)
+                    || (uint)field.Field
+                        >= (uint)Fields(program, ownerType).Length
+                    || !CanAccessField(function, program, ownerType,
+                        field.Field)
+                    || field.Type
+                        != Fields(program, ownerType)[field.Field].Type)
+                {
+                    throw Invalid(field.Span);
+                }
+
+                return RequiresUnsafeFieldAccess(program, ownerType,
+                        Fields(program, ownerType)[field.Field])
+                    || NativeFixedArrayFieldPlaceRequiresUnsafe(
+                        field.Receiver, function, program, depth + 1,
+                        ref remaining);
+            }
+            case BoundNativeFixedArrayElement element:
+                return NativeFixedArrayFieldPlaceRequiresUnsafe(
+                    element.FieldPlace, function, program, depth + 1,
+                    ref remaining);
+            case BoundNativeFixedArrayPathElement element:
+                return NativeFixedArrayFieldPlaceRequiresUnsafe(
+                    element.FieldPlace, function, program, depth + 1,
+                    ref remaining);
+            default:
+                return false;
+        }
     }
 }

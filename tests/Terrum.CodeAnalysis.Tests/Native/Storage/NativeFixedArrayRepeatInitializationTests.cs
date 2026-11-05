@@ -6,6 +6,7 @@ using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
@@ -16,6 +17,14 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
 {
     private static readonly int[] s_twoCopyOriginOrdinals = [0, 1];
     private static readonly int[] s_singleCopyOriginOrdinal = [1];
+
+    private static CompilationOptions LayoutOptions(
+        BoundRuntimePolicy runtimePolicy)
+        => new() {
+            RuntimePolicy = runtimePolicy,
+            LayoutCoreRegistration =
+                LayoutCoreRegistrationTestData.Create(),
+        };
 
     [Test]
     public void RepeatedSeedPreservesFlatAndNestedHighIndexCoverage()
@@ -68,7 +77,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 [RawWord; 0] values = [seed; 0];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         var nestedFunction = compilation.Program?.Functions.SingleOrDefault(
             static function => function.Name == "ReadNestedHighOuter");
@@ -105,6 +114,84 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
     }
 
     [Test]
+    public void NestedHighCountRepeatCopiesRetainSparseSeedFacts()
+    {
+        var preservedSnapshot = Compile("""
+            public uint64 ReadCopiedWideAfterNestedHighWrite() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [RawWord; 2] row = [wide; 2];
+                row[1] = low;
+                mut [[RawWord; 2]; 5000000000] rows
+                    = [row; 5000000000];
+                [[RawWord; 2]; 5000000000] copy = rows;
+                rows[uint64(4999999999)][0] = low;
+                unsafe {
+                    return copy[uint64(4999999999)][0].Wide;
+                }
+            }
+            """);
+        Assert.That(preservedSnapshot.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                preservedSnapshot.Diagnostics));
+
+        var sparseOverride = Compile("""
+            public uint64 ReadNarrowNestedHighOverride() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [RawWord; 2] row = [wide; 2];
+                row[1] = low;
+                [[RawWord; 2]; 5000000000] rows
+                    = [row; 5000000000];
+                unsafe {
+                    return rows[uint64(4999999999)][1].Wide;
+                }
+            }
+            """);
+        Assert.That(sparseOverride.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                sparseOverride.Diagnostics));
+
+        var preservedInnerSnapshot = Compile("""
+            public uint64 ReadCopiedInnerWideAfterHighWrite() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [RawWord; 5000000000] row
+                    = [wide; 5000000000];
+                row[uint64(4999999999)] = low;
+                mut [[RawWord; 5000000000]; 2] rows = [row; 2];
+                [[RawWord; 5000000000]; 2] copy = rows;
+                rows[1][0] = low;
+                unsafe { return copy[1][0].Wide; }
+            }
+            """);
+        Assert.That(preservedInnerSnapshot.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                preservedInnerSnapshot.Diagnostics));
+
+        var innerSparseOverride = Compile("""
+            public uint64 ReadNarrowInnerHighOverride() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [RawWord; 5000000000] row
+                    = [wide; 5000000000];
+                row[uint64(4999999999)] = low;
+                [[RawWord; 5000000000]; 2] rows = [row; 2];
+                unsafe {
+                    return rows[1][uint64(4999999999)].Wide;
+                }
+            }
+            """);
+        Assert.That(innerSparseOverride.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                innerSparseOverride.Diagnostics));
+    }
+
+    [Test]
     public void RepeatedNarrowSeedDoesNotEstablishWideCoverage()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -123,7 +210,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 [RawWord; 5000000000] values = [seed; 5000000000];
                 unsafe { return values[4999999999].Wide; }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -146,15 +233,15 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                     = [seed; 5000000000];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<NotSupportedException>(() =>
             NativeEmitter.EmitWithNativeImports(compilation.Program!,
                 NativeRuntimePolicy.FailFast));
         Assert.That(exception!.Message,
-            Does.Contain("native stack frame exceeds"));
+            Does.Contain("signed x64 stack-offset capacity"));
     }
 
     [Test]
@@ -176,7 +263,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 [RawWord; 2] values = [seed; 1];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -214,6 +301,32 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
             """);
         Assert.That(trailingComma.HasErrors, Is.True,
             string.Join(Environment.NewLine, trailingComma.Diagnostics));
+    }
+
+    [Test]
+    public void RepeatRequiresRootlessBlittableSeedEvenAtZeroCount()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Cell {
+                public mut int32 Value;
+
+                internal Cell() {
+                    Value = int32(0);
+                }
+            }
+
+            int32 Main() {
+                mut Cell seed = new Cell();
+                mut [Cell; 0] values = [seed; 0];
+                return 0;
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
     [Test]
@@ -520,7 +633,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 holder.Values = [wide, wide];
                 unsafe { return holder.Values[0].Wide; }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(arrayFieldReadOnly.HasErrors, Is.False,
             string.Join(Environment.NewLine, arrayFieldReadOnly.Diagnostics));
 
@@ -541,6 +654,482 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
             """);
         Assert.That(arrayField.HasErrors, Is.False,
             string.Join(Environment.NewLine, arrayField.Diagnostics));
+    }
+
+    [Test]
+    public void RepeatedFieldArrayCopiesRetainSparseUnionFacts()
+    {
+        var preservedCopy = Compile("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public uint64 ReadCopiedFieldArrayAfterOverwrite() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                Holder copy = holder;
+                holder.Values[1] = low;
+                unsafe { return copy.Values[1].Wide; }
+            }
+            """);
+        Assert.That(preservedCopy.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                preservedCopy.Diagnostics));
+
+        var narrowedSource = Compile("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public uint64 ReadNarrowedFieldArrayElement() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                holder.Values[1] = low;
+                unsafe { return holder.Values[1].Wide; }
+            }
+            """);
+        Assert.That(narrowedSource.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                narrowedSource.Diagnostics));
+    }
+
+    [Test]
+    public void NestedRepeatedUnionSeedCoversUnknownOuterIndexAfterSpecificWrite()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            int32 Main() {
+                init mut RawWord seed;
+                unsafe { seed.Wide = uint64(0x1122334455667788); }
+                mut [[RawWord; 2]; 2] rows = [[seed; 2]; 2];
+                mut uint64 rowIndex = 1;
+                mut uint64 elementIndex = 1;
+                unsafe { rows[1][1].Low = uint8(0xAA); }
+                unsafe {
+                    return int32(rows[rowIndex][elementIndex].Wide);
+                }
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void RepeatedFieldArrayCoverageSurvivesByValueCalls()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public Holder Identity(Holder value) {
+                return value;
+            }
+
+            int32 Main() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                Holder copy = Identity(holder);
+                unsafe { return int32(copy.Values[1].Wide); }
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+
+        var sparseCopy = Compilation.CreateLibrary(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public Holder Identity(Holder value) {
+                return value;
+            }
+
+            public uint64 RejectCopiedNarrowFieldArrayElement() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                holder.Values[1] = low;
+                Holder copy = Identity(holder);
+                holder.Values[0] = low;
+                unsafe { return copy.Values[1].Wide; }
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(sparseCopy.HasErrors, Is.True,
+            string.Join(Environment.NewLine, sparseCopy.Diagnostics));
+        Assert.That(sparseCopy.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, sparseCopy.Diagnostics));
+    }
+
+    [Test]
+    public void RepeatedCallResultCacheMergesAcrossBranchSnapshots()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public Holder Identity(Holder value) {
+                return value;
+            }
+
+            int32 Check(bool mutateFirst) {
+                RawWord wide = new RawWord(uint64(7));
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                Holder copy = Identity(holder);
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                if (mutateFirst) {
+                    holder.Values[0] = low;
+                } else {
+                    holder.Values[1] = low;
+                }
+                unsafe { return int32(copy.Values[1].Wide); }
+            }
+
+            int32 Main() { return Check(true); }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void RepeatedCallResultMergesAlternativeCopyOrigins()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public Holder Select(bool chooseFirst, Holder first,
+                Holder second) {
+                if (chooseFirst) {
+                    return first;
+                }
+                return second;
+            }
+
+            int32 Main() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut Holder first;
+                first.Values = [wide; 2];
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                first.Values[0] = low;
+                init mut Holder second;
+                second.Values = [wide; 2];
+                Holder copy = Select(true, first, second);
+                unsafe { return int32(copy.Values[1].Wide); }
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void RepeatedNestedCallResultSnapshotRetainsItsOwnLease()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public Holder Identity(Holder value) {
+                return value;
+            }
+
+            int32 Main() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                Holder copy = Identity(Identity(holder));
+                unsafe { return int32(copy.Values[1].Wide); }
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void RepeatedFieldArrayCoverageSurvivesReceiverReturnCalls()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+
+                public Holder Snapshot() {
+                    return this;
+                }
+            }
+
+            int32 Main() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                Holder copy = holder.Snapshot();
+                unsafe { return int32(copy.Values[1].Wide); }
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void RepeatedFieldArrayCoverageSurvivesReferenceValueCalls()
+    {
+        static string Source(int selectedIndex)
+        {
+            return $$"""
+                [Blittable]
+                [Layout(LayoutKind.Sequential)]
+                public struct Holder {
+                    public mut [RawWord; 2] Values;
+                }
+
+                public Holder Snapshot(ref<Holder> source, int32 ignored) {
+                    return *source;
+                }
+
+                int32 MutateElement(write ref<RawWord> element) {
+                    init mut RawWord low;
+                    unsafe { low.Low = 1; }
+                    *element = low;
+                    return 0;
+                }
+
+                int32 Main() {
+                    RawWord wide = new RawWord(uint64(7));
+                    init mut Holder holder;
+                    holder.Values = [wide; 2];
+                    Holder copy = Snapshot(ref holder,
+                        MutateElement(ref holder.Values[1]));
+                    unsafe {
+                        return int32(copy.Values[{{selectedIndex}}].Wide);
+                    }
+                }
+                """;
+        }
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var preserved = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + Source(0)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+        Assert.That(NativeJit.Execute(preserved.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+
+        var invalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+            s_rawWordDeclarations + Source(1)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+    }
+
+    [Test]
+    public void RepeatedFieldArrayCoverageSurvivesAliasedReferenceValueCalls()
+    {
+        static string Source(int selectedIndex)
+        {
+            return $$"""
+                [Blittable]
+                [Layout(LayoutKind.Sequential)]
+                public struct Holder {
+                    public mut [RawWord; 2] Values;
+                }
+
+                public Holder Snapshot(ref<Holder> source, int32 ignored) {
+                    return *source;
+                }
+
+                int32 MutateElement(write ref<RawWord> element) {
+                    init mut RawWord low;
+                    unsafe { low.Low = 1; }
+                    *element = low;
+                    return 0;
+                }
+
+                int32 Main() {
+                    RawWord wide = new RawWord(uint64(7));
+                    init mut Holder holder;
+                    holder.Values = [wide; 2];
+                    ref<Holder> snapshotSource = ref holder;
+                    Holder copy = Snapshot(snapshotSource,
+                        MutateElement(ref holder.Values[1]));
+                    unsafe {
+                        return int32(copy.Values[{{selectedIndex}}].Wide);
+                    }
+                }
+                """;
+        }
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var preserved = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + Source(0)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+        Assert.That(NativeJit.Execute(preserved.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+
+        var invalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+            s_rawWordDeclarations + Source(1)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+    }
+
+    [Test]
+    public void WritableReferenceMutationDoesNotPublishEntryReferentCoverage()
+    {
+        const string source = """
+            public RawWord ReplaceAndReturn(
+                write ref<RawWord> source, RawWord replacement) {
+                *source = replacement;
+                return *source;
+            }
+
+            uint64 RejectWideAfterReferentReplacement() {
+                mut RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                RawWord copy = ReplaceAndReturn(ref wide, low);
+                unsafe { return copy.Wide; }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            s_rawWordDeclarations + source),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void ReceiverReturnUsesArrayFactsAfterLaterArgumentEffects()
+    {
+        static string Source(int selectedIndex)
+        {
+            return $$"""
+                [Blittable]
+                [Layout(LayoutKind.Sequential)]
+                public struct Holder {
+                    public mut [RawWord; 2] Values;
+
+                    public Holder SnapshotAfter(int32 ignored) {
+                        return this;
+                    }
+                }
+
+                int32 MutateElement(write ref<RawWord> element) {
+                    init mut RawWord low;
+                    unsafe { low.Low = 1; }
+                    *element = low;
+                    return 0;
+                }
+
+                int32 Main() {
+                    RawWord wide = new RawWord(uint64(7));
+                    init mut Holder holder;
+                    holder.Values = [wide; 2];
+                    Holder copy = holder.SnapshotAfter(
+                        MutateElement(ref holder.Values[1]));
+                    unsafe {
+                        return int32(
+                            copy.Values[{{selectedIndex}}].Wide);
+                    }
+                }
+                """;
+        }
+
+        var preserved = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + Source(0)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(preserved.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+
+        var invalidated = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + Source(1)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
     }
 
     [Test]
@@ -609,7 +1198,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                     return firstObservation + secondObservation;
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -651,7 +1240,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                         + index;
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -684,7 +1273,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                         + int32(*holders[1].Value) * 100;
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -718,7 +1307,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                         + int32(*holders[1].Value) * 100;
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -753,7 +1342,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                         + int32(*rows[1][1].Value) * 100;
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -826,7 +1415,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                     return selected(21);
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -881,7 +1470,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                     return Observe(holders[0].Value);
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -927,7 +1516,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                         + index;
                 }
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(NativeJit.Execute(compilation.Program!,
@@ -970,7 +1559,49 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 }
                 return -1;
             }
-            """), BoundRuntimePolicy.CheckedExceptions);
+            """), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(2010));
+    }
+
+    [Test]
+    public void FailedRepeatSeedDoesNotPublishTheReplacement()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct TaggedValue {
+                public mut uint32 Tag;
+                public TaggedValue(uint32 tag) { Tag = tag; }
+            }
+
+            TaggedValue FailRepeatSeed(write ref<int32> index) {
+                *index = 0;
+                require false;
+                return new TaggedValue(uint32(99));
+            }
+
+            int32 Main() {
+                mut int32 index = 1;
+                mut [TaggedValue; 2] values = [
+                    new TaggedValue(uint32(10)),
+                    new TaggedValue(uint32(20))];
+                unsafe {
+                    try {
+                        values = [FailRepeatSeed(ref index); 2];
+                    } catch {
+                        return int32(values[0].Tag)
+                            + int32(values[1].Tag) * 100
+                            + index;
+                    }
+                }
+                return -1;
+            }
+            """), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(NativeJit.Execute(compilation.Program!,
@@ -1008,7 +1639,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
 
         var preserved = Compilation.Create(
             SyntaxTree.Parse(CreateSource(string.Empty)),
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(preserved.HasErrors, Is.False,
             string.Join(Environment.NewLine, preserved.Diagnostics));
         Assert.That(NativeJit.Execute(preserved.Program!,
@@ -1017,7 +1648,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         var invalidated = Compilation.Create(
             SyntaxTree.Parse(CreateSource(
                 "unsafe { values[1].Wide = uint64(0); }")),
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(invalidated.HasErrors, Is.True,
             string.Join(Environment.NewLine, invalidated.Diagnostics));
         Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
@@ -1055,7 +1686,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 }
                 return 1;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1109,5 +1740,5 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
     private static Compilation Compile(string body)
         => Compilation.CreateLibrary(
             SyntaxTree.Parse(s_rawWordDeclarations + body),
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
 }
