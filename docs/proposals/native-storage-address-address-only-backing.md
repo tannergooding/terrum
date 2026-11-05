@@ -4,58 +4,51 @@
 missing-contract workflow.** This remains a separate source/storage admission
 decision for
 [nested storage-address paths](native-storage-address-path-private-persistence.md).
-It changes no bytes, tag, Standard schema or normative owner.
 
-## Decision and exact supersession
+## Decision and supersession
 
-Admit a recursively initialized nested direct-local array only as backing
-for an address path passed to an already admitted **direct NativeImport**
-`NativeParameter` formal with exact type/access, `NoEscape`, and a supported
-unsigned minimum extent. This supplies the previously missing positive
-backing route for a nonempty tag-35 ancestor path; the path list by itself
-does not create storage or initialization authority.
+The path-persistence proposal is the complete owner of the revised exact
+private revision-101 candidate,
+`terrum/private-semantic-101-storage-address-only-backing-1`. It incorporates
+this construction-only nested-backing decision, including the wire recipe,
+reconstruction, checks and public-API acceptance cases. The earlier
+`terrum/private-semantic-101-storage-address-paths-1` identity is superseded,
+not an alias. The identity is selected out of band: matching header 101 or
+bytes alone does not establish schema agreement, and no dual decoder follows.
 
-The complete unapproved rules now live in the path-persistence owner's
-[construction-only nested backing](native-storage-address-path-private-persistence.md#construction-only-nested-backing)
-and [capture, suffix, access and execution semantics](native-storage-address-path-private-persistence.md#capture-suffix-access-and-execution-semantics).
-The base also carries the public-API fixture and acceptance gates. This
-decision record preserves the additional approval boundary, not a second
-complete codec or runtime proposal.
+The selected path remains an **ancestor-only** tag-35 list; the existing final
+`Index` is retained once as the suffix. Each ancestor and the final index are
+checked and evaluated exactly once in order. The exact leaf minimum extent
+must fit the final immediate parent's full `N-i` suffix; outer suffixes count
+inner array objects and are never flattened into leaf bytes.
 
-When selected with the path bytes, replace the draft agreement
-`terrum/private-semantic-101-storage-address-paths-1` with the exact identity
-**`terrum/private-semantic-101-storage-address-only-backing-1`**. Keep the
-on-wire i32 header **101**, the 100-plus-path schema, tag-35 ancestor list,
-final-index alias, tag-43 envelope and every record width unchanged. This is
-an intentional change to the unpublished schema's semantic admission, not a
-new byte decoder: the old identity is not an alias or supported alternative.
-The exact identity is out-of-band, so matching bytes/header alone do not
-establish agreement. No dual decoder, header-only conversion or historical
-compatibility promise follows.
+Positive nested backing is constructed recursively through exact tag-43
+initializers, with positive dimensions and a positive-size, rootless-Copy
+leaf. Publish the root only after complete ordered construction. This backing
+is admitted solely for a direct, already-admitted `NativeImport`
+`NativeParameter` with exact pointee/access, `NoEscape`, and a supported
+unsigned minimum extent. The resulting address is non-owning and
+call-confined.
 
-## Preserved exclusions and independent owners
+## Preserved boundaries
 
-The nested local is constructed from exact recursive tag-43 initializers,
-with positive dimensions and an independently admitted positive-size,
-rootless-Copy leaf. It is published only after complete ordered construction.
-Use is limited to direct non-retaining address adaptation. This does not add
-nested array reads/writes/copies, whole-array or field places, vacant
-`init`/`init mut` backing, zero-count/zero-stride or zero-payload nested
-backing, pointer-to-array values, indirect/vtable calls, NativeOutput,
-ownership/root/pin/loan acquisition or lifetime extension. Tag 44–46 remain
-flat-only. Failure publishes no partial root or address.
+The revision-101 identity retains the tag-35 ancestor path, final-index alias,
+tag-43 envelope and existing record widths; it does not change the i32 header
+or add a tag. It admits no nested reads, writes, copies or general value/place
+operations; tags 44–46 remain flat-only. Vacant backing, zero dimensions,
+non-positive extents, non-rootless-Copy leaves, indirect/vtable calls,
+NativeOutput, ownership/root/pin/loan acquisition and lifetime extension
+remain excluded. Failure publishes no partial root or address.
 
 The [revision-100 private array candidate](native-fixed-array-private-persistence.md)
-continues to own the 44-byte type table and tags 43–46; this amendment does
-not reinterpret its exact 100 selection or combine it with candidates 93–98.
-The uncommitted [revision-99 storage-address extent candidate](native-storage-address-private-persistence.md)
-remains a distinct ancestor in the private schema chain. The source structural
-array contract, Standard F+S+A2 schema, its NativeParameter/body routes,
-Windows ABI, Runtime policy, and field/nonlocal place contracts remain
-separate decisions.
+continues to own the 44-byte type table and tags 43–46; this decision does not
+reinterpret revision 100 or combine it with candidates 93–98. The revision-99
+storage-address extent candidate remains a distinct ancestor. Source structural
+arrays, Standard F+S+A2, Windows ABI, runtime policy and other place contracts
+remain separate decisions.
 
-Formal approval of the revised 101 identity and this address-only backing
-admission remains outstanding. The base proposal's
-[public-API acceptance fixture](native-storage-address-path-private-persistence.md#required-acceptance-cases)
-is a future implementation gate, not evidence that the full private or
-Standard route currently works.
+Formal approval of the revised 101 identity and this admission decision
+remains outstanding. The path-persistence owner's
+[acceptance cases](native-storage-address-path-private-persistence.md#required-acceptance-cases)
+are future implementation gates, not evidence that the private or Standard
+route currently works.

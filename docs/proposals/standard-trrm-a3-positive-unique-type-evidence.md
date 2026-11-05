@@ -1,34 +1,24 @@
 # A3 positive Unique evidence amendment
 
-**Status: unapproved.** This remains a separate ownership-evidence decision
-within the exact uniqueness-amended A3 proposal; documenting it does not
-approve A3, allocate a normative TypeDef flag or establish compiler support.
+**Status: unapproved.** This amendment records the separate approval boundary
+for positive nominal Unique evidence in exact successor
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`. It does
+not apply to A2 or flag-free A3 and does not approve any schema or compiler
+support.
 
-## Decision and exact scope
+The complete candidate rules live in
+[Closed constructed nominal elements in standard fixed arrays](standard-trrm-closed-constructed-array-elements.md#positive-nominal-uniqueness-evidence),
+including flags `0x20` and `0x40`, exclusivity, neither-bit unknown, Unique
+without Cleanup, universal formal-domain promises, retained positive provider
+expectations, producer truth, consumer checks and conformance cases. That
+proposal is the sole semantic owner; this amendment does not repeat its codec
+or acceptance recipe.
 
-The full source/metadata contract is integrated in
-[Closed constructed nominal elements in standard fixed arrays](standard-trrm-closed-constructed-array-elements.md#positive-nominal-uniqueness-evidence).
-It recommends TypeDef flag **`0x40=DeclaredUnique`** only under exact schema
-identity **`trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`**.
-The flag-free A3 candidate `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3`
-does not select it; A2 remains unchanged.
-
-The integrated contract preserves A2 `0x20=DeclaredCopy`, Copy/Unique
-exclusivity, neither-bit unknown, Unique without Cleanup, and universal
-formal-domain promises. The positive declaration does not supply Copy,
-Blittable, rootlessness, initialization, backing, cleanup, runtime or
-per-instantiation evidence. Expected Unique must remain a retained positive
-expectation and bind to a positive actual; do not overwrite a weaker stub.
-
-This amendment changes no schema width, section, Feature, Constraint or
-per-instance record. A2, flag-free A3 and the exact Unique-amended successor
-remain distinct drafts. The separate
+Keep the separate
 [A3 layout-failure-class proposal](standard-trrm-a3-layout-failure-classes.md)
-continues to own host resource accounting and failure/diagnostic policy; its
-ledger, bounded expansion and failure channels are not folded into this
-ownership-evidence decision.
+for host resource accounting, bounded expansion and diagnostic/execution
+outcomes. Those failure and tooling rules are not ownership evidence.
 
-Use the closed-constructed-array owner for the exact flag mask, formal-domain
-rules, producer/consumer obligations and conformance cases. This companion
-retains the independent approval boundary only; it claims no test or
-implementation result.
+This amendment adds no Feature, section, per-instance record, runtime policy
+or compatibility decoder. A2, flag-free A3 and the Unique-amended successor
+remain distinct exact schemas. Approval and implementation remain open.
