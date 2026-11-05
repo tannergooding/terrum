@@ -9277,6 +9277,7 @@ public static partial class SemanticVerifier
 
             var defaultBytes = GuaranteedInitializedPayloadBytes(
                 layout.ElementType, Program);
+            using var repeatFrame = RepeatResources.EnterFrame();
             var key = new RawUnionArrayStateKey(variable, arrayPrefix);
             ChargeRepeatRootLookup(key);
             if (_rawUnionArrayElementBytes.TryGetValue(key,
@@ -9288,6 +9289,7 @@ public static partial class SemanticVerifier
                 }
                 var bytes = elementIndex is ulong index
                     ? exactState.Get(index) : exactState.Common();
+                repeatFrame.Complete();
                 return bytes;
             }
 
@@ -9297,16 +9299,20 @@ public static partial class SemanticVerifier
                 if (!TryGetRawUnionArrayTemplateState(variable,
                         arrayPrefix, layout, out var templateState))
                 {
+                    repeatFrame.Complete();
                     return defaultBytes;
                 }
-                return elementIndex is ulong index
+                var bytes = elementIndex is ulong index
                     ? templateState.Get(index) : templateState.Common();
+                repeatFrame.Complete();
+                return bytes;
             }
 
             var expected = arrayPrefix.ProjectionPath.ExpectedMatchCount;
             RepeatResources.ConsumeWork();
             if (expected == 0)
             {
+                repeatFrame.Complete();
                 return defaultBytes;
             }
 
@@ -9365,6 +9371,7 @@ public static partial class SemanticVerifier
             var result = (!coversExpectedDomain && matched < expected)
                 || commonBytes is null
                 ? defaultBytes : commonBytes;
+            repeatFrame.Complete();
             return result;
         }
 
