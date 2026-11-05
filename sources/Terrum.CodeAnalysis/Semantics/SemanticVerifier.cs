@@ -8663,6 +8663,7 @@ public static partial class SemanticVerifier
                     return;
                 }
 
+                using var repeatFrame = RepeatResources.EnterFrame();
                 RawUnionArrayElementState? templateState = null;
                 var hasTemplateState = !hasExactState
                     && TryGetRawUnionArrayTemplateState(variable,
@@ -8706,17 +8707,20 @@ public static partial class SemanticVerifier
                     : stagedState.ApplyUnknownIndexWrite(initializedBytes);
                 if (!changed)
                 {
+                    repeatFrame.Complete();
                     return;
                 }
 
                 ChargeRepeatRootListHeaderForFirstEntry();
                 var replacement = CopyRawUnionArrayStateMap();
                 replacement[key] = stagedState;
+                repeatFrame.Complete();
                 _rawUnionArrayElementBytes = replacement;
                 UpdateRepeatSnapshotStateLease();
                 return;
             }
 
+            using var unknownWriteFrame = RepeatResources.EnterFrame();
             var updated = CopyRawUnionArrayStateMap();
             var changedAny = false;
             foreach (var (matchedKey, matchedState) in
@@ -8758,8 +8762,13 @@ public static partial class SemanticVerifier
             }
             if (changedAny)
             {
+                unknownWriteFrame.Complete();
                 _rawUnionArrayElementBytes = updated;
                 UpdateRepeatSnapshotStateLease();
+            }
+            else
+            {
+                unknownWriteFrame.Complete();
             }
         }
 
@@ -9026,6 +9035,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
 
+            using var repeatFrame = RepeatResources.EnterFrame();
             var defaultBytes = GuaranteedInitializedPayloadBytes(
                 layout.ElementType, Program);
             if (initializedBytes.Length != defaultBytes.Length)
@@ -9046,6 +9056,7 @@ public static partial class SemanticVerifier
                 }
                 if (!existingState.HasTemplateChange(initializedBytes))
                 {
+                    repeatFrame.Complete();
                     return;
                 }
 
@@ -9080,6 +9091,7 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                repeatFrame.Complete();
                 _rawUnionArrayElementBytes = replacement;
                 UpdateRepeatSnapshotStateLease();
                 return;
@@ -9125,10 +9137,13 @@ public static partial class SemanticVerifier
                         ref headerWritten, key, layout, defaultBytes,
                         initializedBytes, repeatOutputState);
                 }
-                _rawUnionArrayElementBytes = replacement ?? throw Invalid();
+                var completedReplacement = replacement ?? throw Invalid();
+                repeatFrame.Complete();
+                _rawUnionArrayElementBytes = completedReplacement;
                 UpdateRepeatSnapshotStateLease();
                 return;
             }
+            repeatFrame.Complete();
         }
 
         internal void WriteRawUnionArrayElementByteRange(int variable,
@@ -9160,6 +9175,7 @@ public static partial class SemanticVerifier
                     || arrayPrefix.ProjectionPath.ExpectedMatchCount == 1;
             var hasState = _rawUnionArrayElementBytes.TryGetValue(key,
                 out var currentState);
+            using var repeatFrame = RepeatResources.EnterFrame();
             if (hasState && elementIndex is ulong exactIndex
                 && locationIsExact)
             {
@@ -9181,6 +9197,7 @@ public static partial class SemanticVerifier
                     elementBytes[offset + byteIndex]
                         = initializedBytes[byteIndex];
                 }
+                repeatFrame.Complete();
                 _ = ReplaceRawUnionArrayElementState(key, existingState,
                     exactIndex, elementBytes);
                 return;
@@ -9220,12 +9237,14 @@ public static partial class SemanticVerifier
                 }
                 if (changedAny)
                 {
+                    repeatFrame.Complete();
                     _rawUnionArrayElementBytes = replacement;
                     UpdateRepeatSnapshotStateLease();
                     return;
                 }
                 if (matchedAny)
                 {
+                    repeatFrame.Complete();
                     return;
                 }
             }
@@ -9266,8 +9285,13 @@ public static partial class SemanticVerifier
                 ChargeRepeatRootListHeaderForFirstEntry();
                 var replacement = CopyRawUnionArrayStateMap();
                 replacement[key] = state;
+                repeatFrame.Complete();
                 _rawUnionArrayElementBytes = replacement;
                 UpdateRepeatSnapshotStateLease();
+            }
+            else
+            {
+                repeatFrame.Complete();
             }
         }
 
