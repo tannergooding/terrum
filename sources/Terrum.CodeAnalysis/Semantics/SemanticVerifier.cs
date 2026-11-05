@@ -8170,6 +8170,7 @@ public static partial class SemanticVerifier
             }
 
             var inputBytes = RawUnionArrayLogicalBytes();
+            using var repeatFrame = RepeatResources.EnterFrame();
             using var inputState
                 = RepeatResources.ReserveState(inputBytes);
             using var outputState
@@ -8201,6 +8202,7 @@ public static partial class SemanticVerifier
                     RepeatResources.ConsumeWork();
                 }
             }
+            repeatFrame.Complete();
             _rawUnionArrayElementBytes = retained;
             UpdateRepeatSnapshotStateLease();
         }
@@ -8227,6 +8229,7 @@ public static partial class SemanticVerifier
             }
 
             var inputBytes = RawUnionArrayLogicalBytes();
+            using var repeatFrame = RepeatResources.EnterFrame();
             using var repeatInputState
                 = RepeatResources.ReserveState(inputBytes);
             using var repeatOutputState
@@ -8362,6 +8365,7 @@ public static partial class SemanticVerifier
             var changed = !RawUnionArrayFactPrefixEquals(
                 _rawUnionArrayElementBytes, replacement, destination,
                 destinationPrefix);
+            repeatFrame.Complete();
             _rawUnionArrayElementBytes = replacement;
             UpdateRepeatSnapshotStateLease();
             return changed;
@@ -8380,6 +8384,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
 
+            using var repeatFrame = RepeatResources.EnterFrame();
             using var inputState = RepeatResources.ReserveState(
                 RawUnionArrayLogicalBytes());
             var snapshotState = RepeatResources.ReserveState(
@@ -8430,9 +8435,11 @@ public static partial class SemanticVerifier
 
                 if (result.Count == 0)
                 {
+                    repeatFrame.Complete();
                     return result;
                 }
 
+                repeatFrame.Complete();
                 outputState = snapshotState;
                 snapshotStateTransferred = true;
                 return result;
