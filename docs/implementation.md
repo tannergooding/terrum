@@ -997,10 +997,14 @@ target to a returning view without changing convention or signature. Checked
 pointer projection preserves the destination and phase while allowing an
 actual source subset and backing-only refinement of a broader expected source
 set; absence and an explicit empty-source contract remain distinct.
-Contract-bearing types are not silently serialized by private revision 92 or
-the Development TRRM signature table; those writers reject the unrepresented
-contracts until the proposed complete private/Standard carriers are
-implemented. Checked OutputState is present in the in-memory model but
+Contract-bearing types are not silently serialized beyond the selected
+private revision-103 array records or their selected Development TRRM schema.
+The default Development and Effects-only selections still reject normalized
+conventions and resolution facts they cannot represent; the explicitly
+selected, unapproved conventions/resolution candidate persists those bounded
+facts without changing Standard or private schemas. Other unrepresented
+function-pointer contracts remain rejected until their private/Standard
+carriers are implemented. Checked OutputState is present in the in-memory model but
 remains unsupported for this ABI signature subset, which has no checked
 initialization-reference parameter representation. The role does not publish
 a general `NoThrow` promise. Function pointers carry code addresses only:

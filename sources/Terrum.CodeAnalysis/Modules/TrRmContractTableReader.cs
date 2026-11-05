@@ -17,7 +17,8 @@ internal readonly record struct TrRmNativeParameterContract(
     int ParameterOrdinal, byte Access, byte Retention, byte ExtentKind, uint Extent,
     uint PointerDepth, uint RequiredAlignment);
 
-internal readonly record struct TrRmNativeAbiContract(uint AbiId, byte Role, byte ExceptionMode);
+internal readonly record struct TrRmNativeAbiContract(uint AbiId, byte Role,
+    byte ExceptionMode, byte ConventionOrReserved = 0);
 
 internal readonly record struct TrRmPredicateGraphContract(
     byte PhaseTag, uint PhaseLocalOrdinal, int PredicateGraphRow);
@@ -151,6 +152,7 @@ public readonly ref struct TrRmContractTableReader
             || predicateGraphCount is < 0 or > 0xFF_FFFF
             || schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
                 or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+                or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -734,8 +736,10 @@ public readonly ref struct TrRmContractTableReader
                     break;
                 case 0x10:
                     if (data.Length != 16 || owner >> 24 != 0x16
-                        || Read(data, 8) != 1 || data[12] is < 1 or > 4
-                        || data[13] != 0 || data[14] != 0 || data[15] != 0)
+                        || data[12] is < 1 or > 4
+                        || data[13] != 0 || data[15] != 0
+                        || !TrRmDevelopmentNativeConventions.IsValidNativeAbi(
+                            nativeAbi, schema))
                     {
                         throw InvalidContract();
                     }

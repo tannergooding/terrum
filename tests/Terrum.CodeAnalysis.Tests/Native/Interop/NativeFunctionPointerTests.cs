@@ -263,8 +263,9 @@ public sealed class NativeFunctionPointerTests
             Assert.That(linkedFunction.NativeFunctionPointerType, Is.Not.Null, name);
         }
 
-        var loaded = TrRmExecutableCompiler.Load(
-            TrRmExecutableCompiler.Emit(program, "native-callable-import"));
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+            TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+                program, "native-callable-import"));
         var loadedCallback = loaded.Functions.Single(static function => function.Name == "Callback");
         Assert.That(loadedCallback.NoFailureProof, Is.False);
         Assert.That(loadedCallback.NativeFunctionPointerType, Is.Not.Null);
@@ -1595,9 +1596,10 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!,
             "native-function-pointer-body");
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(
@@ -1605,7 +1607,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(features.TryGetFeature(
             0x0103, out _), Is.True);
 
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         Assert.That(loaded.Functions.Single(static function => function.Name == "GetAnswer")
             .IndexedBody, Is.Not.Null);
         Assert.That(loaded.Functions.Single(static function => function.Name == "Main")
@@ -1633,9 +1635,10 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!,
             "malformed-native-function-address");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var wrongSignatureMethodRow = loaded.Functions
             .Select((function, index) => (function, index))
             .Single(static item => item.function.Name == "WrongSignature").index + 1;
@@ -1643,11 +1646,13 @@ public sealed class NativeFunctionPointerTests
 
         var mismatchedTarget = (byte[])artifact.Clone();
         mismatchedTarget[addressTargetOffset] = checked((byte)wrongSignatureMethodRow);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(mismatchedTarget));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(mismatchedTarget));
 
         var missingUnsafeRegion = (byte[])artifact.Clone();
         RemoveIndexedUnsafeAuthorization(missingUnsafeRegion);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingUnsafeRegion));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(missingUnsafeRegion));
     }
 
     [Test]
@@ -1675,14 +1680,16 @@ public sealed class NativeFunctionPointerTests
         Assert.That(callbackSignature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(callbackSignature.ParameterTypes, Is.Empty);
 
-        var artifact = TrRmExecutableCompiler.Emit(program, "nested-native-callable");
-        var artifactIndex = TrRmArtifactIndex.ForDevelopment(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            program, "nested-native-callable");
+        var artifactIndex = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(artifactIndex.TryGetSection(0x0033, out _, out var signatureCount), Is.True);
         Assert.That(signatureCount, Is.EqualTo(program.NativeFunctionPointerSignatures.Length));
         Assert.That(artifactIndex.TryGetSection(0x0011, out var typeSpecBytes,
             out var typeSpecCount), Is.True);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecCount,
-            0, 0, 0, signatureCount, TrRmArtifactSchema.Development);
+            0, 0, 0, signatureCount,
+            TrRmArtifactSchema.DevelopmentNativeConventionsDraft);
         var hasFunctionPointerTypeSpec = false;
         for (var row = 1; row <= typeSpecCount; row++)
         {
@@ -1697,7 +1704,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(features.TryGetFeature(
             0x0101, out _), Is.True);
 
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var loadedFunction = loaded.Functions.Single(static candidate => candidate.Name == "Invoke");
         Assert.That(loadedFunction.Variables[0].Type, Is.EqualTo(callbackType));
         Assert.That(loaded.NativeFunctionPointerSignatures, Has.Length.EqualTo(
@@ -1709,10 +1716,12 @@ public sealed class NativeFunctionPointerTests
             Assert.That(actual.ReturnType, Is.EqualTo(expected.ReturnType));
             Assert.That(actual.ParameterTypes.ToArray(), Is.EqualTo(expected.ParameterTypes.ToArray()));
         }
-        Assert.That(TrRmExecutableCompiler.Emit(loaded, "nested-native-callable"),
+        Assert.That(TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+                loaded, "nested-native-callable"),
             Is.EqualTo(artifact));
 
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
         Assert.That(Export(reference, "Invoke").Variables[0].Type, Is.EqualTo(callbackType));
         Assert.That(reference.NativeFunctionPointerSignatures, Has.Length.EqualTo(
             program.NativeFunctionPointerSignatures.Length));
@@ -1720,7 +1729,8 @@ public sealed class NativeFunctionPointerTests
         var malformed = artifact.ToArray();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformed.AsSpan(FindSectionOffset(malformed, 0x0033)), 0x00FF_FFFF);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
 
         Assert.That(signatureCount, Is.EqualTo(2));
         var duplicateSignature = artifact.ToArray();
@@ -1735,7 +1745,8 @@ public sealed class NativeFunctionPointerTests
         BinaryPrimitives.WriteUInt32LittleEndian(
             duplicateSignature.AsSpan(methodOffset + ((secondAnchor - 1) * 28) + 8),
             firstMethodSignature);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(duplicateSignature));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(duplicateSignature));
     }
 
     [Test]
@@ -1776,12 +1787,14 @@ public sealed class NativeFunctionPointerTests
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "module-feature-closure");
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!, "module-feature-closure");
 
-        Assert.DoesNotThrow(() => TrRmStructuralMetadataValidator.ValidateCompact(
-            SplitSignatureAnchorModule(artifact, includeRootlessFeature: true)));
-        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.ValidateCompact(
-            SplitSignatureAnchorModule(artifact, includeRootlessFeature: false)));
+        ValidateDevelopmentNativeConventionsDraft(
+            SplitSignatureAnchorModule(artifact, includeRootlessFeature: true));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateDevelopmentNativeConventionsDraft(
+                SplitSignatureAnchorModule(artifact, includeRootlessFeature: false)));
     }
 
     [Test]
@@ -1802,8 +1815,9 @@ public sealed class NativeFunctionPointerTests
         {
             Functions = program.Functions.SetItem(0, function with { NativeCallableEntryName = "Sum|Native" }),
         };
-        var artifact = TrRmExecutableCompiler.Emit(program, "native-callable");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            program, "native-callable");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var callable = loaded.Functions.Single(static function => function.Name == "Sum");
 
         Assert.That(callable.NativeFunctionPointerType, Is.EqualTo(NativeFunctionPointerTypes.Type(0)));
@@ -1814,7 +1828,8 @@ public sealed class NativeFunctionPointerTests
             Is.EqualTo(new[] { PrimitiveType.Float64, PrimitiveType.Int32, PrimitiveType.Float64 }));
         Assert.That(callable.NoFailureProof, Is.False);
         Assert.That(callable.RequiresUnsafeCaller, Is.True);
-        Assert.That(TrRmExecutableCompiler.Emit(loaded, "native-callable"), Is.EqualTo(artifact));
+        Assert.That(TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            loaded, "native-callable"), Is.EqualTo(artifact));
 
         var privateProducer = ModuleCompiler.CreateProducer(program, ["Sum"]);
         var privateReference = ModuleCompiler.CreateReference(privateProducer);
@@ -1830,8 +1845,9 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "typed-pointer-only");
-        var artifactIndex = TrRmArtifactIndex.ForDevelopment(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!, "typed-pointer-only");
+        var artifactIndex = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(artifactIndex.TryGetSection(0x0004, out var featureBytes,
             out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
@@ -1840,11 +1856,12 @@ public sealed class NativeFunctionPointerTests
         Assert.That(features.TryGetFeature(
             0x0101, out _), Is.True);
 
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var ignored = loaded.Functions.Single(static function => function.Name == "Ignore");
         Assert.That(ignored.RequiresUnsafeCaller, Is.True);
         Assert.That(NativePointerTypes.IsType(ignored.Variables[0].Type), Is.True);
-        Assert.That(TrRmExecutableCompiler.Emit(loaded, "typed-pointer-only"), Is.EqualTo(artifact));
+        Assert.That(TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            loaded, "typed-pointer-only"), Is.EqualTo(artifact));
     }
 
     [Test]
@@ -1909,8 +1926,10 @@ public sealed class NativeFunctionPointerTests
             """));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var artifact = TrRmExecutableCompiler.Emit(providerCompilation.Program!, "native-callable-provider");
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            providerCompilation.Program!, "native-callable-provider");
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -1935,9 +1954,10 @@ public sealed class NativeFunctionPointerTests
             """));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var providerArtifact = TrRmExecutableCompiler.Emit(
+        var providerArtifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
             providerCompilation.Program!, "native-callable-provider");
-        var reference = TrRmExecutableCompiler.CreateReference(providerArtifact);
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(providerArtifact);
         var imported = reference.Functions.Single(static function => function.Name == "GetAnswer");
         Assert.That(imported.ModuleImport?.ProducerIdentity, Is.EqualTo("native-callable-provider"));
         Assert.That(imported.ModuleImport?.ExportKey, Is.EqualTo("GetAnswer"));
@@ -1953,16 +1973,16 @@ public sealed class NativeFunctionPointerTests
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
             consumerCompilation.Program!, "native-callable-consumer");
-        var artifactIndex = TrRmArtifactIndex.ForDevelopment(artifact);
+        var artifactIndex = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(artifactIndex.TryGetSection(0x10, out _, out var moduleRefCount), Is.True);
         Assert.That(moduleRefCount, Is.EqualTo(1));
         Assert.That(artifactIndex.TryGetSection(0x1C, out _, out var importCount), Is.True);
         Assert.That(importCount, Is.EqualTo(1));
         Assert.That(artifactIndex.TryGetSection(0x31, out _, out _), Is.False);
 
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var loadedImported = loaded.Functions.Single(static function => function.Name == "GetAnswer");
         Assert.That(loadedImported.IsExternal, Is.True);
         Assert.That(loadedImported.ModuleImport?.ProducerIdentity, Is.EqualTo("native-callable-provider"));
@@ -2013,10 +2033,11 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!,
             "method-row-function-pointer");
         var reordered = MoveNativeFunctionPointerSignatureAnchorFirst(artifact);
-        var loaded = TrRmExecutableCompiler.Load(reordered);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(reordered);
 
         var callbackIndex = Enumerable.Range(0, loaded.Functions.Length)
             .Single(index => loaded.Functions[index].Name == "CallbackChosen");
@@ -2057,10 +2078,11 @@ public sealed class NativeFunctionPointerTests
             """));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var providerArtifact = TrRmExecutableCompiler.Emit(
+        var providerArtifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
             providerCompilation.Program!, "NativeCallableProvider");
-        var reference = TrRmExecutableCompiler.CreateReference(providerArtifact);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(providerArtifact);
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
                     fnptr<NativeAbi, int32, int32> callback = &GetAnswer;
@@ -2236,9 +2258,9 @@ public sealed class NativeFunctionPointerTests
             TrRmExecutableCompiler.Emit(program, "native-callable-effects"));
 
         var candidateArtifact = TrRmExecutableCompiler
-            .EmitDevelopmentFunctionPointerEffectsDraft(program, "native-callable-effects");
+            .EmitDevelopmentNativeConventionsDraft(program, "native-callable-effects");
         var loaded = TrRmExecutableCompiler
-            .LoadDevelopmentFunctionPointerEffectsDraft(candidateArtifact);
+            .LoadDevelopmentNativeConventionsDraft(candidateArtifact);
         foreach (var (name, expectedEffects, expectedDoesNotReturn,
             expectedDeclaredUnsafe) in new[]
         {
@@ -2263,9 +2285,9 @@ public sealed class NativeFunctionPointerTests
             TrRmExecutableCompiler.Load(candidateArtifact));
 
         var index = TrRmArtifactIndex
-            .ForDevelopmentFunctionPointerEffectsDraft(candidateArtifact);
+            .ForDevelopmentNativeConventionsDraft(candidateArtifact);
         var tables = TrRmStructuralMetadataValidator
-            .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index);
+            .ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(index);
         var stopsMethod = 0;
         for (var method = 1; method <= tables.Methods.Count; method++)
         {
@@ -2298,8 +2320,8 @@ public sealed class NativeFunctionPointerTests
         var malformed = (byte[])candidateArtifact.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(
             contractSectionOffset + contractIndexByteCount + effectsRowOffset + 8), 8);
-        Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadDevelopmentFunctionPointerEffectsDraft(malformed));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
     }
 
     [Test]
@@ -2315,13 +2337,12 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.EmitDevelopmentFunctionPointerEffectsDraft(
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
             compilation.Program!, "native-import-effects");
-        var index = TrRmArtifactIndex.ForDevelopmentFunctionPointerEffectsDraft(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         var tables = TrRmStructuralMetadataValidator
-            .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index);
-        var loaded = TrRmExecutableCompiler
-            .LoadDevelopmentFunctionPointerEffectsDraft(artifact);
+            .ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(index);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         foreach (var (name, declaredUnsafe) in new[]
         {
             ("ObserveDefault", false),
@@ -2365,10 +2386,10 @@ public sealed class NativeFunctionPointerTests
             string.Join(Environment.NewLine, provider.Diagnostics));
 
         var providerArtifact = TrRmExecutableCompiler
-            .EmitDevelopmentFunctionPointerEffectsDraft(provider.Program!, "callable-effects");
+            .EmitDevelopmentNativeConventionsDraft(provider.Program!, "callable-effects");
         var reference = TrRmExecutableCompiler
-            .CreateDevelopmentFunctionPointerEffectsDraftReference(providerArtifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse(
+            .CreateDevelopmentNativeConventionsDraftReference(providerArtifact);
+        var consumer = Create(SyntaxTree.Parse(
             "int32 Main() { return 0; }"), reference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
@@ -2376,9 +2397,9 @@ public sealed class NativeFunctionPointerTests
             function.ModuleImport is not null), Is.EqualTo(2));
 
         var consumerArtifact = TrRmExecutableCompiler
-            .EmitDevelopmentFunctionPointerEffectsDraft(consumer.Program!, "callable-consumer");
+            .EmitDevelopmentNativeConventionsDraft(consumer.Program!, "callable-consumer");
         var loadedConsumer = TrRmExecutableCompiler
-            .LoadDevelopmentFunctionPointerEffectsDraft(consumerArtifact);
+            .LoadDevelopmentNativeConventionsDraft(consumerArtifact);
         foreach (var (name, declaredUnsafe) in new[]
         {
             ("ReadValue", false),
@@ -2392,6 +2413,245 @@ public sealed class NativeFunctionPointerTests
             Assert.That(imported.DeclaredRequiresUnsafeCaller,
                 Is.EqualTo(declaredUnsafe));
         }
+    }
+
+    [Test]
+    public void DevelopmentNativeConventionsProfilePreservesRoleAndResolutionContracts()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+
+            [NativeImport("example.dll", "ImportUnmanaged",
+                CallConv: NativeCallingConvention.Unmanaged)]
+            public extern unsafe int32 ImportUnmanaged();
+
+            [NativeImport("example.dll", "ImportCdecl",
+                CallConv: NativeCallingConvention.Cdecl,
+                ResolutionMode: NativeImportResolutionMode.Dynamic)]
+            public extern unsafe int32 ImportCdecl();
+
+            [NativeImport("example.dll", "ImportStdcall",
+                CallConv: NativeCallingConvention.Stdcall,
+                ResolutionMode: NativeImportResolutionMode.Dynamic,
+                ResolutionPolicy: NativeImportResolutionPolicy.CompatibilitySearch)]
+            public extern unsafe int32 ImportStdcall();
+
+            [NativeImport("example.dll", "ImportVectorcall",
+                CallConv: NativeCallingConvention.Vectorcall)]
+            public extern unsafe int32 ImportVectorcall();
+
+            [NativeCallable(CallConv: NativeCallingConvention.Unmanaged)]
+            public int32 CallableUnmanaged(int32 value) { return value; }
+
+            [NativeCallable(CallConv: NativeCallingConvention.Cdecl)]
+            public int32 CallableCdecl(int32 value, int32 ignored) { return value; }
+
+            [NativeCallable(CallConv: NativeCallingConvention.Stdcall)]
+            public int32 CallableStdcall(int32 value) { return value; }
+
+            [NativeCallable(CallConv: NativeCallingConvention.Vectorcall)]
+            public int32 CallableVectorcall(int32 value) { return value; }
+
+            internal unsafe int32 AcceptNative(fnptr<int32, int32> callback, int32 value) {
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!, "native-conventions-provider");
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(index);
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
+        var nativeAbisByName = new Dictionary<string, TrRmNativeAbiContract>(
+            StringComparer.Ordinal);
+        var nativeAbiPayloadOffsetsByName = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        var role3Conventions = new List<byte>();
+        string? firstAnchorName = null;
+        var contractSectionOffset = FindSectionOffset(artifact, 0x001B);
+        var contractIndexByteCount = checked((tables.Contracts.Count + 1) * 4);
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            if (!tables.Contracts.HasNativeAbi(method))
+            {
+                continue;
+            }
+
+            var name = tables.Methods.GetName(method);
+            var abi = tables.Contracts.GetNativeAbi(method);
+            nativeAbisByName.Add(name, abi);
+            if (abi.Role == 3)
+            {
+                role3Conventions.Add(abi.ConventionOrReserved);
+                firstAnchorName ??= name;
+            }
+
+            var (first, count) = tables.Methods.GetContractRange(method);
+            for (var indexInRange = 0; indexInRange < count; indexInRange++)
+            {
+                var row = first + indexInRange;
+                var contract = tables.Contracts.GetRow(row);
+                if (BinaryPrimitives.ReadUInt16LittleEndian(
+                    contract.Slice(4, sizeof(ushort))) != 0x10)
+                {
+                    continue;
+                }
+
+                var rowOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(contractSectionOffset + ((row - 1) * 4))));
+                nativeAbiPayloadOffsetsByName.Add(name,
+                    contractSectionOffset + contractIndexByteCount + rowOffset + 8);
+            }
+        }
+
+        foreach (var (name, convention, mode, policy, encodedConvention) in new[]
+        {
+            ("ImportUnmanaged", NativeCallingConvention.Unmanaged,
+                NativeImportResolutionMode.Link, NativeImportResolutionPolicy.NotApplicable, (byte)1),
+            ("ImportCdecl", NativeCallingConvention.Cdecl,
+                NativeImportResolutionMode.Dynamic, NativeImportResolutionPolicy.Default, (byte)2),
+            ("ImportStdcall", NativeCallingConvention.Stdcall,
+                NativeImportResolutionMode.Dynamic, NativeImportResolutionPolicy.CompatibilitySearch, (byte)3),
+            ("ImportVectorcall", NativeCallingConvention.Vectorcall,
+                NativeImportResolutionMode.Link, NativeImportResolutionPolicy.NotApplicable, (byte)4),
+        })
+        {
+            var imported = loaded.Functions.Single(function => function.Name == name);
+            Assert.That(imported.DirectNativeImport!.CallingConvention,
+                Is.EqualTo(convention), name);
+            Assert.That(imported.DirectNativeImport.ResolutionMode, Is.EqualTo(mode), name);
+            Assert.That(imported.DirectNativeImport.ResolutionPolicy, Is.EqualTo(policy), name);
+            Assert.That(nativeAbisByName[name].ConventionOrReserved,
+                Is.EqualTo(encodedConvention), name);
+        }
+
+        foreach (var (name, convention, encodedConvention) in new[]
+        {
+            ("CallableUnmanaged", NativeCallingConvention.Unmanaged, (byte)1),
+            ("CallableCdecl", NativeCallingConvention.Cdecl, (byte)2),
+            ("CallableStdcall", NativeCallingConvention.Stdcall, (byte)3),
+            ("CallableVectorcall", NativeCallingConvention.Vectorcall, (byte)4),
+        })
+        {
+            var callable = loaded.Functions.Single(function => function.Name == name);
+            Assert.That(callable.NativeCallableConvention, Is.EqualTo(convention), name);
+            Assert.That(nativeAbisByName[name].ConventionOrReserved,
+                Is.EqualTo(encodedConvention), name);
+        }
+
+        var anchorConventions = role3Conventions
+            .Distinct()
+            .Order()
+            .ToArray();
+        Assert.That(anchorConventions, Is.EqualTo(new byte[] { 0, 1, 2, 3, 4 }));
+        Assert.That(loaded.NativeFunctionPointerSignatures
+            .Select(static signature => signature.CallingConvention)
+            .Distinct()
+            .Order()
+            .ToArray(), Is.EqualTo(new[] {
+                NativeCallingConvention.Native,
+                NativeCallingConvention.Unmanaged,
+                NativeCallingConvention.Cdecl,
+                NativeCallingConvention.Stdcall,
+                NativeCallingConvention.Vectorcall,
+            }.Order().ToArray()));
+
+        var reemitted = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            loaded, "native-conventions-reemitted");
+        var reloaded = TrRmExecutableCompiler
+            .LoadDevelopmentNativeConventionsDraft(reemitted);
+        Assert.That(reloaded.Functions.Single(function =>
+            function.Name == "ImportStdcall").DirectNativeImport!.ResolutionPolicy,
+            Is.EqualTo(NativeImportResolutionPolicy.CompatibilitySearch));
+        Assert.That(reloaded.Functions.Single(function =>
+            function.Name == "CallableVectorcall").NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Vectorcall));
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibrary(
+            loaded, ["CallableVectorcall"], NativeRuntimePolicy.FailFast));
+
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
+        var consumer = Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    return ImportStdcall() + CallableCdecl(7, 0);
+                }
+            }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var importedFromReference = consumer.Program!.Functions.Single(function =>
+            function.Name == "ImportStdcall");
+        Assert.That(importedFromReference.DirectNativeImport!.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Stdcall));
+        Assert.That(importedFromReference.DirectNativeImport.ResolutionMode,
+            Is.EqualTo(NativeImportResolutionMode.Dynamic));
+        Assert.That(importedFromReference.DirectNativeImport.ResolutionPolicy,
+            Is.EqualTo(NativeImportResolutionPolicy.CompatibilitySearch));
+        var callableFromReference = consumer.Program.Functions.Single(function =>
+            function.Name == "CallableCdecl");
+        Assert.That(callableFromReference.NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+        var importConsumer = Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe { return ImportStdcall(); }
+            }
+            """), reference);
+        Assert.That(importConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, importConsumer.Diagnostics));
+        _ = Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitWithNativeImports(importConsumer.Program!,
+                NativeRuntimePolicy.FailFast));
+        var consumerArtifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            importConsumer.Program!, "native-conventions-consumer");
+        var loadedConsumer = TrRmExecutableCompiler
+            .LoadDevelopmentNativeConventionsDraft(consumerArtifact);
+        Assert.That(loadedConsumer.Functions.Single(function =>
+            function.Name == "ImportStdcall").DirectNativeImport!.ResolutionPolicy,
+            Is.EqualTo(NativeImportResolutionPolicy.CompatibilitySearch));
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(artifact));
+
+        var importSectionOffset = FindSectionOffset(artifact, 0x0030);
+        var malformedResolution = (byte[])artifact.Clone();
+        malformedResolution[importSectionOffset + 12] = 1;
+        malformedResolution[importSectionOffset + 13] = 1;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+                malformedResolution));
+        var malformedReserved = (byte[])artifact.Clone();
+        malformedReserved[importSectionOffset + 14] = 1;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+                malformedReserved));
+
+        var importAbiOffset = nativeAbiPayloadOffsetsByName["ImportUnmanaged"];
+        var malformedImportConvention = (byte[])artifact.Clone();
+        malformedImportConvention[importAbiOffset + 6] = 0;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+                malformedImportConvention));
+        var callableAbiOffset = nativeAbiPayloadOffsetsByName["CallableUnmanaged"];
+        var malformedCallableConvention = (byte[])artifact.Clone();
+        malformedCallableConvention[callableAbiOffset + 6] = 0;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+                malformedCallableConvention));
+        var mismatchedCallableConvention = (byte[])artifact.Clone();
+        mismatchedCallableConvention[nativeAbiPayloadOffsetsByName["CallableCdecl"] + 6] = 3;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+                mismatchedCallableConvention));
+        var anchorAbiOffset = nativeAbiPayloadOffsetsByName[firstAnchorName!];
+        var malformedAnchorConvention = (byte[])artifact.Clone();
+        malformedAnchorConvention[anchorAbiOffset + 6] = 5;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+                malformedAnchorConvention));
     }
 
     [Test]
@@ -2951,7 +3211,7 @@ public sealed class NativeFunctionPointerTests
 
     private static byte[] MoveNativeFunctionPointerSignatureAnchorFirst(byte[] artifact)
     {
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         if (!index.TryGetSection(0x0033, out var signatureBytes, out var signatureCount)
             || signatureCount != 1
             || !index.TryGetSection(0x0016, out var methodBytes, out var methodCount))
@@ -3054,7 +3314,15 @@ public sealed class NativeFunctionPointerTests
             sections.Add(new TrRmSection(kind, flags, (uint)recordCount, bytes));
         }
 
-        return TrRmArtifactWriter.EncodeDevelopment(sections);
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.DevelopmentNativeConventionsDraft);
+    }
+
+    private static void ValidateDevelopmentNativeConventionsDraft(byte[] artifact)
+    {
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(index);
     }
 
     private static uint RemapMethodDefinitionId(uint definition, int[] methodRowMap)
@@ -3081,7 +3349,7 @@ public sealed class NativeFunctionPointerTests
 
     private static int FindIndexedOperationTargetOffset(byte[] artifact, byte opcode)
     {
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         if (!index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount))
         {
             throw new InvalidDataException("TRRM fixture is missing its Body section.");
@@ -3118,7 +3386,7 @@ public sealed class NativeFunctionPointerTests
 
     private static void RemoveIndexedUnsafeAuthorization(byte[] artifact)
     {
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         if (!index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount))
         {
             throw new InvalidDataException("TRRM fixture is missing its Body section.");
@@ -3177,7 +3445,7 @@ public sealed class NativeFunctionPointerTests
 
     private static byte[] SplitSignatureAnchorModule(byte[] artifact, bool includeRootlessFeature)
     {
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         var sections = new List<TrRmSection>(index.SectionCount);
         if (!index.TryGetSection(0x0016, out var methodBytes, out _))
         {

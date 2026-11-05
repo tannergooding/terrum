@@ -271,6 +271,11 @@ public static partial class TrRmExecutableCompiler
         => EmitDevelopment(program, moduleIdentity,
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
 
+    internal static byte[] EmitDevelopmentNativeConventionsDraft(
+        BoundProgram program, string moduleIdentity)
+        => EmitDevelopment(program, moduleIdentity,
+            TrRmArtifactSchema.DevelopmentNativeConventionsDraft);
+
     private static byte[] EmitRegisterExceptionRegionsDraft(
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement)
@@ -349,15 +354,17 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported("A function Body cannot be traversed for function-pointer addresses.");
             }
         }
-        if (program.NativeFunctionPointerSignatures.Any(static signature =>
-                signature.CallingConvention != NativeCallingConvention.Native)
-            || program.Functions.Any(static function =>
-                function.NativeCallableConvention is NativeCallingConvention convention
-                    && convention != NativeCallingConvention.Native
-                || function.DirectNativeImport is DirectNativeImport import
-                    && (import.CallingConvention != NativeCallingConvention.Native
-                        || import.ResolutionMode != NativeImportResolutionMode.Link
-                        || import.ResolutionPolicy != NativeImportResolutionPolicy.NotApplicable)))
+        if (!schema.UsesDevelopmentNativeConventions()
+            && (program.NativeFunctionPointerSignatures.Any(static signature =>
+                    signature.CallingConvention != NativeCallingConvention.Native)
+                || program.Functions.Any(static function =>
+                    (function.NativeCallableConvention is NativeCallingConvention convention
+                        && convention != NativeCallingConvention.Native)
+                    || (function.DirectNativeImport is DirectNativeImport import
+                        && (import.CallingConvention != NativeCallingConvention.Native
+                            || import.ResolutionMode != NativeImportResolutionMode.Link
+                            || import.ResolutionPolicy
+                                != NativeImportResolutionPolicy.NotApplicable)))))
         {
             throw Unsupported(
                 "The current TRRM function-pointer writer does not preserve normalized calling conventions.");
@@ -840,7 +847,8 @@ public static partial class TrRmExecutableCompiler
             if (function.DirectNativeImport is DirectNativeImport nativeImport)
             {
                 contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 0x10,
-                    NativeAbiPayload()));
+                    NativeAbiPayload(1, NativeAbiConvention(schema,
+                        nativeImport.CallingConvention, 1))));
                 foreach (var output in nativeImport.Outputs)
                 {
                     contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 0x12,
@@ -858,10 +866,17 @@ public static partial class TrRmExecutableCompiler
             else if (function.NativeFunctionPointerType is not null)
             {
                 contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 0x10,
-                    NativeAbiPayload(2)));
+                    NativeAbiPayload(2, NativeAbiConvention(schema,
+                        function.NativeCallableConvention, 2))));
             }
             else if (hasNativeVTable)
             {
+                if (schema.UsesDevelopmentNativeConventions()
+                    && function.NativeCallableConvention is not null)
+                {
+                    throw Unsupported(
+                        "A NativeVTable declaration cannot carry a NativeCallable convention.");
+                }
                 contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 0x10,
                     NativeAbiPayload(4)));
                 var method = function.NativeVTableMethod!;
@@ -919,7 +934,8 @@ public static partial class TrRmExecutableCompiler
                     s_effectPayloads[anchorEffectsMask]));
             }
             contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 0x10,
-                NativeAbiPayload(3)));
+                NativeAbiPayload(3, NativeAbiConvention(schema,
+                    signature.CallingConvention, 3))));
             var nameRow = names.Count + 1;
             names.Add(($"__trrm_fnptr_signature_{index}", 1));
             methods.Add(new TrRmMethodDefRow(0, nameRow, signatures.Count, 0,
@@ -1059,6 +1075,9 @@ public static partial class TrRmExecutableCompiler
             : new TrRmParamTableReader(paramBytes, parameters.Count, sigs, types,
                 schema);
         var contractBytes = contracts.Count == 0 ? []
+            : schema.UsesDevelopmentNativeConventions()
+                ? TrRmContractTableWriter.EncodeDevelopmentNativeConventionsDraft(
+                    contracts, typeDefs, defs, sigs, paramReader, types)
             : schema.UsesDevelopmentFunctionPointerEffects()
                 ? TrRmContractTableWriter.EncodeDevelopmentFunctionPointerEffectsDraft(
                     contracts, typeDefs, defs, sigs, paramReader, types)
@@ -1093,11 +1112,36 @@ public static partial class TrRmExecutableCompiler
         var nativeImportRows = new List<TrRmDevelopmentNativeImportRow>(nativeImportCount);
         for (var index = 0; index < program.Functions.Length; index++)
         {
-            if (program.Functions[index].DirectNativeImport is not null)
+            nativeImportBytes = [];
+        }
+        else if (schema.UsesDevelopmentNativeConventions())
+        {
+            var nativeImportRows =
+                new List<TrRmDevelopmentNativeImportResolutionRow>(nativeImportCount);
+            for (var index = 0; index < program.Functions.Length; index++)
             {
                 nativeImportRows.Add(new TrRmDevelopmentNativeImportRow(index + 1,
                     nativeLibraryRows[index], nativeExportRows[index], 1));
             }
+            nativeImportBytes =
+                TrRmDevelopmentNativeImportTableWriter.EncodeNativeConventionsDraft(
+                    nativeImportRows, strings, defs, sigs, paramReader, types,
+                    contractReader, layouts);
+        }
+        else
+        {
+            var nativeImportRows = new List<TrRmDevelopmentNativeImportRow>(nativeImportCount);
+            for (var index = 0; index < program.Functions.Length; index++)
+            {
+                if (program.Functions[index].DirectNativeImport is not null)
+                {
+                    nativeImportRows.Add(new TrRmDevelopmentNativeImportRow(index + 1,
+                        nativeLibraryRows[index], nativeExportRows[index], 1));
+                }
+            }
+            nativeImportBytes = TrRmDevelopmentNativeImportTableWriter.Encode(
+                nativeImportRows, strings, defs, sigs, paramReader, types,
+                contractReader, layouts);
         }
         var nativeImportBytes = nativeImportRows.Count == 0 ? []
             : TrRmDevelopmentNativeImportTableWriter.Encode(nativeImportRows, strings, defs, sigs,
@@ -1221,7 +1265,11 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new(0x48, 0, (uint)targetProfiles.Count, targetProfileBytes));
         }
         var artifact = TrRmArtifactWriter.Encode(sections, schema);
-        if (schema.UsesDevelopmentFunctionPointerEffects())
+        if (schema.UsesDevelopmentNativeConventions())
+        {
+            _ = LoadDevelopmentNativeConventionsDraft(artifact);
+        }
+        else if (schema.UsesDevelopmentFunctionPointerEffects())
         {
             _ = LoadDevelopmentFunctionPointerEffectsDraft(artifact);
         }
@@ -1254,6 +1302,11 @@ public static partial class TrRmExecutableCompiler
         => LoadDevelopment(artifact,
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
 
+    internal static BoundProgram LoadDevelopmentNativeConventionsDraft(
+        ReadOnlySpan<byte> artifact)
+        => LoadDevelopment(artifact,
+            TrRmArtifactSchema.DevelopmentNativeConventionsDraft);
+
     internal static BoundProgram LoadRegisterExceptionRegionsDraft(
         ReadOnlySpan<byte> artifact,
         ImmutableArray<CoreExceptionIdentitySelection>
@@ -1276,7 +1329,10 @@ public static partial class TrRmExecutableCompiler
         }
 
         var index = new TrRmArtifactIndex(artifact, schema);
-        var validatedTables = schema.UsesDevelopmentFunctionPointerEffects()
+        var validatedTables = schema.UsesDevelopmentNativeConventions()
+            ? TrRmStructuralMetadataValidator
+                .ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(index)
+            : schema.UsesDevelopmentFunctionPointerEffects()
             ? TrRmStructuralMetadataValidator
                 .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index)
             : schema.UsesRegisterExceptionRegions()
@@ -1612,8 +1668,13 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
                 directNativeImport = new DirectNativeImport(nativeImports.GetLibraryName(row),
-                    nativeImports.GetExportName(row), directOutputs.MoveToImmutable())
-                {
+                    nativeImports.GetExportName(row), directOutputs.MoveToImmutable()) {
+                    CallingConvention = schema.UsesDevelopmentNativeConventions()
+                        ? TrRmDevelopmentNativeConventions.DecodeConvention(
+                            contractTable.GetNativeAbi(row).ConventionOrReserved, 1)
+                        : NativeCallingConvention.Native,
+                    ResolutionMode = nativeImports.GetResolutionMode(row),
+                    ResolutionPolicy = nativeImports.GetResolutionPolicy(row),
                     Parameters = directParameters.MoveToImmutable(),
                 };
             }
@@ -1683,6 +1744,11 @@ public static partial class TrRmExecutableCompiler
                 ModuleImport = moduleImport,
                 NativeVTableMethod = nativeVTableMethod,
                 NativeFunctionPointerType = nativeCallableTypeByMethod[row],
+                NativeCallableConvention = schema.UsesDevelopmentNativeConventions()
+                    && isNativeCallable
+                        ? TrRmDevelopmentNativeConventions.DecodeConvention(
+                            contractTable.GetNativeAbi(row).ConventionOrReserved, 2)
+                        : null,
                 NativeCallableEntryName = isNativeCallable
                     && nativeCallables.HasCallableEntryForMethod(row)
                         ? nativeCallables.GetEntryName(row) : null,
@@ -1887,12 +1953,21 @@ public static partial class TrRmExecutableCompiler
         => CreateReference(providerArtifact,
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
 
+    internal static CompilationReference
+        CreateDevelopmentNativeConventionsDraftReference(byte[] providerArtifact)
+        => CreateReference(providerArtifact,
+            TrRmArtifactSchema.DevelopmentNativeConventionsDraft);
+
     private static CompilationReference CreateReference(byte[] providerArtifact,
         TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(providerArtifact);
         var artifactIndex = new TrRmArtifactIndex(providerArtifact, schema);
-        var validatedTables = schema.UsesDevelopmentFunctionPointerEffects()
+        var validatedTables = schema.UsesDevelopmentNativeConventions()
+            ? TrRmStructuralMetadataValidator
+                .ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(
+                    artifactIndex)
+            : schema.UsesDevelopmentFunctionPointerEffects()
             ? TrRmStructuralMetadataValidator
                 .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(
                     artifactIndex)
@@ -3281,7 +3356,27 @@ public static partial class TrRmExecutableCompiler
         return row;
     }
 
-    private static ReadOnlyMemory<byte> NativeAbiPayload(byte role = 1)
+    private static byte NativeAbiConvention(TrRmArtifactSchema schema,
+        NativeCallingConvention? convention, byte role)
+    {
+        if (!schema.UsesDevelopmentNativeConventions())
+        {
+            return 0;
+        }
+
+        if (convention is not NativeCallingConvention selected
+            || !TrRmDevelopmentNativeConventions.TryEncodeConvention(
+                selected, role, out var value))
+        {
+            throw Unsupported(
+                "The selected Development schema cannot represent this native convention.");
+        }
+
+        return value;
+    }
+
+    private static ReadOnlyMemory<byte> NativeAbiPayload(byte role = 1,
+        byte conventionOrReserved = 0)
     {
         var payload = new byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(payload, 1);

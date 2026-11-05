@@ -489,6 +489,57 @@ public sealed class NativeVTableCallTests
     }
 
     [Test]
+    public void DevelopmentNativeConventionsProfileKeepsVTableConventionBytesReserved()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeVTableMethod(0)]
+            public extern unsafe int32 Invoke(ptr<void> receiver);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!, "vtable-native-conventions");
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(index);
+        Assert.That(tables.Methods.Count, Is.EqualTo(1));
+        Assert.That(tables.Contracts.GetEffectsMask(1), Is.EqualTo(4u));
+        Assert.That(tables.Contracts.GetNativeAbi(1).Role, Is.EqualTo(4));
+        Assert.That(tables.Contracts.GetNativeAbi(1).ConventionOrReserved, Is.Zero);
+
+        var (first, count) = tables.Methods.GetContractRange(1);
+        var nativeAbiRow = 0;
+        for (var indexInRange = 0; indexInRange < count; indexInRange++)
+        {
+            var row = first + indexInRange;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                tables.Contracts.GetRow(row).Slice(4, sizeof(ushort))) == 0x10)
+            {
+                nativeAbiRow = row;
+                break;
+            }
+        }
+        Assert.That(nativeAbiRow, Is.GreaterThan(0));
+        Assert.That(index.TryGetSection(0x001B, out _, out var contractCount), Is.True);
+        var sectionOffset = FindSectionOffset(artifact, 0x001B);
+        var indexByteCount = checked((contractCount + 1) * sizeof(uint));
+        var rowOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(sectionOffset + ((nativeAbiRow - 1) * sizeof(uint)))));
+        var conventionOffset = sectionOffset + indexByteCount + rowOffset + 8 + 6;
+        Assert.That(artifact[conventionOffset], Is.Zero);
+        Assert.That(artifact[conventionOffset + 1], Is.Zero);
+        Assert.That(TrRmExecutableCompiler
+            .LoadDevelopmentNativeConventionsDraft(artifact).Functions.Single()
+            .NativeCallableConvention, Is.Null);
+
+        var malformed = (byte[])artifact.Clone();
+        malformed[conventionOffset] = 1;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
+    }
+
+    [Test]
     public async Task NativeVTableTrRmImportDispatchesNonNullReceiverAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -501,10 +552,10 @@ public sealed class NativeVTableCallTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.EmitDevelopmentFunctionPointerEffectsDraft(
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
             provider.Program!, "VTableProvider");
         var reference = TrRmExecutableCompiler
-            .CreateDevelopmentFunctionPointerEffectsDraftReference(artifact);
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
 
             [Terrum.Interop.NativeCallable]
@@ -526,10 +577,10 @@ public sealed class NativeVTableCallTests
         try
         {
             var consumerArtifact = TrRmExecutableCompiler
-                .EmitDevelopmentFunctionPointerEffectsDraft(
+                .EmitDevelopmentNativeConventionsDraft(
                     consumer.Program!, "VTableConsumer");
             var loadedConsumer = TrRmExecutableCompiler
-                .LoadDevelopmentFunctionPointerEffectsDraft(consumerArtifact);
+                .LoadDevelopmentNativeConventionsDraft(consumerArtifact);
             await File.WriteAllBytesAsync(libraryPath, NativeEmitter.EmitLibrary(
                 loadedConsumer, ["GetValue", "Dispatch"], NativeRuntimePolicy.FailFast))
                 .ConfigureAwait(true);

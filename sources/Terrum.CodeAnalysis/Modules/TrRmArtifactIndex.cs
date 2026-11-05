@@ -11,6 +11,7 @@ internal enum TrRmArtifactSchema
     Standard,
     Development,
     DevelopmentFunctionPointerEffectsDraft,
+    DevelopmentNativeConventionsDraft,
     CopyOriginDraft,
     ForeignInvocationDraft,
     ForeignInvocationStorageAddressDraft,
@@ -33,11 +34,17 @@ internal static class TrRmArtifactSchemaFacts
 {
     internal static bool IsDevelopmentProfile(this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.Development
-            or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft;
+            or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+            or TrRmArtifactSchema.DevelopmentNativeConventionsDraft;
 
     internal static bool UsesDevelopmentFunctionPointerEffects(
         this TrRmArtifactSchema schema) =>
-        schema == TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft;
+        schema is TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+            or TrRmArtifactSchema.DevelopmentNativeConventionsDraft;
+
+    internal static bool UsesDevelopmentNativeConventions(
+        this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.DevelopmentNativeConventionsDraft;
 
     internal static bool SupportsNominalEnums(this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.NominalEnumsDraft;
@@ -177,6 +184,7 @@ public readonly ref struct TrRmArtifactIndex
         _resourceLedger = resourceLedger;
         if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+            or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -501,6 +509,10 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForDevelopmentFunctionPointerEffectsDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
+
+    internal static TrRmArtifactIndex ForDevelopmentNativeConventionsDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.DevelopmentNativeConventionsDraft);
 
     internal static TrRmArtifactIndex ForCopyOriginDraft(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.CopyOriginDraft);

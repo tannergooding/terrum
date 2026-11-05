@@ -691,6 +691,12 @@ public static class TrRmStructuralMetadataValidator
         => ValidateCore(index, BodyInspection.None, developmentProfile: true,
             developmentFunctionPointerEffectsDraft: true);
 
+    internal static ValidatedExecutionTables
+        ValidateDevelopmentNativeConventionsDraftAndGetExecutionTables(
+            TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: true,
+            developmentNativeConventionsDraft: true);
+
     internal static ValidatedExecutionTables ValidateCopyOriginDraftAndGetExecutionTables(
         TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
@@ -1105,7 +1111,9 @@ public static class TrRmStructuralMetadataValidator
         bool registerExceptionRegionsDraft = false,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
     {
-        var selectedSchema = developmentFunctionPointerEffectsDraft
+        var selectedSchema = developmentNativeConventionsDraft
+            ? TrRmArtifactSchema.DevelopmentNativeConventionsDraft
+            : developmentFunctionPointerEffectsDraft
             ? TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             : developmentProfile
             ? TrRmArtifactSchema.Development

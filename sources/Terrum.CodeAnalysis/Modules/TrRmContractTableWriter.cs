@@ -112,6 +112,15 @@ public static class TrRmContractTableWriter
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft,
             profileAware: false);
 
+    internal static byte[] EncodeDevelopmentNativeConventionsDraft(
+        IReadOnlyList<TrRmContractRow> rows, TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs)
+        => EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
+            fieldPathCount: 0, predicateGraphCount: 0, default, default,
+            TrRmArtifactSchema.DevelopmentNativeConventionsDraft,
+            profileAware: false);
+
     private static TrRmContractRow[] CanonicalizeCopyOriginRows(
         IReadOnlyList<TrRmContractRow> rows,
         TrRmFieldPathTableReader fieldPaths,

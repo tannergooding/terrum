@@ -86,7 +86,7 @@ internal readonly ref struct TrRmNativeCallableTableReader
                 || signatures.GetReceiverTypeSpec(methods.GetSignature((int)method)) != 0
                 || signatures.GetGenericCount(methods.GetSignature((int)method)) != 0
                 || !contracts.HasNativeAbi((int)method)
-                || contracts.GetNativeAbi((int)method) != new TrRmNativeAbiContract(1, 2, 0)
+                || !HasNativeAbiRole(contracts.GetNativeAbi((int)method), 2)
                 || (declaredEffectsProfile
                     ? (effectsMask & ~6u) != 0
                     : (effectsMask & 4) != 4 || (effectsMask & 2) != 0))
@@ -214,4 +214,7 @@ internal readonly ref struct TrRmNativeCallableTableReader
 
     private static InvalidDataException InvalidNativeCallable()
         => new("Invalid TRRM native callable declaration.");
+
+    private static bool HasNativeAbiRole(TrRmNativeAbiContract abi, byte role)
+        => abi.AbiId == 1 && abi.Role == role && abi.ExceptionMode == 0;
 }

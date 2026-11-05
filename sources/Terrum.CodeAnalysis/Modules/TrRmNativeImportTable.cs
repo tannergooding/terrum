@@ -345,6 +345,12 @@ public static class TrRmDevelopmentNativeImportTableWriter
         TrRmLayoutTableReader layouts)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        if (contracts.Schema.UsesDevelopmentNativeConventions())
+        {
+            throw new ArgumentException(
+                "The selected Development schema requires explicit resolution rows.",
+                nameof(contracts));
+        }
         if (rows.Count is <= 0 or > 0xFF_FFFF)
         {
             throw new ArgumentOutOfRangeException(nameof(rows));
@@ -366,6 +372,50 @@ public static class TrRmDevelopmentNativeImportTableWriter
         return result;
     }
 
+    internal static byte[] EncodeNativeConventionsDraft(
+        IReadOnlyList<TrRmDevelopmentNativeImportResolutionRow> rows,
+        TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (!contracts.Schema.UsesDevelopmentNativeConventions())
+        {
+            throw new ArgumentException(
+                "The selected Development schema does not use resolution rows.",
+                nameof(contracts));
+        }
+        if (rows.Count is <= 0 or > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows));
+        }
+
+        var result = new byte[rows.Count * 16];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            if (!TrRmDevelopmentNativeConventions.TryEncodeResolution(
+                row.ResolutionMode, row.ResolutionPolicy,
+                out var mode, out var policy))
+            {
+                throw new ArgumentException(
+                    "A native import has an invalid resolution pair.", nameof(rows));
+            }
+
+            var offset = index * 16;
+            Write(result, offset, row.MethodDefRow);
+            Write(result, offset + 4, row.LibraryNameStringRow);
+            Write(result, offset + 8, row.ExportNameStringRow);
+            result[offset + 12] = mode;
+            result[offset + 13] = policy;
+        }
+
+        _ = new TrRmDevelopmentNativeImportTableReader(result, rows.Count, strings, methods,
+            signatures, parameters, types, contracts, layouts);
+        return result;
+    }
+
     private static void Write(byte[] bytes, int offset, int value)
         => Write(bytes, offset, unchecked((uint)value));
 
@@ -373,7 +423,7 @@ public static class TrRmDevelopmentNativeImportTableWriter
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 }
 
-/// <summary>Validates the development-only four-word NativeImport prototype.</summary>
+/// <summary>Validates NativeImport rows in the selected Development TRRM schema.</summary>
 /// <remarks>The borrowed NativeImport section must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmDevelopmentNativeImportTableReader
 {
@@ -381,6 +431,9 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly int[] _rowByMethod;
+    private readonly NativeImportResolutionMode[] _resolutionModeByMethod;
+    private readonly NativeImportResolutionPolicy[] _resolutionPolicyByMethod;
+    private readonly bool _explicitResolution;
     private readonly int _recordCount;
 
     /// <summary>Validates the native import section against its declarations.</summary>
@@ -410,13 +463,22 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
         _strings = strings;
         _recordCount = recordCount;
         _rowByMethod = new int[methods.Count + 1];
+        _resolutionModeByMethod = new NativeImportResolutionMode[methods.Count + 1];
+        _resolutionPolicyByMethod = new NativeImportResolutionPolicy[methods.Count + 1];
+        _explicitResolution = contracts.Schema.UsesDevelopmentNativeConventions();
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
             var method = Read(data, 0);
             var library = Read(data, 4);
             var export = Read(data, 8);
-            var policy = Read(data, 12);
+            var resolutionMode = NativeImportResolutionMode.Link;
+            var resolutionPolicy = NativeImportResolutionPolicy.NotApplicable;
+            var validResolution = _explicitResolution
+                ? data[14] == 0 && data[15] == 0
+                    && TrRmDevelopmentNativeConventions.TryDecodeResolution(
+                        data[12], data[13], out resolutionMode, out resolutionPolicy)
+                : Read(data, 12) == WindowsSystem32ResolutionPolicy;
             var effectsMask = method > 0 && method <= methods.Count
                 ? contracts.GetEffectsMask((int)method) : 0;
             if (method is 0 or > 0xFF_FFFF || method > methods.Count
@@ -430,8 +492,7 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
                 || (!contracts.Schema.UsesDevelopmentFunctionPointerEffects()
                     && (effectsMask & 4) == 0)
                 || !contracts.HasNativeAbi((int)method)
-                || contracts.GetNativeAbi((int)method)
-                    != new TrRmNativeAbiContract(1, 1, 0))
+                || !HasNativeAbiRole(contracts.GetNativeAbi((int)method), 1))
             {
                 throw InvalidNativeImport();
             }
@@ -486,15 +547,38 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
     /// <exception cref="InvalidDataException">The method has no native import declaration.</exception>
     public TrRmDevelopmentNativeImportRow GetImportForMethod(int methodDefRow)
     {
-        if (!HasImportForMethod(methodDefRow))
+        if (_explicitResolution || !HasImportForMethod(methodDefRow))
         {
             throw InvalidNativeImport();
         }
 
         var data = GetRow(_rowByMethod[methodDefRow]);
         return new TrRmDevelopmentNativeImportRow(methodDefRow, (int)Read(data, 4),
-            (int)Read(data, 8), Read(data, 12));
+            (int)Read(data, 8), _explicitResolution ? data[13] : Read(data, 12));
     }
+
+    internal TrRmDevelopmentNativeImportResolutionRow
+        GetResolutionImportForMethod(int methodDefRow)
+    {
+        if (!_explicitResolution || !HasImportForMethod(methodDefRow))
+        {
+            throw InvalidNativeImport();
+        }
+
+        var data = GetRow(_rowByMethod[methodDefRow]);
+        return new TrRmDevelopmentNativeImportResolutionRow(methodDefRow,
+            (int)Read(data, 4), (int)Read(data, 8),
+            _resolutionModeByMethod[methodDefRow],
+            _resolutionPolicyByMethod[methodDefRow]);
+    }
+
+    internal NativeImportResolutionMode GetResolutionMode(int methodDefRow)
+        => HasImportForMethod(methodDefRow)
+            ? _resolutionModeByMethod[methodDefRow] : throw InvalidNativeImport();
+
+    internal NativeImportResolutionPolicy GetResolutionPolicy(int methodDefRow)
+        => HasImportForMethod(methodDefRow)
+            ? _resolutionPolicyByMethod[methodDefRow] : throw InvalidNativeImport();
 
     /// <summary>Gets the library name associated with a method's import.</summary>
     /// <param name="methodDefRow">The 1-based method-definition row.</param>
@@ -520,6 +604,9 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
 
     private static uint Read(ReadOnlySpan<byte> bytes, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(offset, sizeof(uint)));
+
+    private static bool HasNativeAbiRole(TrRmNativeAbiContract abi, byte role)
+        => abi.AbiId == 1 && abi.Role == role && abi.ExceptionMode == 0;
 
     private static InvalidDataException InvalidNativeImport()
         => new("Invalid TRRM NativeImport table.");

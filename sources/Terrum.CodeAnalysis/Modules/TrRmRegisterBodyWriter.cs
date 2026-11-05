@@ -33,6 +33,7 @@ internal static class TrRmRegisterBodyWriter
         if (schema is not (TrRmArtifactSchema.Standard
             or TrRmArtifactSchema.Development
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+            or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft

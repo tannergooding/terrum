@@ -90,7 +90,7 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
                 || signatures.GetReceiverTypeSpec(methods.GetSignature((int)method)) != 0
                 || signatures.GetGenericCount(methods.GetSignature((int)method)) != 0
                 || !contracts.HasNativeAbi((int)method)
-                || contracts.GetNativeAbi((int)method) != new TrRmNativeAbiContract(1, 3, 0)
+                || !HasNativeAbiRole(contracts.GetNativeAbi((int)method), 3)
                 || !ValidAnchorContractRange((int)method, methods, contracts))
             {
                 throw InvalidNativeFunctionPointerSignature();
@@ -154,6 +154,9 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
             if ((_schema.UsesDevelopmentFunctionPointerEffects()
                     && _contracts.GetEffectsMask(methodDefRow)
                         != _contracts.GetEffectsMask(anchorMethod))
+                || (_schema.UsesDevelopmentNativeConventions()
+                    && _contracts.GetNativeAbi(methodDefRow).ConventionOrReserved
+                        != _contracts.GetNativeAbi(anchorMethod).ConventionOrReserved)
                 || !SignatureEquals(methodSignature, anchorSignature))
             {
                 continue;
@@ -176,6 +179,19 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
         }
 
         return _contracts.GetEffectsMask(_methodBySignature[signatureRow]);
+    }
+
+    internal NativeCallingConvention GetCallingConvention(int signatureRow)
+    {
+        if (signatureRow <= 0 || signatureRow > _recordCount)
+        {
+            throw InvalidNativeFunctionPointerSignature();
+        }
+
+        return _schema.UsesDevelopmentNativeConventions()
+            ? TrRmDevelopmentNativeConventions.DecodeConvention(
+                _contracts.GetNativeAbi(_methodBySignature[signatureRow]).ConventionOrReserved, 3)
+            : NativeCallingConvention.Native;
     }
 
     private bool ValidAnchorContractRange(int method,
@@ -354,6 +370,11 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
         var method = _methodBySignature[signatureRow];
         var signature = _methods.GetSignature(method);
         var typeIdentities = new List<string>();
+        if (_schema.UsesDevelopmentNativeConventions())
+        {
+            typeIdentities.Add(
+                $"convention:{_contracts.GetNativeAbi(method).ConventionOrReserved}");
+        }
         if (_schema.UsesDevelopmentFunctionPointerEffects())
         {
             typeIdentities.Add($"effects:{_contracts.GetEffectsMask(method)}");
@@ -407,4 +428,7 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
 
     private static InvalidDataException InvalidNativeFunctionPointerSignature()
         => new("Invalid TRRM native function-pointer signature declaration.");
+
+    private static bool HasNativeAbiRole(TrRmNativeAbiContract abi, byte role)
+        => abi.AbiId == 1 && abi.Role == role && abi.ExceptionMode == 0;
 }

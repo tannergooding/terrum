@@ -121,6 +121,29 @@ callback target remains valid only while its code image is loaded. These
 bounded implementation paths do not establish support for every accepted
 native target or metadata contract; the `NativeCallable.entryName` extension
 remains provisional.
+An explicitly selected internal Development TRRM candidate,
+`trrm/1-development-native-conventions-resolution-1`, preserves normalized
+foreign conventions, the distinct Native/Terrum default on function-pointer
+anchors, and direct-import resolution mode/policy in the prototype metadata.
+Its producer, reader, source-free reference and re-emission paths are covered;
+default Development operations and Standard TRRM retain their separate
+selections. This metadata route does not establish native lowering for every
+convention or implement the selected linker/loader resolution behavior. The
+candidate remains unapproved.
+`CompilationOptions.NativeCoreRegistration` is an explicit host-supplied
+in-process descriptor. `NativeCoreRegistrationSet.Create` validates the
+enum/member/schema facts and requires `CoreProviderModuleBindings` with the
+exact using Module, selected provider Module/revision/schema tokens and
+ModuleRef target/runtime requirements; each enum member also carries its
+explicit producer declaration key. These host inputs are not authentication
+or provider discovery, and do not select a default or enable source-free
+enum/schema consumption. The persisted enum profile remains an unapproved
+internal candidate; actual provider selections and serialized binding remain
+separate work.
+Explicit Core-registered `NativeImport.CallConv` calls to
+`kernel32.dll!GetCurrentThreadId` execute for Cdecl and Stdcall under FailFast
+JIT on Windows x64. These conventions share the selected x64 mapping; this does
+not demonstrate distinct ABI sequences or foreign callers.
 The `Host.Source` semantic-module JIT grant and `NativeSourceGrantLibrary` are
 unselected prototype paths, not compiler input or JIT contracts. Compiler
 frontends consume source text at their input boundary; JIT consumes semantic

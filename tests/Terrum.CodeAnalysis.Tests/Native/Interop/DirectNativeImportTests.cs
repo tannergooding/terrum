@@ -931,9 +931,11 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-results");
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse("""
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "pointer-results");
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
+        var consumer = Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
                     ptr<void> context = AcquireContext();
@@ -945,7 +947,7 @@ public sealed class DirectNativeImportTests
 
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
-        var imports = TrRmExecutableCompiler.Load(artifact).Functions
+        var imports = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact).Functions
             .Where(static function => function.IsExternal).ToArray();
         Assert.That(imports.Select(static function => function.ReturnType),
             Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.Float64]));
@@ -980,8 +982,9 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-callable-imports");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "pointer-callable-imports");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         foreach (var imported in provider.Program!.Functions)
         {
             var roundTripped = loaded.Functions.Single(function => function.Name == imported.Name);
@@ -991,11 +994,13 @@ public sealed class DirectNativeImportTests
                 imported.Name);
             Assert.That(roundTripped.DirectNativeImport!.Parameters, Is.Empty, imported.Name);
         }
-        Assert.That(TrRmExecutableCompiler.Emit(loaded, "pointer-callable-imports"),
+        Assert.That(TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            loaded, "pointer-callable-imports"),
             Is.EqualTo(artifact));
 
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse("""
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
+        var consumer = Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
                     return InvokeCallback(
@@ -1051,21 +1056,25 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-result");
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "pointer-result");
         var resultTypeRow = FindVariableRow(artifact, 0x0011, [1, 0, 0x8C, 0]);
         var writableArtifact = MutateVariableRowByte(artifact, 0x0011, resultTypeRow, 1, 1);
 
-        var loaded = TrRmExecutableCompiler.Load(writableArtifact);
+        var loaded = TrRmExecutableCompiler
+            .LoadDevelopmentNativeConventionsDraft(writableArtifact);
         var returnType = loaded.Functions.Single(static function =>
             function.Name == "AcquireContext").ReturnType;
         Assert.That(NativePointerTypes.IsType(returnType), Is.True);
         var pointer = loaded.NativePointerTypes[NativePointerTypes.Index(returnType)];
         Assert.That(pointer.PointeeType, Is.EqualTo(PrimitiveType.Void));
         Assert.That(pointer.IsWritable, Is.True);
-        Assert.That(TrRmExecutableCompiler.Emit(loaded, "pointer-result"),
+        Assert.That(TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            loaded, "pointer-result"),
             Is.EqualTo(writableArtifact));
         var invalidQualifier = MutateVariableRowByte(artifact, 0x0011, resultTypeRow, 1, 2);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(invalidQualifier));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(invalidQualifier));
     }
 
     [Test]
@@ -1654,8 +1663,9 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "character-pointer-input");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "character-pointer-input");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var import = loaded.Functions.Single(static function =>
             function.Name == "ReadUtf16Path").DirectNativeImport!;
         Assert.That(import.Parameters, Is.EqualTo([
@@ -2032,8 +2042,9 @@ public sealed class DirectNativeImportTests
         var program = compilation.Program!;
         Assert.That(NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast),
             Is.Not.Empty);
-        _ = TrRmExecutableCompiler.Load(
-            TrRmExecutableCompiler.Emit(program, "null-native-parameter"));
+        _ = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+            TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+                program, "null-native-parameter"));
     }
 
     [Test]
@@ -2131,8 +2142,9 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-input");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "pointer-input");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var loadedFunction = loaded.Functions.Single(static function =>
             function.Name == "ReadValue");
         var import = loadedFunction.DirectNativeImport!;
@@ -2147,7 +2159,7 @@ public sealed class DirectNativeImportTests
         Assert.That(loaded.NativePointerTypes[NativePointerTypes.Index(parameterType)],
             Is.EqualTo(new NativePointerTypeDefinition(PrimitiveType.Int32, false)));
 
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(featureCount, Is.EqualTo(3));
@@ -2158,8 +2170,9 @@ public sealed class DirectNativeImportTests
         Assert.That(features.GetFeature(3).FeatureId,
             Is.EqualTo(0x0102u));
 
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse("""
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
+        var consumer = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut int32 value = 42;
                 unsafe { return ReadValue(&value); }
@@ -2199,8 +2212,9 @@ public sealed class DirectNativeImportTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "typed-address-body");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!, "typed-address-body");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var main = loaded.Functions.Single(static function => function.Name == "Main");
         var unsafeBody = main.Body.Statements.OfType<BoundUnsafe>().Single();
         var addresses = unsafeBody.Body.Statements
@@ -2214,7 +2228,7 @@ public sealed class DirectNativeImportTests
             Is.EqualTo([PrimitiveType.Int32, PrimitiveType.UInt32]));
         Assert.That(addresses.All(static address => address.IsReadonly), Is.True);
 
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(featureCount, Is.EqualTo(4));
@@ -2227,8 +2241,9 @@ public sealed class DirectNativeImportTests
         Assert.That(features.GetFeature(4),
             Is.EqualTo(new TrRmFeatureRow(0x0102, 1)));
 
-        var reemitted = TrRmExecutableCompiler.Emit(loaded, "typed-address-body-reemitted");
-        Assert.That(TrRmExecutableCompiler.Load(reemitted).Functions
+        var reemitted = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            loaded, "typed-address-body-reemitted");
+        Assert.That(TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(reemitted).Functions
             .Single(static function => function.Name == "Main").Body.Statements
             .OfType<BoundUnsafe>().Single().Body.Statements
             .OfType<BoundExpressionStatement>().Count(), Is.EqualTo(2));
@@ -2271,7 +2286,8 @@ public sealed class DirectNativeImportTests
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "malformed-address-body");
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            compilation.Program!, "malformed-address-body");
         var layout = ReadOutputBodyLayout(artifact);
         var operations = ReadOutputBodyOperations(artifact, layout);
         var addresses = operations.Where(static operation => operation.Opcode == 0x2A).ToArray();
@@ -2284,11 +2300,13 @@ public sealed class DirectNativeImportTests
         WriteUnsigned(mismatchedPointer,
             addresses[0].Offset + 1 + addresses[0].ReferenceWidth,
             addresses[0].ReferenceWidth, secondPointerType);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(mismatchedPointer));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(mismatchedPointer));
 
         var nonAddressableBacking = artifact.ToArray();
         nonAddressableBacking[layout.FirstPlaceFlagsOffset] = 4;
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(nonAddressableBacking));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(nonAddressableBacking));
 
         var uninitializedBacking = artifact.ToArray();
         var initialize = operations.First(static operation => operation.Opcode == 0x0E);
@@ -2301,12 +2319,14 @@ public sealed class DirectNativeImportTests
             initialize.ReferenceWidth, value);
         WriteUnsigned(uninitializedBacking, initialize.Offset + 1 + initialize.ReferenceWidth,
             initialize.ReferenceWidth, handle);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(uninitializedBacking));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(uninitializedBacking));
 
         var missingUnsafeScope = artifact.ToArray();
         var unsafeMarker = operations.Single(static operation => operation.Opcode == 0x2E);
         missingUnsafeScope[unsafeMarker.Offset] = 0x2F;
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingUnsafeScope));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(missingUnsafeScope));
     }
 
     [Test]
@@ -2332,8 +2352,9 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "transport-header");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "transport-header");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var loadedStructure = loaded.Structures.Single(static structure =>
             structure.Name == "TransportHeader");
         var loadedStructureIndex = loaded.Structures.IndexOf(loadedStructure);
@@ -2349,14 +2370,15 @@ public sealed class DirectNativeImportTests
         Assert.That(loadedImport.Parameters.Single().PointeeType,
             Is.EqualTo((PrimitiveType)(100 + loadedStructureIndex)));
 
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(0x0100,
             out var blittableFeature), Is.True);
         Assert.That(blittableFeature.RuleRevision, Is.EqualTo(1u));
 
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
         Assert.That(reference.Structures.Select(static structure => structure.Name),
             Is.EqualTo(["TransportIdentity", "TransportHeader"]));
         var consumer = Compilation.Create(SyntaxTree.Parse("""
@@ -2373,11 +2395,14 @@ public sealed class DirectNativeImportTests
         Assert.That(Encoding.ASCII.GetString(image), Does.Contain("fixture.dll"));
 
         var wrongTarget = MutateVariableRowByte(artifact, 0x001B, 1, 8, 2);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(wrongTarget));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(wrongTarget));
         var missingFeature = MutateFixedSectionByte(artifact, 0x0004, 4, 0);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingFeature));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(missingFeature));
         var wrongAlignment = MutateFixedRowByte(artifact, 0x0015, 2, 24, 12, 4);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(wrongAlignment));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(wrongAlignment));
     }
 
     [Test]
@@ -2391,14 +2416,17 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "native-parameter-extent");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "native-parameter-extent");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var import = loaded.Functions.Single(static function =>
             function.Name == "ObserveValues").DirectNativeImport!;
         Assert.That(import.Parameters.Single().Extent, Is.EqualTo(3));
 
-        var malformed = MutateVariableRowByte(artifact, 0x001B, 3, 23, 0x80);
-        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
+        var malformed = MutateVariableRowByte(artifact, 0x001B,
+            FindContractRow(artifact, 0x11), 18, 0);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
     }
 
     [Test]
@@ -2412,8 +2440,9 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "nested-pointer-input");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "nested-pointer-input");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var import = loaded.Functions.Single(static function =>
             function.Name == "WritePointer").DirectNativeImport!;
         Assert.That(import.Parameters,
@@ -2423,8 +2452,9 @@ public sealed class DirectNativeImportTests
                     NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
             }));
 
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse("""
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
+        var consumer = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut ptr<void> result = null;
                 unsafe { return WritePointer(&result); }
@@ -2449,8 +2479,9 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "void-pointer-input");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "void-pointer-input");
+        var loaded = TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(artifact);
         var import = loaded.Functions.Single(static function =>
             function.Name == "InspectPointer").DirectNativeImport!;
         Assert.That(import.Parameters,
@@ -2471,10 +2502,13 @@ public sealed class DirectNativeImportTests
             """));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-input");
-        var malformed = MutateVariableRowByte(artifact, 0x001B, 3, 16, 0);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "pointer-input");
+        var malformed = MutateVariableRowByte(artifact, 0x001B,
+            FindContractRow(artifact, 0x11), 16, 0);
 
-        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
     }
 
     [Test]
@@ -2771,10 +2805,12 @@ public sealed class DirectNativeImportTests
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse(OpaquePointerImportDeclaration));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "opaque-interface-import");
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "opaque-interface-import");
 
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse("""
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
+        var consumer = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut ptr<void> result = null;
                 unsafe {
@@ -2795,7 +2831,7 @@ public sealed class DirectNativeImportTests
     public void TrRmNativeImportRoundTripsIntoAnUnsafeSourceConsumer()
     {
         var artifact = EmitPublicImportArtifact();
-        var index = TrRmArtifactIndex.ForDevelopment(artifact);
+        var index = TrRmArtifactIndex.ForDevelopmentNativeConventionsDraft(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.GetFeature(1),
@@ -2805,8 +2841,9 @@ public sealed class DirectNativeImportTests
         Assert.That(index.TryGetSection(0x0030, out _, out var nativeImportCount), Is.True);
         Assert.That(nativeImportCount, Is.EqualTo(1));
 
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse("""
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentNativeConventionsDraftReference(artifact);
+        var consumer = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut int64 counter = 0;
                 unsafe {
@@ -2830,7 +2867,8 @@ public sealed class DirectNativeImportTests
         var artifact = EmitPublicImportArtifact();
         var malformed = MutateVariableRowByte(artifact, 0x001B, 1, 8, 0);
 
-        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
     }
 
     [Test]
@@ -2839,7 +2877,8 @@ public sealed class DirectNativeImportTests
         var artifact = EmitPublicImportArtifact();
         var malformed = MutateVariableRowByte(artifact, 0x001B, 2, 12, 2);
 
-        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
     }
 
     [Test]
@@ -2848,7 +2887,8 @@ public sealed class DirectNativeImportTests
         var artifact = EmitPublicImportArtifact();
         var malformed = MutateFixedSectionByte(artifact, 0x0004, 0, 1);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
     }
 
     private static byte[] EmitPublicImportArtifact()
@@ -2856,7 +2896,8 @@ public sealed class DirectNativeImportTests
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse(PublicImportDeclaration));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
-        return TrRmExecutableCompiler.Emit(provider.Program!, "windows-clock");
+        return TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+            provider.Program!, "windows-clock");
     }
 
     private static int IndexOf(byte[] source, byte[] value)
@@ -2941,6 +2982,31 @@ public sealed class DirectNativeImportTests
         }
 
         throw new InvalidOperationException("The emitted artifact has no matching metadata row.");
+    }
+
+    private static int FindContractRow(byte[] artifact, ushort contractKind)
+    {
+        var (sectionOffset, count) = FindSection(artifact, 0x001B);
+        var offsetTableBytes = checked((count + 1) * sizeof(uint));
+        for (var row = 1; row <= count; row++)
+        {
+            var first = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(sectionOffset + ((row - 1) * sizeof(uint)),
+                    sizeof(uint))));
+            var last = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(sectionOffset + (row * sizeof(uint)), sizeof(uint))));
+            var rowBytes = artifact.AsSpan(sectionOffset + offsetTableBytes + first,
+                last - first);
+            if (rowBytes.Length >= 8
+                && BinaryPrimitives.ReadUInt16LittleEndian(rowBytes.Slice(4, 2))
+                    == contractKind)
+            {
+                return row;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"The emitted artifact has no Contract row of kind 0x{contractKind:X4}.");
     }
 
     private static OutputBodyLayout ReadOutputBodyLayout(byte[] artifact)
