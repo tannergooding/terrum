@@ -132,6 +132,86 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
     }
 
     [Test]
+    public void MultipleNativeParameterRowsSurvivePrivatePersistence()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObservePair")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 8)]
+            public extern unsafe int32 ObservePair(
+                ptr<uint32> first, ptr<uint64> second);
+
+            public int32 Address() {
+                unsafe {
+                    var observe = &ObservePair;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["ObservePair", "Address"]);
+
+        var reference = ModuleCompiler.CreateReference(producer);
+        var parameters = reference.NativeFunctionPointerSignatures
+            .Single(static signature =>
+                signature.NativeParameters.Length == 2)
+            .NativeParameters;
+        Assert.That(parameters.Select(static parameter =>
+            parameter.ParameterIndex), Is.EqualTo([0, 1]));
+        Assert.That(parameters.Select(static parameter => parameter.Extent),
+            Is.EqualTo([4u, 8u]));
+    }
+
+    [Test]
+    public void PrivateReaderRejectsMalformedNativeParameterRows()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObservePair")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 8)]
+            public extern unsafe int32 ObservePair(
+                ptr<uint32> first, ptr<uint64> second);
+
+            public int32 Address() {
+                unsafe {
+                    var observe = &ObservePair;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["ObservePair", "Address"]);
+        var rowOffset = FindPrivateNativeParameterReservedOffset(producer,
+            expectedExtent: 8) - 7;
+        var mutations = new Action<byte[]>[] {
+            malformed => BinaryPrimitives.WriteUInt32LittleEndian(
+                malformed.AsSpan(rowOffset, sizeof(uint)), 2),
+            malformed => malformed[rowOffset + 4] = 0,
+            malformed => malformed[rowOffset + 5] = 1,
+            malformed => malformed[rowOffset + 6] = 2,
+            malformed => malformed[rowOffset + 6] = 0,
+            malformed => {
+                malformed[rowOffset + 6] = 1;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    malformed.AsSpan(rowOffset + 8, sizeof(uint)), 0);
+            },
+        };
+
+        foreach (var mutate in mutations)
+        {
+            var malformed = producer.ToArray();
+            mutate(malformed);
+
+            _ = Assert.Throws<ModuleFormatException>(() =>
+                ModuleCompiler.CreateReference(malformed));
+        }
+    }
+
+    [Test]
     public void PrivateReaderRejectsUnknownAddressContractConvention()
     {
         var producer = ModuleCompiler.CreateProducer(
