@@ -1,0 +1,137 @@
+using System;
+using System.Linq;
+using System.Runtime.InteropServices;
+using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
+
+namespace Terrum.CodeAnalysis.Tests.Modules;
+
+[TestFixture]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeCallableContractRemappingTests
+{
+    [Test]
+    public void NativeCallableAddressContractsRemapAcrossPrivateSetAndGraphProviders()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var original = CreateProvider(reverse: false, changeIdentity: false);
+        var reordered = CreateProvider(reverse: true, changeIdentity: false);
+        var changed = CreateProvider(reverse: true, changeIdentity: true);
+        var originalReference = ModuleCompiler.CreateReference(original.Private);
+        var reorderedReference = ModuleCompiler.CreateReference(reordered.Private);
+        var originalIdentityType = originalReference.Functions.Single(
+            static function => function.Name == "Identity")
+            .NativeFunctionPointerType;
+        var reorderedIdentityType = reorderedReference.Functions.Single(
+            static function => function.Name == "Identity")
+            .NativeFunctionPointerType;
+        Assert.That(originalIdentityType, Is.Not.EqualTo(reorderedIdentityType));
+
+        var consumerSource = SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    fnptr<int32, int32> callback = &Identity;
+                    return callback(42);
+                }
+            }
+            """);
+        var privateCompilation = CreateConsumer(
+            consumerSource, originalReference);
+        Assert.That(privateCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, privateCompilation.Diagnostics));
+        var privateConsumer = ModuleCompiler.CreateConsumer(
+            privateCompilation.Program!, original.Private);
+        Assert.DoesNotThrow(() =>
+            ModuleCompiler.Link(privateConsumer, reordered.Private));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(privateConsumer, changed.Private));
+
+        var extra = CreateExtraProvider();
+        var providers = new[] { original.Native, extra };
+        var reorderedProviders = new[] { reordered.Native, extra };
+        var changedProviders = new[] { changed.Native, extra };
+        var setCompilation = CreateConsumer(consumerSource,
+            NativeModuleCompiler.CreateReferenceSet(providers));
+        Assert.That(setCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var setConsumer = NativeModuleCompiler.CreateConsumerSet(
+            setCompilation.Program!, providers, NativeRuntimePolicy.FailFast);
+        Assert.DoesNotThrow(() =>
+            NativeModuleCompiler.ValidateConsumerSet(setConsumer,
+                reorderedProviders));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateConsumerSet(setConsumer,
+                changedProviders));
+
+        var graphCompilation = CreateConsumer(consumerSource,
+            NativeModuleCompiler.CreateGraphReference(providers));
+        Assert.That(graphCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            graphCompilation.Program!, providers, NativeRuntimePolicy.FailFast);
+        Assert.DoesNotThrow(() =>
+            NativeModuleCompiler.ValidateGraph(graphConsumer,
+                reorderedProviders));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(graphConsumer,
+                changedProviders));
+    }
+
+    private static ProviderArtifacts CreateProvider(bool reverse,
+        bool changeIdentity)
+    {
+        var identity = changeIdentity
+            ? """
+                [Terrum.Interop.NativeCallable]
+                public int64 Identity(int64 value) { return value; }
+                """
+            : """
+                [Terrum.Interop.NativeCallable]
+                public int32 Identity(int32 value) { return value; }
+                """;
+        const string different = """
+            [Terrum.Interop.NativeCallable]
+            public int64 Different(int64 value) { return value; }
+            """;
+        var source = reverse ? different + identity : identity + different;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var exports = new[] { "Identity", "Different" };
+        var privateProducer = ModuleCompiler.CreateProducer(
+            compilation.Program!, exports);
+        var nativeProducer = NativeModuleCompiler.CreateProducer(
+            compilation.Program!, exports, "CallableProvider",
+            NativeRuntimePolicy.FailFast);
+        return new ProviderArtifacts(privateProducer, nativeProducer);
+    }
+
+    private static byte[] CreateExtraProvider()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Extra() { return 0; }"));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateProducer(compilation.Program!,
+            ["Extra"], "ExtraProvider", NativeRuntimePolicy.FailFast);
+    }
+
+    private static Compilation CreateConsumer(SyntaxTree tree,
+        CompilationReference? reference = null)
+    {
+        var options = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        return reference is null
+            ? Compilation.Create(tree, options)
+            : Compilation.Create(tree, reference, options);
+    }
+
+    private sealed record ProviderArtifacts(byte[] Private, byte[] Native);
+}
