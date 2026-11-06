@@ -88,6 +88,15 @@ public readonly ref struct TrRmContractTableReader
     }
     internal TrRmArtifactSchema Schema => _schema;
 
+    /// <summary>Validates Contract rows against their owning definitions and referenced tables.</summary>
+    /// <param name="section">The borrowed Contract section bytes.</param>
+    /// <param name="recordCount">The number of Contract rows.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="parameters">The validated Param table.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
+    /// <param name="developmentProfile">Whether to apply the Development-profile contract rules.</param>
     public TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
@@ -376,12 +385,22 @@ public readonly ref struct TrRmContractTableReader
                     }
 
                     var outputPredicateGraph = Read(data, 12);
+                    var outputTypeSpec = ordinal < paramCount
+                        ? parameters.GetTypeSpec(paramFirst + checked((int)ordinal))
+                        : 0;
+                    var isNativeOutputCell = schema.UsesForeignInvocationContracts()
+                        && IsNativeOutputCellType(typeSpecs, outputTypeSpec)
+                        && TrRmFeatureManifestValidator.Requires(features, modules,
+                            methods.GetOwnerModule(outputMethod),
+                            TrRmFeatureTableReader.NativeOutputCellsCandidateFeatureId,
+                            schema);
                     if (ordinal >= paramCount
                         || outputPredicateGraph is 0 or > 0xFF_FFFF
                         || outputPredicateGraph > (uint)predicateGraphCount
                         || parameters.GetMode(paramFirst + (int)ordinal) != 0
-                        || !IsInitializationDestinationType(typeSpecs,
-                            parameters.GetTypeSpec(paramFirst + (int)ordinal))
+                        || (!isNativeOutputCell
+                            && !IsInitializationDestinationType(typeSpecs,
+                                outputTypeSpec))
                         || !AddState(outputStates,
                             (owner, ordinal, outputPredicateGraph)))
                     {
@@ -735,6 +754,9 @@ public readonly ref struct TrRmContractTableReader
                     AddNativeParameter(nativeParameterMethod, pointerParameter);
                     break;
                 case 0x10:
+                    var nativeAbi = data.Length == 16
+                        ? new TrRmNativeAbiContract(Read(data, 8), data[12],
+                            data[13], data[14]) : default;
                     if (data.Length != 16 || owner >> 24 != 0x16
                         || data[12] is < 1 or > 4
                         || data[13] != 0 || data[15] != 0
@@ -746,8 +768,7 @@ public readonly ref struct TrRmContractTableReader
 
                     var abiMethod = (int)(owner & 0xFF_FFFF);
                     ConsumeWork(2);
-                    _nativeAbis[abiMethod] = new TrRmNativeAbiContract(
-                        Read(data, 8), data[12], data[13]);
+                    _nativeAbis[abiMethod] = nativeAbi;
                     _hasNativeAbis[abiMethod] = true;
                     break;
                 case 0x11:
@@ -1164,6 +1185,41 @@ public readonly ref struct TrRmContractTableReader
             : throw InvalidContract();
     }
 
+    internal bool IsNativeOutputCellParameter(int methodRow,
+        int parameterOrdinal)
+    {
+        ConsumeWork();
+        if (methodRow <= 0 || methodRow > _methods.Count)
+        {
+            throw InvalidContract();
+        }
+
+        var signature = _methods.GetSignature(methodRow);
+        var (first, count) = _signatures.GetParamRange(signature);
+        if (parameterOrdinal < 0 || parameterOrdinal >= count)
+        {
+            return false;
+        }
+
+        var outputStates = _outputStateContracts[methodRow];
+        if (outputStates.IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < outputStates.Length; index++)
+        {
+            ConsumeWork();
+            if (outputStates[index].ParameterOrdinal == parameterOrdinal)
+            {
+                return IsNativeOutputCellType(_typeSpecs,
+                    _parameters.GetTypeSpec(first + parameterOrdinal));
+            }
+        }
+
+        return false;
+    }
+
     internal ImmutableArray<TrRmDependencyContract> GetDependencyContracts(
         int methodRow)
     {
@@ -1298,6 +1354,39 @@ public readonly ref struct TrRmContractTableReader
             var argument = typeSpecs.GetTypeSpecRef(Read(type, 3),
                 allowInitQualifier: true);
             return (argument.Qualifiers & 0x04) != 0;
+        }
+
+        return false;
+    }
+
+    private static bool IsNativeOutputCellType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        if (typeSpecRef == 0)
+        {
+            return false;
+        }
+
+        var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
+        if (type.Length == 4 && type[0] == 1 && type[1] == 1
+            && type[2] == 0x8C)
+        {
+            return TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
+                typeSpecs, typeSpecRef, out _);
+        }
+
+        if (type.Length == 7 && type[0] == 0x0C && type[1] == 1
+            && type[2] == 0x8C)
+        {
+            var pointeeRef = Read(type, 3);
+            var pointee = typeSpecs.GetTypeSpecBytes(pointeeRef);
+            if (pointee is [1, 0, 0])
+            {
+                return false;
+            }
+
+            return typeSpecs.GetTypeSpecRef(pointeeRef,
+                allowInitQualifier: false).Value != 0;
         }
 
         return false;
