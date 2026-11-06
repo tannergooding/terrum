@@ -98,6 +98,34 @@ internal sealed class NativeCallableContractRemappingTests
             ModuleCompiler.CreateReference(malformed));
     }
 
+    [Test]
+    public void PrivateModuleRejectsDuplicateAndMisorderedCallableTokens()
+    {
+        var producer = CreateCallableEntryProducer();
+        var callableToken = Encoding.ASCII.GetBytes(
+            "NativeCallable:Unmanaged");
+        var entryToken = Encoding.ASCII.GetBytes(
+            "NativeCallableEntry:4142");
+        Assert.That(callableToken, Has.Length.EqualTo(entryToken.Length));
+
+        var duplicate = producer.ToArray();
+        var entryOffset = FindBytes(duplicate, entryToken);
+        Array.Copy(callableToken, 0, duplicate, entryOffset,
+            callableToken.Length);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(duplicate));
+
+        var misordered = producer.ToArray();
+        var callableOffset = FindBytes(misordered, callableToken);
+        entryOffset = FindBytes(misordered, entryToken);
+        Array.Copy(entryToken, 0, misordered, callableOffset,
+            entryToken.Length);
+        Array.Copy(callableToken, 0, misordered, entryOffset,
+            callableToken.Length);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(misordered));
+    }
+
     private static ProviderArtifacts CreateProvider(bool reverse,
         bool changeIdentity)
     {
@@ -137,6 +165,27 @@ internal sealed class NativeCallableContractRemappingTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return NativeModuleCompiler.CreateProducer(compilation.Program!,
             ["Extra"], "ExtraProvider", NativeRuntimePolicy.FailFast);
+    }
+
+    private static byte[] CreateCallableEntryProducer()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            public int32 Identity(int32 value) { return value; }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var index = program.Functions.IndexOf(
+            program.Functions.Single(static function =>
+                function.Name == "Identity"));
+        program = program with {
+            Functions = program.Functions.SetItem(index,
+                program.Functions[index] with {
+                    NativeCallableEntryName = "AB",
+                }),
+        };
+        return ModuleCompiler.CreateProducer(program, ["Identity"]);
     }
 
     private static Compilation CreateConsumer(SyntaxTree tree,
