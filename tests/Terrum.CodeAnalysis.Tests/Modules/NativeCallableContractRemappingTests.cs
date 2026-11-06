@@ -212,6 +212,32 @@ internal sealed class NativeCallableContractRemappingTests
         }
     }
 
+    [Test]
+    public void BodylessNativeCallableEntryBindsToItsOriginalOwner()
+    {
+        var provider = CreateCallableEntryProducer();
+        var renamedProvider = CreateCallableEntryProducer("CD");
+        var reference = ModuleCompiler.CreateReference(provider);
+        var compilation = CreateConsumer(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    [Terrum.Interop.NativeCallConv(
+                        Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    fnptr<int32, int32> callback = &Identity;
+                    return callback(42);
+                }
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(compilation.Program!,
+            provider);
+
+        Assert.DoesNotThrow(() => ModuleCompiler.Link(consumer, provider));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(consumer, renamedProvider));
+    }
+
     private static ProviderArtifacts CreateProvider(bool reverse,
         bool changeIdentity)
     {
@@ -253,7 +279,7 @@ internal sealed class NativeCallableContractRemappingTests
             ["Extra"], "ExtraProvider", NativeRuntimePolicy.FailFast);
     }
 
-    private static byte[] CreateCallableEntryProducer()
+    private static byte[] CreateCallableEntryProducer(string entryName = "AB")
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeCallable]
@@ -268,7 +294,7 @@ internal sealed class NativeCallableContractRemappingTests
         program = program with {
             Functions = program.Functions.SetItem(index,
                 program.Functions[index] with {
-                    NativeCallableEntryName = "AB",
+                    NativeCallableEntryName = entryName,
                 }),
         };
         return ModuleCompiler.CreateProducer(program, ["Identity"]);
