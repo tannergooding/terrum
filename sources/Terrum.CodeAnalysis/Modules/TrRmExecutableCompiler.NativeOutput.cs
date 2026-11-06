@@ -76,7 +76,6 @@ public static partial class TrRmExecutableCompiler
         var targetIndex = -1;
         var callerIndex = -1;
         var outputCallCount = 0;
-        BoundCall? outputCall = null;
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
@@ -116,7 +115,6 @@ public static partial class TrRmExecutableCompiler
                             argument is BoundNativeOutputReservation))
                     {
                         outputCallCount++;
-                        outputCall = call;
                     }
                 }))
             {
@@ -125,13 +123,11 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (targetIndex != 0 || callerIndex != 1 || outputCallCount != 1
-            || outputCall is not BoundCall selectedCall
-            || selectedCall.Function != targetIndex
+        if (targetIndex != 0 || callerIndex != 1 || outputCallCount == 0
             || (program.EntryPoint >= 0 && program.EntryPoint != callerIndex))
         {
             throw Unsupported(
-                "The direct NativeOutput Body requires one direct import call.");
+                "The direct NativeOutput Body requires sequential direct import calls.");
         }
 
         var target = program.Functions[targetIndex];
@@ -146,129 +142,186 @@ public static partial class TrRmExecutableCompiler
             || target.ReturnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32)
             || target.DirectNativeImport is not DirectNativeImport import
             || (schema == TrRmArtifactSchema.ForeignInvocationDraft
-                && !import.Parameters.IsEmpty)
-            || selectedCall.Arguments.Length != target.ParameterCount
-            || selectedCall.Type != target.ReturnType
-            || (!selectedCall.ArgumentParameterIndices.IsDefaultOrEmpty
-                && selectedCall.ArgumentParameterIndices.Length
-                    != selectedCall.Arguments.Length))
+                && !import.Parameters.IsEmpty))
         {
             throw Unsupported(
                 "The direct NativeOutput call has unsupported declaration or argument facts.");
         }
 
-        var outputVariables = new int[target.NativeOutputContracts.Length];
-        var outputVariableByFormal = new Dictionary<int, int>(
-            outputVariables.Length);
-        var seenOutputVariables = new HashSet<int>();
-        for (var outputIndex = 0; outputIndex < outputVariables.Length;
-            outputIndex++)
+        var outputCalls = CollectDirectNativeOutputCalls(caller);
+        if (outputCalls.Count != outputCallCount
+            || outputCalls.Any(call => call.Function != targetIndex))
         {
-            var output = target.NativeOutputContracts[outputIndex];
-            var formal = output.FormalOrdinal;
-            if ((uint)formal >= (uint)target.ParameterCount
-                || selectedCall.Arguments[formal]
-                    is not BoundNativeOutputReservation reservation
-                || reservation.PointeeType != output.PointeeType
-                || !seenOutputVariables.Add(reservation.Variable)
-                || reservation.Variable < caller.ParameterCount
-                || (uint)reservation.Variable >= (uint)caller.Variables.Length
-                || !caller.Variables[reservation.Variable].IsInitializationLocal)
-            {
-                throw Unsupported(
-                    "The direct NativeOutput call requires one vacant local per output formal.");
-            }
-
-            if (!outputVariableByFormal.TryAdd(formal, reservation.Variable))
-            {
-                throw Unsupported(
-                    "The direct NativeOutput call repeats an output formal.");
-            }
-
-            if (!selectedCall.ArgumentParameterIndices.IsDefaultOrEmpty
-                && selectedCall.ArgumentParameterIndices[formal] != formal)
-            {
-                throw Unsupported(
-                    "The direct NativeOutput Body requires formal-order arguments.");
-            }
-
-            outputVariables[outputIndex] = reservation.Variable;
+            throw Unsupported(
+                "The direct NativeOutput Body calls are not a supported sequential call sequence.");
         }
 
+        var outputHomeCount = (long)outputCalls.Count
+            * target.NativeOutputContracts.Length;
+        var nativeParameterHomeCount = (long)outputCalls.Count
+            * import.Parameters.Length;
+        var minimumHomeCount = caller.ParameterCount + outputHomeCount
+            + nativeParameterHomeCount;
+        var expectedRecordCount = 1L + outputCalls.Count
+            + outputHomeCount + nativeParameterHomeCount;
+        if (minimumHomeCount > 65_536 || expectedRecordCount > 65_536)
+        {
+            throw Unsupported(
+                "The direct NativeOutput Body exceeds the selected Home or record index range.");
+        }
+
+        var outputVariablesByCall = new int[outputCalls.Count][];
+        var outputVariableByFormalByCall
+            = new Dictionary<int, int>[outputCalls.Count];
+        var seenOutputVariables = new HashSet<int>();
+        for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
+        {
+            var selectedCall = outputCalls[callIndex];
+            if (selectedCall.Arguments.Length != target.ParameterCount
+                || selectedCall.Type != target.ReturnType
+                || (!selectedCall.ArgumentParameterIndices.IsDefaultOrEmpty
+                    && selectedCall.ArgumentParameterIndices.Length
+                        != selectedCall.Arguments.Length))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput call has unsupported argument facts.");
+            }
+
+            var callOutputVariables
+                = new int[target.NativeOutputContracts.Length];
+            var outputVariableByFormal = new Dictionary<int, int>(
+                callOutputVariables.Length);
+            for (var outputIndex = 0;
+                outputIndex < callOutputVariables.Length;
+                outputIndex++)
+            {
+                var output = target.NativeOutputContracts[outputIndex];
+                var formal = output.FormalOrdinal;
+                if ((uint)formal >= (uint)target.ParameterCount
+                    || selectedCall.Arguments[formal]
+                        is not BoundNativeOutputReservation reservation
+                    || reservation.PointeeType != output.PointeeType
+                    || !seenOutputVariables.Add(reservation.Variable)
+                    || reservation.Variable < caller.ParameterCount
+                    || (uint)reservation.Variable
+                        >= (uint)caller.Variables.Length
+                    || !caller.Variables[reservation.Variable]
+                        .IsInitializationLocal)
+                {
+                    throw Unsupported(
+                        "Each direct NativeOutput call requires distinct vacant locals for its output formals.");
+                }
+
+                if (!outputVariableByFormal.TryAdd(formal,
+                        reservation.Variable)
+                    || (!selectedCall.ArgumentParameterIndices.IsDefaultOrEmpty
+                        && selectedCall.ArgumentParameterIndices[formal]
+                            != formal))
+                {
+                    throw Unsupported(
+                        "The direct NativeOutput Body requires distinct formal-order output arguments.");
+                }
+
+                callOutputVariables[outputIndex] = reservation.Variable;
+            }
+
+            outputVariablesByCall[callIndex] = callOutputVariables;
+            outputVariableByFormalByCall[callIndex]
+                = outputVariableByFormal;
+        }
+
+        var outputVariables = outputVariablesByCall
+            .SelectMany(static variables => variables).ToArray();
         var backingLocals = ValidateDirectNativeOutputCaller(caller,
-            selectedCall, outputVariables);
+            outputCalls, seenOutputVariables);
+        if (minimumHomeCount + backingLocals.Length > 65_536)
+        {
+            throw Unsupported(
+                "The direct NativeOutput Body exceeds the selected Home index range.");
+        }
+
         var backingLocalByVariable = backingLocals.ToDictionary(
             static local => local.Variable);
         var nativeParameterByFormal = import.Parameters.ToDictionary(
             static parameter => parameter.ParameterIndex);
-        var nativeParameterAddressByFormal
-            = new Dictionary<int, BoundNativeStorageAddress>(
-                import.Parameters.Length);
-        for (var formal = 0; formal < target.ParameterCount; formal++)
+        var nativeParameterAddressByCallFormal
+            = new Dictionary<(int CallIndex, int Formal),
+                BoundNativeStorageAddress>(
+                checked(import.Parameters.Length * outputCalls.Count));
+        for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
         {
-            if (outputVariableByFormal.ContainsKey(formal))
+            var selectedCall = outputCalls[callIndex];
+            var outputVariableByFormal
+                = outputVariableByFormalByCall[callIndex];
+            for (var formal = 0; formal < target.ParameterCount; formal++)
             {
-                continue;
-            }
-
-            if (!selectedCall.ArgumentParameterIndices.IsDefaultOrEmpty
-                && selectedCall.ArgumentParameterIndices[formal] != formal)
-            {
-                throw Unsupported(
-                    "The direct NativeOutput Body requires formal-order input arguments.");
-            }
-
-            if (nativeParameterByFormal.TryGetValue(formal,
-                    out var nativeParameter))
-            {
-                if (schema
-                        != TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
-                    || nativeParameter.Retention
-                        != NativeParameterRetention.NoEscape
-                    || nativeParameter.Extent != 0
-                    || selectedCall.Arguments[formal]
-                        is not BoundNativeStorageAddress address
-                    || address.Variable < caller.ParameterCount
-                    || !backingLocalByVariable.ContainsKey(address.Variable)
-                    || address.Type != PrimitiveType.NativeStorageAddress
-                    || address.ElementType != nativeParameter.PointeeType
-                    || address.CarrierType != address.ElementType
-                    || address.ElementCount != 1
-                    || address.ElementStride == 0
-                    || address.ElementStride != address.ByteExtent
-                    || address.Index is not BoundConstant index
-                    || index.Type != PrimitiveType.Int32
-                    || index.Bits.Low != 0 || index.Bits.High != 0
-                    || address.IsReadonly
-                        != (nativeParameter.Access == NativeParameterAccess.Read)
-                    || caller.Variables[address.Variable].Type
-                        != nativeParameter.PointeeType
-                    || ((nativeParameter.Access
-                            is NativeParameterAccess.Write
-                                or NativeParameterAccess.ReadWrite)
-                        && !caller.Variables[address.Variable].IsMutable)
-                    || !DirectNativeImportContract
-                        .MatchesNativeParameterFormalType(
-                            target.Variables[formal].Type,
-                            nativeParameter.PointeeType,
-                            nativeParameter.Access, program.NativePointerTypes))
+                if (outputVariableByFormal.ContainsKey(formal))
                 {
-                    throw Unsupported(
-                        "A direct NativeParameter Body requires stable backing from an initialized local.");
+                    continue;
                 }
 
-                _ = nativeParameterAddressByFormal.TryAdd(formal,
-                    (BoundNativeStorageAddress)selectedCall.Arguments[formal]);
-            }
-            else if (selectedCall.Arguments[formal] is not BoundRead read
-                || read.Variable < 0
-                || (read.Variable >= caller.ParameterCount
-                    && !backingLocalByVariable.ContainsKey(read.Variable))
-                || read.Type != target.Variables[formal].Type
-                || read.Type != caller.Variables[read.Variable].Type)
-            {
-                throw Unsupported(
-                    "A direct NativeOutput input must read a caller formal or its local copy.");
+                if (!selectedCall.ArgumentParameterIndices.IsDefaultOrEmpty
+                    && selectedCall.ArgumentParameterIndices[formal] != formal)
+                {
+                    throw Unsupported(
+                        "The direct NativeOutput Body requires formal-order input arguments.");
+                }
+
+                if (nativeParameterByFormal.TryGetValue(formal,
+                        out var nativeParameter))
+                {
+                    if (schema
+                            != TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                        || nativeParameter.Retention
+                            != NativeParameterRetention.NoEscape
+                        || nativeParameter.Extent != 0
+                        || selectedCall.Arguments[formal]
+                            is not BoundNativeStorageAddress address
+                        || address.Variable < caller.ParameterCount
+                        || !backingLocalByVariable.ContainsKey(
+                            address.Variable)
+                        || address.Type != PrimitiveType.NativeStorageAddress
+                        || address.ElementType != nativeParameter.PointeeType
+                        || address.CarrierType != address.ElementType
+                        || address.ElementCount != 1
+                        || address.ElementStride == 0
+                        || address.ElementStride != address.ByteExtent
+                        || address.Index is not BoundConstant index
+                        || index.Type != PrimitiveType.Int32
+                        || index.Bits.Low != 0 || index.Bits.High != 0
+                        || address.IsReadonly
+                            != (nativeParameter.Access
+                                == NativeParameterAccess.Read)
+                        || caller.Variables[address.Variable].Type
+                            != nativeParameter.PointeeType
+                        || ((nativeParameter.Access
+                                is NativeParameterAccess.Write
+                                    or NativeParameterAccess.ReadWrite)
+                            && !caller.Variables[address.Variable].IsMutable)
+                        || !DirectNativeImportContract
+                            .MatchesNativeParameterFormalType(
+                                target.Variables[formal].Type,
+                                nativeParameter.PointeeType,
+                                nativeParameter.Access,
+                                program.NativePointerTypes))
+                    {
+                        throw Unsupported(
+                            "A direct NativeParameter Body requires stable backing from an initialized local.");
+                    }
+
+                    _ = nativeParameterAddressByCallFormal.TryAdd(
+                        (callIndex, formal), address);
+                }
+                else if (selectedCall.Arguments[formal] is not BoundRead read
+                    || read.Variable < 0
+                    || (read.Variable >= caller.ParameterCount
+                        && !backingLocalByVariable.ContainsKey(read.Variable))
+                    || read.Type != target.Variables[formal].Type
+                    || read.Type != caller.Variables[read.Variable].Type)
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput input must read a caller formal or its local copy.");
+                }
             }
         }
 
@@ -356,11 +409,13 @@ public static partial class TrRmExecutableCompiler
         }
 
         var outputTypeMapTokens = new uint[outputVariables.Length];
-        for (var formal = 0; formal < outputVariables.Length; formal++)
+        for (var index = 0; index < outputTypeMapTokens.Length; index++)
         {
-            var type = target.NativeOutputContracts[formal].PointeeType;
+            var outputIndex = index
+                % target.NativeOutputContracts.Length;
+            var type = target.NativeOutputContracts[outputIndex].PointeeType;
             var typeSpecRef = GetTypeSpecRef(type);
-            outputTypeMapTokens[formal] = (typeSpecRef >> 24) is 0xF2 or 0xF3
+            outputTypeMapTokens[index] = (typeSpecRef >> 24) is 0xF2 or 0xF3
                 ? typeSpecRef : 0x1100_0000u | typeSpecRef;
         }
 
@@ -693,9 +748,9 @@ public static partial class TrRmExecutableCompiler
         var backingLocalTypeMapTokens = backingLocals.Select(local =>
             CreateStandardBodyTypeMapToken(GetTypeSpecRef(
                 caller.Variables[local.Variable].Type))).ToArray();
-        var nativeParameterFormals = nativeParameterAddressByFormal.Keys
-            .Order()
-            .ToArray();
+        var nativeParameterFormals = import.Parameters
+            .Select(static parameter => parameter.ParameterIndex)
+            .Order().ToArray();
         var nativeParameterTypeMapTokens = nativeParameterFormals.Select(
             formal => CreateStandardBodyTypeMapToken(
                 targetParameterTypeSpecRefs[formal])).ToArray();
@@ -709,11 +764,13 @@ public static partial class TrRmExecutableCompiler
         var parameterHomeStart = outputVariables.Length;
         var backingHomeStart = parameterHomeStart + caller.ParameterCount;
         var storageHomeStart = backingHomeStart + backingLocals.Length;
+        var storageHomeCount = checked((int)nativeParameterHomeCount);
         var homeMap = new byte[checked((storageHomeStart
-            + nativeParameterFormals.Length) * 8)];
+            + storageHomeCount) * 8)];
         var homeByVariable = new Dictionary<int, ushort>();
-        var storageHomeByFormal = new Dictionary<int, ushort>(
-            nativeParameterFormals.Length);
+        var storageHomeByCallFormal
+            = new Dictionary<(int CallIndex, int Formal), ushort>(
+                storageHomeCount);
         for (var formal = 0; formal < outputVariables.Length; formal++)
         {
             var variable = outputVariables[formal];
@@ -753,58 +810,75 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(backingLocalTypeMapTokens[index]));
         }
 
-        for (var index = 0; index < nativeParameterFormals.Length; index++)
+        for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
         {
-            var formal = nativeParameterFormals[index];
-            var home = checked((ushort)(storageHomeStart + index));
-            storageHomeByFormal.Add(formal, home);
-            var offset = home * 8;
-            homeMap[offset] = 3;
-            BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(offset + 2),
-                maps.GetTypeMapIndex(nativeParameterTypeMapTokens[index]));
-        }
-
-        var callInputs = new TrRmRegisterBodyCallInput[target.ParameterCount];
-        for (var formal = 0; formal < callInputs.Length; formal++)
-        {
-            if (outputVariableByFormal.TryGetValue(formal,
-                    out var outputVariable))
+            for (var index = 0; index < nativeParameterFormals.Length;
+                index++)
             {
-                callInputs[formal] = new TrRmRegisterBodyCallInput(2, 6,
-                    homeByVariable[outputVariable]);
-            }
-            else if (storageHomeByFormal.TryGetValue(formal,
-                    out var storageHome))
-            {
-                callInputs[formal] = new TrRmRegisterBodyCallInput(2, 1,
-                    storageHome);
-            }
-            else if (selectedCall.Arguments[formal] is BoundRead read
-                && homeByVariable.TryGetValue(read.Variable, out var inputHome))
-            {
-                callInputs[formal] = new TrRmRegisterBodyCallInput(2, 1,
-                    inputHome);
-            }
-            else
-            {
-                throw Unsupported(
-                    "A direct NativeOutput input has no completed caller Home.");
+                var formal = nativeParameterFormals[index];
+                var home = checked((ushort)(storageHomeStart
+                    + (callIndex * nativeParameterFormals.Length) + index));
+                storageHomeByCallFormal.Add((callIndex, formal), home);
+                var offset = home * 8;
+                homeMap[offset] = 3;
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    homeMap.AsSpan(offset + 2),
+                    maps.GetTypeMapIndex(nativeParameterTypeMapTokens[index]));
             }
         }
 
-        const ushort callSiteRecordIndex = 1;
-        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
-            maps.GetMethodMapIndex(0x1600_0000u
-                | checked((uint)targetMethodRow)), 0, callInputs, [],
-            schema: schema);
-        var records = new List<ReadOnlyMemory<byte>>(2
-            + outputVariables.Length + nativeParameterFormals.Length) {
+        var records = new List<ReadOnlyMemory<byte>>(
+            checked(1 + outputCalls.Count
+                + (outputVariables.Length + storageHomeCount))) {
             new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
-            callSite,
         };
+        var callSiteRecordIndices = new ushort[outputCalls.Count];
+        for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
+        {
+            var selectedCall = outputCalls[callIndex];
+            var callInputs
+                = new TrRmRegisterBodyCallInput[target.ParameterCount];
+            var outputVariableByFormal
+                = outputVariableByFormalByCall[callIndex];
+            for (var formal = 0; formal < callInputs.Length; formal++)
+            {
+                if (outputVariableByFormal.TryGetValue(formal,
+                        out var outputVariable))
+                {
+                    callInputs[formal] = new TrRmRegisterBodyCallInput(2, 6,
+                        homeByVariable[outputVariable]);
+                }
+                else if (storageHomeByCallFormal.TryGetValue(
+                        (callIndex, formal), out var storageHome))
+                {
+                    callInputs[formal] = new TrRmRegisterBodyCallInput(2, 1,
+                        storageHome);
+                }
+                else if (selectedCall.Arguments[formal] is BoundRead read
+                    && homeByVariable.TryGetValue(read.Variable,
+                        out var inputHome))
+                {
+                    callInputs[formal] = new TrRmRegisterBodyCallInput(2, 1,
+                        inputHome);
+                }
+                else
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput input has no completed caller Home.");
+                }
+            }
+
+            callSiteRecordIndices[callIndex]
+                = checked((ushort)records.Count);
+            records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(1, 1,
+                maps.GetMethodMapIndex(0x1600_0000u
+                    | checked((uint)targetMethodRow)), 0, callInputs, [],
+                schema: schema));
+        }
+
         var code = new List<byte>(checked((backingLocals.Length * 8)
-            + ((outputVariables.Length + nativeParameterFormals.Length) * 4)
-            + 6));
+            + checked((outputVariables.Length + storageHomeCount) * 4)
+            + checked(outputCalls.Count * 6) + 2));
         foreach (var local in backingLocals)
         {
             if (local.Initializer is not BoundRead source)
@@ -825,42 +899,53 @@ public static partial class TrRmExecutableCompiler
             code.Add((byte)(destinationHome >> 8));
         }
 
-        for (var formal = 0; formal < target.ParameterCount; formal++)
+        for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
         {
-            if (nativeParameterAddressByFormal.TryGetValue(formal,
-                    out var address))
+            var outputVariableByFormal
+                = outputVariableByFormalByCall[callIndex];
+            for (var formal = 0; formal < target.ParameterCount; formal++)
             {
-                var storageRecordIndex = checked((ushort)records.Count);
-                var pointerTypeMapIndex = maps.GetTypeMapIndex(
-                    CreateStandardBodyTypeMapToken(
-                        targetParameterTypeSpecRefs[formal]));
-                records.Add(TrRmRegisterBodyRecordWriter.EncodeStorageAddress(
-                    2, 2, homeByVariable[address.Variable],
-                    storageHomeByFormal[formal], pointerTypeMapIndex,
-                    checked((uint)address.ElementCount)));
-                code.Add(0xEC);
-                code.Add(0);
-                code.Add((byte)storageRecordIndex);
-                code.Add((byte)(storageRecordIndex >> 8));
+                if (nativeParameterAddressByCallFormal.TryGetValue(
+                        (callIndex, formal), out var address))
+                {
+                    var storageRecordIndex = checked((ushort)records.Count);
+                    var pointerTypeMapIndex = maps.GetTypeMapIndex(
+                        CreateStandardBodyTypeMapToken(
+                            targetParameterTypeSpecRefs[formal]));
+                    records.Add(
+                        TrRmRegisterBodyRecordWriter.EncodeStorageAddress(
+                            2, 2, homeByVariable[address.Variable],
+                            storageHomeByCallFormal[(callIndex, formal)],
+                            pointerTypeMapIndex,
+                            checked((uint)address.ElementCount)));
+                    code.Add(0xEC);
+                    code.Add(0);
+                    code.Add((byte)storageRecordIndex);
+                    code.Add((byte)(storageRecordIndex >> 8));
+                }
+
+                if (outputVariableByFormal.TryGetValue(formal,
+                        out var outputVariable))
+                {
+                    var reservationRecordIndex
+                        = checked((ushort)records.Count);
+                    records.Add(TrRmRegisterBodyRecordWriter
+                        .EncodeNativeOutputReservation(
+                            callSiteRecordIndices[callIndex],
+                            homeByVariable[outputVariable],
+                            checked((uint)formal)));
+                    code.Add(0xDF);
+                    code.Add(0);
+                    code.Add((byte)reservationRecordIndex);
+                    code.Add((byte)(reservationRecordIndex >> 8));
+                }
             }
 
-            if (outputVariableByFormal.TryGetValue(formal,
-                    out var outputVariable))
-            {
-                var reservationRecordIndex = checked((ushort)records.Count);
-                records.Add(TrRmRegisterBodyRecordWriter
-                    .EncodeNativeOutputReservation(callSiteRecordIndex,
-                        homeByVariable[outputVariable],
-                        checked((uint)formal)));
-                code.Add(0xDF);
-                code.Add(0);
-                code.Add((byte)reservationRecordIndex);
-                code.Add((byte)(reservationRecordIndex >> 8));
-            }
+            AppendCallSiteInstruction(code, callSiteRecordIndices[callIndex]);
         }
 
-        AppendCallSiteInstruction(code, callSiteRecordIndex);
-        code.Add(caller.ReturnType == target.ReturnType ? (byte)0x17 : (byte)0x18);
+        code.Add(caller.ReturnType == target.ReturnType
+            ? (byte)0x17 : (byte)0x18);
         code.Add(0);
         var bodyCode = code.ToArray();
         var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
@@ -955,9 +1040,48 @@ public static partial class TrRmExecutableCompiler
                 program.Structures, program.NativePointerTypes,
                 program.NativeFunctionPointerSignatures);
 
+    private static List<BoundCall> CollectDirectNativeOutputCalls(
+        BoundFunction caller)
+    {
+        if (caller.Body is not BoundBlock body)
+        {
+            throw Unsupported(
+                "The direct NativeOutput caller requires a block Body.");
+        }
+
+        var calls = new List<BoundCall>();
+        foreach (var statement in body.Statements)
+        {
+            if (statement is not BoundUnsafe { Body: BoundBlock unsafeBody })
+            {
+                continue;
+            }
+
+            foreach (var nested in unsafeBody.Statements)
+            {
+                var call = nested switch
+                {
+                    BoundExpressionStatement {
+                        Expression: BoundCall value,
+                    } => value,
+                    BoundReturn { Value: BoundCall value } => value,
+                    _ => null,
+                };
+                if (call is not null
+                    && call.Arguments.Any(static argument =>
+                        argument is BoundNativeOutputReservation))
+                {
+                    calls.Add(call);
+                }
+            }
+        }
+
+        return calls;
+    }
+
     private static ImmutableArray<BoundLocal> ValidateDirectNativeOutputCaller(
-        BoundFunction caller, BoundCall call,
-        int[] outputVariables)
+        BoundFunction caller, List<BoundCall> calls,
+        HashSet<int> outputVariables)
     {
         if (caller.Body is not BoundBlock body)
         {
@@ -968,9 +1092,20 @@ public static partial class TrRmExecutableCompiler
         var declaredVacant = new HashSet<int>();
         var backingLocalByVariable = new HashSet<int>();
         var backingLocals = ImmutableArray.CreateBuilder<BoundLocal>();
-        var unsafeCallCount = 0;
-        var unsafeReturnCallCount = 0;
+        var expressionCalls = new HashSet<BoundCall>(
+            ReferenceEqualityComparer.Instance);
+        var returnCalls = new HashSet<BoundCall>(
+            ReferenceEqualityComparer.Instance);
+        var expectedCalls = new HashSet<BoundCall>(calls,
+            ReferenceEqualityComparer.Instance);
+        if (expectedCalls.Count != calls.Count)
+        {
+            throw Unsupported(
+                "The direct NativeOutput caller repeats a call expression.");
+        }
+
         var outerUnitReturnCount = 0;
+        var nextCallIndex = 0;
         foreach (var statement in body.Statements)
         {
             switch (statement)
@@ -1005,16 +1140,35 @@ public static partial class TrRmExecutableCompiler
                     {
                         if (nested is BoundExpressionStatement {
                             Expression: BoundCall nestedCall,
-                        } && ReferenceEquals(nestedCall, call))
+                        } && expectedCalls.Contains(nestedCall)
+                            && expressionCalls.Add(nestedCall))
                         {
-                            unsafeCallCount++;
+                            if (nextCallIndex >= calls.Count
+                                || !ReferenceEquals(calls[nextCallIndex],
+                                    nestedCall))
+                            {
+                                throw Unsupported(
+                                    "The direct NativeOutput Body call order differs from source order.");
+                            }
+
+                            nextCallIndex++;
+                            continue;
                         }
                         else if (nested is BoundReturn {
                             Value: BoundCall returnedCall,
-                        } && ReferenceEquals(returnedCall, call)
-                            && caller.ReturnType == call.Type)
+                        } && expectedCalls.Contains(returnedCall)
+                            && returnCalls.Add(returnedCall))
                         {
-                            unsafeReturnCallCount++;
+                            if (nextCallIndex >= calls.Count
+                                || !ReferenceEquals(calls[nextCallIndex],
+                                    returnedCall))
+                            {
+                                throw Unsupported(
+                                    "The direct NativeOutput Body call order differs from source order.");
+                            }
+
+                            nextCallIndex++;
+                            continue;
                         }
                         else if (nested is not BoundReturn { Value: null })
                         {
@@ -1034,14 +1188,20 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var returnsCallResult = caller.ReturnType == call.Type;
+        var returnsCallResult = caller.ReturnType != PrimitiveType.Void;
         if ((returnsCallResult
-                ? unsafeReturnCallCount != 1 || unsafeCallCount != 0
-                : unsafeCallCount != 1 || unsafeReturnCallCount != 0)
-            || declaredVacant.Count != outputVariables.Length
-            || outputVariables.Any(variable => !declaredVacant.Contains(variable))
+                ? returnCalls.Count != 1
+                    || expressionCalls.Count != calls.Count - 1
+                    || !returnCalls.Contains(calls[^1])
+                : expressionCalls.Count != calls.Count
+                    || returnCalls.Count != 0)
+            || expressionCalls.Count + returnCalls.Count != expectedCalls.Count
+            || nextCallIndex != calls.Count
+            || declaredVacant.Count != outputVariables.Count
+            || outputVariables.Any(variable =>
+                !declaredVacant.Contains(variable))
             || caller.Variables.Length
-                != caller.ParameterCount + outputVariables.Length
+                != caller.ParameterCount + outputVariables.Count
                     + backingLocals.Count
             || (returnsCallResult && outerUnitReturnCount != 0)
             || (!returnsCallResult && outerUnitReturnCount > 1))
