@@ -126,6 +126,29 @@ internal sealed class NativeCallableContractRemappingTests
             ModuleCompiler.CreateReference(misordered));
     }
 
+    [Test]
+    public void PrivateModuleRejectsMalformedAndInconsistentCallableEntryTokens()
+    {
+        var producer = CreateCallableEntryProducer();
+        var entryToken = Encoding.ASCII.GetBytes(
+            "NativeCallableEntry:4142");
+        var entryOffset = FindBytes(producer, entryToken);
+
+        var malformed = producer.ToArray();
+        malformed[entryOffset + entryToken.Length - 1] = (byte)'Z';
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+
+        var inconsistent = producer.ToArray();
+        var otherEntry = Encoding.ASCII.GetBytes(
+            "NativeCallableEntry:4344");
+        Assert.That(otherEntry, Has.Length.EqualTo(entryToken.Length));
+        Array.Copy(otherEntry, 0, inconsistent, entryOffset,
+            otherEntry.Length);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(inconsistent));
+    }
+
     private static ProviderArtifacts CreateProvider(bool reverse,
         bool changeIdentity)
     {
