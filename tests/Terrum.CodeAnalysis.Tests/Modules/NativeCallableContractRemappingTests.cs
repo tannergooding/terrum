@@ -177,6 +177,41 @@ internal sealed class NativeCallableContractRemappingTests
             ModuleCompiler.Link(malformed, provider.Private));
     }
 
+    [Test]
+    public void PrivateNativeCallableRootPreservesDeclaredCallerUnsafety()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            public unsafe int32 DeclaredUnsafe(int32 value) { return value; }
+
+            [Terrum.Interop.NativeCallable]
+            public int32 RoleUnsafe(int32 value) { return value; }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["DeclaredUnsafe", "RoleUnsafe"]);
+
+        var reference = ModuleCompiler.CreateReference(producer);
+        foreach (var (name, declaredUnsafe, expectedMask) in new[] {
+            ("DeclaredUnsafe", true, 4u),
+            ("RoleUnsafe", false, 0u),
+        })
+        {
+            var function = reference.Functions.Single(candidate =>
+                candidate.Name == name);
+            Assert.That(function.DeclaredRequiresUnsafeCaller,
+                Is.EqualTo(declaredUnsafe));
+            Assert.That(function.RequiresUnsafeCaller, Is.True);
+            var functionPointerType = function.NativeFunctionPointerType
+                ?? throw new InvalidOperationException(
+                    $"NativeCallable '{name}' has no address-contract root.");
+            var signature = reference.NativeFunctionPointerSignatures[
+                NativeFunctionPointerTypes.Index(functionPointerType)];
+            Assert.That(signature.EffectsMask, Is.EqualTo(expectedMask));
+        }
+    }
+
     private static ProviderArtifacts CreateProvider(bool reverse,
         bool changeIdentity)
     {
