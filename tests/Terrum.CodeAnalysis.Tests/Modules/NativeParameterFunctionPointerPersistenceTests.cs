@@ -184,6 +184,40 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
     }
 
     [Test]
+    public void PrivateReaderRejectsDuplicateNativeParameterFormals()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObservePair")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 8)]
+            public extern unsafe int32 ObservePair(
+                ptr<uint32> first, ptr<uint64> second);
+
+            public int32 Address() {
+                unsafe {
+                    var observe = &ObservePair;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["ObservePair", "Address"]);
+        var malformed = producer.ToArray();
+        var secondParameterReservedOffset
+            = FindPrivateNativeParameterReservedOffset(malformed,
+                expectedExtent: 8);
+        var secondParameterOffset
+            = secondParameterReservedOffset - 7;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformed.AsSpan(secondParameterOffset, sizeof(uint)), 0);
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
     public void PrivateReaderRejectsMissingDirectImportAddressContractRoot()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
