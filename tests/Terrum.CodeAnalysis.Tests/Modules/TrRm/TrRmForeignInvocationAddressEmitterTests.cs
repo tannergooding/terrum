@@ -2309,6 +2309,156 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Is.Not.Zero);
     }
 
+    [TestCase(
+        "trrm/1-draft-foreign-invocation-contracts-1",
+        "native-output-result-correlated-read-f")]
+    [TestCase(
+        "trrm/1-draft-foreign-invocation-storage-addresses-1",
+        "native-output-result-correlated-read-a2")]
+    public void StandardDirectNativeOutputResultCorrelatesAReadThroughJit(
+        string schemaIdentity, string moduleIdentity)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int64> ticks);
+
+            void Main() {
+                init mut int64 ticks;
+                unsafe {
+                    if (QueryPerformanceCounter(&init ticks) != 0) {
+                        if (ticks > 0) { }
+                    }
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundCall? outputCall = null;
+        var outputReads = new List<BoundRead>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundCall call
+                    && call.Arguments.Any(static argument =>
+                        argument is BoundNativeOutputReservation))
+                {
+                    outputCall = call;
+                }
+                else if (expression is BoundRead read
+                    && read.Variable >= main.ParameterCount)
+                {
+                    outputReads.Add(read);
+                }
+            }), Is.True);
+        Assert.That(outputCall, Is.Not.Null);
+        Assert.That(outputReads, Has.Count.EqualTo(1));
+        var reservation = outputCall!.Arguments
+            .OfType<BoundNativeOutputReservation>().Single();
+        Assert.That(outputReads.Single().Variable,
+            Is.EqualTo(reservation.Variable));
+        Assert.That(outputReads.Single().Type,
+            Is.EqualTo(PrimitiveType.Int64));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.Zero);
+    }
+
+    [Test]
+    public void StandardDirectNativeOutputNonNegativeResultCorrelatesARead()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string moduleIdentity = "native-output-nonnegative-result";
+        var source = """
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            internal extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+                write ptr<int32> value);
+
+            public void Probe() {
+                init mut int32 value;
+                unsafe {
+                    if (ReadValue(&init value) >= 0) {
+                        if (value >= 0) { }
+                    }
+                }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(2);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(2), tables.Contracts.Count);
+        var foundNonNegativePredicate = false;
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
+            {
+                var length = TrRmRegisterBodyReader.InstructionLength(
+                    code[position], body.Schema);
+                if (code[position] == 0xC3 && code[position + 1] == 6)
+                {
+                    foundNonNegativePredicate = true;
+                }
+
+                position += length;
+            }
+        }
+
+        Assert.That(foundNonNegativePredicate, Is.True);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+
+        var incompatible = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source.Replace(
+                "ReadValue(&init value) >= 0",
+                "ReadValue(&init value) != 0",
+                StringComparison.Ordinal)),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(incompatible.HasErrors, Is.True,
+            "A NonZero branch must not prove a NonNegative output live.");
+
+        var complementary = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source.Replace(
+                "ReadValue(&init value) >= 0",
+                "ReadValue(&init value) < 0",
+                StringComparison.Ordinal)),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(complementary.HasErrors, Is.True,
+            "The NonNegative complement must leave the output unavailable.");
+    }
+
     [Test]
     public void A3NativeAddressProducerUsesOneRootLedgerForArtifactValidation()
     {

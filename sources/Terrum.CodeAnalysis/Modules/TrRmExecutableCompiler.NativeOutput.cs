@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -1003,19 +1004,79 @@ public static partial class TrRmExecutableCompiler
         void AppendConditionalFlow(BoundExpression condition,
             int trueBlock, int falseBlock)
         {
-            if (condition is not BoundRead read
-                || read.Type != PrimitiveType.Bool
-                || !homeByVariable.TryGetValue(read.Variable,
-                    out var conditionHome))
+            while (condition is BoundUnsafeExpression unsafeExpression)
             {
-                throw Unsupported(
-                    "A direct NativeOutput conditional requires a Boolean caller Home.");
+                condition = unsafeExpression.Expression;
             }
 
-            currentCode.Add(0xD5);
-            currentCode.Add(0);
-            currentCode.Add((byte)conditionHome);
-            currentCode.Add((byte)(conditionHome >> 8));
+            if (condition is BoundRead read
+                && read.Type == PrimitiveType.Bool
+                && homeByVariable.TryGetValue(read.Variable,
+                    out var conditionHome))
+            {
+                AppendLoadHome(0, conditionHome);
+            }
+            else if (condition is BoundBinary binary
+                && binary.Type == PrimitiveType.Bool
+                && binary.Operator is TokenKind.BangEquals
+                    or TokenKind.EqualsEquals
+                    or TokenKind.Less
+                    or TokenKind.LessEquals
+                    or TokenKind.Greater
+                    or TokenKind.GreaterEquals
+                && binary.Right is BoundConstant zero
+                && zero.Type == binary.Left.Type
+                && zero.Bits.Low == 0 && zero.Bits.High == 0
+                && PrimitiveTypeFacts.IsInteger(binary.Left.Type))
+            {
+                var left = binary.Left;
+                while (left is BoundUnsafeExpression leftUnsafe)
+                {
+                    left = leftUnsafe.Expression;
+                }
+
+                if (left is BoundCall call)
+                {
+                    EmitCall(call);
+                }
+                else if (left is BoundRead valueRead
+                    && homeByVariable.TryGetValue(valueRead.Variable,
+                        out var valueHome))
+                {
+                    AppendLoadHome(0, valueHome);
+                }
+                else
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput comparison has no call-result or Home input.");
+                }
+
+                currentCode.Add(0xC2);
+                currentCode.Add(0);
+                const ushort comparePayload
+                    = (ushort)((15 << 4) | (14 << 12));
+                currentCode.Add(unchecked((byte)comparePayload));
+                currentCode.Add((byte)(comparePayload >> 8));
+                currentCode.Add(0xC3);
+                currentCode.Add(binary.Operator switch {
+                    TokenKind.Less => 1,
+                    TokenKind.EqualsEquals => 2,
+                    TokenKind.LessEquals => 3,
+                    TokenKind.Greater => 4,
+                    TokenKind.GreaterEquals => 6,
+                    TokenKind.BangEquals => 13,
+                    _ => throw Unsupported(
+                        "A direct NativeOutput comparison has no selected predicate."),
+                });
+                currentCode.Add(0);
+                currentCode.Add(0xFF);
+            }
+            else
+            {
+                throw Unsupported(
+                    "A direct NativeOutput conditional requires a Boolean Home or a selected zero comparison.");
+            }
+
             var edgeRecordIndex = checked((ushort)records.Count);
             records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
                 checked((ushort)trueBlock), checked((ushort)falseBlock)));
@@ -1037,6 +1098,20 @@ public static partial class TrRmExecutableCompiler
                     && AlwaysTerminates(branch.Else),
                 _ => false,
             };
+        }
+
+        void AppendLoadHome(int register, int home)
+        {
+            if ((uint)register >= 14u)
+            {
+                throw Unsupported(
+                    "A direct NativeOutput Home load requires a general register.");
+            }
+
+            currentCode.Add(0xD5);
+            currentCode.Add(checked((byte)register));
+            currentCode.Add(unchecked((byte)home));
+            currentCode.Add(checked((byte)(home >> 8)));
         }
 
         void EmitCall(BoundCall call)
@@ -1315,6 +1390,19 @@ public static partial class TrRmExecutableCompiler
         }
 
         var calls = new List<BoundCall>();
+        void VisitExpression(BoundExpression expression)
+        {
+            if (expression is BoundCall call)
+            {
+                AddCall(call);
+            }
+
+            foreach (var nested in expression.NestedExpressions)
+            {
+                VisitExpression(nested);
+            }
+        }
+
         void VisitStatement(BoundStatement statement)
         {
             switch (statement)
@@ -1331,6 +1419,7 @@ public static partial class TrRmExecutableCompiler
                     return;
 
                 case BoundIf branch:
+                    VisitExpression(branch.Condition);
                     VisitStatement(branch.Then);
                     if (branch.Else is not null)
                     {
@@ -1394,6 +1483,87 @@ public static partial class TrRmExecutableCompiler
 
         var outerUnitReturnCount = 0;
         var nextCallIndex = 0;
+        void ValidateConditionalCondition(BoundExpression expression,
+            bool insideUnsafe)
+        {
+            var conditionIsUnsafe = false;
+            while (expression is BoundUnsafeExpression unsafeExpression)
+            {
+                conditionIsUnsafe = true;
+                expression = unsafeExpression.Expression;
+            }
+
+            if (expression is BoundRead booleanRead
+                && booleanRead.Type == PrimitiveType.Bool)
+            {
+                if ((uint)booleanRead.Variable
+                        >= (uint)caller.Variables.Length
+                    || caller.Variables[booleanRead.Variable].Type
+                        != PrimitiveType.Bool
+                    || (booleanRead.Variable >= caller.ParameterCount
+                        && !backingLocalByVariable.Contains(
+                            booleanRead.Variable)))
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput Body Boolean condition has no caller Home.");
+                }
+
+                return;
+            }
+
+            if (expression is not BoundBinary binary
+                || binary.Type != PrimitiveType.Bool
+                || binary.Operator is not (TokenKind.BangEquals
+                    or TokenKind.EqualsEquals or TokenKind.GreaterEquals
+                    or TokenKind.Less or TokenKind.LessEquals
+                    or TokenKind.Greater))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput Body condition must be a Boolean Home read or an admitted zero comparison.");
+            }
+
+            var left = binary.Left;
+            while (left is BoundUnsafeExpression leftUnsafe)
+            {
+                conditionIsUnsafe = true;
+                left = leftUnsafe.Expression;
+            }
+
+            if (binary.Right is not BoundConstant zero
+                || zero.Type != left.Type
+                || zero.Bits.Low != 0 || zero.Bits.High != 0
+                || !PrimitiveTypeFacts.IsInteger(left.Type))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput Body comparison requires a typed zero.");
+            }
+
+            if (left is BoundCall call
+                && (insideUnsafe || conditionIsUnsafe)
+                && expectedCalls.Contains(call)
+                && call.Arguments.Any(static argument =>
+                    argument is BoundNativeOutputReservation)
+                && expressionCalls.Add(call))
+            {
+                ValidateCallOrder(call);
+                return;
+            }
+
+            if (left is BoundRead valueRead
+                && (uint)valueRead.Variable
+                    < (uint)caller.Variables.Length
+                && valueRead.Type == caller.Variables[valueRead.Variable].Type
+                && (valueRead.Variable < caller.ParameterCount
+                    || backingLocalByVariable.Contains(valueRead.Variable)
+                    || outputVariables.Contains(valueRead.Variable)))
+            {
+                return;
+            }
+
+            throw Unsupported(
+                "A direct NativeOutput Body comparison does not select a caller value or output result.");
+        }
+
         void VisitStatement(BoundStatement statement, bool insideUnsafe,
             bool insideConditional, bool topLevel)
         {
@@ -1439,20 +1609,8 @@ public static partial class TrRmExecutableCompiler
                     return;
 
                 case BoundIf branch:
-                    if (branch.Condition is not BoundRead conditionRead
-                        || conditionRead.Type != PrimitiveType.Bool
-                        || (uint)conditionRead.Variable
-                            >= (uint)caller.Variables.Length
-                        || caller.Variables[conditionRead.Variable].Type
-                            != PrimitiveType.Bool
-                        || (conditionRead.Variable >= caller.ParameterCount
-                            && !backingLocalByVariable.Contains(
-                                conditionRead.Variable)))
-                    {
-                        throw Unsupported(
-                            "A direct NativeOutput Body condition must read a caller Boolean formal or its local copy.");
-                    }
-
+                    ValidateConditionalCondition(branch.Condition,
+                        insideUnsafe);
                     VisitStatement(branch.Then, insideUnsafe, true, false);
                     if (branch.Else is not null)
                     {

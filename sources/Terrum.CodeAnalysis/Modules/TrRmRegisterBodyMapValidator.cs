@@ -298,8 +298,11 @@ internal static class TrRmRegisterBodyMapValidator
         ConsumeWork(body);
         ValidateCallSiteHomeTypes(body, methodDefRow, ownerModule, types, typeSpecs,
             fields, genericParams, methods, signatures, parameters, imports,
-            constantValues, contracts, nativeFunctionPointerAnchors,
+            constantValues, contracts, features, modules, standardNativeImports,
+            nativeFunctionPointerAnchors,
             registerTypeEntries);
+        ConsumeWork(body);
+        ValidateNativeOutputReservationFlow(body);
         ConsumeWork(body);
         ValidateNativeAddressRecords(body, ownerModule, features, modules,
             types, typeSpecs, genericParams, methods, signatures, parameters,
@@ -1430,6 +1433,179 @@ internal static class TrRmRegisterBodyMapValidator
             : unitResult ? resultKind != 0 : resultKind == 0)
         {
             throw InvalidMap();
+        }
+    }
+
+    private static void ValidateNativeOutputReservationFlow(
+        TrRmRegisterBodyReader body)
+    {
+        if (!body.Schema.UsesForeignInvocationContracts())
+        {
+            return;
+        }
+
+        var reservationRowsByCallSite
+            = new List<int>?[body.RecordCount];
+        var hasReservations = false;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            ConsumeWork(body);
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x0C)
+            {
+                continue;
+            }
+
+            var payload = record[4..];
+            var callSiteRecordIndex = ReadUInt16(body, payload, 0);
+            ConsumeWork(body);
+            var reservations = reservationRowsByCallSite[callSiteRecordIndex];
+            if (reservations is null)
+            {
+                ConsumeWork(body);
+                reservations = [];
+                reservationRowsByCallSite[callSiteRecordIndex] = reservations;
+            }
+
+            ConsumeWork(body);
+            reservations.Add(recordIndex);
+            hasReservations = true;
+        }
+
+        if (!hasReservations)
+        {
+            return;
+        }
+
+        var referencedCallSites = new HashSet<int>();
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            ConsumeWork(body);
+            var code = body.GetBlockCode(blockIndex);
+            var position = 0;
+            while (position < code.Length)
+            {
+                ConsumeWork(body);
+                var instruction = code[position..];
+                var opcode = ReadByte(body, instruction, 0);
+                var length = TrRmRegisterBodyReader.InstructionLength(
+                    opcode, body.Schema);
+                if (opcode == 0x90)
+                {
+                    _ = referencedCallSites.Add(
+                        ReadByte(body, instruction, 1));
+                }
+                else if (opcode == 0xE0)
+                {
+                    _ = referencedCallSites.Add(
+                        ReadUInt16(body, instruction, 2));
+                }
+
+                position += length;
+            }
+        }
+
+        for (var callSite = 0; callSite < reservationRowsByCallSite.Length;
+            callSite++)
+        {
+            if (reservationRowsByCallSite[callSite] is not null
+                && !referencedCallSites.Contains(callSite))
+            {
+                throw InvalidMap();
+            }
+        }
+
+        var successors = BuildBlockFlowSuccessors(body);
+        var entryStates = new HashSet<int>?[body.BlockCount];
+        var queued = new bool[body.BlockCount];
+        var worklist = new Queue<int>();
+        entryStates[0] = [];
+        queued[0] = true;
+        worklist.Enqueue(0);
+        while (worklist.Count != 0)
+        {
+            ConsumeWork(body);
+            var blockIndex = worklist.Dequeue();
+            queued[blockIndex] = false;
+            var active = new HashSet<int>(entryStates[blockIndex]!);
+            var code = body.GetBlockCode(blockIndex);
+            var position = 0;
+            while (position < code.Length)
+            {
+                ConsumeWork(body, 2);
+                var instruction = code[position..];
+                var opcode = ReadByte(body, instruction, 0);
+                var length = TrRmRegisterBodyReader.InstructionLength(
+                    opcode, body.Schema);
+                if (opcode == 0xDF)
+                {
+                    var action = ReadByte(body, instruction, 1);
+                    var reservationIndex = ReadUInt16(body, instruction, 2);
+                    ConsumeWork(body);
+                    if (action == 0)
+                    {
+                        if (!active.Add(reservationIndex))
+                        {
+                            throw InvalidMap();
+                        }
+                    }
+                    else if (action != 1
+                        || !active.Remove(reservationIndex))
+                    {
+                        throw InvalidMap();
+                    }
+                }
+                else if (opcode is 0x90 or 0xE0)
+                {
+                    var callSiteRecordIndex = opcode == 0x90
+                        ? ReadByte(body, instruction, 1)
+                        : ReadUInt16(body, instruction, 2);
+                    if (reservationRowsByCallSite[callSiteRecordIndex]
+                        is { } reservations)
+                    {
+                        foreach (var reservation in reservations)
+                        {
+                            ConsumeWork(body);
+                            if (!active.Remove(reservation))
+                            {
+                                throw InvalidMap();
+                            }
+                        }
+                    }
+                }
+
+                position += length;
+            }
+
+            if (successors[blockIndex] is not { } blockSuccessors)
+            {
+                if (active.Count != 0)
+                {
+                    throw InvalidMap();
+                }
+
+                continue;
+            }
+
+            foreach (var successor in blockSuccessors)
+            {
+                ConsumeWork(body);
+                var successorState = entryStates[successor];
+                if (successorState is null)
+                {
+                    entryStates[successor] = [.. active];
+                    if (!queued[successor])
+                    {
+                        worklist.Enqueue(successor);
+                        queued[successor] = true;
+                    }
+                }
+                else if (!successorState.SetEquals(active))
+                {
+                    throw InvalidMap();
+                }
+            }
         }
     }
 
@@ -2616,8 +2792,7 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
-        if (opcode == 0xC2
-            && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
+        if (opcode == 0xC2)
         {
             var payload = ReadUInt16(body, instruction, 2);
             var destination = payload & 0x0F;
@@ -2625,29 +2800,50 @@ internal static class TrRmRegisterBodyMapValidator
             var source0 = (payload >> 8) & 0x0F;
             var source1 = payload >> 12;
             if (destination >= 14 || secondResult != 15
-                || source0 >= 14 || source1 >= 14)
+                || (source0 >= 14 && source1 >= 14))
             {
                 throw InvalidMap();
             }
 
-            var leftState = GetRegisterTypeState(
-                body, registerTypes, source0);
-            var rightState = GetRegisterTypeState(
-                body, registerTypes, source1);
-            var leftType = GetRegisterTypeSpecRef(body, leftState);
-            var rightType = GetRegisterTypeSpecRef(body, rightState);
-            if (leftState.IsPlaceHandle || rightState.IsPlaceHandle
-                || !typeSpecs.AreEquivalentTypeSpecRefs(leftType,
-                    rightType))
+            var generalRegister = source0 < 14 ? source0 : source1;
+            var generalState = GetRegisterTypeState(body, registerTypes,
+                generalRegister);
+            if (generalState.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            var valueType = GetRegisterTypeSpecRef(body, generalState);
+            var specialRegister = source0 >= 14 ? source0 : source1 >= 14
+                ? source1 : -1;
+            if (specialRegister < 0)
+            {
+                var secondState = GetRegisterTypeState(body,
+                    registerTypes, source1);
+                if (secondState.IsPlaceHandle
+                    || !typeSpecs.AreEquivalentTypeSpecRefs(valueType,
+                        GetRegisterTypeSpecRef(body, secondState)))
+                {
+                    throw InvalidMap();
+                }
+            }
+
+            if (specialRegister >= 0
+                && !(IsRegisterArithmeticType(typeSpecs, valueType,
+                        isFloating: false)
+                    || IsRegisterArithmeticType(typeSpecs, valueType,
+                        isFloating: true)
+                    || typeSpecs.AreEquivalentTypeSpecRefs(valueType,
+                        BooleanTypeSpecRef)))
             {
                 throw InvalidMap();
             }
 
             if (operand == 0)
             {
-                if (!IsRegisterArithmeticType(typeSpecs, leftType,
+                if (!IsRegisterArithmeticType(typeSpecs, valueType,
                         isFloating: false)
-                    && !IsRegisterArithmeticType(typeSpecs, leftType,
+                    && !IsRegisterArithmeticType(typeSpecs, valueType,
                         isFloating: true))
                 {
                     throw InvalidMap();
@@ -2655,7 +2851,7 @@ internal static class TrRmRegisterBodyMapValidator
             }
             else if (operand is 1 or 2)
             {
-                if (!typeSpecs.AreEquivalentTypeSpecRefs(leftType,
+                if (!typeSpecs.AreEquivalentTypeSpecRefs(valueType,
                         BooleanTypeSpecRef))
                 {
                     throw InvalidMap();
@@ -2673,8 +2869,7 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
-        if (opcode == 0xC3
-            && body.Schema == TrRmArtifactSchema.LocalAggregateLayoutDraft)
+        if (opcode == 0xC3)
         {
             var payload = ReadUInt16(body, instruction, 2);
             var destination = payload & 0x0F;
@@ -4017,6 +4212,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmImportTableReader imports,
         ConstantSourceValueContext constantValues, TrRmContractTableReader contracts,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmNativeImportTableReader standardNativeImports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
         RegisterTypeState[][] registerTypeEntries)
     {
@@ -4067,6 +4264,16 @@ internal static class TrRmRegisterBodyMapValidator
                                 inputOffset);
                             if (selectorKind is 1 or 2)
                             {
+                                var sourceUse = ReadByte(body, payload,
+                                    inputOffset + 1);
+                                var isNativeOutputCell
+                                    = contracts.IsNativeOutputCellParameter(
+                                        targetMethod, ordinal);
+                                if (isNativeOutputCell != (sourceUse == 6))
+                                {
+                                    throw InvalidMap();
+                                }
+
                                 var selectorIndex = ReadUInt16(body, payload,
                                     inputOffset + 2);
                                 var typeState = selectorKind == 1
@@ -4089,7 +4296,35 @@ internal static class TrRmRegisterBodyMapValidator
                                     }
                                 }
 
-                                if (nativeParameterAccess != 0
+                                if (sourceUse == 6)
+                                {
+                                    if (selectorKind != 2
+                                        || nativeParameterAccess != 0
+                                        || !standardNativeImports
+                                            .HasImportForMethod(targetMethod)
+                                        || !contracts
+                                            .IsNativeOutputCellParameter(
+                                                targetMethod, ordinal)
+                                        || !TrRmFeatureManifestValidator
+                                            .Requires(features, modules,
+                                                methods.GetOwnerModule(
+                                                    targetMethod),
+                                                TrRmFeatureTableReader
+                                                    .NativeOutputCellsCandidateFeatureId,
+                                                body.Schema)
+                                        || !TrRmNativeImportTypeContract
+                                            .TryGetNativeOutputCellPointeeTypeSpecRef(
+                                                typeSpecs, formalType,
+                                                out var outputTypeSpec)
+                                        || !typeSpecs.AreEquivalentTypeSpecRefs(
+                                            GetTypeMapTypeSpecRef(body,
+                                                typeState.TypeMapIndex),
+                                            outputTypeSpec))
+                                    {
+                                        throw InvalidMap();
+                                    }
+                                }
+                                else if (nativeParameterAccess != 0
                                     ? !TrRmNativeImportTypeContract
                                         .MatchesNativeParameterArgumentType(typeSpecs,
                                             GetRegisterTypeSpecRef(body, typeState),

@@ -525,12 +525,16 @@ public static partial class TrRmExecutableCompiler
         var seenCallSiteRecords = new HashSet<int>();
         var callSiteRecordsByBlock = new List<int>[body.BlockCount];
         var conditionHomeByBlock = new int[body.BlockCount];
+        var conditionCallSiteByBlock = new int[body.BlockCount];
+        var conditionOperatorByBlock = new TokenKind[body.BlockCount];
+        var hasComparisonByBlock = new bool[body.BlockCount];
         var trueTargetByBlock = new int[body.BlockCount];
         var falseTargetByBlock = new int[body.BlockCount];
         var jumpTargetByBlock = new int[body.BlockCount];
         var returnsByBlock = new bool[body.BlockCount];
         var returnResultByBlock = new bool[body.BlockCount];
         Array.Fill(conditionHomeByBlock, -1);
+        Array.Fill(conditionCallSiteByBlock, -1);
         Array.Fill(trueTargetByBlock, -1);
         Array.Fill(falseTargetByBlock, -1);
         Array.Fill(jumpTargetByBlock, -1);
@@ -550,6 +554,8 @@ public static partial class TrRmExecutableCompiler
         {
             var code = body.GetBlockCode(blockIndex);
             var pendingHomeLoad = -1;
+            var lastCallSiteRecord = -1;
+            var pendingComparison = false;
             var sawTerminator = false;
             for (var position = 0; position < code.Length;)
             {
@@ -571,10 +577,11 @@ public static partial class TrRmExecutableCompiler
                         "A direct NativeOutput Body has instructions after a Block terminator.");
                 }
 
-                if (pendingHomeLoad >= 0 && opcode is not (0xD6 or 0xE4))
+                if (pendingHomeLoad >= 0
+                    && opcode is not (0xD6 or 0xC2 or 0xE4))
                 {
                     throw Invalid(
-                        "A direct NativeOutput Home load is not consumed by a local copy or conditional branch.");
+                        "A direct NativeOutput Home load is not consumed by a local copy or condition.");
                 }
 
                 if (opcode == 0xDF)
@@ -598,6 +605,7 @@ public static partial class TrRmExecutableCompiler
 
                     pendingHomeLoad = BinaryPrimitives
                         .ReadUInt16LittleEndian(instruction[2..]);
+                    lastCallSiteRecord = -1;
                 }
                 else if (opcode == 0xD6)
                 {
@@ -650,6 +658,71 @@ public static partial class TrRmExecutableCompiler
                     callSiteRecordIndices.Add(callSiteRecordIndex);
                     callSiteRecordsByBlock[blockIndex].Add(
                         callSiteRecordIndex);
+                    lastCallSiteRecord = callSiteRecordIndex;
+                }
+                else if (opcode == 0xC2)
+                {
+                    var comparison = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                    var destination = comparison & 0x0F;
+                    var secondResult = (comparison >> 4) & 0x0F;
+                    var source0 = (comparison >> 8) & 0x0F;
+                    var source1 = comparison >> 12;
+                    if (instruction[1] != 0 || pendingComparison
+                        || destination != 0 || secondResult != 15
+                        || source0 != 0 || source1 != 14
+                        || (pendingHomeLoad < 0
+                            && lastCallSiteRecord < 0))
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput comparison has an unsupported operand or origin.");
+                    }
+
+                    if (pendingHomeLoad >= 0)
+                    {
+                        conditionHomeByBlock[blockIndex]
+                            = pendingHomeLoad;
+                        pendingHomeLoad = -1;
+                    }
+                    else
+                    {
+                        conditionCallSiteByBlock[blockIndex]
+                            = lastCallSiteRecord;
+                        lastCallSiteRecord = -1;
+                    }
+
+                    pendingComparison = true;
+                }
+                else if (opcode == 0xC3)
+                {
+                    var comparison = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                    var destination = comparison & 0x0F;
+                    var conditionRegister = (comparison >> 4) & 0x0F;
+                    var unused0 = (comparison >> 8) & 0x0F;
+                    var unused1 = comparison >> 12;
+                    if (!pendingComparison
+                        || instruction[1] is not (1 or 2 or 3 or 4 or 6 or 13)
+                        || destination != 0 || conditionRegister != 0
+                        || unused0 != 15 || unused1 != 15)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput SetCondition has no matching comparison.");
+                    }
+
+                    conditionOperatorByBlock[blockIndex]
+                        = instruction[1] switch {
+                            1 => TokenKind.Less,
+                            2 => TokenKind.EqualsEquals,
+                            3 => TokenKind.LessEquals,
+                            4 => TokenKind.Greater,
+                            6 => TokenKind.GreaterEquals,
+                            13 => TokenKind.BangEquals,
+                            _ => throw Invalid(
+                                "A direct NativeOutput SetCondition predicate is invalid."),
+                        };
+                    hasComparisonByBlock[blockIndex] = true;
+                    pendingComparison = false;
                 }
                 else if (opcode == 0xE3)
                 {
@@ -666,10 +739,14 @@ public static partial class TrRmExecutableCompiler
                 }
                 else if (opcode == 0xE4)
                 {
-                    if (instruction[1] != 0 || pendingHomeLoad < 0)
+                    if (instruction[1] != 0
+                        || (pendingHomeLoad < 0
+                            && !hasComparisonByBlock[blockIndex])
+                        || (pendingHomeLoad >= 0
+                            && hasComparisonByBlock[blockIndex]))
                     {
                         throw Unsupported(
-                            "A direct NativeOutput conditional requires a loaded Boolean Home.");
+                            "A direct NativeOutput conditional has no unique condition value.");
                     }
 
                     var edgeRecordIndex
@@ -678,7 +755,17 @@ public static partial class TrRmExecutableCompiler
                     var (trueTarget, falseTarget)
                         = ReadLocalAggregateConditionalEdge(body,
                             edgeRecordIndex);
-                    conditionHomeByBlock[blockIndex] = pendingHomeLoad;
+                    if (!hasComparisonByBlock[blockIndex])
+                    {
+                        conditionHomeByBlock[blockIndex] = pendingHomeLoad;
+                    }
+                    else if (conditionHomeByBlock[blockIndex] < 0
+                        && conditionCallSiteByBlock[blockIndex] < 0)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput comparison has no source value.");
+                    }
+
                     trueTargetByBlock[blockIndex] = trueTarget;
                     falseTargetByBlock[blockIndex] = falseTarget;
                     pendingHomeLoad = -1;
@@ -722,7 +809,7 @@ public static partial class TrRmExecutableCompiler
                 position += length;
             }
 
-            if (!sawTerminator || pendingHomeLoad >= 0)
+            if (!sawTerminator || pendingHomeLoad >= 0 || pendingComparison)
             {
                 throw Invalid(
                     "A direct NativeOutput CFG Block has no complete terminator.");
@@ -959,7 +1046,6 @@ public static partial class TrRmExecutableCompiler
         var targetSignature = tables.Methods.GetSignature(targetMethod);
         var (targetParameterFirst, targetParameterCount)
             = tables.Signatures.GetParamRange(targetSignature);
-        var targetFunctionIndex = methodIndexByRow[targetMethod];
         var remainingOutputHomes = new HashSet<int>(outputHomeIndices);
         var remainingStorageAddressHomes
             = new HashSet<int>(storageAddressByHome.Keys);
@@ -972,37 +1058,55 @@ public static partial class TrRmExecutableCompiler
                 "The direct NativeOutput Body has an unsupported return shape.");
         }
 
+        var callsByRecord = new Dictionary<int, BoundCall>(
+            callSiteRecordIndices.Count);
+        foreach (var callSiteRecordIndex in callSiteRecordIndices)
+        {
+            callsByRecord.Add(callSiteRecordIndex,
+                ReconstructForeignInvocationNativeOutputCall(
+                    callSiteRecordIndex, targetMethod,
+                    methodIndexByRow[targetMethod], target,
+                    targetParameterFirst, targetParameterCount,
+                    callerParameterCount, variableByHome,
+                    variables, outputHomeIndices,
+                    remainingOutputHomes,
+                    remainingStorageAddressHomes,
+                    backingLocalHomeIndices, storageAddressByHome,
+                    structures, body, tables));
+        }
+
         var decodedBlocks
             = new LocalAggregateLayoutBlock[body.BlockCount];
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             var blockCallSites = callSiteRecordsByBlock[blockIndex];
-            var statementCount = (blockCallSites.Count == 0 ? 0 : 1)
+            var conditionCallSite = conditionCallSiteByBlock[blockIndex];
+            var statementCallSites = blockCallSites
+                .Where(callSite => callSite != conditionCallSite).ToArray();
+            if (conditionCallSite >= 0
+                && !blockCallSites.Contains(conditionCallSite))
+            {
+                throw Invalid(
+                    "A direct NativeOutput conditional references an unexecuted CallSite.");
+            }
+
+            var statementCount = (statementCallSites.Length == 0 ? 0 : 1)
                 + (returnsByBlock[blockIndex]
                     && !returnResultByBlock[blockIndex] ? 1 : 0);
             var blockStatements
                 = ImmutableArray.CreateBuilder<BoundStatement>(
                     statementCount);
-            if (blockCallSites.Count != 0)
+            if (statementCallSites.Length != 0)
             {
                 var callStatements
                     = ImmutableArray.CreateBuilder<BoundStatement>(
-                        blockCallSites.Count);
+                        statementCallSites.Length);
                 for (var callIndex = 0;
-                    callIndex < blockCallSites.Count; callIndex++)
+                    callIndex < statementCallSites.Length; callIndex++)
                 {
-                    var call = ReconstructForeignInvocationNativeOutputCall(
-                        blockCallSites[callIndex], targetMethod,
-                        targetFunctionIndex, target,
-                        targetParameterFirst, targetParameterCount,
-                        callerParameterCount, variableByHome,
-                        variables, outputHomeIndices,
-                        remainingOutputHomes,
-                        remainingStorageAddressHomes,
-                        backingLocalHomeIndices, storageAddressByHome,
-                        structures, body, tables);
+                    var call = callsByRecord[statementCallSites[callIndex]];
                     callStatements.Add(returnResultByBlock[blockIndex]
-                        && callIndex == blockCallSites.Count - 1
+                        && callIndex == statementCallSites.Length - 1
                         ? (BoundStatement)new BoundReturn(call, default)
                         : new BoundExpressionStatement(call, default));
                 }
@@ -1023,7 +1127,48 @@ public static partial class TrRmExecutableCompiler
             }
 
             BoundExpression? condition = null;
-            if (conditionHomeByBlock[blockIndex] >= 0)
+            if (hasComparisonByBlock[blockIndex])
+            {
+                BoundExpression value;
+                if (conditionCallSite >= 0)
+                {
+                    if (!callsByRecord.TryGetValue(conditionCallSite,
+                            out var call))
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput result comparison has no CallSite.");
+                    }
+
+                    value = new BoundUnsafeExpression(call, default);
+                }
+                else if (conditionHomeByBlock[blockIndex] >= 0)
+                {
+                    var valueVariable = variableByHome[
+                        conditionHomeByBlock[blockIndex]];
+                    if (valueVariable < 0
+                        || valueVariable >= variables.Count
+                        || !PrimitiveTypeFacts.IsInteger(
+                            variables[valueVariable].Type))
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput zero comparison Home has no integral value.");
+                    }
+
+                    value = new BoundRead(valueVariable,
+                        variables[valueVariable].Type, default);
+                }
+                else
+                {
+                    throw Invalid(
+                        "A direct NativeOutput comparison has no value source.");
+                }
+
+                condition = new BoundBinary(
+                    conditionOperatorByBlock[blockIndex], value,
+                    new BoundConstant(0, value.Type, default),
+                    PrimitiveType.Bool, default);
+            }
+            else if (conditionHomeByBlock[blockIndex] >= 0)
             {
                 var conditionVariable = variableByHome[
                     conditionHomeByBlock[blockIndex]];
@@ -1038,6 +1183,11 @@ public static partial class TrRmExecutableCompiler
 
                 condition = new BoundRead(conditionVariable,
                     PrimitiveType.Bool, default);
+            }
+            else if (conditionCallSite >= 0)
+            {
+                throw Invalid(
+                    "A direct NativeOutput conditional CallSite has no comparison.");
             }
 
             decodedBlocks[blockIndex] = new LocalAggregateLayoutBlock(
