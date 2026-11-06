@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -83,6 +84,20 @@ internal sealed class NativeCallableContractRemappingTests
                 changedProviders));
     }
 
+    [Test]
+    public void PrivateModuleRejectsOutOfRangeNativeCallableAddressContractReference()
+    {
+        var provider = CreateProvider(reverse: false, changeIdentity: false);
+        var malformed = provider.Private.ToArray();
+        var marker = Encoding.ASCII.GetBytes(
+            "|NativeAddressContract:fnptr#");
+        var markerOffset = FindBytes(malformed, marker);
+        malformed[markerOffset + marker.Length] = (byte)'9';
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
     private static ProviderArtifacts CreateProvider(bool reverse,
         bool changeIdentity)
     {
@@ -131,6 +146,20 @@ internal sealed class NativeCallableContractRemappingTests
         return reference is null
             ? Compilation.Create(tree, options)
             : Compilation.Create(tree, reference, options);
+    }
+
+    private static int FindBytes(byte[] bytes, byte[] value)
+    {
+        for (var index = 0; index <= bytes.Length - value.Length; index++)
+        {
+            if (bytes.AsSpan(index, value.Length).SequenceEqual(value))
+            {
+                return index;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The NativeAddressContract token was not found.");
     }
 
     private sealed record ProviderArtifacts(byte[] Private, byte[] Native);
