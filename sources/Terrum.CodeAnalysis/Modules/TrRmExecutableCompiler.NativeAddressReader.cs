@@ -1306,53 +1306,81 @@ public static partial class TrRmExecutableCompiler
                     candidate.ParameterIndex == formal);
             if (nativeParameter is not null)
             {
-                if (sourceUse != 1 || variableIndex != -2
-                    || !storageAddressByHome.TryGetValue(selectorIndex,
-                        out var storageAddress)
-                    || !remainingStorageAddressHomes.Remove(selectorIndex)
-                    || storageAddress.RequiredElementCount != 1
-                    || storageAddress.SourceHome >= variableByHome.Length)
-                {
-                    throw Invalid(
-                        "A direct NativeParameter input does not use a unique stored backing address.");
-                }
-
-                var sourceVariable = variableByHome[
-                    storageAddress.SourceHome];
-                if (sourceVariable < callerParameterCount
-                    || sourceVariable >= variables.Count
-                    || !backingLocalHomeIndices.Contains(
-                        storageAddress.SourceHome)
-                    || variables[sourceVariable].Type
-                        != nativeParameter.PointeeType
+                if (sourceUse != 1
                     || nativeParameter.Retention
-                        != NativeParameterRetention.NoEscape
-                    || nativeParameter.Extent != 0
-                    || !tables.TypeSpecs.AreEquivalentTypeSpecRefs(
-                        ReadForeignInvocationBodyTypeSpec(body,
-                            storageAddress.PointerTypeMapIndex),
-                        tables.Parameters.GetTypeSpec(
-                            checked((ushort)(targetParameterFirst + formal))))
-                    || ((nativeParameter.Access
-                            is NativeParameterAccess.Write
-                                or NativeParameterAccess.ReadWrite)
-                        && !variables[sourceVariable].IsMutable))
+                        != NativeParameterRetention.NoEscape)
                 {
                     throw Invalid(
-                        "A direct NativeParameter backing differs from its formal.");
+                        "A direct NativeParameter input must use its selected typed input Home.");
                 }
 
-                var backingExtent = ValueLayout.Size(
-                    nativeParameter.PointeeType, structures);
-                arguments.Add(new BoundNativeStorageAddress(sourceVariable,
-                    new BoundConstant(0, PrimitiveType.Int32, default),
-                    nativeParameter.PointeeType,
-                    nativeParameter.PointeeType,
-                    PrimitiveType.NativeStorageAddress, 1,
-                    checked((ulong)backingExtent),
-                    checked((ulong)backingExtent),
-                    nativeParameter.Access == NativeParameterAccess.Read,
-                    default));
+                if (storageAddressByHome.TryGetValue(selectorIndex,
+                        out var storageAddress))
+                {
+                    if (variableIndex != -2
+                        || !remainingStorageAddressHomes.Remove(selectorIndex)
+                        || storageAddress.RequiredElementCount != 1
+                        || nativeParameter.Extent
+                            > storageAddress.RequiredElementCount
+                        || storageAddress.SourceHome >= variableByHome.Length)
+                    {
+                        throw Invalid(
+                            "A direct NativeParameter storage address does not provide sufficient stored backing.");
+                    }
+
+                    var sourceVariable = variableByHome[
+                        storageAddress.SourceHome];
+                    if (sourceVariable < callerParameterCount
+                        || sourceVariable >= variables.Count
+                        || !backingLocalHomeIndices.Contains(
+                            storageAddress.SourceHome)
+                        || variables[sourceVariable].Type
+                            != nativeParameter.PointeeType
+                        || !tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                            ReadForeignInvocationBodyTypeSpec(body,
+                                storageAddress.PointerTypeMapIndex),
+                            tables.Parameters.GetTypeSpec(
+                                checked((ushort)(targetParameterFirst
+                                    + formal))))
+                        || ((nativeParameter.Access
+                                is NativeParameterAccess.Write
+                                    or NativeParameterAccess.ReadWrite)
+                            && !variables[sourceVariable].IsMutable))
+                    {
+                        throw Invalid(
+                            "A direct NativeParameter backing differs from its formal.");
+                    }
+
+                    var backingExtent = ValueLayout.Size(
+                        nativeParameter.PointeeType, structures);
+                    arguments.Add(new BoundNativeStorageAddress(
+                        sourceVariable,
+                        new BoundConstant(0, PrimitiveType.Int32, default),
+                        nativeParameter.PointeeType,
+                        nativeParameter.PointeeType,
+                        PrimitiveType.NativeStorageAddress, 1,
+                        checked((ulong)backingExtent),
+                        checked((ulong)backingExtent),
+                        nativeParameter.Access
+                            == NativeParameterAccess.Read,
+                        default));
+                    continue;
+                }
+
+                if (variableIndex < 0
+                    || variableIndex >= variables.Count
+                    || (variableIndex >= callerParameterCount
+                        && !backingLocalHomeIndices.Contains(selectorIndex))
+                    || outputHomeIndices.Contains(selectorIndex)
+                    || variables[variableIndex].Type
+                        != target.Variables[formal].Type)
+                {
+                    throw Invalid(
+                        "A direct NativeParameter pointer Home differs from its formal.");
+                }
+
+                arguments.Add(new BoundRead(variableIndex,
+                    target.Variables[formal].Type, default));
                 continue;
             }
 

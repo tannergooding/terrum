@@ -159,8 +159,20 @@ public static partial class TrRmExecutableCompiler
 
         var outputHomeCount = (long)outputCalls.Count
             * target.NativeOutputContracts.Length;
-        var nativeParameterHomeCount = (long)outputCalls.Count
-            * import.Parameters.Length;
+        var nativeParameterHomeCount = 0L;
+        foreach (var call in outputCalls)
+        {
+            foreach (var parameter in import.Parameters)
+            {
+                if ((uint)parameter.ParameterIndex
+                        < (uint)call.Arguments.Length
+                    && call.Arguments[parameter.ParameterIndex]
+                        is BoundNativeStorageAddress)
+                {
+                    nativeParameterHomeCount++;
+                }
+            }
+        }
         var conditionalCount = 0;
         if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
             {
@@ -290,30 +302,6 @@ public static partial class TrRmExecutableCompiler
                             != TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                         || nativeParameter.Retention
                             != NativeParameterRetention.NoEscape
-                        || nativeParameter.Extent != 0
-                        || selectedCall.Arguments[formal]
-                            is not BoundNativeStorageAddress address
-                        || address.Variable < caller.ParameterCount
-                        || !backingLocalByVariable.ContainsKey(
-                            address.Variable)
-                        || address.Type != PrimitiveType.NativeStorageAddress
-                        || address.ElementType != nativeParameter.PointeeType
-                        || address.CarrierType != address.ElementType
-                        || address.ElementCount != 1
-                        || address.ElementStride == 0
-                        || address.ElementStride != address.ByteExtent
-                        || address.Index is not BoundConstant index
-                        || index.Type != PrimitiveType.Int32
-                        || index.Bits.Low != 0 || index.Bits.High != 0
-                        || address.IsReadonly
-                            != (nativeParameter.Access
-                                == NativeParameterAccess.Read)
-                        || caller.Variables[address.Variable].Type
-                            != nativeParameter.PointeeType
-                        || ((nativeParameter.Access
-                                is NativeParameterAccess.Write
-                                    or NativeParameterAccess.ReadWrite)
-                            && !caller.Variables[address.Variable].IsMutable)
                         || !DirectNativeImportContract
                             .MatchesNativeParameterFormalType(
                                 target.Variables[formal].Type,
@@ -322,11 +310,56 @@ public static partial class TrRmExecutableCompiler
                                 program.NativePointerTypes))
                     {
                         throw Unsupported(
-                            "A direct NativeParameter Body requires stable backing from an initialized local.");
+                            "A direct NativeParameter Body requires its selected storage-address schema and matching pointer formal.");
                     }
 
-                    _ = nativeParameterAddressByCallFormal.TryAdd(
-                        (callIndex, formal), address);
+                    if (selectedCall.Arguments[formal]
+                        is BoundNativeStorageAddress address)
+                    {
+                        if (address.Variable < caller.ParameterCount
+                            || !backingLocalByVariable.ContainsKey(
+                                address.Variable)
+                            || address.Type
+                                != PrimitiveType.NativeStorageAddress
+                            || address.ElementType
+                                != nativeParameter.PointeeType
+                            || address.CarrierType != address.ElementType
+                            || address.ElementCount != 1
+                            || nativeParameter.Extent > address.ElementCount
+                            || address.ElementStride == 0
+                            || address.ElementStride != address.ByteExtent
+                            || address.Index is not BoundConstant index
+                            || index.Type != PrimitiveType.Int32
+                            || index.Bits.Low != 0 || index.Bits.High != 0
+                            || address.IsReadonly
+                                != (nativeParameter.Access
+                                    == NativeParameterAccess.Read)
+                            || caller.Variables[address.Variable].Type
+                                != nativeParameter.PointeeType
+                            || ((nativeParameter.Access
+                                    is NativeParameterAccess.Write
+                                        or NativeParameterAccess.ReadWrite)
+                                && !caller.Variables[address.Variable]
+                                    .IsMutable))
+                        {
+                            throw Unsupported(
+                                "A direct NativeParameter storage address requires sufficient stable backing from an initialized local.");
+                        }
+
+                        _ = nativeParameterAddressByCallFormal.TryAdd(
+                            (callIndex, formal), address);
+                    }
+                    else if (selectedCall.Arguments[formal] is not BoundRead read
+                        || read.Variable < 0
+                        || (read.Variable >= caller.ParameterCount
+                            && !backingLocalByVariable.ContainsKey(
+                                read.Variable))
+                        || read.Type != target.Variables[formal].Type
+                        || read.Type != caller.Variables[read.Variable].Type)
+                    {
+                        throw Unsupported(
+                            "A direct NativeParameter input must read an opaque pointer formal or its local copy.");
+                    }
                 }
                 else if (selectedCall.Arguments[formal] is not BoundRead read
                     || read.Variable < 0
@@ -780,7 +813,8 @@ public static partial class TrRmExecutableCompiler
         var parameterHomeStart = outputVariables.Length;
         var backingHomeStart = parameterHomeStart + caller.ParameterCount;
         var storageHomeStart = backingHomeStart + backingLocals.Length;
-        var storageHomeCount = checked((int)nativeParameterHomeCount);
+        var storageHomeCount
+            = nativeParameterAddressByCallFormal.Count;
         var homeMap = new byte[checked((storageHomeStart
             + storageHomeCount) * 8)];
         var homeByVariable = new Dictionary<int, ushort>();
@@ -826,20 +860,26 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(backingLocalTypeMapTokens[index]));
         }
 
+        var storageHomeOrdinal = 0;
         for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
         {
-            for (var index = 0; index < nativeParameterFormals.Length;
-                index++)
+            for (var formal = 0; formal < target.ParameterCount; formal++)
             {
-                var formal = nativeParameterFormals[index];
+                if (!nativeParameterAddressByCallFormal.ContainsKey(
+                        (callIndex, formal)))
+                {
+                    continue;
+                }
+
                 var home = checked((ushort)(storageHomeStart
-                    + (callIndex * nativeParameterFormals.Length) + index));
+                    + storageHomeOrdinal++));
                 storageHomeByCallFormal.Add((callIndex, formal), home);
                 var offset = home * 8;
                 homeMap[offset] = 3;
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     homeMap.AsSpan(offset + 2),
-                    maps.GetTypeMapIndex(nativeParameterTypeMapTokens[index]));
+                    maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
+                        targetParameterTypeSpecRefs[formal])));
             }
         }
 

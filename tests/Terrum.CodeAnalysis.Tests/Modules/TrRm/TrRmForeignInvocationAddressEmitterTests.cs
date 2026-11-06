@@ -2158,11 +2158,14 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    [TestCase("Read", false)]
-    [TestCase("Write", true)]
-    [TestCase("ReadWrite", true)]
+    [TestCase("Read", false, 0u)]
+    [TestCase("Read", false, 1u)]
+    [TestCase("Write", true, 0u)]
+    [TestCase("Write", true, 1u)]
+    [TestCase("ReadWrite", true, 0u)]
+    [TestCase("ReadWrite", true, 1u)]
     public void StorageAddressNativeOutputBodyPreservesNativeParameterBacking(
-        string access, bool isMutable)
+        string access, bool isMutable, uint extent)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-addresses-1";
@@ -2172,7 +2175,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             [param(result): DependsOn(nameof(source))]
             [param(result): ForwardsBacking(nameof(source))]
             [Terrum.Interop.NativeImport("example.dll", "GetPointer")]
-            [Terrum.Interop.NativeParameter(1, {{access}}, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(1, {{access}}, NoEscape, {{extent}})]
             internal extern int32 GetPointer(
                 {{pointerAccess}}ptr<int32> source,
                 [Terrum.Interop.NativeOutput(
@@ -2204,6 +2207,86 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(target.DirectNativeImport!.Parameters, Has.Length.EqualTo(1));
         Assert.That(target.DirectNativeImport.Parameters[0].Access.ToString(),
             Is.EqualTo(access));
+        Assert.That(target.DirectNativeImport.Parameters[0].Extent,
+            Is.EqualTo(extent));
+        Assert.That(target.NativeOutputContracts.Single().Dependencies,
+            Is.EqualTo([
+                new NativeOutputDependency(2,
+                    NativeOutputDependencySourceKind.Formal,
+                    NativeOutputDependencyRelationship.Forward,
+                    NativeOutputPublicationPhase.NormalCompletion, 1, 0),
+            ]));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
+    [Test]
+    [TestCase("Read", false, 0u, false)]
+    [TestCase("Read", false, 1u, false)]
+    [TestCase("Read", false, 3u, true)]
+    [TestCase("Write", true, 0u, false)]
+    [TestCase("Write", true, 1u, false)]
+    [TestCase("Write", true, 3u, true)]
+    [TestCase("ReadWrite", true, 0u, false)]
+    [TestCase("ReadWrite", true, 1u, false)]
+    [TestCase("ReadWrite", true, 3u, true)]
+    public void NativeOutputBodyPreservesOpaqueNativeParameterPointerFormal(
+        string access, bool isMutable, uint extent, bool copyToLocal)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-addresses-1";
+        const string moduleIdentity = "native-output-opaque-pointer-parameter";
+        var pointerAccess = isMutable ? "write " : "";
+        var pointerArgument = copyToLocal ? "backing" : "source";
+        var localCopy = copyToLocal
+            ? $"{pointerAccess}ptr<int32> backing = source;"
+            : "";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            [param(result): DependsOn(nameof(source))]
+            [param(result): ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeImport("example.dll", "GetPointer")]
+            [Terrum.Interop.NativeParameter(1, {{access}}, NoEscape, {{extent}})]
+            internal extern int32 GetPointer(
+                {{pointerAccess}}ptr<int32> source,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<ptr<void>> result);
+
+            public int32 Probe({{pointerAccess}}ptr<int32> source) {
+                {{localCopy}}
+                init mut ptr<void> result;
+                unsafe { return GetPointer({{pointerArgument}}, &init result); }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageAddressDraft(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(2);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var target = loaded.Functions.Single(static function =>
+            function.Name == "GetPointer");
+        Assert.That(target.DirectNativeImport!.Parameters, Has.Length.EqualTo(1));
+        Assert.That(target.DirectNativeImport.Parameters[0].Access.ToString(),
+            Is.EqualTo(access));
+        Assert.That(target.DirectNativeImport.Parameters[0].Extent,
+            Is.EqualTo(extent));
         Assert.That(target.NativeOutputContracts.Single().Dependencies,
             Is.EqualTo([
                 new NativeOutputDependency(2,
