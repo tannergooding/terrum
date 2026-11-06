@@ -149,6 +149,34 @@ internal sealed class NativeCallableContractRemappingTests
             ModuleCompiler.CreateReference(inconsistent));
     }
 
+    [Test]
+    public void PrivateBodylessNativeCallableRequiresItsAddressContractRoot()
+    {
+        var provider = CreateProvider(reverse: false, changeIdentity: false);
+        var reference = ModuleCompiler.CreateReference(provider.Private);
+        var compilation = CreateConsumer(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    fnptr<int32, int32> callback = &Identity;
+                    return callback(42);
+                }
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            compilation.Program!, provider.Private);
+        var malformed = consumer.ToArray();
+        var marker = Encoding.ASCII.GetBytes(
+            "NativeAddressContract:fnptr#");
+        var offset = FindBytes(malformed, marker);
+        malformed[offset] = (byte)'n';
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(malformed, provider.Private));
+    }
+
     private static ProviderArtifacts CreateProvider(bool reverse,
         bool changeIdentity)
     {
