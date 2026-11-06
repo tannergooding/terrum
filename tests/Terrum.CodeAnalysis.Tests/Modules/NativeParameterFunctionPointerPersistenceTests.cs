@@ -7,10 +7,12 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules;
 
-public sealed class NativeParameterFunctionPointerPersistenceTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeParameterFunctionPointerPersistenceTests
 {
     [Test]
     public void NativeImportExpectationsRemapFunctionPointerPointees()
@@ -53,8 +55,55 @@ public sealed class NativeParameterFunctionPointerPersistenceTests
             consumerCompilation.Program!, original, NativeRuntimePolicy.FailFast);
 
         Assert.DoesNotThrow(() => NativeModuleCompiler.Validate(consumer, reordered));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(consumer, changed));
+    }
+
+    [Test]
+    public void NativeImportExpectationsRemapFunctionPointerPointeesAcrossSetsAndGraphs()
+    {
+        var original = CreateProvider(reverse: false, changePointee: false);
+        var reordered = CreateProvider(reverse: true, changePointee: false);
+        var changed = CreateProvider(reverse: true, changePointee: true);
+        var extraCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Extra() { return 0; }"));
+        Assert.That(extraCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, extraCompilation.Diagnostics));
+        var extra = NativeModuleCompiler.CreateProducer(
+            extraCompilation.Program!, ["Extra"], "ExtraProvider",
+            NativeRuntimePolicy.FailFast);
+        var providers = new[] { original, extra };
+        var reorderedProviders = new[] { reordered, extra };
+        var changedProviders = new[] { changed, extra };
+        const string consumerSource = "int32 Main() { return 0; }";
+
+        var setCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource),
+            NativeModuleCompiler.CreateReferenceSet(providers));
+        Assert.That(setCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var setConsumer = NativeModuleCompiler.CreateConsumerSet(
+            setCompilation.Program!, providers, NativeRuntimePolicy.FailFast);
+        Assert.DoesNotThrow(() =>
+            NativeModuleCompiler.ValidateConsumerSet(setConsumer,
+                reorderedProviders));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateConsumerSet(setConsumer,
+                changedProviders));
+
+        var graphCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource),
+            NativeModuleCompiler.CreateGraphReference(providers));
+        Assert.That(graphCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            graphCompilation.Program!, providers, NativeRuntimePolicy.FailFast);
+        Assert.DoesNotThrow(() =>
+            NativeModuleCompiler.ValidateGraph(graphConsumer,
+                reorderedProviders));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(graphConsumer,
+                changedProviders));
     }
 
     private static byte[] CreateProvider(bool reverse, bool changePointee)
@@ -63,7 +112,8 @@ public sealed class NativeParameterFunctionPointerPersistenceTests
             changePointee ? "fnptr<int64, int64>" : "fnptr<int32, int32>");
         var callback64 = CallbackImport("ObserveCallback64", "fnptr<int64, int64>");
         var source = reverse ? callback64 + callback32 : callback32 + callback64;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
