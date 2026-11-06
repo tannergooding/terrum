@@ -99,6 +99,20 @@ internal sealed class NativeCallableContractRemappingTests
     }
 
     [Test]
+    public void PrivateModuleRejectsInRangeButInconsistentAddressContractReference()
+    {
+        var provider = CreateProvider(reverse: false, changeIdentity: false);
+        var malformed = provider.Private.ToArray();
+        var marker = Encoding.ASCII.GetBytes(
+            "|NativeAddressContract:fnptr#0");
+        var markerOffset = FindBytes(malformed, marker);
+        malformed[markerOffset + marker.Length - 1] = (byte)'1';
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
     public void PrivateModuleRejectsDuplicateAndMisorderedCallableTokens()
     {
         var producer = CreateCallableEntryProducer();
