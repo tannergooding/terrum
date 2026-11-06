@@ -132,6 +132,111 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
     }
 
     [Test]
+    public void PrivateAddressContractPersistsOutputAndDependencyVectors()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(result): DependsOn(nameof(source))]
+            [param(result): ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadAndProbe")]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 4)]
+            public extern unsafe int32 ReadAndProbe(
+                ptr<int32> source,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<ptr<int32>> result,
+                ptr<uint32> values);
+
+            public int32 Address() {
+                unsafe {
+                    var readAndProbe = &ReadAndProbe;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var sourceSignature = compilation.Program!
+            .NativeFunctionPointerSignatures
+            .Single(static signature => !signature.OutputStates.IsEmpty);
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["ReadAndProbe", "Address"]);
+
+        var reference = ModuleCompiler.CreateReference(producer);
+        var persistedSignature = reference.NativeFunctionPointerSignatures
+            .Single(static signature => !signature.OutputStates.IsEmpty);
+        Assert.That(persistedSignature.CallingConvention,
+            Is.EqualTo(sourceSignature.CallingConvention));
+        Assert.That(persistedSignature.EffectsMask,
+            Is.EqualTo(sourceSignature.EffectsMask));
+        Assert.That(persistedSignature.Selectors,
+            Is.EqualTo(sourceSignature.Selectors));
+        Assert.That(persistedSignature.OutputStates,
+            Is.EqualTo(sourceSignature.OutputStates));
+        Assert.That(persistedSignature.Dependencies,
+            Is.EqualTo(sourceSignature.Dependencies));
+        Assert.That(persistedSignature.NativeParameters.Select(
+            static parameter => (parameter.ParameterIndex,
+                parameter.PointeeType, parameter.Access,
+                parameter.Retention, parameter.Extent)),
+            Is.EqualTo(sourceSignature.NativeParameters.Select(
+                static parameter => (parameter.ParameterIndex,
+                    parameter.PointeeType, parameter.Access,
+                    parameter.Retention, parameter.Extent))));
+    }
+
+    [TestCase("selector-phase")]
+    [TestCase("output-state")]
+    [TestCase("dependency-source")]
+    public void PrivateReaderRejectsMalformedAddressContractVectors(
+        string malformedField)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(result): DependsOn(nameof(source))]
+            [param(result): ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadAndProbe")]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 4)]
+            public extern unsafe int32 ReadAndProbe(
+                    ptr<int32> source,
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                    write ptr<ptr<int32>> result,
+                    ptr<uint32> values);
+
+            public int32 Address() {
+                    unsafe {
+                        var readAndProbe = &ReadAndProbe;
+                        return 0;
+                    }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["ReadAndProbe", "Address"]);
+        var (selectorOffset, outputStateOffset, dependencyOffset)
+            = FindPrivateAddressContractVectorOffsets(producer);
+        var malformed = producer.ToArray();
+        switch (malformedField)
+        {
+            case "selector-phase":
+                    malformed[selectorOffset] = 2;
+                    break;
+            case "output-state":
+                    malformed[outputStateOffset + 8] = 2;
+                    break;
+            case "dependency-source":
+                    malformed[dependencyOffset + 1] = 2;
+                    break;
+            default:
+                    throw new InvalidOperationException(
+                        "Unsupported private address-contract mutation.");
+        }
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
     public void MultipleNativeParameterRowsSurvivePrivatePersistence()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -448,6 +553,46 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!,
             ["Observe", "Address"]);
+    }
+
+    private static (int Selector, int OutputState, int Dependency)
+        FindPrivateAddressContractVectorOffsets(byte[] module)
+    {
+        var tableOffset = FindPrivateNativeFunctionPointerSignatureTableOffset(
+            module);
+        using var stream = new MemoryStream(module, writable: false);
+        using var reader = new BinaryReader(stream, Encoding.UTF8,
+            leaveOpen: true);
+        stream.Position = tableOffset;
+        var signatureCount = reader.ReadInt32();
+        for (var signatureIndex = 0;
+            signatureIndex < signatureCount; signatureIndex++)
+        {
+            _ = reader.ReadByte();
+            _ = reader.ReadInt32();
+            var parameterCount = reader.ReadInt32();
+            stream.Position += (long)parameterCount * sizeof(int);
+            _ = reader.ReadUInt32();
+            var selectorCount = reader.ReadInt32();
+            var selectorOffset = checked((int)stream.Position);
+            stream.Position += (long)selectorCount * 12;
+            var outputStateCount = reader.ReadInt32();
+            var outputStateOffset = checked((int)stream.Position);
+            stream.Position += (long)outputStateCount * 12;
+            var dependencyCount = reader.ReadInt32();
+            var dependencyOffset = checked((int)stream.Position);
+            stream.Position += (long)dependencyCount * 12;
+            var nativeParameterCount = reader.ReadInt32();
+            stream.Position += (long)nativeParameterCount * 12;
+            if (outputStateCount != 0)
+            {
+                return (selectorOffset, outputStateOffset,
+                    dependencyOffset);
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The private signature table has no output-state vector.");
     }
 
     private static int FindPrivateNativeFunctionPointerConventionOffset(
