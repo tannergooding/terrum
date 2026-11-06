@@ -2037,12 +2037,19 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public void StandardDirectNativeOutputCallsRoundTripLocalInputHome()
+    [TestCase(false)]
+    [TestCase(true)]
+    public void StandardDirectNativeOutputCallsRoundTripLocalInputHome(
+        bool copyThroughLocal)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-contracts-1";
         const string moduleIdentity = "native-output-local-input-home";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var stagedInitialization = copyThroughLocal
+            ? "int32 staged = selector;\nint32 stagedAgain = staged;"
+            : "int32 staged = selector;";
+        var stagedArgument = copyThroughLocal ? "stagedAgain" : "staged";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Terrum.Interop.NativeImport("example.dll", "Observe")]
             internal extern int32 Observe(
                 [Terrum.Interop.NativeOutput(
@@ -2052,8 +2059,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
 
             internal void Probe(int32 selector) {
                 init mut uint32 value;
-                int32 staged = selector;
-                unsafe { Observe(&init value, staged); }
+                {{stagedInitialization}}
+                unsafe { Observe(&init value, {{stagedArgument}}); }
             }
             """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
@@ -2073,18 +2080,44 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, []);
         var caller = loaded.Functions.Single(static function =>
             function.Name == "Probe");
-        var loadedLocal = (BoundLocal?)null;
+        var loadedLocals = new List<BoundLocal>();
         Assert.That(BoundTreeTraversal.VisitStatements(caller.Body,
             statement =>
             {
                 if (statement is BoundLocal local)
                 {
-                    loadedLocal = local;
+                    loadedLocals.Add(local);
                 }
             }), Is.True);
-        Assert.That(loadedLocal?.Initializer, Is.TypeOf<BoundRead>());
-        Assert.That(((BoundRead)loadedLocal!.Initializer!).Variable,
-            Is.EqualTo(0));
+        Assert.That(loadedLocals, Has.Count.EqualTo(
+            copyThroughLocal ? 2 : 1));
+        Assert.That(loadedLocals.All(static local =>
+            local.Initializer is BoundRead), Is.True);
+        var localFromFormal = loadedLocals.Single(local =>
+            ((BoundRead)local.Initializer!).Variable == 0);
+        var inputVariable = localFromFormal.Variable;
+        if (copyThroughLocal)
+        {
+            inputVariable = loadedLocals.Single(local =>
+                ((BoundRead)local.Initializer!).Variable
+                    == localFromFormal.Variable).Variable;
+        }
+
+        BoundCall? loadedCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundCall call
+                    && call.Arguments.Any(static argument =>
+                        argument is BoundNativeOutputReservation))
+                {
+                    loadedCall = call;
+                }
+            }), Is.True);
+        Assert.That(loadedCall, Is.Not.Null);
+        Assert.That(loadedCall!.Arguments[1], Is.TypeOf<BoundRead>());
+        Assert.That(((BoundRead)loadedCall.Arguments[1]).Variable,
+            Is.EqualTo(inputVariable));
         Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
                 moduleIdentity, schemaIdentity, 1),
             Is.EqualTo(artifact));
