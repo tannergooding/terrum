@@ -1,7 +1,10 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
+using System.IO;
 using System.Linq;
+using System.Text;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -106,6 +109,141 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
                 changedProviders));
     }
 
+    [Test]
+    public void NativeParameterInvocationRowsSurvivePrivatePersistence()
+    {
+        var program = CreatePrivateInvocationRowProgram();
+        var sourceSignature = program
+            .NativeFunctionPointerSignatures
+            .Single(static candidate =>
+                !candidate.NativeParameters.IsDefaultOrEmpty);
+        Assert.That(sourceSignature.NativeParameters.Single().Extent,
+            Is.EqualTo(4));
+
+        var producer = ModuleCompiler.CreateProducer(program,
+            ["Observe", "ObserveWide", "Address"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var persistedExtents = reference.NativeFunctionPointerSignatures
+            .Where(static candidate =>
+                !candidate.NativeParameters.IsDefaultOrEmpty)
+            .SelectMany(static candidate => candidate.NativeParameters)
+            .Select(static parameter => parameter.Extent);
+        Assert.That(persistedExtents, Is.EquivalentTo([4u, 8u]));
+    }
+
+    [Test]
+    public void PrivateReaderRejectsUnknownAddressContractConvention()
+    {
+        var producer = ModuleCompiler.CreateProducer(
+            CreatePrivateInvocationRowProgram(),
+            ["Observe", "ObserveWide", "Address"]);
+        var malformed = producer.ToArray();
+        var conventionOffset =
+            FindPrivateNativeFunctionPointerConventionOffset(malformed);
+        malformed[conventionOffset] = byte.MaxValue;
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void PrivateReaderRejectsRetiredAddressContractEffectBit()
+    {
+        var producer = ModuleCompiler.CreateProducer(
+            CreatePrivateInvocationRowProgram(),
+            ["Observe", "ObserveWide", "Address"]);
+        var malformed = producer.ToArray();
+        var effectsOffset =
+            FindPrivateNativeFunctionPointerEffectsOffset(malformed);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformed.AsSpan(effectsOffset, sizeof(uint)), 1);
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void PrivateReaderRejectsReservedNativeParameterBytes()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4)]
+            public extern unsafe int32 Observe(ptr<uint32> value);
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            compilation.Program!, ["Observe"]);
+        var malformed = producer.ToArray();
+        var reservedOffset = FindPrivateNativeParameterReservedOffset(
+            malformed, expectedExtent: 4);
+        malformed[reservedOffset] = 1;
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void PrivateReaderRejectsMissingDirectImportAddressContractRoot()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4)]
+            public extern unsafe int32 Observe(ptr<uint32> value);
+
+            public int32 Address() {
+                unsafe {
+                    var observe = &Observe;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["Observe", "Address"]);
+        var malformed = producer.ToArray();
+        var marker = Encoding.ASCII.GetBytes(
+            "NativeAddressContract:fnptr#");
+        var offset = FindBytes(malformed, marker);
+        malformed[offset] = (byte)'n';
+
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void PrivateBodylessImportRejectsMissingAddressContractRoot()
+    {
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+                [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4)]
+                public extern unsafe int32 Observe(ptr<uint32> value);
+                """),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = ModuleCompiler.CreateProducer(
+            providerCompilation.Program!, ["Observe"]);
+        var reference = ModuleCompiler.CreateReference(provider);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return 0; }"), reference,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, provider);
+        var malformed = consumer.ToArray();
+        var marker = Encoding.ASCII.GetBytes(
+            "NativeAddressContract:fnptr#");
+        var offset = FindBytes(malformed, marker);
+        malformed[offset] = (byte)'n';
+
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(malformed, provider));
+    }
+
     private static byte[] CreateProvider(bool reverse, bool changePointee)
     {
         var callback32 = CallbackImport("ObserveCallback32",
@@ -129,4 +267,167 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
             public extern unsafe int32 {{name}}(
                 ptr<{{callbackType}}> callback);
             """;
+
+    private static BoundProgram CreatePrivateInvocationRowProgram()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4)]
+            public extern unsafe int32 Observe(ptr<uint32> value);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveWide")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 8)]
+            public extern unsafe int64 ObserveWide(ptr<uint64> value);
+
+            public int32 Address() {
+                unsafe {
+                    var observe = &Observe;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return compilation.Program!;
+    }
+
+    private static int FindPrivateNativeFunctionPointerConventionOffset(
+        byte[] module)
+    {
+        var tableOffset = FindPrivateNativeFunctionPointerSignatureTableOffset(
+            module);
+        using var stream = new MemoryStream(module, writable: false);
+        using var reader = new BinaryReader(stream, Encoding.UTF8,
+            leaveOpen: true);
+        stream.Position = tableOffset;
+        Assert.That(reader.ReadInt32(), Is.GreaterThan(0));
+        return checked((int)stream.Position);
+    }
+
+    private static int FindPrivateNativeFunctionPointerEffectsOffset(
+        byte[] module)
+    {
+        var tableOffset = FindPrivateNativeFunctionPointerSignatureTableOffset(
+            module);
+        using var stream = new MemoryStream(module, writable: false);
+        using var reader = new BinaryReader(stream, Encoding.UTF8,
+            leaveOpen: true);
+        stream.Position = tableOffset;
+        Assert.That(reader.ReadInt32(), Is.GreaterThan(0));
+        _ = reader.ReadByte();
+        _ = reader.ReadInt32();
+        var parameterCount = reader.ReadInt32();
+        stream.Position += (long)parameterCount * sizeof(int);
+        return checked((int)stream.Position);
+    }
+
+    private static int FindPrivateNativeFunctionPointerSignatureTableOffset(
+        byte[] module)
+    {
+        using var stream = new MemoryStream(module, writable: false);
+        using var reader = new BinaryReader(stream, Encoding.UTF8,
+            leaveOpen: true);
+        _ = reader.ReadInt32();
+        Assert.That(reader.ReadInt32(), Is.EqualTo(106));
+        SkipString(reader);
+        _ = reader.ReadBoolean();
+        _ = reader.ReadByte();
+        _ = reader.ReadBoolean();
+        SkipString(reader);
+        Assert.That(reader.ReadInt32(), Is.Zero);
+        _ = reader.ReadInt32();
+        Assert.That(reader.ReadInt32(), Is.Zero);
+        Assert.That(reader.ReadInt32(), Is.Zero);
+        Assert.That(reader.ReadInt32(), Is.Zero);
+        return checked((int)stream.Position);
+    }
+
+    private static int FindPrivateNativeParameterReservedOffset(
+        byte[] module, uint expectedExtent)
+    {
+        using var stream = new MemoryStream(module, writable: false);
+        using var reader = new BinaryReader(stream, Encoding.UTF8,
+            leaveOpen: true);
+        _ = reader.ReadInt32();
+        Assert.That(reader.ReadInt32(), Is.EqualTo(106));
+        SkipString(reader);
+        _ = reader.ReadBoolean();
+        _ = reader.ReadByte();
+        _ = reader.ReadBoolean();
+        SkipString(reader);
+        Assert.That(reader.ReadInt32(), Is.Zero);
+        _ = reader.ReadInt32();
+        Assert.That(reader.ReadInt32(), Is.Zero);
+        Assert.That(reader.ReadInt32(), Is.Zero);
+        Assert.That(reader.ReadInt32(), Is.Zero);
+
+        var signatureCount = reader.ReadInt32();
+        for (var signatureIndex = 0;
+            signatureIndex < signatureCount; signatureIndex++)
+        {
+            _ = reader.ReadByte();
+            _ = reader.ReadInt32();
+            var parameterCount = reader.ReadInt32();
+            stream.Position += (long)parameterCount * sizeof(int);
+            _ = reader.ReadUInt32();
+            SkipRows(reader, rowSize: 12);
+            SkipRows(reader, rowSize: 12);
+            SkipRows(reader, rowSize: 12);
+            var nativeParameterCount = reader.ReadInt32();
+            for (var parameterIndex = 0;
+                parameterIndex < nativeParameterCount; parameterIndex++)
+            {
+                _ = reader.ReadUInt32();
+                _ = reader.ReadByte();
+                _ = reader.ReadByte();
+                _ = reader.ReadByte();
+                var reservedOffset = checked((int)stream.Position);
+                _ = reader.ReadByte();
+                var extent = reader.ReadUInt32();
+                if (extent == expectedExtent)
+                {
+                    return reservedOffset;
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The expected private NativeParameter row was not found.");
+    }
+
+    private static int FindBytes(byte[] bytes, byte[] value)
+    {
+        for (var index = 0; index <= bytes.Length - value.Length; index++)
+        {
+            if (bytes.AsSpan(index, value.Length).SequenceEqual(value))
+            {
+                return index;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The expected private contract token was not found.");
+    }
+
+    private static void SkipRows(BinaryReader reader, int rowSize)
+    {
+        var count = reader.ReadInt32();
+        if (count < 0)
+        {
+            throw new InvalidOperationException(
+                "The private native signature row count is negative.");
+        }
+        reader.BaseStream.Position += (long)count * rowSize;
+    }
+
+    private static void SkipString(BinaryReader reader)
+    {
+        var length = reader.ReadInt32();
+        if (length < 0)
+        {
+            throw new InvalidOperationException(
+                "The private module string length is negative.");
+        }
+        reader.BaseStream.Position += length;
+    }
 }
