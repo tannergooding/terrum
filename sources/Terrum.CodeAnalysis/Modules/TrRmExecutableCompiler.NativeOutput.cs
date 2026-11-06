@@ -1619,17 +1619,22 @@ public static partial class TrRmExecutableCompiler
 
                 case BoundLocal local when topLevel
                     && local.Initializer is BoundRead read:
+                    var sourceIsAvailable = read.Variable >= 0
+                        && read.Variable < caller.Variables.Length
+                        && (read.Variable < caller.ParameterCount
+                            || backingLocalByVariable.Contains(
+                                read.Variable));
                     if ((uint)local.Variable >= (uint)caller.Variables.Length
                             || local.Variable < caller.ParameterCount
                             || caller.Variables[local.Variable].IsInitializationLocal
                         || outputVariables.Contains(local.Variable)
-                        || !backingLocalByVariable.Add(local.Variable)
-                        || read.Variable < 0
-                        || read.Variable >= caller.ParameterCount
-                        || read.Type != caller.Variables[local.Variable].Type)
+                        || !sourceIsAvailable
+                        || read.Type != caller.Variables[local.Variable].Type
+                        || read.Type != caller.Variables[read.Variable].Type
+                        || !backingLocalByVariable.Add(local.Variable))
                     {
                         throw Unsupported(
-                            "A direct NativeOutput local must copy one caller formal.");
+                            "A direct NativeOutput local must copy a caller formal or an earlier copied local.");
                     }
 
                     backingLocals.Add(local);

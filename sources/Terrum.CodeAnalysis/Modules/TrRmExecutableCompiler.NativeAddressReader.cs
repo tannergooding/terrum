@@ -1007,9 +1007,18 @@ public static partial class TrRmExecutableCompiler
                         "A direct NativeOutput local Home has no copy source.");
                 }
 
+                if (sourceHome >= homeIndex
+                    || sourceHome >= variableByHome.Length)
+                {
+                    throw Invalid(
+                        "A direct NativeOutput local copy must read an earlier Home.");
+                }
+
                 var sourceVariable = variableByHome[sourceHome];
                 if (sourceVariable < 0
-                    || sourceVariable >= callerParameterCount
+                    || sourceVariable >= variables.Count
+                    || (sourceVariable >= callerParameterCount
+                        && !backingLocalHomeIndices.Contains(sourceHome))
                     || variables[sourceVariable].Type != type)
                 {
                     throw Invalid(

@@ -2236,19 +2236,31 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    [TestCase("Read", false, 0u)]
-    [TestCase("Read", false, 1u)]
-    [TestCase("Write", true, 0u)]
-    [TestCase("Write", true, 1u)]
-    [TestCase("ReadWrite", true, 0u)]
-    [TestCase("ReadWrite", true, 1u)]
+    [TestCase("Read", false, 0u, false)]
+    [TestCase("Read", false, 1u, false)]
+    [TestCase("Read", false, 0u, true)]
+    [TestCase("Read", false, 1u, true)]
+    [TestCase("Write", true, 0u, false)]
+    [TestCase("Write", true, 1u, false)]
+    [TestCase("Write", true, 0u, true)]
+    [TestCase("Write", true, 1u, true)]
+    [TestCase("ReadWrite", true, 0u, false)]
+    [TestCase("ReadWrite", true, 1u, false)]
+    [TestCase("ReadWrite", true, 0u, true)]
+    [TestCase("ReadWrite", true, 1u, true)]
     public void StorageAddressNativeOutputBodyPreservesNativeParameterBacking(
-        string access, bool isMutable, uint extent)
+        string access, bool isMutable, uint extent,
+        bool copyThroughLocal)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-addresses-1";
         const string moduleIdentity = "native-output-parameter-backing";
         var pointerAccess = isMutable ? "write " : "";
+        var localMutability = isMutable ? "mut " : "";
+        var backingInitialization = copyThroughLocal
+            ? $"{localMutability}int32 intermediate = source;\n"
+                + $"{localMutability}int32 backing = intermediate;"
+            : $"{localMutability}int32 backing = source;";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [param(result): DependsOn(nameof(source))]
             [param(result): ForwardsBacking(nameof(source))]
@@ -2261,7 +2273,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 write ptr<ptr<void>> result);
 
             public int32 Probe(int32 source) {
-                {{(isMutable ? "mut " : "")}}int32 backing = source;
+                {{backingInitialization}}
                 init mut ptr<void> result;
                 unsafe { return GetPointer(&backing, &init result); }
             }
