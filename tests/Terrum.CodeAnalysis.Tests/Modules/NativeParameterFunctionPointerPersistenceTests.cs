@@ -212,6 +212,31 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
     }
 
     [Test]
+    public void PrivateConsumerBindsCompleteNativeParameterAddressContract()
+    {
+        var provider = CreatePrivateNativeParameterProvider(4);
+        var changedProvider = CreatePrivateNativeParameterProvider(8);
+        var reference = ModuleCompiler.CreateReference(provider);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    var observe = &Observe;
+                    return 0;
+                }
+            }
+            """), reference,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(compilation.Program!,
+            provider);
+
+        Assert.DoesNotThrow(() => ModuleCompiler.Link(consumer, provider));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(consumer, changedProvider));
+    }
+
+    [Test]
     public void PrivateReaderRejectsUnknownAddressContractConvention()
     {
         var producer = ModuleCompiler.CreateProducer(
@@ -403,6 +428,26 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return compilation.Program!;
+    }
+
+    private static byte[] CreatePrivateNativeParameterProvider(uint extent)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            public extern unsafe int32 Observe(ptr<uint32> value);
+
+            public int32 Address() {
+                unsafe {
+                    var observe = &Observe;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(compilation.Program!,
+            ["Observe", "Address"]);
     }
 
     private static int FindPrivateNativeFunctionPointerConventionOffset(
