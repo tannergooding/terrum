@@ -1728,6 +1728,135 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardDirectNativeOutputCallsRoundTripConditionalInvoke()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string moduleIdentity = "native-output-conditional-call";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Observe")]
+            internal extern int32 Observe(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            public void Probe(bool invoke) {
+                init mut uint32 value;
+                if (invoke) {
+                    unsafe { Observe(&init value); }
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(2);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(2), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(4));
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] { 0xD5, 0, 1, 0, 0xE4, 0, 3, 0 }));
+        Assert.That(body.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xDF, 0, 2, 0, 0xE0, 0, 1, 0, 0xE3, 0, 3, 0,
+            }));
+        Assert.That(body.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
+        Assert.That(body.GetBlockCode(3).ToArray(),
+            Is.EqualTo(new byte[] { 0x18, 0 }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void StorageAddressNativeOutputCallsRoundTripConditionalInvoke()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-addresses-1";
+        const string moduleIdentity = "native-output-conditional-a2-call";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(result): DependsOn(nameof(source))]
+            [param(result): ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeImport("example.dll", "GetPointer")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            internal extern int32 GetPointer(
+                ptr<int32> source,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<ptr<void>> result);
+
+            public void Probe(int32 source, bool invoke) {
+                int32 backing = source;
+                init mut ptr<void> result;
+                if (invoke) {
+                    unsafe { GetPointer(&backing, &init result); }
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageAddressDraft(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(2);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(2), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(4));
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0, 0xD6, 0x10, 3, 0,
+                0xD5, 0, 2, 0, 0xE4, 0, 4, 0,
+            }));
+        Assert.That(body.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xEC, 0, 2, 0, 0xDF, 0, 3, 0,
+                0xE0, 0, 1, 0, 0xE3, 0, 3, 0,
+            }));
+        Assert.That(body.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
+        Assert.That(body.GetBlockCode(3).ToArray(),
+            Is.EqualTo(new byte[] { 0x18, 0 }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var target = loaded.Functions.Single(static function =>
+            function.Name == "GetPointer");
+        Assert.That(target.DirectNativeImport!.Parameters, Has.Length.EqualTo(1));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
+    [Test]
     public void StandardDirectAggregateNativeOutputCallsRoundTripLayouts()
     {
         const string schemaIdentity

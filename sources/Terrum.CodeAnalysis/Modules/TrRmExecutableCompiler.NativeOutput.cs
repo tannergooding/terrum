@@ -160,14 +160,29 @@ public static partial class TrRmExecutableCompiler
             * target.NativeOutputContracts.Length;
         var nativeParameterHomeCount = (long)outputCalls.Count
             * import.Parameters.Length;
+        var conditionalCount = 0;
+        if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
+            {
+                if (statement is BoundIf)
+                {
+                    conditionalCount++;
+                }
+            }))
+        {
+            throw Unsupported(
+                "The direct NativeOutput Body cannot be traversed for conditional statements.");
+        }
+
         var minimumHomeCount = caller.ParameterCount + outputHomeCount
             + nativeParameterHomeCount;
         var expectedRecordCount = 1L + outputCalls.Count
-            + outputHomeCount + nativeParameterHomeCount;
-        if (minimumHomeCount > 65_536 || expectedRecordCount > 65_536)
+            + outputHomeCount + nativeParameterHomeCount + conditionalCount;
+        var expectedBlockCount = 1L + (3L * conditionalCount);
+        if (minimumHomeCount > 65_536 || expectedRecordCount > 65_536
+            || expectedBlockCount > 65_536)
         {
             throw Unsupported(
-                "The direct NativeOutput Body exceeds the selected Home or record index range.");
+                "The direct NativeOutput Body exceeds the selected Home, record or Block index range.");
         }
 
         var outputVariablesByCall = new int[outputCalls.Count][];
@@ -876,29 +891,12 @@ public static partial class TrRmExecutableCompiler
                 schema: schema));
         }
 
-        var code = new List<byte>(checked((backingLocals.Length * 8)
-            + checked((outputVariables.Length + storageHomeCount) * 4)
-            + checked(outputCalls.Count * 6) + 2));
-        foreach (var local in backingLocals)
-        {
-            if (local.Initializer is not BoundRead source)
-            {
-                throw Unsupported(
-                    "A direct NativeOutput local has no caller-formal source.");
-            }
-
-            var sourceHome = homeByVariable[source.Variable];
-            var destinationHome = homeByVariable[local.Variable];
-            code.Add(0xD5);
-            code.Add(0);
-            code.Add((byte)sourceHome);
-            code.Add((byte)(sourceHome >> 8));
-            code.Add(0xD6);
-            code.Add(0x10);
-            code.Add((byte)destinationHome);
-            code.Add((byte)(destinationHome >> 8));
-        }
-
+        var storageRecordByCallFormal
+            = new Dictionary<(int CallIndex, int Formal), ushort>(
+                storageHomeCount);
+        var reservationRecordByCallFormal
+            = new Dictionary<(int CallIndex, int Formal), ushort>(
+                outputVariables.Length);
         for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
         {
             var outputVariableByFormal
@@ -918,40 +916,307 @@ public static partial class TrRmExecutableCompiler
                             storageHomeByCallFormal[(callIndex, formal)],
                             pointerTypeMapIndex,
                             checked((uint)address.ElementCount)));
-                    code.Add(0xEC);
-                    code.Add(0);
-                    code.Add((byte)storageRecordIndex);
-                    code.Add((byte)(storageRecordIndex >> 8));
+                    storageRecordByCallFormal.Add((callIndex, formal),
+                        storageRecordIndex);
                 }
 
                 if (outputVariableByFormal.TryGetValue(formal,
                         out var outputVariable))
                 {
-                    var reservationRecordIndex
-                        = checked((ushort)records.Count);
+                    var reservationRecordIndex = checked((ushort)records.Count);
                     records.Add(TrRmRegisterBodyRecordWriter
                         .EncodeNativeOutputReservation(
                             callSiteRecordIndices[callIndex],
                             homeByVariable[outputVariable],
                             checked((uint)formal)));
-                    code.Add(0xDF);
-                    code.Add(0);
-                    code.Add((byte)reservationRecordIndex);
-                    code.Add((byte)(reservationRecordIndex >> 8));
+                    reservationRecordByCallFormal.Add((callIndex, formal),
+                        reservationRecordIndex);
+                }
+            }
+        }
+
+        var codeBlocks = new List<List<byte>> {
+            new(checked((backingLocals.Length * 8)
+                + checked((outputVariables.Length + storageHomeCount) * 4)
+                + checked(outputCalls.Count * 6) + 2)),
+        };
+        var currentCode = codeBlocks[0];
+        foreach (var local in backingLocals)
+        {
+            if (local.Initializer is not BoundRead source)
+            {
+                throw Unsupported(
+                    "A direct NativeOutput local has no caller-formal source.");
+            }
+
+            var sourceHome = homeByVariable[source.Variable];
+            var destinationHome = homeByVariable[local.Variable];
+            currentCode.Add(0xD5);
+            currentCode.Add(0);
+            currentCode.Add((byte)sourceHome);
+            currentCode.Add((byte)(sourceHome >> 8));
+            currentCode.Add(0xD6);
+            currentCode.Add(0x10);
+            currentCode.Add((byte)destinationHome);
+            currentCode.Add((byte)(destinationHome >> 8));
+        }
+
+        var callIndexByExpression = new Dictionary<BoundCall, int>(
+            ReferenceEqualityComparer.Instance);
+        for (var callIndex = 0; callIndex < outputCalls.Count; callIndex++)
+        {
+            callIndexByExpression.Add(outputCalls[callIndex], callIndex);
+        }
+
+        int CreateBlock()
+        {
+            if (codeBlocks.Count >= 65_536)
+            {
+                throw Unsupported(
+                    "The direct NativeOutput Body exceeds the Block index range.");
+            }
+
+            var block = codeBlocks.Count;
+            codeBlocks.Add([]);
+            return block;
+        }
+
+        void SelectBlock(int blockIndex)
+        {
+            if ((uint)blockIndex >= (uint)codeBlocks.Count)
+            {
+                throw Unsupported(
+                    "A direct NativeOutput branch targets an unknown Block.");
+            }
+
+            currentCode = codeBlocks[blockIndex];
+        }
+
+        void AppendBranch(int targetBlock)
+        {
+            currentCode.Add(0xE3);
+            currentCode.Add(0);
+            currentCode.Add((byte)targetBlock);
+            currentCode.Add(checked((byte)(targetBlock >> 8)));
+        }
+
+        void AppendConditionalFlow(BoundExpression condition,
+            int trueBlock, int falseBlock)
+        {
+            if (condition is not BoundRead read
+                || read.Type != PrimitiveType.Bool
+                || !homeByVariable.TryGetValue(read.Variable,
+                    out var conditionHome))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput conditional requires a Boolean caller Home.");
+            }
+
+            currentCode.Add(0xD5);
+            currentCode.Add(0);
+            currentCode.Add((byte)conditionHome);
+            currentCode.Add((byte)(conditionHome >> 8));
+            var edgeRecordIndex = checked((ushort)records.Count);
+            records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
+                checked((ushort)trueBlock), checked((ushort)falseBlock)));
+            currentCode.Add(0xE4);
+            currentCode.Add(0);
+            currentCode.Add((byte)edgeRecordIndex);
+            currentCode.Add((byte)(edgeRecordIndex >> 8));
+        }
+
+        bool AlwaysTerminates(BoundStatement statement)
+        {
+            return statement switch {
+                BoundReturn => true,
+                BoundBlock block => block.Statements.Any(AlwaysTerminates),
+                BoundUnsafe unsafeBlock => AlwaysTerminates(
+                    unsafeBlock.Body),
+                BoundIf branch => branch.Else is not null
+                    && AlwaysTerminates(branch.Then)
+                    && AlwaysTerminates(branch.Else),
+                _ => false,
+            };
+        }
+
+        void EmitCall(BoundCall call)
+        {
+            if (!callIndexByExpression.TryGetValue(call,
+                    out var callIndex))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput call has no selected CallSite.");
+            }
+
+            for (var formal = 0; formal < target.ParameterCount; formal++)
+            {
+                if (storageRecordByCallFormal.TryGetValue(
+                        (callIndex, formal), out var storageRecordIndex))
+                {
+                    currentCode.Add(0xEC);
+                    currentCode.Add(0);
+                    currentCode.Add((byte)storageRecordIndex);
+                    currentCode.Add((byte)(storageRecordIndex >> 8));
+                }
+
+                if (reservationRecordByCallFormal.TryGetValue(
+                        (callIndex, formal),
+                        out var reservationRecordIndex))
+                {
+                    currentCode.Add(0xDF);
+                    currentCode.Add(0);
+                    currentCode.Add((byte)reservationRecordIndex);
+                    currentCode.Add((byte)(reservationRecordIndex >> 8));
                 }
             }
 
-            AppendCallSiteInstruction(code, callSiteRecordIndices[callIndex]);
+            AppendCallSiteInstruction(currentCode,
+                callSiteRecordIndices[callIndex]);
         }
 
-        code.Add(caller.ReturnType == target.ReturnType
-            ? (byte)0x17 : (byte)0x18);
-        code.Add(0);
-        var bodyCode = code.ToArray();
+        bool EmitStatement(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    for (var index = 0; index < block.Statements.Length;
+                        index++)
+                    {
+                        if (EmitStatement(block.Statements[index]))
+                        {
+                            if (index + 1 < block.Statements.Length)
+                            {
+                                throw Unsupported(
+                                    "A direct NativeOutput Body has statements after a terminating branch.");
+                            }
+
+                            return true;
+                        }
+                    }
+
+                    return false;
+
+                case BoundVacantLocal:
+                case BoundLocal:
+                    return false;
+
+                case BoundUnsafe unsafeBlock:
+                    return EmitStatement(unsafeBlock.Body);
+
+                case BoundIf branch:
+                {
+                    var thenTerminates = AlwaysTerminates(branch.Then);
+                    var elseTerminates = branch.Else is not null
+                        && AlwaysTerminates(branch.Else);
+                    var thenBlock = CreateBlock();
+                    var elseBlock = CreateBlock();
+                    var joinBlock = thenTerminates && elseTerminates
+                        ? -1 : CreateBlock();
+                    AppendConditionalFlow(branch.Condition, thenBlock,
+                        elseBlock);
+
+                    SelectBlock(thenBlock);
+                    var thenReturned = EmitStatement(branch.Then);
+                    if (thenReturned != thenTerminates)
+                    {
+                        throw Unsupported(
+                            "Direct NativeOutput then-branch termination differs from its bound shape.");
+                    }
+                    if (!thenReturned)
+                    {
+                        AppendBranch(joinBlock);
+                    }
+
+                    SelectBlock(elseBlock);
+                    var elseReturned = branch.Else is not null
+                        && EmitStatement(branch.Else);
+                    if (elseReturned != elseTerminates)
+                    {
+                        throw Unsupported(
+                            "Direct NativeOutput else-branch termination differs from its bound shape.");
+                    }
+                    if (!elseReturned)
+                    {
+                        AppendBranch(joinBlock);
+                    }
+
+                    if (joinBlock < 0)
+                    {
+                        return true;
+                    }
+
+                    SelectBlock(joinBlock);
+                    return false;
+                }
+
+                case BoundExpressionStatement {
+                    Expression: BoundCall call,
+                }:
+                    EmitCall(call);
+                    return false;
+
+                case BoundReturn { Value: BoundCall call }:
+                    EmitCall(call);
+                    currentCode.Add(0x17);
+                    currentCode.Add(0);
+                    return true;
+
+                case BoundReturn { Value: null }:
+                    currentCode.Add(0x18);
+                    currentCode.Add(0);
+                    return true;
+
+                default:
+                    throw Unsupported(
+                        "A direct NativeOutput caller contains an unsupported control-flow statement.");
+            }
+        }
+
+        if (caller.Body is not BoundBlock callerBody)
+        {
+            throw Unsupported(
+                "The direct NativeOutput caller requires a block Body.");
+        }
+
+        var terminated = false;
+        foreach (var statement in callerBody.Statements)
+        {
+            if (terminated)
+            {
+                throw Unsupported(
+                    "A direct NativeOutput caller has statements after termination.");
+            }
+
+            terminated = EmitStatement(statement);
+        }
+
+        if (!terminated)
+        {
+            currentCode.Add(caller.ReturnType == PrimitiveType.Void
+                ? (byte)0x18 : throw Unsupported(
+                    "A direct NativeOutput caller has no returned call result."));
+            currentCode.Add(0);
+        }
+
+        var blocks = new List<TrRmRegisterBodyBlock>(codeBlocks.Count);
+        var bodyCode = new List<byte>();
+        foreach (var blockCode in codeBlocks)
+        {
+            if (blockCode.Count == 0)
+            {
+                throw Unsupported(
+                    "A direct NativeOutput CFG block is empty.");
+            }
+
+            blocks.Add(new TrRmRegisterBodyBlock(
+                checked((uint)bodyCode.Count),
+                checked((uint)blockCode.Count), 0));
+            bodyCode.AddRange(blockCode);
+        }
+
         var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            maps.MethodMap, default, default, [
-                new TrRmRegisterBodyBlock(0, checked((uint)bodyCode.Length), 0),
-            ], records, bodyCode, contractRows.Count, schema);
+            maps.MethodMap, default, default, blocks, records,
+            bodyCode.ToArray(), contractRows.Count, schema);
 
         var predicateGraphBytes = TrRmPredicateGraphTableWriter.Encode(
             predicateGraphs, predicateNodes.Count, predicateFootprints.Count);
@@ -1050,30 +1315,53 @@ public static partial class TrRmExecutableCompiler
         }
 
         var calls = new List<BoundCall>();
+        void VisitStatement(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        VisitStatement(nested);
+                    }
+                    return;
+
+                case BoundUnsafe unsafeBlock:
+                    VisitStatement(unsafeBlock.Body);
+                    return;
+
+                case BoundIf branch:
+                    VisitStatement(branch.Then);
+                    if (branch.Else is not null)
+                    {
+                        VisitStatement(branch.Else);
+                    }
+                    return;
+
+                case BoundExpressionStatement {
+                    Expression: BoundCall expressionCall,
+                }:
+                    AddCall(expressionCall);
+                    return;
+
+                case BoundReturn { Value: BoundCall returnedCall }:
+                    AddCall(returnedCall);
+                    return;
+            }
+        }
+
+        void AddCall(BoundCall call)
+        {
+            if (call.Arguments.Any(static argument =>
+                        argument is BoundNativeOutputReservation))
+            {
+                calls.Add(call);
+            }
+        }
+
         foreach (var statement in body.Statements)
         {
-            if (statement is not BoundUnsafe { Body: BoundBlock unsafeBody })
-            {
-                continue;
-            }
-
-            foreach (var nested in unsafeBody.Statements)
-            {
-                var call = nested switch
-                {
-                    BoundExpressionStatement {
-                        Expression: BoundCall value,
-                    } => value,
-                    BoundReturn { Value: BoundCall value } => value,
-                    _ => null,
-                };
-                if (call is not null
-                    && call.Arguments.Any(static argument =>
-                        argument is BoundNativeOutputReservation))
-                {
-                    calls.Add(call);
-                }
-            }
+            VisitStatement(statement);
         }
 
         return calls;
@@ -1106,22 +1394,24 @@ public static partial class TrRmExecutableCompiler
 
         var outerUnitReturnCount = 0;
         var nextCallIndex = 0;
-        foreach (var statement in body.Statements)
+        void VisitStatement(BoundStatement statement, bool insideUnsafe,
+            bool insideConditional, bool topLevel)
         {
             switch (statement)
             {
-                case BoundVacantLocal vacant:
+                case BoundVacantLocal vacant when topLevel:
                     if (!declaredVacant.Add(vacant.Variable))
                     {
                         throw Unsupported(
                             "The direct NativeOutput caller declares a vacant local twice.");
                     }
-                    break;
+                    return;
 
-                case BoundLocal local when local.Initializer is BoundRead read:
+                case BoundLocal local when topLevel
+                    && local.Initializer is BoundRead read:
                     if ((uint)local.Variable >= (uint)caller.Variables.Length
-                        || local.Variable < caller.ParameterCount
-                        || caller.Variables[local.Variable].IsInitializationLocal
+                            || local.Variable < caller.ParameterCount
+                            || caller.Variables[local.Variable].IsInitializationLocal
                         || outputVariables.Contains(local.Variable)
                         || !backingLocalByVariable.Add(local.Variable)
                         || read.Variable < 0
@@ -1133,59 +1423,84 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     backingLocals.Add(local);
-                    break;
+                    return;
 
-                case BoundUnsafe { Body: BoundBlock unsafeBody }:
-                    foreach (var nested in unsafeBody.Statements)
+                case BoundUnsafe unsafeBlock when !insideUnsafe:
+                    VisitStatement(unsafeBlock.Body, true,
+                        insideConditional, false);
+                    return;
+
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
                     {
-                        if (nested is BoundExpressionStatement {
-                            Expression: BoundCall nestedCall,
-                        } && expectedCalls.Contains(nestedCall)
-                            && expressionCalls.Add(nestedCall))
-                        {
-                            if (nextCallIndex >= calls.Count
-                                || !ReferenceEquals(calls[nextCallIndex],
-                                    nestedCall))
-                            {
-                                throw Unsupported(
-                                    "The direct NativeOutput Body call order differs from source order.");
-                            }
-
-                            nextCallIndex++;
-                            continue;
-                        }
-                        else if (nested is BoundReturn {
-                            Value: BoundCall returnedCall,
-                        } && expectedCalls.Contains(returnedCall)
-                            && returnCalls.Add(returnedCall))
-                        {
-                            if (nextCallIndex >= calls.Count
-                                || !ReferenceEquals(calls[nextCallIndex],
-                                    returnedCall))
-                            {
-                                throw Unsupported(
-                                    "The direct NativeOutput Body call order differs from source order.");
-                            }
-
-                            nextCallIndex++;
-                            continue;
-                        }
-                        else if (nested is not BoundReturn { Value: null })
-                        {
-                            throw Unsupported(
-                                "The direct NativeOutput unsafe block contains an unsupported operation.");
-                        }
+                        VisitStatement(nested, insideUnsafe,
+                            insideConditional, false);
                     }
-                    break;
+                    return;
 
-                case BoundReturn { Value: null }:
+                case BoundIf branch:
+                    if (branch.Condition is not BoundRead conditionRead
+                        || conditionRead.Type != PrimitiveType.Bool
+                        || (uint)conditionRead.Variable
+                            >= (uint)caller.Variables.Length
+                        || caller.Variables[conditionRead.Variable].Type
+                            != PrimitiveType.Bool
+                        || (conditionRead.Variable >= caller.ParameterCount
+                            && !backingLocalByVariable.Contains(
+                                conditionRead.Variable)))
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput Body condition must read a caller Boolean formal or its local copy.");
+                    }
+
+                    VisitStatement(branch.Then, insideUnsafe, true, false);
+                    if (branch.Else is not null)
+                    {
+                        VisitStatement(branch.Else, insideUnsafe, true, false);
+                    }
+                    return;
+
+                case BoundExpressionStatement {
+                    Expression: BoundCall expressionCall,
+                } when insideUnsafe
+                    && expectedCalls.Contains(expressionCall)
+                    && expressionCalls.Add(expressionCall):
+                    ValidateCallOrder(expressionCall);
+                    return;
+
+                case BoundReturn {
+                    Value: BoundCall returnedCall,
+                } when insideUnsafe && !insideConditional
+                    && expectedCalls.Contains(returnedCall)
+                    && returnCalls.Add(returnedCall):
+                    ValidateCallOrder(returnedCall);
+                    return;
+
+                case BoundReturn { Value: null } when topLevel:
                     outerUnitReturnCount++;
-                    break;
+                    return;
 
                 default:
                     throw Unsupported(
                         "The direct NativeOutput caller contains an unsupported statement.");
             }
+        }
+
+        void ValidateCallOrder(BoundCall call)
+        {
+            if (nextCallIndex >= calls.Count
+                || !ReferenceEquals(calls[nextCallIndex], call))
+            {
+                throw Unsupported(
+                    "The direct NativeOutput Body call order differs from source order.");
+            }
+
+            nextCallIndex++;
+        }
+
+        foreach (var statement in body.Statements)
+        {
+            VisitStatement(statement, false, false, true);
         }
 
         var returnsCallResult = caller.ReturnType != PrimitiveType.Void;

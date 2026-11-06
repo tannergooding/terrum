@@ -520,114 +520,216 @@ public static partial class TrRmExecutableCompiler
             tables.Methods.GetBodyRow(callerMethodRow),
             tables.Contracts.Count);
         tables.ValidateRegisterBodyMapsForMethod(callerMethodRow);
-        if (body.BlockCount != 1)
-        {
-            throw Unsupported(
-                "The bounded direct NativeOutput Body loader requires one block.");
-        }
 
-        var code = body.GetBlockCode(0);
         var callSiteRecordIndices = new List<int>();
         var seenCallSiteRecords = new HashSet<int>();
-        var sawReturn = false;
-        var returnsCallResult = false;
-        var backingSourceHome = -1;
-        var backingHomeBySourceHome = new Dictionary<int, int>();
-        var storageAddressRecordIndexes = new HashSet<int>();
-        var position = 0;
-        while (position < code.Length)
+        var callSiteRecordsByBlock = new List<int>[body.BlockCount];
+        var conditionHomeByBlock = new int[body.BlockCount];
+        var trueTargetByBlock = new int[body.BlockCount];
+        var falseTargetByBlock = new int[body.BlockCount];
+        var jumpTargetByBlock = new int[body.BlockCount];
+        var returnsByBlock = new bool[body.BlockCount];
+        var returnResultByBlock = new bool[body.BlockCount];
+        Array.Fill(conditionHomeByBlock, -1);
+        Array.Fill(trueTargetByBlock, -1);
+        Array.Fill(falseTargetByBlock, -1);
+        Array.Fill(jumpTargetByBlock, -1);
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
-            var instruction = code[position..];
-            var opcode = instruction[0];
-            var length = TrRmRegisterBodyReader.InstructionLength(
-                opcode, body.Schema);
-            if (opcode == 0xDF)
-            {
-                if (instruction[1] != 0)
-                {
-                    throw Unsupported(
-                        "The bounded direct NativeOutput loader does not reconstruct cancellation branches.");
-                }
-            }
-            else if (opcode == 0xD5)
-            {
-                if (instruction[1] != 0 || backingSourceHome >= 0)
-                {
-                    throw Unsupported(
-                        "The bounded direct NativeOutput loader found an unsupported local copy.");
-                }
-
-                backingSourceHome = BinaryPrimitives
-                    .ReadUInt16LittleEndian(instruction[2..]);
-            }
-            else if (opcode == 0xD6)
-            {
-                var backingHome = BinaryPrimitives
-                    .ReadUInt16LittleEndian(instruction[2..]);
-                if (instruction[1] != 0x10 || backingSourceHome < 0
-                    || !backingHomeBySourceHome.TryAdd(backingHome,
-                        backingSourceHome))
-                {
-                    throw Invalid(
-                        "The direct NativeOutput local copy is malformed.");
-                }
-
-                backingSourceHome = -1;
-            }
-            else if (opcode == 0xEC)
-            {
-                if (!body.Schema.UsesForeignInvocationStorageAddresses()
-                    || instruction[1] != 0)
-                {
-                    throw Unsupported(
-                        "The bounded direct NativeOutput loader found an unsupported storage-address operation.");
-                }
-
-                var storageRecordIndex
-                    = BinaryPrimitives.ReadUInt16LittleEndian(
-                        instruction[2..]);
-                if (body.GetRecord(storageRecordIndex)[0] != 0x0E
-                    || !storageAddressRecordIndexes.Add(storageRecordIndex))
-                {
-                    throw Invalid(
-                        "A direct NativeParameter address instruction has an invalid record.");
-                }
-            }
-            else if (opcode is 0x90 or 0xE0)
-            {
-                var callSiteRecordIndex = opcode == 0x90
-                    ? instruction[1]
-                    : BinaryPrimitives.ReadUInt16LittleEndian(
-                        instruction[2..]);
-                if (!seenCallSiteRecords.Add(callSiteRecordIndex))
-                {
-                    throw Invalid(
-                        "A direct NativeOutput CallSite is invoked more than once.");
-                }
-
-                callSiteRecordIndices.Add(callSiteRecordIndex);
-            }
-            else if (opcode == 0x18 && position + length == code.Length)
-            {
-                sawReturn = true;
-            }
-            else if (opcode == 0x17 && instruction[1] == 0
-                && position + length == code.Length)
-            {
-                sawReturn = true;
-                returnsCallResult = true;
-            }
-            else
-            {
-                throw Unsupported(
-                    "The bounded direct NativeOutput Body contains an unsupported operation.");
-            }
-
-            position += length;
+            callSiteRecordsByBlock[blockIndex] = [];
         }
 
-        if (callSiteRecordIndices.Count == 0 || !sawReturn
-            || backingSourceHome >= 0)
+        var sawReturn = false;
+        var returnsCallResult = false;
+        var returnCount = 0;
+        var returnResultCount = 0;
+        var backingHomeBySourceHome = new Dictionary<int, int>();
+        var storageAddressRecordIndexes = new HashSet<int>();
+        for (var blockIndex = 0; blockIndex < body.BlockCount;
+            blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            var pendingHomeLoad = -1;
+            var sawTerminator = false;
+            for (var position = 0; position < code.Length;)
+            {
+                var instruction = code[position..];
+                var opcode = instruction[0];
+                var length = TrRmRegisterBodyReader.InstructionLength(
+                    opcode, body.Schema);
+                if (length > code.Length - position)
+                {
+                    throw Invalid(
+                        "A direct NativeOutput Body contains a truncated instruction.");
+                }
+
+                var isTerminator = opcode is 0x17 or 0x18 or 0xE3 or 0xE4;
+                if (sawTerminator
+                    || (isTerminator && position + length != code.Length))
+                {
+                    throw Invalid(
+                        "A direct NativeOutput Body has instructions after a Block terminator.");
+                }
+
+                if (pendingHomeLoad >= 0 && opcode is not (0xD6 or 0xE4))
+                {
+                    throw Invalid(
+                        "A direct NativeOutput Home load is not consumed by a local copy or conditional branch.");
+                }
+
+                if (opcode == 0xDF)
+                {
+                    if (instruction[1] != 0
+                        || body.GetRecord(BinaryPrimitives
+                            .ReadUInt16LittleEndian(instruction[2..]))[0]
+                            != 0x0C)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput reservation instruction is malformed.");
+                    }
+                }
+                else if (opcode == 0xD5)
+                {
+                    if (instruction[1] != 0 || pendingHomeLoad >= 0)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput Home load is malformed.");
+                    }
+
+                    pendingHomeLoad = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                }
+                else if (opcode == 0xD6)
+                {
+                    var backingHome = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                    if (blockIndex != 0 || instruction[1] != 0x10
+                        || pendingHomeLoad < 0
+                        || !backingHomeBySourceHome.TryAdd(backingHome,
+                            pendingHomeLoad))
+                    {
+                        throw Invalid(
+                            "The direct NativeOutput local copy is malformed.");
+                    }
+
+                    pendingHomeLoad = -1;
+                }
+                else if (opcode == 0xEC)
+                {
+                    if (!body.Schema
+                            .UsesForeignInvocationStorageAddresses()
+                        || instruction[1] != 0)
+                    {
+                        throw Unsupported(
+                            "The bounded direct NativeOutput loader found an unsupported storage-address operation.");
+                    }
+
+                    var storageRecordIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    if (body.GetRecord(storageRecordIndex)[0] != 0x0E
+                        || !storageAddressRecordIndexes.Add(
+                            storageRecordIndex))
+                    {
+                        throw Invalid(
+                            "A direct NativeParameter address instruction has an invalid record.");
+                    }
+                }
+                else if (opcode is 0x90 or 0xE0)
+                {
+                    var callSiteRecordIndex = opcode == 0x90
+                        ? instruction[1]
+                        : BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    if (!seenCallSiteRecords.Add(callSiteRecordIndex))
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput CallSite is invoked more than once.");
+                    }
+
+                    callSiteRecordIndices.Add(callSiteRecordIndex);
+                    callSiteRecordsByBlock[blockIndex].Add(
+                        callSiteRecordIndex);
+                }
+                else if (opcode == 0xE3)
+                {
+                    if (instruction[1] != 0)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput branch has nonzero control bits.");
+                    }
+
+                    jumpTargetByBlock[blockIndex]
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    sawTerminator = true;
+                }
+                else if (opcode == 0xE4)
+                {
+                    if (instruction[1] != 0 || pendingHomeLoad < 0)
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput conditional requires a loaded Boolean Home.");
+                    }
+
+                    var edgeRecordIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    var (trueTarget, falseTarget)
+                        = ReadLocalAggregateConditionalEdge(body,
+                            edgeRecordIndex);
+                    conditionHomeByBlock[blockIndex] = pendingHomeLoad;
+                    trueTargetByBlock[blockIndex] = trueTarget;
+                    falseTargetByBlock[blockIndex] = falseTarget;
+                    pendingHomeLoad = -1;
+                    sawTerminator = true;
+                }
+                else if (opcode == 0x18)
+                {
+                    if (instruction[1] != 0)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput unit return is malformed.");
+                    }
+
+                    returnsByBlock[blockIndex] = true;
+                    sawReturn = true;
+                    returnCount++;
+                    sawTerminator = true;
+                }
+                else if (opcode == 0x17)
+                {
+                    if (instruction[1] != 0)
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput result return is malformed.");
+                    }
+
+                    returnsByBlock[blockIndex] = true;
+                    returnResultByBlock[blockIndex] = true;
+                    sawReturn = true;
+                    returnsCallResult = true;
+                    returnCount++;
+                    returnResultCount++;
+                    sawTerminator = true;
+                }
+                else
+                {
+                    throw Unsupported(
+                        "The bounded direct NativeOutput Body contains an unsupported operation.");
+                }
+
+                position += length;
+            }
+
+            if (!sawTerminator || pendingHomeLoad >= 0)
+            {
+                throw Invalid(
+                    "A direct NativeOutput CFG Block has no complete terminator.");
+            }
+        }
+
+        if (callSiteRecordIndices.Count == 0 || !sawReturn)
         {
             throw Invalid("The direct NativeOutput Body has no complete call.");
         }
@@ -861,151 +963,89 @@ public static partial class TrRmExecutableCompiler
         var remainingOutputHomes = new HashSet<int>(outputHomeIndices);
         var remainingStorageAddressHomes
             = new HashSet<int>(storageAddressByHome.Keys);
-        var callStatements = ImmutableArray.CreateBuilder<BoundStatement>(
-            callSiteRecordIndices.Count);
-        for (var callIndex = 0; callIndex < callSiteRecordIndices.Count;
-            callIndex++)
+
+        if (callerReturnType == PrimitiveType.Void
+            ? returnResultCount != 0
+            : returnCount != 1 || returnResultCount != 1)
         {
-            var callSiteRecordIndex = callSiteRecordIndices[callIndex];
-            var callPayload = body.GetRecord(callSiteRecordIndex)[4..];
-            if (callPayload[0] != 1 || callPayload[1] != 1
-                || BinaryPrimitives.ReadUInt32LittleEndian(
-                    callPayload[12..]) != 0
-                || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[8..])
-                    != (uint)targetParameterCount)
+            throw Unsupported(
+                "The direct NativeOutput Body has an unsupported return shape.");
+        }
+
+        var decodedBlocks
+            = new LocalAggregateLayoutBlock[body.BlockCount];
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var blockCallSites = callSiteRecordsByBlock[blockIndex];
+            var statementCount = (blockCallSites.Count == 0 ? 0 : 1)
+                + (returnsByBlock[blockIndex]
+                    && !returnResultByBlock[blockIndex] ? 1 : 0);
+            var blockStatements
+                = ImmutableArray.CreateBuilder<BoundStatement>(
+                    statementCount);
+            if (blockCallSites.Count != 0)
             {
-                throw Unsupported(
-                    "The bounded direct NativeOutput Body requires direct calls with the selected input shape.");
+                var callStatements
+                    = ImmutableArray.CreateBuilder<BoundStatement>(
+                        blockCallSites.Count);
+                for (var callIndex = 0;
+                    callIndex < blockCallSites.Count; callIndex++)
+                {
+                    var call = ReconstructForeignInvocationNativeOutputCall(
+                        blockCallSites[callIndex], targetMethod,
+                        targetFunctionIndex, target,
+                        targetParameterFirst, targetParameterCount,
+                        callerParameterCount, variableByHome,
+                        variables, outputHomeIndices,
+                        remainingOutputHomes,
+                        remainingStorageAddressHomes,
+                        backingLocalHomeIndices, storageAddressByHome,
+                        structures, body, tables);
+                    callStatements.Add(returnResultByBlock[blockIndex]
+                        && callIndex == blockCallSites.Count - 1
+                        ? (BoundStatement)new BoundReturn(call, default)
+                        : new BoundExpressionStatement(call, default));
+                }
+
+                blockStatements.Add(new BoundUnsafe(new BoundBlock(
+                    callStatements.MoveToImmutable(), default), default));
+            }
+            else if (returnResultByBlock[blockIndex])
+            {
+                throw Invalid(
+                    "A direct NativeOutput result return has no CallSite.");
             }
 
-            var callTargetMethod = ReadForeignInvocationBodyMethodDef(body,
-                tables.Imports, BinaryPrimitives.ReadUInt16LittleEndian(
-                    callPayload[4..]));
-            if (callTargetMethod != targetMethod)
+            if (returnsByBlock[blockIndex]
+                && !returnResultByBlock[blockIndex])
             {
-                throw Unsupported(
-                    "The bounded direct NativeOutput Body requires one imported declaration.");
+                blockStatements.Add(new BoundReturn(null, default));
             }
 
-            var arguments = ImmutableArray.CreateBuilder<BoundExpression>(
-                targetParameterCount);
-            for (var formal = 0; formal < targetParameterCount; formal++)
+            BoundExpression? condition = null;
+            if (conditionHomeByBlock[blockIndex] >= 0)
             {
-                var inputOffset = 16 + (formal * 4);
-                var selectorKind = callPayload[inputOffset];
-                var sourceUse = callPayload[inputOffset + 1];
-                var selectorIndex = BinaryPrimitives.ReadUInt16LittleEndian(
-                    callPayload[(inputOffset + 2)..]);
-                if (selectorKind != 2
-                    || selectorIndex >= variableByHome.Length)
-                {
-                    throw Unsupported(
-                        "The bounded direct NativeOutput Body requires Home inputs.");
-                }
-
-                var output = target.NativeOutputContracts.FirstOrDefault(
-                    candidate => candidate.FormalOrdinal == formal);
-                var variableIndex = variableByHome[selectorIndex];
-                if (output is not null)
-                {
-                    if (sourceUse != 6
-                        || variableIndex < callerParameterCount
-                        || !outputHomeIndices.Contains(selectorIndex)
-                        || !remainingOutputHomes.Remove(selectorIndex)
-                        || variables[variableIndex].Type
-                            != output.PointeeType)
-                    {
-                        throw Invalid(
-                            "An OutputReservation Home differs from its output formal.");
-                    }
-
-                    arguments.Add(new BoundNativeOutputReservation(
-                        variableIndex, output.PointeeType, default));
-                    continue;
-                }
-
-                var nativeParameter = target.DirectNativeImport?.Parameters
-                    .FirstOrDefault(candidate =>
-                        candidate.ParameterIndex == formal);
-                if (nativeParameter is not null)
-                {
-                    if (sourceUse != 1 || variableIndex != -2
-                        || !storageAddressByHome.TryGetValue(selectorIndex,
-                            out var storageAddress)
-                        || !remainingStorageAddressHomes.Remove(selectorIndex)
-                        || storageAddress.RequiredElementCount != 1
-                        || storageAddress.SourceHome
-                            >= variableByHome.Length)
-                    {
-                        throw Invalid(
-                            "A direct NativeParameter input does not use a unique stored backing address.");
-                    }
-
-                    var sourceVariable = variableByHome[
-                        storageAddress.SourceHome];
-                    if (sourceVariable < callerParameterCount
-                        || sourceVariable >= variables.Count
-                        || !backingLocalHomeIndices.Contains(
-                            storageAddress.SourceHome)
-                        || variables[sourceVariable].Type
-                            != nativeParameter.PointeeType
-                        || nativeParameter.Retention
-                            != NativeParameterRetention.NoEscape
-                        || nativeParameter.Extent != 0
-                        || !tables.TypeSpecs.AreEquivalentTypeSpecRefs(
-                            ReadForeignInvocationBodyTypeSpec(body,
-                                storageAddress.PointerTypeMapIndex),
-                            tables.Parameters.GetTypeSpec(checked(
-                                (ushort)(targetParameterFirst + formal))))
-                        || ((nativeParameter.Access
-                                is NativeParameterAccess.Write
-                                    or NativeParameterAccess.ReadWrite)
-                            && !variables[sourceVariable].IsMutable))
-                    {
-                        throw Invalid(
-                            "A direct NativeParameter backing differs from its formal.");
-                    }
-
-                    var backingExtent = ValueLayout.Size(
-                        nativeParameter.PointeeType, structures);
-                    arguments.Add(new BoundNativeStorageAddress(
-                        sourceVariable,
-                        new BoundConstant(0, PrimitiveType.Int32, default),
-                        nativeParameter.PointeeType,
-                        nativeParameter.PointeeType,
-                        PrimitiveType.NativeStorageAddress, 1,
-                        checked((ulong)backingExtent),
-                        checked((ulong)backingExtent),
-                        nativeParameter.Access
-                            == NativeParameterAccess.Read, default));
-                    continue;
-                }
-
-                if (sourceUse != 1 || variableIndex < 0
-                    || variableIndex >= variables.Count
-                    || (variableIndex >= callerParameterCount
-                        && !backingLocalHomeIndices.Contains(selectorIndex))
-                    || outputHomeIndices.Contains(selectorIndex)
-                    || variables[variableIndex].Type
-                        != target.Variables[formal].Type)
+                var conditionVariable = variableByHome[
+                    conditionHomeByBlock[blockIndex]];
+                if (conditionVariable < 0
+                    || conditionVariable >= variables.Count
+                    || variables[conditionVariable].Type
+                        != PrimitiveType.Bool)
                 {
                     throw Invalid(
-                        "A direct NativeOutput input Home differs from its formal.");
+                        "A direct NativeOutput conditional Home is not Boolean.");
                 }
 
-                arguments.Add(new BoundRead(variableIndex,
-                    target.Variables[formal].Type, default));
+                condition = new BoundRead(conditionVariable,
+                    PrimitiveType.Bool, default);
             }
 
-            var call = new BoundCall(targetFunctionIndex,
-                arguments.MoveToImmutable(), target.ReturnType, default)
-            {
-                IsUnsafeAuthorized = true,
-            };
-            callStatements.Add(returnsCallResult
-                && callIndex == callSiteRecordIndices.Count - 1
-                ? (BoundStatement)new BoundReturn(call, default)
-                : new BoundExpressionStatement(call, default));
+            decodedBlocks[blockIndex] = new LocalAggregateLayoutBlock(
+                blockStatements.MoveToImmutable(), condition,
+                trueTargetByBlock[blockIndex],
+                falseTargetByBlock[blockIndex],
+                jumpTargetByBlock[blockIndex],
+                returnsByBlock[blockIndex]);
         }
 
         if (remainingOutputHomes.Count != 0
@@ -1015,17 +1055,20 @@ public static partial class TrRmExecutableCompiler
                 "A direct NativeOutput Body contains unconsumed output or storage-address Homes.");
         }
 
+        var controlFlow = AnalyzeLocalAggregateLayoutControlFlow(body);
+        if (!controlFlow.IsAcyclic)
+        {
+            throw Unsupported(
+                "The bounded direct NativeOutput Body loader does not reconstruct loops.");
+        }
+        var controlStatements = BuildLocalAggregateLayoutBody(
+            decodedBlocks, controlFlow);
         var statements = ImmutableArray.CreateBuilder<BoundStatement>(
-            vacantLocalStatements.Count + backingLocalStatements.Count + 1
-                + (callerReturnType == PrimitiveType.Void ? 1 : 0));
+            vacantLocalStatements.Count + backingLocalStatements.Count
+                + controlStatements.Length);
         statements.AddRange(vacantLocalStatements);
         statements.AddRange(backingLocalStatements);
-        statements.Add(new BoundUnsafe(new BoundBlock(
-            callStatements.MoveToImmutable(), default), default));
-        if (callerReturnType == PrimitiveType.Void)
-        {
-            statements.Add(new BoundReturn(null, default));
-        }
+        statements.AddRange(controlStatements);
 
         var flagsValue = tables.Methods.GetFlags(callerMethodRow);
         return new BoundFunction(tables.Methods.GetName(callerMethodRow),
@@ -1035,6 +1078,154 @@ public static partial class TrRmExecutableCompiler
         {
             IsPrivate = flagsValue == 0,
             IsInternal = flagsValue == 1,
+        };
+    }
+
+    private static BoundCall ReconstructForeignInvocationNativeOutputCall(
+        int callSiteRecordIndex, int targetMethod, int targetFunctionIndex,
+        BoundFunction target, int targetParameterFirst,
+        int targetParameterCount, int callerParameterCount,
+        int[] variableByHome,
+        ImmutableArray<BoundVariable>.Builder variables,
+        HashSet<int> outputHomeIndices,
+        HashSet<int> remainingOutputHomes,
+        HashSet<int> remainingStorageAddressHomes,
+        HashSet<int> backingLocalHomeIndices,
+        Dictionary<int, (int SourceHome, ushort PointerTypeMapIndex,
+            uint RequiredElementCount)> storageAddressByHome,
+        ImmutableArray<BoundStruct> structures,
+        TrRmRegisterBodyReader body,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        var callPayload = body.GetRecord(callSiteRecordIndex)[4..];
+        if (callPayload[0] != 1 || callPayload[1] != 1
+            || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[12..]) != 0
+            || BinaryPrimitives.ReadUInt32LittleEndian(callPayload[8..])
+                != (uint)targetParameterCount)
+        {
+            throw Unsupported(
+                "The bounded direct NativeOutput Body requires direct calls with the selected input shape.");
+        }
+
+        var callTargetMethod = ReadForeignInvocationBodyMethodDef(body,
+            tables.Imports, BinaryPrimitives.ReadUInt16LittleEndian(
+                callPayload[4..]));
+        if (callTargetMethod != targetMethod)
+        {
+            throw Unsupported(
+                "The bounded direct NativeOutput Body requires one imported declaration.");
+        }
+
+        var arguments = ImmutableArray.CreateBuilder<BoundExpression>(
+            targetParameterCount);
+        for (var formal = 0; formal < targetParameterCount; formal++)
+        {
+            var inputOffset = 16 + (formal * 4);
+            var selectorKind = callPayload[inputOffset];
+            var sourceUse = callPayload[inputOffset + 1];
+            var selectorIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                callPayload[(inputOffset + 2)..]);
+            if (selectorKind != 2
+                || selectorIndex >= variableByHome.Length)
+            {
+                throw Unsupported(
+                    "The bounded direct NativeOutput Body requires Home inputs.");
+            }
+
+            var output = target.NativeOutputContracts.FirstOrDefault(
+                candidate => candidate.FormalOrdinal == formal);
+            var variableIndex = variableByHome[selectorIndex];
+            if (output is not null)
+            {
+                if (sourceUse != 6 || variableIndex < callerParameterCount
+                    || !outputHomeIndices.Contains(selectorIndex)
+                    || !remainingOutputHomes.Remove(selectorIndex)
+                    || variables[variableIndex].Type != output.PointeeType)
+                {
+                    throw Invalid(
+                        "An OutputReservation Home differs from its output formal.");
+                }
+
+                arguments.Add(new BoundNativeOutputReservation(variableIndex,
+                    output.PointeeType, default));
+                continue;
+            }
+
+            var nativeParameter = target.DirectNativeImport?.Parameters
+                .FirstOrDefault(candidate =>
+                    candidate.ParameterIndex == formal);
+            if (nativeParameter is not null)
+            {
+                if (sourceUse != 1 || variableIndex != -2
+                    || !storageAddressByHome.TryGetValue(selectorIndex,
+                        out var storageAddress)
+                    || !remainingStorageAddressHomes.Remove(selectorIndex)
+                    || storageAddress.RequiredElementCount != 1
+                    || storageAddress.SourceHome >= variableByHome.Length)
+                {
+                    throw Invalid(
+                        "A direct NativeParameter input does not use a unique stored backing address.");
+                }
+
+                var sourceVariable = variableByHome[
+                    storageAddress.SourceHome];
+                if (sourceVariable < callerParameterCount
+                    || sourceVariable >= variables.Count
+                    || !backingLocalHomeIndices.Contains(
+                        storageAddress.SourceHome)
+                    || variables[sourceVariable].Type
+                        != nativeParameter.PointeeType
+                    || nativeParameter.Retention
+                        != NativeParameterRetention.NoEscape
+                    || nativeParameter.Extent != 0
+                    || !tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        ReadForeignInvocationBodyTypeSpec(body,
+                            storageAddress.PointerTypeMapIndex),
+                        tables.Parameters.GetTypeSpec(
+                            checked((ushort)(targetParameterFirst + formal))))
+                    || ((nativeParameter.Access
+                            is NativeParameterAccess.Write
+                                or NativeParameterAccess.ReadWrite)
+                        && !variables[sourceVariable].IsMutable))
+                {
+                    throw Invalid(
+                        "A direct NativeParameter backing differs from its formal.");
+                }
+
+                var backingExtent = ValueLayout.Size(
+                    nativeParameter.PointeeType, structures);
+                arguments.Add(new BoundNativeStorageAddress(sourceVariable,
+                    new BoundConstant(0, PrimitiveType.Int32, default),
+                    nativeParameter.PointeeType,
+                    nativeParameter.PointeeType,
+                    PrimitiveType.NativeStorageAddress, 1,
+                    checked((ulong)backingExtent),
+                    checked((ulong)backingExtent),
+                    nativeParameter.Access == NativeParameterAccess.Read,
+                    default));
+                continue;
+            }
+
+            if (sourceUse != 1 || variableIndex < 0
+                || variableIndex >= variables.Count
+                || (variableIndex >= callerParameterCount
+                    && !backingLocalHomeIndices.Contains(selectorIndex))
+                || outputHomeIndices.Contains(selectorIndex)
+                || variables[variableIndex].Type
+                    != target.Variables[formal].Type)
+            {
+                throw Invalid(
+                    "A direct NativeOutput input Home differs from its formal.");
+            }
+
+            arguments.Add(new BoundRead(variableIndex,
+                target.Variables[formal].Type, default));
+        }
+
+        return new BoundCall(targetFunctionIndex,
+            arguments.MoveToImmutable(), target.ReturnType, default)
+        {
+            IsUnsafeAuthorized = true,
         };
     }
 
