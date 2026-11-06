@@ -184,6 +184,31 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
                     parameter.Retention, parameter.Extent))));
     }
 
+    [Test]
+    public void PrivateBodylessOutputAddressContractRejectsChangedProvider()
+    {
+        var provider = CreatePrivateOutputDependencyProvider("NonZero");
+        var changedProvider = CreatePrivateOutputDependencyProvider(
+            "NonNegative");
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Main() {
+                    unsafe {
+                        var readAndProbe = &ReadAndProbe;
+                        return 0;
+                    }
+            }
+            """), ModuleCompiler.CreateReference(provider),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(compilation.Program!,
+            provider);
+
+        Assert.DoesNotThrow(() => ModuleCompiler.Link(consumer, provider));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(consumer, changedProvider));
+    }
+
     [TestCase("selector-phase")]
     [TestCase("output-state")]
     [TestCase("dependency-source")]
@@ -553,6 +578,34 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!,
             ["Observe", "Address"]);
+    }
+
+    private static byte[] CreatePrivateOutputDependencyProvider(
+        string outputCondition)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            [param(result): DependsOn(nameof(source))]
+            [param(result): ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadAndProbe")]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 4)]
+            public extern unsafe int32 ReadAndProbe(
+                ptr<int32> source,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.{{outputCondition}})]
+                write ptr<ptr<int32>> result,
+                ptr<uint32> values);
+
+            public int32 Address() {
+                unsafe {
+                    var readAndProbe = &ReadAndProbe;
+                    return 0;
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(compilation.Program!,
+            ["ReadAndProbe", "Address"]);
     }
 
     private static (int Selector, int OutputState, int Dependency)
