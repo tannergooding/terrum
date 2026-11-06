@@ -2541,6 +2541,89 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Is.Zero);
     }
 
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true)]
+    public void StandardDirectNativeOutputNestedResultCorrelatesARead(
+        string schemaIdentity, bool storageAddressSchema)
+    {
+        const string moduleIdentity = "native-output-nested-result-read";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<int64> ticks);
+
+            public void Probe(bool invoke) {
+                init mut int64 ticks;
+                if (invoke) {
+                    unsafe {
+                        if (QueryPerformanceCounter(&init ticks) != 0) {
+                            if (ticks > 0) { }
+                        }
+                    }
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var index = storageAddressSchema
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageAddressDraft(artifact)
+            : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = storageAddressSchema
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                    index)
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        tables.ValidateRegisterBodyMapsForMethod(2);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(2), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(10));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var probe = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        var conditionals = new List<BoundIf>();
+        var outputReads = new List<BoundRead>();
+        Assert.That(BoundTreeTraversal.VisitStatements(probe.Body,
+            statement =>
+            {
+                if (statement is BoundIf conditional)
+                {
+                    conditionals.Add(conditional);
+                }
+            }), Is.True);
+        Assert.That(BoundTreeTraversal.VisitExpressions(probe.Body,
+            expression =>
+            {
+                if (expression is BoundRead read
+                    && read.Variable >= probe.ParameterCount)
+                {
+                    outputReads.Add(read);
+                }
+            }), Is.True);
+        Assert.That(conditionals, Has.Count.EqualTo(3));
+        Assert.That(outputReads, Has.Count.EqualTo(1));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
     [Test]
     public void StandardDirectNativeOutputNonNegativeResultCorrelatesARead()
     {
