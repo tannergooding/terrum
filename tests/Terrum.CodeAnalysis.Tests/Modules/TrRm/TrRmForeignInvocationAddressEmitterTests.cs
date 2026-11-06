@@ -1786,6 +1786,84 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true)]
+    public void StandardDirectNativeOutputCallsRoundTripNestedConditionals(
+        string schemaIdentity, bool storageAddressSchema)
+    {
+        const string moduleIdentity = "native-output-nested-conditionals";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Observe")]
+            internal extern int32 Observe(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            public void Probe(bool outer, bool inner) {
+                init mut uint32 first;
+                init mut uint32 second;
+                init mut uint32 third;
+                if (outer) {
+                    if (inner) {
+                        unsafe { Observe(&init first); }
+                    }
+                    else {
+                        unsafe { Observe(&init second); }
+                    }
+                }
+                else {
+                    unsafe { Observe(&init third); }
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var index = storageAddressSchema
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageAddressDraft(artifact)
+            : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = storageAddressSchema
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                    index)
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        tables.ValidateRegisterBodyMapsForMethod(2);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(2), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(7));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var conditionals = new List<BoundIf>();
+        Assert.That(BoundTreeTraversal.VisitStatements(
+            loaded.Functions.Single(static function =>
+                function.Name == "Probe").Body,
+            statement =>
+            {
+                if (statement is BoundIf conditional)
+                {
+                    conditionals.Add(conditional);
+                }
+            }), Is.True);
+        Assert.That(conditionals, Has.Count.EqualTo(2));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibraryWithNativeImports(loaded,
+            ["Probe"], NativeRuntimePolicy.FailFast);
+        using var imageStream = new MemoryStream(image);
+        using var imageReader = new PEReader(imageStream);
+        Assert.That(imageReader.PEHeaders.PEHeader, Is.Not.Null);
+        Assert.That(imageReader.PEHeaders.PEHeader!.ImportTableDirectory.Size,
+            Is.GreaterThan(0));
+    }
+
+    [Test]
     public void StorageAddressNativeOutputCallsRoundTripConditionalInvoke()
     {
         const string schemaIdentity
