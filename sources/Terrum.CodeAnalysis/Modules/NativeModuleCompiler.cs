@@ -556,6 +556,7 @@ public static partial class NativeModuleCompiler
                     reboundFunctions ??= program.Functions.ToBuilder();
                     reboundFunctions[functionIndex] = function with {
                         IsExternal = true,
+                        IsModuleReference = true,
                         Intrinsic = BoundIntrinsic.None,
                         Body = new BoundBlock([], default),
                         IndexedBody = null,

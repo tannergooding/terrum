@@ -1566,7 +1566,8 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and producer invocation profiles differ.");
         }
-        return Link(consumer, producer, CreateReference(producer));
+        return Link(consumer, producer, CreateReference(producer),
+            allowPrivateVTableSlotChanges: true);
     }
 
     internal static BoundProgram Link(ConsumerContractSnapshot consumer, ProviderContractSnapshot producer)
@@ -1584,12 +1585,15 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and producer invocation profiles differ.");
         }
-        return Link(consumer.ParsedModule, producer.ParsedModule, producer.GetReference());
+        return Link(consumer.ParsedModule, producer.ParsedModule,
+            producer.GetReference(), allowPrivateVTableSlotChanges: false);
     }
 
-    private static BoundProgram Link(Module consumer, Module producer, CompilationReference reference)
+    private static BoundProgram Link(Module consumer, Module producer,
+        CompilationReference reference, bool allowPrivateVTableSlotChanges)
     {
-        _ = RestoreConsumerAgainstReference(consumer, reference);
+        _ = RestoreConsumerAgainstReference(consumer, reference,
+            allowPrivateVTableSlotChanges);
         if (consumer.Classes.Length + producer.Classes.Length > SemanticVerifier.MaximumVariables)
         {
             throw new ModuleContractException("Combined private managed class layouts exceed the supported limit.");
@@ -1686,9 +1690,13 @@ public static partial class ModuleCompiler
                         replacement.NativeOutputContracts, consumer.Structures, producer.Structures,
                         consumer.NativeFunctionPointerSignatures, consumer.NativePointerTypes,
                         producer.NativeFunctionPointerSignatures, producer.NativePointerTypes)
-                    || !CompatibleImportedNativeVTableMethod(
-                        declaration.ImportedNativeVTableMethod,
-                        replacement.Function?.NativeVTableMethod)
+                    || !(allowPrivateVTableSlotChanges
+                        ? CompatibleImportedNativeVTableMethodForPrivateReplacement(
+                            declaration.ImportedNativeVTableMethod,
+                            replacement.Function?.NativeVTableMethod)
+                        : CompatibleImportedNativeVTableMethod(
+                            declaration.ImportedNativeVTableMethod,
+                            replacement.Function?.NativeVTableMethod))
                     || declaration.HasOwnershipTransfer != replacement.HasOwnershipTransfer)
                 {
                     throw new ModuleContractException($"Incompatible or missing producer contract for '{declaration.Name}'.");
@@ -3597,6 +3605,13 @@ public static partial class ModuleCompiler
     internal static bool CompatibleImportedNativeVTableMethod(
         NativeVTableMethodDefinition? expected, NativeVTableMethodDefinition? actual) =>
         expected is null || (actual is not null && SameNativeVTableMethod(expected, actual));
+
+    internal static bool CompatibleImportedNativeVTableMethodForPrivateReplacement(
+        NativeVTableMethodDefinition? expected, NativeVTableMethodDefinition? actual) =>
+        expected is null || (actual is not null
+            && expected.VTableByteOffset == actual.VTableByteOffset
+            && SameNativeVTableParameterBindings(expected.Parameters, actual.Parameters)
+            && SameNativeVTableOutputBindings(expected.Outputs, actual.Outputs));
 
     private static string ContractType(PrimitiveType type, ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,

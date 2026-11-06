@@ -488,7 +488,8 @@ public static partial class ModuleCompiler
         return RestoreConsumerAgainstReference(consumer, reference);
     }
 
-    private static BoundProgram RestoreConsumerAgainstReference(Module consumer, CompilationReference reference)
+    private static BoundProgram RestoreConsumerAgainstReference(Module consumer,
+        CompilationReference reference, bool allowPrivateVTableSlotChanges = false)
     {
         var providerFunctionPointerMapping = MapNativeFunctionPointerTypes(
             consumer.NativeFunctionPointerSignatures, reference.NativeFunctionPointerSignatures,
@@ -535,8 +536,13 @@ public static partial class ModuleCompiler
                     actual.NativeOutputContracts, consumer.Structures, reference.Structures,
                     consumer.NativeFunctionPointerSignatures, consumer.NativePointerTypes,
                     reference.NativeFunctionPointerSignatures, reference.NativePointerTypes)
-                || !CompatibleImportedNativeVTableMethod(imported.ImportedNativeVTableMethod,
-                    actual.NativeVTableMethod)
+                || !(allowPrivateVTableSlotChanges
+                    ? CompatibleImportedNativeVTableMethodForPrivateReplacement(
+                        imported.ImportedNativeVTableMethod,
+                        actual.NativeVTableMethod)
+                    : CompatibleImportedNativeVTableMethod(
+                        imported.ImportedNativeVTableMethod,
+                        actual.NativeVTableMethod))
                 || imported.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, reference.Structures))
             {
                 throw new ModuleContractException($"Incompatible or missing provider contract for '{imported.Name}'.");

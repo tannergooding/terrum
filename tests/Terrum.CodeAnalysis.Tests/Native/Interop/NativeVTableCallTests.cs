@@ -1231,6 +1231,11 @@ public sealed class NativeVTableCallTests
         NativeModuleCompiler.Validate(nativeConsumer, nativeProducer);
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.Zero);
+        var slotOneNativeProducer = NativeModuleCompiler.CreateProducer(
+            slotOneCompilation.Program!, exports, "native_vtable",
+            NativeRuntimePolicy.FailFast);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.Validate(nativeConsumer, slotOneNativeProducer));
 
         var extraProviderCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Extra() { return 43; }"));
@@ -1269,12 +1274,19 @@ public sealed class NativeVTableCallTests
 
         var incompatibleNativeProducer = NativeModuleCompiler.CreateProducer(
             incompatibleCompilation.Program!, exports, "native_vtable", NativeRuntimePolicy.FailFast);
+        var slotOneNativeProviders = new[] { slotOneNativeProducer, extraNativeProducer };
         Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(nativeSet,
                 [incompatibleNativeProducer, extraNativeProducer]));
         Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateConsumerSet(nativeSet,
+                slotOneNativeProviders));
+        Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(graphConsumer,
                 [incompatibleNativeProducer, extraNativeProducer]));
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(graphConsumer,
+                slotOneNativeProviders));
 
         var directCompilation = Compilation.Create(SyntaxTree.Parse(providerSource + consumerSource));
         Assert.That(directCompilation.HasErrors, Is.False,
