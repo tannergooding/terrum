@@ -98,6 +98,20 @@ internal sealed class NativeOutputAuthoredAdoptionTests
         }
         """;
 
+    private const string FailedAcquisitionSource = Declarations + """
+        public int32 Main() {
+            unsafe {
+                ptr<void> process = GetCurrentProcess();
+                init ptr<void> duplicate;
+                int32 status = DuplicateHandle(process, null, process,
+                    &init duplicate, 0, false, 2);
+                if (status == 0) { return 42; }
+                HandleOwner owner = new HandleOwner(duplicate);
+                return -1;
+            }
+        }
+        """;
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NativeOutputCustodyUsesAuthoredUniqueRetirement(
@@ -142,6 +156,31 @@ internal sealed class NativeOutputAuthoredAdoptionTests
 
         Assert.That(NativeJit.Execute(compilation.Program!,
             NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void NativeOutputComplementaryResultDoesNotAdoptFailureCell(
+        NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var nativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(FailedAcquisitionSource),
+            new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+                NativeCoreRegistration = nativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        nativeRegistration),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.That(NativeJit.Execute(compilation.Program!, policy),
+            Is.EqualTo(42));
     }
 
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -205,6 +244,83 @@ internal sealed class NativeOutputAuthoredAdoptionTests
         {
             await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
                 .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task NativeImageDoesNotAdoptNativeOutputOnComplementaryResultAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-native-output-failure-");
+        try
+        {
+            foreach (var policy in new[] {
+                NativeRuntimePolicy.FailFast,
+                NativeRuntimePolicy.CheckedExceptions,
+            })
+            {
+                var nativeRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration();
+                var compilation = Compilation.Create(
+                    SyntaxTree.Parse(FailedAcquisitionSource),
+                    new CompilationOptions {
+                        RuntimePolicy = (BoundRuntimePolicy)policy,
+                        NativeCoreRegistration = nativeRegistration,
+                        LayoutCoreRegistration =
+                            NativeCoreRegistrationTests.CreateLayoutRegistration(
+                                nativeRegistration),
+                    });
+                Assert.That(compilation.HasErrors, Is.False,
+                    string.Join(Environment.NewLine,
+                        compilation.Diagnostics));
+                var image = NativeEmitter.EmitWithNativeImports(
+                    compilation.Program!, policy);
+                var fileName = policy == NativeRuntimePolicy.FailFast
+                    ? "fail-fast.exe" : "checked-exceptions.exe";
+                await ExecuteImageAsync(fileName, image).ConfigureAwait(true);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+
+        async Task ExecuteImageAsync(string fileName, byte[] image)
+        {
+            var executable = Path.Combine(directory, fileName);
+            await File.WriteAllBytesAsync(executable, image)
+                .ConfigureAwait(true);
+            using var process = Process.Start(new ProcessStartInfo(executable) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = directory,
+            }) ?? throw new InvalidOperationException(
+                "Could not start the NativeOutput failure executable.");
+            try
+            {
+                var standardOutput = process.StandardOutput.ReadToEndAsync();
+                var standardError = process.StandardError.ReadToEndAsync();
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(30))
+                    .ConfigureAwait(true);
+                Assert.That(process.ExitCode, Is.EqualTo(42),
+                    $"stdout: {await standardOutput.ConfigureAwait(true)}"
+                    + $"{Environment.NewLine}stderr: "
+                    + await standardError.ConfigureAwait(true));
+            }
+            finally
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+            }
         }
     }
 }
