@@ -112,7 +112,9 @@ public sealed class CoreProviderModuleBindings
                 exported && AreEquivalent(exported, definition));
 
     internal bool ContainsDeclaration(CoreNativeAttributeSchema schema)
-        => Declarations.Any(declaration => declaration.NativeAttributeSchema == schema);
+        => Declarations.Any(declaration =>
+            declaration.NativeAttributeSchema is CoreNativeAttributeSchema exported
+            && CoreNativeAttributeSchema.AreEquivalent(exported, schema));
 
     internal bool ContainsDeclaration(CoreLayoutAttributeSchema schema)
         => Declarations.Any(declaration => declaration.LayoutAttributeSchema is
@@ -126,6 +128,22 @@ public sealed class CoreProviderModuleBindings
             && exported.IsPublic == schema.IsPublic
             && exported.IsPrimary == schema.IsPrimary
             && exported.IsRepeatable == schema.IsRepeatable);
+
+    internal bool ContainsDeclaration(
+        CoreStaticInitializerAttributeSchema schema)
+        => Declarations.Any(declaration =>
+            declaration.StaticInitializerAttributeSchema is
+                CoreStaticInitializerAttributeSchema exported
+            && CoreStaticInitializerAttributeSchema.AreEquivalent(
+                exported, schema));
+
+    internal bool ContainsDeclaration(
+        CoreLazyInitializationAttributeSchema schema)
+        => Declarations.Any(declaration =>
+            declaration.LazyInitializationAttributeSchema is
+                CoreLazyInitializationAttributeSchema exported
+            && CoreLazyInitializationAttributeSchema.AreEquivalent(
+                exported, schema));
 
     internal string? GetInvalidReason()
     {
@@ -246,10 +264,115 @@ public enum CoreNativeAttributeRole
     NativeExport = 4,
 }
 
+/// <summary>The registered source-value kind for one native attribute argument.</summary>
+public enum CoreNativeAttributeArgumentKind
+{
+    /// <summary>No valid source argument kind.</summary>
+    None = 0,
+    /// <summary>A compile-time native library-name literal.</summary>
+    LibraryNameLiteral = 1,
+    /// <summary>A compile-time native entry-name literal.</summary>
+    EntryNameLiteral = 2,
+    /// <summary>A value of the exact selected enum type.</summary>
+    Enum = 3,
+}
+
+/// <summary>The registered default form for a native attribute argument.</summary>
+public enum CoreNativeAttributeDefaultKind
+{
+    /// <summary>No valid default form.</summary>
+    None = 0,
+    /// <summary>The exact name of the target declaration.</summary>
+    DeclarationName = 1,
+    /// <summary>A selected member of the argument's exact enum type.</summary>
+    EnumMember = 2,
+}
+
+/// <summary>A complete registered default for one native attribute argument.</summary>
+/// <param name="Kind">The selected default form.</param>
+/// <param name="Member">The exact enum member for an EnumMember default.</param>
+public readonly record struct CoreNativeAttributeDefault(
+    CoreNativeAttributeDefaultKind Kind, CoreDeclarationIdentity? Member)
+{
+    internal bool IsValid
+        => Kind switch {
+            CoreNativeAttributeDefaultKind.DeclarationName => Member is null,
+            CoreNativeAttributeDefaultKind.EnumMember => Member is
+                CoreDeclarationIdentity member
+                && member.IsValid
+                && member.Kind == CoreDeclarationKind.EnumMember,
+            _ => false,
+        };
+}
+
+/// <summary>A complete ordered source argument slot in a registered native schema.</summary>
+/// <param name="Name">The exact source label, or null for an unnamed argument.</param>
+/// <param name="Kind">The exact source-value domain.</param>
+/// <param name="EnumType">The exact selected enum identity for an enum-valued argument.</param>
+/// <param name="IsRequired">Whether the source schema requires the argument.</param>
+/// <param name="AllowsPositional">Whether the argument may be supplied positionally.</param>
+/// <param name="AllowsNamed">Whether the argument may be supplied by its source label.</param>
+/// <param name="Contexts">The complete set of source applicability contexts.</param>
+/// <param name="Default">The registered omission rule, when any.</param>
+public readonly record struct CoreNativeAttributeArgument(
+    string? Name,
+    CoreNativeAttributeArgumentKind Kind,
+    CoreDeclarationIdentity? EnumType,
+    bool IsRequired,
+    bool AllowsPositional,
+    bool AllowsNamed,
+    ImmutableHashSet<string> Contexts,
+    CoreNativeAttributeDefault? Default)
+{
+    internal bool IsValid
+    {
+        get
+        {
+            if ((Name is string name && !IsValidText(name))
+                || (Name is null && AllowsNamed)
+                || Kind is not (CoreNativeAttributeArgumentKind.LibraryNameLiteral
+                    or CoreNativeAttributeArgumentKind.EntryNameLiteral
+                    or CoreNativeAttributeArgumentKind.Enum)
+                || (Kind == CoreNativeAttributeArgumentKind.Enum
+                    != (EnumType is CoreDeclarationIdentity enumType
+                        && enumType.IsValid
+                        && enumType.Kind == CoreDeclarationKind.EnumType))
+                || (!AllowsPositional && !AllowsNamed)
+                || Contexts is null || Contexts.Count == 0
+                || Contexts.Any(static context => !IsValidText(context))
+                || (Default is CoreNativeAttributeDefault defaultValue
+                    && !defaultValue.IsValid))
+            {
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    internal bool IsEquivalent(CoreNativeAttributeArgument other)
+        => Name == other.Name
+            && Kind == other.Kind
+            && EnumType == other.EnumType
+            && IsRequired == other.IsRequired
+            && AllowsPositional == other.AllowsPositional
+            && AllowsNamed == other.AllowsNamed
+            && Contexts is not null && other.Contexts is not null
+            && Contexts.SetEquals(other.Contexts)
+            && Default == other.Default;
+
+    private static bool IsValidText(string value)
+        => !string.IsNullOrWhiteSpace(value)
+            && !value.Contains('\0', StringComparison.Ordinal);
+}
+
 /// <summary>A complete checked attribute schema selected by a Core provider.</summary>
 /// <param name="Identity">The exact semantic schema identity.</param>
 /// <param name="QualifiedName">The source-qualified schema name.</param>
 /// <param name="Role">The native declaration role owned by this schema.</param>
+/// <param name="Arguments">The complete ordered source argument schema.</param>
+/// <param name="Placement">The exact registered source placement.</param>
+/// <param name="Targets">The complete set of permitted source target contexts.</param>
 /// <param name="CallingConventionEnum">The exact convention enum identity, when applicable.</param>
 /// <param name="ResolutionModeEnum">The exact resolution-mode enum identity, when applicable.</param>
 /// <param name="ResolutionPolicyEnum">The exact resolution-policy enum identity, when applicable.</param>
@@ -261,24 +384,98 @@ public sealed record CoreNativeAttributeSchema(
     CoreDeclarationIdentity Identity,
     string QualifiedName,
     CoreNativeAttributeRole Role,
+    ImmutableArray<CoreNativeAttributeArgument> Arguments,
+    string Placement,
+    ImmutableHashSet<string> Targets,
     CoreDeclarationIdentity? CallingConventionEnum,
     CoreDeclarationIdentity? ResolutionModeEnum,
     CoreDeclarationIdentity? ResolutionPolicyEnum,
     int GenericArity,
     bool IsPublic,
     bool IsPrimary,
-    bool IsRepeatable);
+    bool IsRepeatable)
+{
+    internal bool IsStructurallyValid
+    {
+        get
+        {
+            if (!Identity.IsValid
+                || Identity.Kind != CoreDeclarationKind.AttributeSchema
+                || !IsValidText(QualifiedName)
+                || Role is not (CoreNativeAttributeRole.NativeImport
+                    or CoreNativeAttributeRole.NativeCallable
+                    or CoreNativeAttributeRole.NativeCallConv
+                    or CoreNativeAttributeRole.NativeExport)
+                || Arguments.IsDefault
+                || !IsValidText(Placement)
+                || Targets is null || Targets.Count == 0
+                || Targets.Any(static target => target is null
+                    || !IsValidText(target))
+                || GenericArity < 0
+                || Arguments.Any(static argument => !argument.IsValid))
+            {
+                return false;
+            }
+
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            return Arguments.All(argument => argument.Name is not string name
+                || names.Add(name));
+        }
+    }
+
+    internal static bool AreEquivalent(CoreNativeAttributeSchema left,
+        CoreNativeAttributeSchema right)
+    {
+        if (left.Identity != right.Identity
+            || left.QualifiedName != right.QualifiedName
+            || left.Role != right.Role
+            || left.Arguments.IsDefault || right.Arguments.IsDefault
+            || left.Arguments.Length != right.Arguments.Length
+            || !string.Equals(left.Placement, right.Placement,
+                StringComparison.Ordinal)
+            || left.Targets is null || right.Targets is null
+            || !left.Targets.SetEquals(right.Targets)
+            || left.CallingConventionEnum != right.CallingConventionEnum
+            || left.ResolutionModeEnum != right.ResolutionModeEnum
+            || left.ResolutionPolicyEnum != right.ResolutionPolicyEnum
+            || left.GenericArity != right.GenericArity
+            || left.IsPublic != right.IsPublic
+            || left.IsPrimary != right.IsPrimary
+            || left.IsRepeatable != right.IsRepeatable)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Arguments.Length; index++)
+        {
+            if (!left.Arguments[index].IsEquivalent(right.Arguments[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsValidText(string value)
+        => !string.IsNullOrWhiteSpace(value)
+            && !value.Contains('\0', StringComparison.Ordinal);
+}
 
 /// <summary>A complete selected top-level declaration captured from one provider export map.</summary>
 /// <param name="Identity">The exact exported declaration identity.</param>
 /// <param name="EnumDefinition">The complete enum declaration, for an enum-type export.</param>
 /// <param name="NativeAttributeSchema">The complete native attribute schema, when selected.</param>
 /// <param name="LayoutAttributeSchema">The complete layout attribute schema, when selected.</param>
+/// <param name="StaticInitializerAttributeSchema">The complete static-initializer attribute schema, when selected.</param>
+/// <param name="LazyInitializationAttributeSchema">The complete LazyInitialization attribute schema, when selected.</param>
 public sealed record CoreProviderDeclarationSnapshot(
     CoreDeclarationIdentity Identity,
     CoreEnumDefinition? EnumDefinition,
     CoreNativeAttributeSchema? NativeAttributeSchema,
-    CoreLayoutAttributeSchema? LayoutAttributeSchema)
+    CoreLayoutAttributeSchema? LayoutAttributeSchema,
+    CoreStaticInitializerAttributeSchema? StaticInitializerAttributeSchema = null,
+    CoreLazyInitializationAttributeSchema? LazyInitializationAttributeSchema = null)
 {
     /// <summary>Creates a snapshot for a complete enum declaration.</summary>
     public static CoreProviderDeclarationSnapshot From(CoreEnumDefinition definition)
@@ -303,6 +500,22 @@ public sealed record CoreProviderDeclarationSnapshot(
         return new(schema.Identity, null, null, schema);
     }
 
+    /// <summary>Creates a snapshot for the complete StaticInitializer schema.</summary>
+    public static CoreProviderDeclarationSnapshot From(
+        CoreStaticInitializerAttributeSchema schema)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        return new(schema.Identity, null, null, null, schema);
+    }
+
+    /// <summary>Creates a snapshot for the complete LazyInitialization schema.</summary>
+    public static CoreProviderDeclarationSnapshot From(
+        CoreLazyInitializationAttributeSchema schema)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        return new(schema.Identity, null, null, null, null, schema);
+    }
+
     internal bool IsValid
     {
         get
@@ -310,9 +523,15 @@ public sealed record CoreProviderDeclarationSnapshot(
             var hasEnum = EnumDefinition is not null;
             var hasNativeSchema = NativeAttributeSchema is not null;
             var hasLayoutSchema = LayoutAttributeSchema is not null;
+            var hasStaticInitializerSchema
+                = StaticInitializerAttributeSchema is not null;
+            var hasLazyInitializationSchema
+                = LazyInitializationAttributeSchema is not null;
             if (!Identity.IsValid
                 || (hasEnum ? 1 : 0) + (hasNativeSchema ? 1 : 0)
-                    + (hasLayoutSchema ? 1 : 0) != 1)
+                    + (hasLayoutSchema ? 1 : 0)
+                    + (hasStaticInitializerSchema ? 1 : 0)
+                    + (hasLazyInitializationSchema ? 1 : 0) != 1)
             {
                 return false;
             }
@@ -323,8 +542,19 @@ public sealed record CoreProviderDeclarationSnapshot(
                 : hasNativeSchema
                     ? Identity.Kind == CoreDeclarationKind.AttributeSchema
                         && NativeAttributeSchema!.Identity == Identity
-                    : Identity.Kind == CoreDeclarationKind.AttributeSchema
-                        && LayoutAttributeSchema!.Identity == Identity;
+                        && NativeAttributeSchema.IsStructurallyValid
+                    : hasLayoutSchema
+                        ? Identity.Kind == CoreDeclarationKind.AttributeSchema
+                            && LayoutAttributeSchema!.Identity == Identity
+                        : hasStaticInitializerSchema
+                            ? Identity.Kind == CoreDeclarationKind.AttributeSchema
+                                && StaticInitializerAttributeSchema!.Identity
+                                    == Identity
+                                && StaticInitializerAttributeSchema.IsStructurallyValid
+                            : Identity.Kind == CoreDeclarationKind.AttributeSchema
+                            && LazyInitializationAttributeSchema!.Identity
+                                == Identity
+                            && LazyInitializationAttributeSchema.IsStructurallyValid;
         }
     }
 }
@@ -593,12 +823,136 @@ public sealed class NativeCoreRegistrationSet
                 && member.DeclaringEnum == definition.Identity);
     }
 
-    private static bool IsSchema(CoreNativeAttributeSchema schema, string qualifiedName,
-        CoreNativeAttributeRole role) =>
-        schema is not null && schema.Identity.IsValid
-        && schema.Identity.Kind == CoreDeclarationKind.AttributeSchema
-        && schema.QualifiedName == qualifiedName
-        && schema.Role == role
-        && schema.GenericArity == 0
-        && schema.IsPublic && schema.IsPrimary && !schema.IsRepeatable;
+    private bool IsSchema(CoreNativeAttributeSchema schema,
+        string qualifiedName, CoreNativeAttributeRole role)
+    {
+        if (schema is null || !schema.IsStructurallyValid
+            || schema.Identity.Kind != CoreDeclarationKind.AttributeSchema
+            || schema.QualifiedName != qualifiedName
+            || schema.Role != role
+            || schema.GenericArity != 0
+            || !schema.IsPublic || !schema.IsPrimary || schema.IsRepeatable)
+        {
+            return false;
+        }
+
+        var conventionMember = FindMember(CallingConventions,
+            "Unmanaged").Identity;
+        var (placement, targets, arguments) = role switch {
+            CoreNativeAttributeRole.NativeImport =>
+                (Placement: "primary-declaration",
+                    Targets: Set("static-extern-callable",
+                        "static-extern-data"),
+                    Arguments: ExpectedNativeImportArguments(conventionMember)),
+            CoreNativeAttributeRole.NativeCallable =>
+                (Placement: "primary-declaration",
+                    Targets: Set("ordinary-method", "interface"),
+                    Arguments: ExpectedNativeCallableArguments(
+                        conventionMember)),
+            CoreNativeAttributeRole.NativeCallConv =>
+                (Placement: "immediate-fnptr-type-use",
+                    Targets: Set("fnptr-type-use"),
+                    Arguments: ExpectedNativeCallConvArguments()),
+            CoreNativeAttributeRole.NativeExport =>
+                (Placement: "primary-declaration",
+                    Targets: Set("static-defined-callable",
+                        "static-defined-data"),
+                    Arguments: ExpectedNativeExportArguments()),
+            _ => default,
+        };
+        return schema.Placement == placement
+            && schema.Targets.SetEquals(targets)
+            && AreEquivalent(schema.Arguments, arguments);
+    }
+
+    private ImmutableArray<CoreNativeAttributeArgument>
+        ExpectedNativeImportArguments(CoreDeclarationIdentity conventionMember)
+    {
+        var all = Set("callable-link", "callable-dynamic", "data-link",
+            "data-dynamic");
+        return [
+            new("LibraryName",
+                CoreNativeAttributeArgumentKind.LibraryNameLiteral, null,
+                true, true, true, all, null),
+            new("EntryName",
+                CoreNativeAttributeArgumentKind.EntryNameLiteral, null,
+                false, true, true, all,
+                new CoreNativeAttributeDefault(
+                    CoreNativeAttributeDefaultKind.DeclarationName, null)),
+            new("ResolutionMode", CoreNativeAttributeArgumentKind.Enum,
+                ResolutionModes.Identity, false, false, true, all,
+                EnumMemberDefault(FindMember(ResolutionModes, "Link").Identity)),
+            new("ResolutionPolicy", CoreNativeAttributeArgumentKind.Enum,
+                ResolutionPolicies.Identity, false, false, true,
+                Set("callable-dynamic", "data-dynamic"),
+                EnumMemberDefault(FindMember(ResolutionPolicies,
+                    "Default").Identity)),
+            new("CallConv", CoreNativeAttributeArgumentKind.Enum,
+                CallingConventions.Identity, false, false, true,
+                Set("callable-link", "callable-dynamic"),
+                EnumMemberDefault(conventionMember)),
+        ];
+    }
+
+    private ImmutableArray<CoreNativeAttributeArgument>
+        ExpectedNativeCallableArguments(
+            CoreDeclarationIdentity conventionMember)
+        =>
+        [
+            new("CallConv", CoreNativeAttributeArgumentKind.Enum,
+                CallingConventions.Identity, false, false, true,
+                Set("method", "interface"),
+                EnumMemberDefault(conventionMember)),
+        ];
+
+    private ImmutableArray<CoreNativeAttributeArgument>
+        ExpectedNativeCallConvArguments()
+        =>
+        [
+            new(null, CoreNativeAttributeArgumentKind.Enum,
+                CallingConventions.Identity, true, true, false,
+                Set("fnptr-type-use"), null),
+        ];
+
+    private static ImmutableArray<CoreNativeAttributeArgument>
+        ExpectedNativeExportArguments()
+        =>
+        [
+            new("EntryName",
+                CoreNativeAttributeArgumentKind.EntryNameLiteral, null,
+                false, true, true, Set("method", "data"),
+                new CoreNativeAttributeDefault(
+                    CoreNativeAttributeDefaultKind.DeclarationName, null)),
+        ];
+
+    private static CoreNativeAttributeDefault EnumMemberDefault(
+        CoreDeclarationIdentity member)
+        => new(CoreNativeAttributeDefaultKind.EnumMember, member);
+
+    private static CoreEnumMemberDefinition FindMember(
+        CoreEnumDefinition definition, string name)
+        => definition.Members.Single(member => member.Name == name);
+
+    private static bool AreEquivalent(
+        ImmutableArray<CoreNativeAttributeArgument> left,
+        ImmutableArray<CoreNativeAttributeArgument> right)
+    {
+        if (left.IsDefault || right.IsDefault || left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Length; index++)
+        {
+            if (!left[index].IsEquivalent(right[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static ImmutableHashSet<string> Set(params string[] values)
+        => values.ToImmutableHashSet(StringComparer.Ordinal);
 }

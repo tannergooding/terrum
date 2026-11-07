@@ -15,7 +15,8 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class LoopLabelAttachmentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class LoopLabelAttachmentTests
 {
     public static IEnumerable<object[]> Boundaries
     {
@@ -87,15 +88,20 @@ public sealed class LoopLabelAttachmentTests
     public async Task CompiledScannerPreservesEveryLabelBoundaryAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root).ConfigureAwait(false);
         var text = string.Join("\n", Boundaries.Select(row => Source((string)row[0], (string)row[1])));
         var source = SourceText.From(text);
         Assert.That(source.Length <= ScannerHost.MaximumSourceLength, Is.True);
         var buffers = ScannerHost.CreateBuffers(source);
-        var compilation = Compilation.Create(SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
+        var compilation = ScannerTests.CreateScannerCompilation(
+            SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
             buffers, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy);
+        var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), policy);
         var adapted = ScannerHost.ReadLexResult(source, native.ExitCode, Buffer(3), Buffer(5), Buffer(4));
         Assert.That(adapted.Tokens.Select(token => (token.Kind, token.Span)), Is.EqualTo(Lexer.Lex(source).Tokens.Select(token => (token.Kind, token.Span))));
         var hosted = SyntaxTree.Parse(source);
@@ -104,10 +110,12 @@ public sealed class LoopLabelAttachmentTests
         Assert.That(actual.Diagnostics.ToArray(), Is.EqualTo(hosted.Diagnostics.ToArray()));
         Assert.That(actual.Diagnostics.Count(item => item.Code == "TRM1012"), Is.EqualTo(Boundaries.Count(row => (bool)row[2])));
 
-        ReadOnlySpan<byte> Buffer(int index) =>
-            native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+        ReadOnlySpan<byte> Buffer(int index)
+        {
+            return native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+        }
     }
 
     internal static string Source(string loop, string gap) =>
-        $"[NoThrow] int32 Main() {{ @const:{gap}{loop} return 42; }}";
+        $" int32 Main() {{ @const:{gap}{loop} return 42; }}";
 }

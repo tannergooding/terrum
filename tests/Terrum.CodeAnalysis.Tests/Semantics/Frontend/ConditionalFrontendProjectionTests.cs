@@ -2,13 +2,14 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class ConditionalFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ConditionalFrontendProjectionTests
 {
     [Test]
     public void ReaderChecksThreeConditionalRootsAndIndependentThirdChildren()
@@ -61,33 +62,33 @@ public sealed class ConditionalFrontendProjectionTests
         Reject(38, 7);
         Reject(39, 11);
         Reject(40, 7);
-        Reject(43 + 3 * 8, 1);
-        Reject(43 + 7 * 8, 5);
-        Reject(42 + 7 * 8 + 4, 5);
-        Reject(42 + 7 * 8 + 5, 7);
-        Reject(42 + 7 * 8 + 6, 7);
-        Reject(42 + 7 * 8 + 6, 5);
-        Reject(42 + 7 * 8 + 7, 1);
-        Reject(42 + 11 * 8 + 6, 6);
-        Reject(42 + 3 * 8 + 2, first + 1);
-        Reject(42 + 7 * 8 + 3, two - second);
-        Reject(42 + 12 * 8, 1);
+        Reject(43 + (3 * 8), 1);
+        Reject(43 + (7 * 8), 5);
+        Reject(42 + (7 * 8) + 4, 5);
+        Reject(42 + (7 * 8) + 5, 7);
+        Reject(42 + (7 * 8) + 6, 7);
+        Reject(42 + (7 * 8) + 6, 5);
+        Reject(42 + (7 * 8) + 7, 1);
+        Reject(42 + (11 * 8) + 6, 6);
+        Reject(42 + (3 * 8) + 2, first + 1);
+        Reject(42 + (7 * 8) + 3, two - second);
+        Reject(42 + (12 * 8), 1);
         Reject(298, 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("b ? 3", "b : 3", StringComparison.Ordinal)), Bytes()));
 
         void Reject(int index, int replacement)
         {
             var original = words[index];
             words[index] = replacement;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int type, int start, int end,
             int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -137,13 +138,13 @@ public sealed class ConditionalFrontendProjectionTests
         Node(2, 3, 1, two, two + 1, -1, -1, 2);
         Node(3, 84, 1, b, two + 1, 0, 1, 2);
         Node(4, 83, 4, call, two + 2, 3, -1);
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes()));
 
         void Node(int index, int operation, int type, int start, int end,
             int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;

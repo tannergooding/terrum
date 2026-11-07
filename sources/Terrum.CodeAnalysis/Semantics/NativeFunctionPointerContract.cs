@@ -43,7 +43,7 @@ internal static class NativeFunctionPointerTypes
     internal const int First = ManagedClassTypes.OptionalWriteFirst + 256;
 
     internal static bool IsType(PrimitiveType type) =>
-        (int)type is >= First and < NativePointerTypes.First;
+        (int)type is >= First and < NativeFixedArrayTypes.First;
 
     internal static int Index(PrimitiveType type) => checked((int)type - First);
 
@@ -53,6 +53,11 @@ internal static class NativeFunctionPointerTypes
 internal static class NativeFunctionPointerContract
 {
     internal static bool IsValidTable(ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures)
+        => IsValidTable(signatures, null);
+
+    internal static bool IsValidTable(
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
+        Func<PrimitiveType, bool>? isValidNativeParameterPointee)
     {
         if (signatures.IsDefault)
         {
@@ -62,7 +67,8 @@ internal static class NativeFunctionPointerContract
         var state = new byte[signatures.Length];
         for (var index = 0; index < signatures.Length; index++)
         {
-            if (!IsValidSignature(index, signatures, state, 0))
+            if (!IsValidSignature(index, signatures, state, 0,
+                    isValidNativeParameterPointee))
             {
                 return false;
             }
@@ -1130,6 +1136,7 @@ internal static class NativeFunctionPointerContract
             or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
             or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.NativeRawPointer
+            || BoundEnumTypes.IsType(type)
             || NativePointerTypes.IsType(type)
             || (NativeFunctionPointerTypes.IsType(type)
                 && (uint)NativeFunctionPointerTypes.Index(type) < (uint)signatures.Length);
@@ -1139,7 +1146,9 @@ internal static class NativeFunctionPointerContract
         type == PrimitiveType.Void || IsSupportedValueType(type, signatures);
 
     private static bool IsValidSignature(int index,
-        ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures, byte[] state, int depth)
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
+        byte[] state, int depth,
+        Func<PrimitiveType, bool>? isValidNativeParameterPointee)
     {
         if (depth > SemanticVerifier.MaximumDepth)
         {
@@ -1167,21 +1176,30 @@ internal static class NativeFunctionPointerContract
             || !ValidOutputStates(signature)
             || !ValidDependencies(signature)
             || !ValidNativeParameterContracts(signature)
-            || !IsValidType(signature.ReturnType, signatures, state, allowVoid: true, depth: depth + 1))
+            || !IsValidType(signature.ReturnType, signatures, state,
+                allowVoid: true, depth: depth + 1,
+                isValidNativeParameterPointee:
+                    isValidNativeParameterPointee))
         {
             return false;
         }
         foreach (var parameterType in signature.ParameterTypes)
         {
-            if (!IsValidType(parameterType, signatures, state, allowVoid: false, depth: depth + 1))
+            if (!IsValidType(parameterType, signatures, state,
+                    allowVoid: false, depth: depth + 1,
+                    isValidNativeParameterPointee:
+                        isValidNativeParameterPointee))
             {
                 return false;
             }
         }
         foreach (var parameter in signature.NativeParameters)
         {
-            if (!IsValidType(parameter.PointeeType, signatures, state,
-                allowVoid: true, depth: depth + 1))
+            if (isValidNativeParameterPointee is null
+                ? !IsValidType(parameter.PointeeType, signatures, state,
+                    allowVoid: true, depth: depth + 1,
+                    isValidNativeParameterPointee: null)
+                : !isValidNativeParameterPointee(parameter.PointeeType))
             {
                 return false;
             }
@@ -1192,16 +1210,19 @@ internal static class NativeFunctionPointerContract
 
     private static bool IsValidType(PrimitiveType type,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures, byte[] state, bool allowVoid,
-        int depth)
+        int depth,
+        Func<PrimitiveType, bool>? isValidNativeParameterPointee)
     {
         if (NativeFunctionPointerTypes.IsType(type))
         {
             var index = NativeFunctionPointerTypes.Index(type);
             return (uint)index < (uint)signatures.Length
-                && IsValidSignature(index, signatures, state, depth + 1);
+                && IsValidSignature(index, signatures, state, depth + 1,
+                    isValidNativeParameterPointee);
         }
 
         return type == PrimitiveType.NativeRawPointer || NativePointerTypes.IsType(type)
+            || BoundEnumTypes.IsType(type)
             || type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
                 or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
                 or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32

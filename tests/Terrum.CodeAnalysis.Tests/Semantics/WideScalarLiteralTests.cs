@@ -8,7 +8,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class WideScalarLiteralTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class WideScalarLiteralTests
 {
     [TestCase("int128", PrimitiveType.Int128,
         "-170141183460469231731687303715884105728", 0UL, 0x8000_0000_0000_0000UL)]

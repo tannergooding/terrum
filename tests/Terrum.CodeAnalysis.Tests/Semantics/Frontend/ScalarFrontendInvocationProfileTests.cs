@@ -4,19 +4,19 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed partial class ScalarFrontendInvocationProfileTests
+internal sealed partial class ScalarFrontendInvocationProfileTests
 {
     private const string TenFunctions =
         "void F0() { } void F1() { } void F2() { } void F3() { } void F4() { } "
@@ -52,16 +52,22 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             """).ConfigureAwait(true);
         var source = SourceText.From(TenFunctions);
         Assert.That(Lexer.Lex(source).Tokens.Length, Is.EqualTo(61));
-        var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source), policy);
+        var compilation = CreateWithLayoutCore(trees,
+            ScalarFrontendHost.CreateBuffers(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var window = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Terrum.CodeAnalysis.TryGetScalarWindowToken");
         Assert.That(global::System.Linq.Enumerable.Any(window.Variables,static variable => variable.Type == PrimitiveType.TokenSpan),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Structures,static structure => structure.Name == "Terrum.CodeAnalysis.TokenCursor"),Is.False);
 
         var exception = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(program, ["Terrum.CodeAnalysis.PublishAndSummarize"]))!;
-        Assert.That(exception.Message, Is.EqualTo("Compilation-local span and capture metadata cannot be persisted."));
+        Assert.That(exception.Message, Is.EqualTo(
+            "Compilation-local spans are not supported in private semantic modules."));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -74,10 +80,14 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 return TryDecodeScalarFrontendProgram(wordCount, maximumTokenEnd);
             }
             """).ConfigureAwait(true);
-        var compilation = Compilation.Create(trees,
+        var compilation = CreateWithLayoutCore(trees,
             ScalarFrontendHost.CreateBuffers(SourceText.From(TenFunctions)), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function => function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan)),Is.False);
 
         var exception = Assert.Throws<ModuleFormatException>(() =>
@@ -96,18 +106,35 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             }
             """).ConfigureAwait(true);
         var source = SourceText.From(TenFunctions);
-        var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source), policy);
+        var compilation = CreateWithLayoutCore(trees,
+            ScalarFrontendHost.CreateBuffers(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var actual = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
+        var actual = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(),
             (NativeRuntimePolicy)policy);
         Assert.That(actual.ExitCode, Is.EqualTo(42));
         var summary = actual.Data.AsSpan(actual.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         var publication = actual.Data.AsSpan(actual.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
             ScalarFrontendHost.ProgramWordCount * sizeof(int)).ToArray();
-        {var __nunitItems0 = summary;        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems0) { Assert.That(__nunitItem3, Is.EqualTo(0)); } });}
-        {var __nunitItems1 = publication;        Assert.Multiple(() => { foreach (var __nunitItem4 in __nunitItems1) { Assert.That(__nunitItem4, Is.EqualTo(0)); } });}
-        Assert.Throws<ArgumentException>(() =>
+        {
+            var __nunitItems0 = summary;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem3 in __nunitItems0)
+    {
+        Assert.That(__nunitItem3, Is.EqualTo(0)); } });
+        }
+        {
+            var __nunitItems1 = publication;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem4 in __nunitItems1)
+    {
+        Assert.That(__nunitItem4, Is.EqualTo(0)); } });
+        }
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadProgram(source, summary, publication, policy));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -150,15 +177,24 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             """).ConfigureAwait(true);
         var seed = SourceText.From("seed");
         var buffers = ScannerHost.CreateInvocationProfileBuffers(seed);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CreateWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(),
             ["Terrum.CodeAnalysis.ScanFrontendFixture"]);
-        var alternateCompilation = Compilation.Create(trees,
-            ScannerHost.CreateInvocationProfileBuffers(SourceText.From("different seed 123")), policy);
+        var alternateCompilation = CreateWithLayoutCore(trees,
+            ScannerHost.CreateInvocationProfileBuffers(
+                SourceText.From("different seed 123")), policy);
         Assert.That(alternateCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
         Assert.That(ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = alternateCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = alternateCompilation.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(),
             ["Terrum.CodeAnalysis.ScanFrontendFixture"]), Is.EqualTo(producer));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.InvocationProfileId, Is.EqualTo(ScannerHost.InvocationProfileIdentity));
@@ -168,12 +204,22 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             """), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = consumerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual7 = consumerCompilation.Program;
+                Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual7!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(linked.RequiresSourceGrant, Is.True);
         Assert.That(linked.InvocationProfileId, Is.EqualTo(ScannerHost.InvocationProfileIdentity));
         Assert.That(linked.Buffers.Length, Is.EqualTo(10));
-        {var __nunitItems2 = linked.Buffers;        Assert.Multiple(() => { foreach (var __nunitItem8 in __nunitItems2) { Assert.That(__nunitItem8.Values, Is.Empty); } });}
+        {
+            var __nunitItems2 = linked.Buffers;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem8 in __nunitItems2)
+    {
+        Assert.That(__nunitItem8.Values, Is.Empty); } });
+        }
 
         var maximumSource = new string(' ', ScannerHost.MaximumSourceLength - TenFunctions.Length)
             + TenFunctions;
@@ -214,11 +260,37 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(retained.TokenCount, Is.EqualTo(17));
         Assert.That(global::System.Linq.Enumerable.Single(retained.IntegerValues).Magnitude, Is.EqualTo(42UL));
         Assert.That(seed.Text, Is.EqualTo("seed"));
-        {var __nunitItems4 = buffers.Where(static buffer => buffer.IsWritable);        Assert.Multiple(() => { foreach (var __nunitItem10 in __nunitItems4) { {var __nunitItems3 = __nunitItem10.Values;Assert.Multiple(() => { foreach (var __nunitItem9 in __nunitItems3) { Assert.That(__nunitItem9, Is.EqualTo(0)); } });} } });}
-        Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScannerProfile(linked,
+        {
+            var __nunitItems4 = buffers.Where(static buffer => buffer.IsWritable);
+            Assert.Multiple(() => {
+    foreach (var __nunitItem10 in __nunitItems4)
+    {
+        {
+            var __nunitItems3 = __nunitItem10.Values;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem9 in __nunitItems3)
+    {
+        Assert.That(__nunitItem9, Is.EqualTo(0)); } });} } });
+        }
+        _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScannerProfile(linked,
             SourceText.From(new string(' ', ScannerHost.MaximumSourceLength + 1)),
             (NativeRuntimePolicy)policy));
     }
+
+    private static Compilation CreateWithLayoutCore(
+        IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        BoundRuntimePolicy policy)
+        => Compilation.Create(trees, buffers, new CompilationOptions {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+
+    private static Compilation CreateLibraryWithLayoutCore(SyntaxTree tree,
+        BoundRuntimePolicy policy)
+        => Compilation.CreateLibrary(tree, new CompilationOptions {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
 
     private static async Task<ImmutableArray<SyntaxTree>> ReadComponentsAsync(string[] components, string entry)
     {

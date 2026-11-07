@@ -2,14 +2,15 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class DoForFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class DoForFrontendProjectionTests
 {
     [Test]
     public void ReaderRejectsObsoleteLoopTagForOrdinaryReturn()
@@ -44,7 +45,7 @@ public sealed class DoForFrontendProjectionTests
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).IsValid, Is.True);
         words[0] = 51;
         Encode();
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -64,17 +65,16 @@ public sealed class DoForFrontendProjectionTests
         words[298] = isFor ? 4 : 2;
         var keyword = text.IndexOf(isFor ? "for (" : "do {", StringComparison.Ordinal);
         var end = isFor
-            ? text.IndexOf("}", text.IndexOf("return", StringComparison.Ordinal),
-                StringComparison.Ordinal) + 1
+            ? text.IndexOf('}', text.IndexOf("return", StringComparison.Ordinal), System.StringComparison.Ordinal) + 1
             : text.IndexOf(");", keyword, StringComparison.Ordinal) + 2;
         var returnAt = text.IndexOf("return", StringComparison.Ordinal);
         var literalAt = text.IndexOf("42", StringComparison.Ordinal);
         Node(0, 3, 1, literalAt, 2, -1, 42);
         if (isFor)
         {
-            var firstDelimiter = text.IndexOf(';', keyword);
-            var secondDelimiter = text.IndexOf(';', firstDelimiter + 1);
-            var close = text.IndexOf(')', secondDelimiter);
+            var firstDelimiter = text.IndexOf(';', keyword, System.StringComparison.Ordinal);
+            var secondDelimiter = text.IndexOf(';', firstDelimiter + 1, System.StringComparison.Ordinal);
+            var close = text.IndexOf(')', secondDelimiter, System.StringComparison.Ordinal);
             Statement(0, 12, 4, -1, keyword, end);
             Statement(1, 13, 0, -1, firstDelimiter, firstDelimiter + 1);
             Statement(2, 13, 0, -1, close, close + 1);
@@ -114,13 +114,13 @@ public sealed class DoForFrontendProjectionTests
         {
             var previous = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = previous;
         }
 
         void Node(int index, int operation, int type, int start, int length, int left, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -132,7 +132,7 @@ public sealed class DoForFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int finish)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;

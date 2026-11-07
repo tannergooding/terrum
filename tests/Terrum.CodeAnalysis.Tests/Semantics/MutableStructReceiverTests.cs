@@ -2,13 +2,14 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class MutableStructReceiverTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class MutableStructReceiverTests
 {
     [TestCase("Counter value = new Counter(40); value.Increment();")]
     [TestCase("new Counter(40).Increment();")]
@@ -50,7 +51,7 @@ public sealed class MutableStructReceiverTests
                 public mut int32 Value;
                 public Owner(int32 value) { Value = value; }
                 public mut void Increment() { Value = Value + 1; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source
@@ -67,7 +68,7 @@ public sealed class MutableStructReceiverTests
                 public mut int32 Value;
                 public Owner(int32 value) { Value = value; }
                 public mut void Accept(Owner other) { Value = other.Value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(42);
@@ -87,7 +88,7 @@ public sealed class MutableStructReceiverTests
                 public mut int32 Value;
                 public Owner(int32 value) { Value = value; }
                 public mut void Increment() { Value = Value + 1; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(41);
@@ -96,12 +97,32 @@ public sealed class MutableStructReceiverTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var main = program.Functions[program.EntryPoint];
-        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual1 = main.Body.Statements[1]; Assert.That(__nunitActual1, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual1!; }))();
-        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual2 = region.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual2!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual3 = statement.Expression; Assert.That(__nunitActual3, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual3!; }))();
-        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual4, Is.TypeOf<BoundMutableReceiverLoan>()); return (BoundMutableReceiverLoan)__nunitActual4!; }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual1 = main.Body.Statements[1];
+            Assert.That(__nunitActual1, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual1!;
+        }))();
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => {
+            var __nunitActual2 = region.Body.Statements[0];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundExpressionStatement>());
+            return (BoundExpressionStatement)__nunitActual2!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual3 = statement.Expression;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual3!;
+        }))();
+        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => {
+            var __nunitActual4 = global::System.Linq.Enumerable.Single(call.Arguments);
+            Assert.That(__nunitActual4, Is.TypeOf<BoundMutableReceiverLoan>());
+            return (BoundMutableReceiverLoan)__nunitActual4!;
+        }))();
         var forged = region with {
             Body = region.Body with {
                 Statements = region.Body.Statements.SetItem(0, statement with {
@@ -170,13 +191,13 @@ public sealed class MutableStructReceiverTests
                 public mut int32 Value;
                 public Child(int32 value) { Value = value; }
                 public mut void Increment(bool enabled) { if (enabled) { Value = Value + 1; } }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Owner {
                 public mut Child Child;
                 public Child Readonly;
                 public Owner(int32 value) { Child = new Child(value); Readonly = new Child(value); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             bool Replace(out Owner result) { result = new Owner(1); return true; }
             int32 Main() {
@@ -193,7 +214,7 @@ public sealed class MutableStructReceiverTests
                 public mut int32 Value;
                 public Child(int32 value) { Value = value; }
                 public mut void Increment() { Value = Value + 1; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Owner {
                 public mut Child Nested;
@@ -203,7 +224,7 @@ public sealed class MutableStructReceiverTests
                     Nested.Increment();
                     Guard = 0;
                 }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             """));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
@@ -226,7 +247,7 @@ public sealed class MutableStructReceiverTests
             unique struct Child {
                 public mut Leaf Data;
                 public Child(int32 value) { Data = new Leaf(value); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Owner {
                 public mut Child Active;
@@ -235,7 +256,7 @@ public sealed class MutableStructReceiverTests
                     Active = new Child(value);
                     Readonly = new Child(value);
                 }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(41);
@@ -244,13 +265,37 @@ public sealed class MutableStructReceiverTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         var main = program.Functions[program.EntryPoint];
-        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual6 = main.Body.Statements[1]; Assert.That(__nunitActual6, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual6!; }))();
-        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual7 = region.Body.Statements[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual7!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual8 = statement.Expression; Assert.That(__nunitActual8, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual8!; }))();
-        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual9 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual9, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual9!; }))();
-        var parent = ((global::System.Func<BoundFieldRead>)(() => { var __nunitActual10 = loan.Place.Receiver; Assert.That(__nunitActual10, Is.TypeOf<BoundFieldRead>()); return (BoundFieldRead)__nunitActual10!; }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual6 = main.Body.Statements[1];
+            Assert.That(__nunitActual6, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual6!;
+        }))();
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => {
+            var __nunitActual7 = region.Body.Statements[0];
+            Assert.That(__nunitActual7, Is.TypeOf<BoundExpressionStatement>());
+            return (BoundExpressionStatement)__nunitActual7!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual8 = statement.Expression;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual8!;
+        }))();
+        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => {
+            var __nunitActual9 = global::System.Linq.Enumerable.Single(call.Arguments);
+            Assert.That(__nunitActual9, Is.TypeOf<BoundMutableFieldLoan>());
+            return (BoundMutableFieldLoan)__nunitActual9!;
+        }))();
+        var parent = ((global::System.Func<BoundFieldRead>)(() => {
+            var __nunitActual10 = loan.Place.Receiver;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundFieldRead>());
+            return (BoundFieldRead)__nunitActual10!;
+        }))();
         var forgedPlace = mutation switch {
             0 => loan.Place with { Field = 8 },
             1 => loan.Place with { Type = PrimitiveType.Int32 },
@@ -358,7 +403,11 @@ public sealed class MutableStructReceiverTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
         SemanticVerifier.Verify(program);
         var method = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Counter.Increment");
         Assert.That(method.Variables[0].IsMutable, Is.True);
@@ -381,7 +430,11 @@ public sealed class MutableStructReceiverTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))();
         var main = program.Functions[program.EntryPoint];
         var readonlyIndex = Array.FindIndex(main.Variables.ToArray(),
             static variable => variable.Name == "readonlyValue");
@@ -391,7 +444,11 @@ public sealed class MutableStructReceiverTests
             Assert.That(__nunitActual13, Is.TypeOf<BoundCall>());
             return (BoundCall)__nunitActual13!;
         }))();
-        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => { var __nunitActual14 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual14, Is.TypeOf<BoundMutableReceiverLoan>()); return (BoundMutableReceiverLoan)__nunitActual14!; }))();
+        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => {
+            var __nunitActual14 = global::System.Linq.Enumerable.Single(call.Arguments);
+            Assert.That(__nunitActual14, Is.TypeOf<BoundMutableReceiverLoan>());
+            return (BoundMutableReceiverLoan)__nunitActual14!;
+        }))();
         var forgedCall = call with { Arguments = [loan with { Variable = readonlyIndex }] };
         var index = Array.FindIndex(main.Body.Statements.ToArray(),
             statement => statement is BoundExpressionStatement expression && expression.Expression == call);
@@ -434,14 +491,30 @@ public sealed class MutableStructReceiverTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
         var main = program.Functions[program.EntryPoint];
         var immutable = Array.FindIndex(main.Variables.ToArray(), variable => variable.Name == "immutable");
         var index = Array.FindIndex(main.Body.Statements.ToArray(),
             statement => statement is BoundExpressionStatement);
-        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual16 = main.Body.Statements[index]; Assert.That(__nunitActual16, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual16!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual17 = statement.Expression; Assert.That(__nunitActual17, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual17!; }))();
-        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual18 = call.Arguments[0]; Assert.That(__nunitActual18, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual18!; }))();
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => {
+            var __nunitActual16 = main.Body.Statements[index];
+            Assert.That(__nunitActual16, Is.TypeOf<BoundExpressionStatement>());
+            return (BoundExpressionStatement)__nunitActual16!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual17 = statement.Expression;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual17!;
+        }))();
+        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => {
+            var __nunitActual18 = call.Arguments[0];
+            Assert.That(__nunitActual18, Is.TypeOf<BoundMutableFieldLoan>());
+            return (BoundMutableFieldLoan)__nunitActual18!;
+        }))();
         var forgedPlace = mutation switch {
             0 => loan.Place with { Field = 9 },
             1 => loan.Place with { Field = 1 },
@@ -486,13 +559,29 @@ public sealed class MutableStructReceiverTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual19 = compilation.Program;
+            Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual19!;
+        }))();
         var main = program.Functions[program.EntryPoint];
         var index = Array.FindIndex(main.Body.Statements.ToArray(),
             static statement => statement is BoundExpressionStatement);
-        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual20 = main.Body.Statements[index]; Assert.That(__nunitActual20, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual20!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual21 = statement.Expression; Assert.That(__nunitActual21, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual21!; }))();
-        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => { var __nunitActual22 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual22, Is.TypeOf<BoundMutableReceiverLoan>()); return (BoundMutableReceiverLoan)__nunitActual22!; }))();
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => {
+            var __nunitActual20 = main.Body.Statements[index];
+            Assert.That(__nunitActual20, Is.TypeOf<BoundExpressionStatement>());
+            return (BoundExpressionStatement)__nunitActual20!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual21 = statement.Expression;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual21!;
+        }))();
+        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => {
+            var __nunitActual22 = global::System.Linq.Enumerable.Single(call.Arguments);
+            Assert.That(__nunitActual22, Is.TypeOf<BoundMutableReceiverLoan>());
+            return (BoundMutableReceiverLoan)__nunitActual22!;
+        }))();
         var forged = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(index, statement with {
@@ -518,7 +607,11 @@ public sealed class MutableStructReceiverTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = compilation.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual23 = compilation.Program;
+            Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual23!;
+        }))();
         var index = Array.FindIndex(program.Functions.ToArray(),
             static function => function.Name == "Counter.Touch");
         var method = program.Functions[index];
@@ -545,11 +638,27 @@ public sealed class MutableStructReceiverTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = compilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual24 = compilation.Program;
+            Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual24!;
+        }))();
         var main = program.Functions[program.EntryPoint];
-        var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual25 = main.Body.Statements[^1]; Assert.That(__nunitActual25, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual25!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual26 = returned.Value; Assert.That(__nunitActual26, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual26!; }))();
-        var read = ((global::System.Func<BoundRead>)(() => { var __nunitActual27 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual27, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual27!; }))();
+        var returned = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual25 = main.Body.Statements[^1];
+            Assert.That(__nunitActual25, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual25!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual26 = returned.Value;
+            Assert.That(__nunitActual26, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual26!;
+        }))();
+        var read = ((global::System.Func<BoundRead>)(() => {
+            var __nunitActual27 = global::System.Linq.Enumerable.Single(call.Arguments);
+            Assert.That(__nunitActual27, Is.TypeOf<BoundRead>());
+            return (BoundRead)__nunitActual27!;
+        }))();
         var forged = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(main.Body.Statements.Length - 1,

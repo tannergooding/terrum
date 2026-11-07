@@ -2,14 +2,15 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class ScopedLocalFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ScopedLocalFrontendProjectionTests
 {
     [Test]
     public void IndependentExpiredIdentityCannotAuthorizeReadsOrUpdatesOfReusedSpelling()
@@ -62,13 +63,13 @@ public sealed class ScopedLocalFrontendProjectionTests
         {
             var saved = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = saved;
         }
 
         void Node(int index, int operation, int type, int start, int length, int left, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -80,7 +81,7 @@ public sealed class ScopedLocalFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;
@@ -136,7 +137,7 @@ public sealed class ScopedLocalFrontendProjectionTests
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).IsValid, Is.True);
         words[0] = 50;
         Encode();
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
     }
 
     [Test]
@@ -192,20 +193,20 @@ public sealed class ScopedLocalFrontendProjectionTests
         Reject(349, 1);
         Reject(306, first + 6);
         Reject(355, 2);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("return 0;", "return x;", StringComparison.Ordinal)), Bytes()));
 
         void Reject(int index, int replacement)
         {
             var old = words[index];
             words[index] = replacement;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = old;
         }
 
         void Node(int index, int operation, int type, int start, int length, int left, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -217,7 +218,7 @@ public sealed class ScopedLocalFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;
@@ -290,21 +291,21 @@ public sealed class ScopedLocalFrontendProjectionTests
         Reject(50, 2);
         Reject(359, lastReturn + 1);
         Reject(391, 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("return x;", "return 42;", StringComparison.Ordinal)), Bytes()));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()[..^1]));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes().AsSpan()[..^1]));
 
         void Reject(int index, int replacement)
         {
             var old = words[index];
             words[index] = replacement;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = old;
         }
 
         void Node(int index, int operation, int type, int start, int length, int left, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -316,7 +317,7 @@ public sealed class ScopedLocalFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;

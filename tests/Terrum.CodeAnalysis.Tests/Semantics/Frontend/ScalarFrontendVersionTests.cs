@@ -4,15 +4,16 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class ScalarFrontendVersionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ScalarFrontendVersionTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -26,7 +27,7 @@ public sealed class ScalarFrontendVersionTests
         foreach (var version in RejectedVersions())
         {
             words[0] = version;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
         }
     }
     [TestCase(false)]
@@ -83,7 +84,7 @@ public sealed class ScalarFrontendVersionTests
             {
                 var fourthMask = words.ToArray();
                 fourthMask[maskWord] = 1 << 3;
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                     source, Bytes(fourthMask)));
             }
         }
@@ -96,7 +97,7 @@ public sealed class ScalarFrontendVersionTests
         fourParameter[18] = 1;
         fourParameter[19] = fourParameterText.IndexOf("fourth", StringComparison.Ordinal);
         fourParameter[20] = "fourth".Length;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(fourParameterText), Bytes(fourParameter)));
     }
 
@@ -123,19 +124,19 @@ public sealed class ScalarFrontendVersionTests
         const string function = "int32 Value() { return 42; }";
         var malformed = SourceText.From(function[..^1]);
         Assert.That(SyntaxTree.Parse(malformed).HasErrors, Is.True);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(malformed,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(malformed,
             Bytes(Function(malformed.Text, "Value", tree: true))));
 
         var lexicalErrorText = string.Concat("//", (char)0xD800, "\n", function);
         var lexicalError = SourceText.From(lexicalErrorText);
         Assert.That(Lexer.Lex(lexicalError).Diagnostics, Is.Not.Empty);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(lexicalError,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(lexicalError,
             Bytes(Function(lexicalErrorText, "Value", tree: true))));
 
         const string invalidAliasText = "alias Scalar = Missing; int32 Value() { return 42; }";
         var invalidAlias = SourceText.From(invalidAliasText);
         Assert.That(SyntaxTree.Parse(invalidAlias).HasErrors, Is.False);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(invalidAlias,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(invalidAlias,
             Bytes(Function(invalidAliasText, "Value", tree: true))));
     }
 
@@ -152,7 +153,7 @@ public sealed class ScalarFrontendVersionTests
         foreach (var version in RejectedVersions())
         {
             words[0] = version;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
         }
     }
 
@@ -176,13 +177,15 @@ public sealed class ScalarFrontendVersionTests
             }
             var span = new TextSpan(tokens[start].Span.Start,
                 tokens[end - 1].Span.End - tokens[start].Span.Start);
-            var frame = 4 + function * ScalarFrontendHost.ProgramFrameWordCount;
+            var frame = 4 + (function * ScalarFrontendHost.ProgramFrameWordCount);
             words[frame] = start;
             words[frame + 1] = end;
             words[frame + 2] = span.Start;
             words[frame + 3] = span.Length;
             var name = function == 0 ? "First" : "Second";
-            var body = Function(new string(' ', span.Start) + text.Substring(span.Start, span.Length), name, true);
+            var body = Function(string.Concat(
+                new string(' ', span.Start).AsSpan(),
+                text.AsSpan(span.Start, span.Length)), name, true);
             body[0] = 88;
             body.AsSpan(0, ScalarFrontendHost.ProgramBodyWordCount).CopyTo(words.AsSpan(frame + 4));
             words.AsSpan(frame + 4 + ScalarFrontendHost.ProgramBodyWordCount, 64).Fill(-1);
@@ -195,7 +198,7 @@ public sealed class ScalarFrontendVersionTests
             foreach (var version in RejectedProgramVersions())
             {
                 words[offset] = version;
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
                     Bytes(words), BoundRuntimePolicy.FailFast));
             }
             words[offset] = 88;
@@ -247,9 +250,9 @@ public sealed class ScalarFrontendVersionTests
 
         var forgedNamespace = words.ToArray();
         forgedNamespace[frame + 4 + 21]++;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
             Bytes(forgedNamespace), BoundRuntimePolicy.FailFast));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
             Bytes(Function(text, "Main", tree: true))));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -295,11 +298,11 @@ public sealed class ScalarFrontendVersionTests
 
         var forgedNamespace = words.ToArray();
         forgedNamespace[frame + 4 + 21]++;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
             Bytes(forgedNamespace), policy));
         var forgedDeclarationName = words.ToArray();
         forgedDeclarationName[frame + 4 + 9]++;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
             Bytes(forgedDeclarationName), policy));
     }
     [TestCase(9,64)]
@@ -327,7 +330,7 @@ public sealed class ScalarFrontendVersionTests
             }
             var span = new TextSpan(tokens[start].Span.Start,
                 tokens[end - 1].Span.End - tokens[start].Span.Start);
-            var frame = 4 + index * ScalarFrontendHost.ProgramFrameWordCount;
+            var frame = 4 + (index * ScalarFrontendHost.ProgramFrameWordCount);
             program[frame] = start;
             program[frame + 1] = end;
             program[frame + 2] = span.Start;
@@ -374,7 +377,7 @@ public sealed class ScalarFrontendVersionTests
         words[2] = ScalarFrontendHost.MaximumFunctions + 1;
         var source = SourceText.From("void Main() { }");
 
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
             Bytes(new int[ScalarFrontendHost.WordCount]), Bytes(words), BoundRuntimePolicy.FailFast));
     }
 

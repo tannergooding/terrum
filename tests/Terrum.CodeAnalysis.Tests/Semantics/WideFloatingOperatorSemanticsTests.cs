@@ -9,7 +9,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class WideFloatingOperatorSemanticsTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class WideFloatingOperatorSemanticsTests
 {
     [TestCase("float16", 0x3E00UL, 0UL)]
     [TestCase("bfloat16", 0x3FC0UL, 0UL)]

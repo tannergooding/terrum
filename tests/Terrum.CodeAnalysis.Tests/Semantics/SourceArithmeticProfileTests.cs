@@ -18,7 +18,8 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class SourceArithmeticProfileTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class SourceArithmeticProfileTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -256,7 +257,7 @@ public sealed class SourceArithmeticProfileTests
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!);
         if (expectError)
         {
-            Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
         }
         else
         {
@@ -328,7 +329,7 @@ public sealed class SourceArithmeticProfileTests
         var producer = ModuleCompiler.CreateProducer(GetProgram(provider,
             BoundRuntimePolicy.CheckedExceptions), ["Compute"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(sizeof(int), sizeof(int))),
-            Is.EqualTo(92));
+            Is.EqualTo(100));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var consumer = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(); }"),
@@ -363,7 +364,7 @@ public sealed class SourceArithmeticProfileTests
     }
 
     [Test]
-    public void Revision92ArithmeticRemainsCheckedAndInvalidModesReject()
+    public void Revision100ArithmeticRemainsCheckedAndInvalidModesReject()
     {
         const string source = """
             public int32 Add(int32 left, int32 right) { return left + right; }

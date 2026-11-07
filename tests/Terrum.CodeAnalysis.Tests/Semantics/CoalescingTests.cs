@@ -4,17 +4,18 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class CoalescingTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CoalescingTests
 {
     [Test]
     public void LexerAndParserRetainLongestMatchesAndTypeErrors()
@@ -59,9 +60,17 @@ public sealed class CoalescingTests
         var tree = SyntaxTree.Parse(source);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var choice = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ConditionalExpression);
-        var outer = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual0 = choice.Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual0!; }))();
+        var outer = ((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual0 = choice.Children[0];
+            Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual0!;
+        }))();
         Assert.That(outer.Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual1 = outer.Children[2]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual1!; }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual1 = outer.Children[2];
+            Assert.That(__nunitActual1, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual1!;
+        }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -675,7 +684,7 @@ public sealed class CoalescingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(unsafeSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Select");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -696,7 +705,7 @@ public sealed class CoalescingTests
                 Statements = function.Body.Statements.Insert(0, invalid),
             }
         };
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, changed),
         }));
         var validAssignment = new BoundOptionalAssignment(new BoundRead(0, PrimitiveType.OptionalManagedNode,
@@ -709,7 +718,7 @@ public sealed class CoalescingTests
                 Statements = function.Body.Statements.Insert(1, forgedAssignment),
             }
         };
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, invalidAssignment),
         }));
 
@@ -721,8 +730,16 @@ public sealed class CoalescingTests
             }
             """, NativeRuntimePolicy.FailFast);
         var entry = valid.Functions[valid.EntryPoint];
-        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = entry.Body.Statements[1]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))();
-        var coalesce = ((global::System.Func<BoundCoalesce>)(() => { var __nunitActual3 = local.Initializer; Assert.That(__nunitActual3, Is.TypeOf<BoundCoalesce>()); return (BoundCoalesce)__nunitActual3!; }))();
+        var local = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual2 = entry.Body.Statements[1];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual2!;
+        }))();
+        var coalesce = ((global::System.Func<BoundCoalesce>)(() => {
+            var __nunitActual3 = local.Initializer;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundCoalesce>());
+            return (BoundCoalesce)__nunitActual3!;
+        }))();
         foreach (var forged in new[] {
             coalesce with { Type = PrimitiveType.WriteManagedNode },
             coalesce with { Type = PrimitiveType.OptionalWriteManagedNode,
@@ -735,7 +752,7 @@ public sealed class CoalescingTests
                     Statements = entry.Body.Statements.SetItem(1, local with { Initializer = forged }),
                 }
             };
-            Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(valid with {
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(valid with {
                 Functions = valid.Functions.SetItem(valid.EntryPoint, invalidEntry),
             }));
         }
@@ -789,17 +806,25 @@ public sealed class CoalescingTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(library), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), ["Select"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(), ["Select"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 47);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Select(); }"),
             reference, runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = consumerCompilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(), producer);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
@@ -820,13 +845,21 @@ public sealed class CoalescingTests
         var producerProgram = Compilation.CreateLibrary(SyntaxTree.Parse(library),
             (BoundRuntimePolicy)policy);
         Assert.That(producerProgram.HasErrors, Is.False, string.Join(Environment.NewLine, producerProgram.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = producerProgram.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(),
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = producerProgram.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(),
             ["Select"], "Coalescing", policy);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Select(); }"),
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = consumerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), [producer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual7 = consumerCompilation.Program;
+                Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual7!;
+            }))(), [producer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -849,7 +882,11 @@ public sealed class CoalescingTests
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(consumerProgram.HasErrors, Is.False, string.Join(Environment.NewLine, consumerProgram.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = consumerProgram.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), [producer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual8 = consumerProgram.Program;
+                Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual8!;
+            }))(), [producer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(
@@ -864,13 +901,21 @@ public sealed class CoalescingTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
     }
 
     private static BoundProgram Compile(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
     }
 }

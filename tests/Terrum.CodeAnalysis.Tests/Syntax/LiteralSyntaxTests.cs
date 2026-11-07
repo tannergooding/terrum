@@ -2,13 +2,14 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class LiteralSyntaxTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class LiteralSyntaxTests
 {
     [TestCase("int32 Main() { return int32(42); }")]
     [TestCase("int32 Main() { int64 wide = int64(50000 * 50000); return int32(wide / 2500000000); }")]
@@ -58,9 +59,21 @@ public sealed class LiteralSyntaxTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 int32(int32 value) { return value + 1; } int32 Main() { return int32(41); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions
+        var main = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))().Functions
             .Single(function => function.Name == "Main");
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = global::System.Linq.Enumerable.Single(main.Body.Statements); Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))();
-        _ = ((global::System.Func<BoundCall>)(() => { var __nunitActual2 = result.Value; Assert.That(__nunitActual2, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual2!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual1 = global::System.Linq.Enumerable.Single(main.Body.Statements);
+            Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual1!;
+        }))();
+        _ = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual2 = result.Value;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual2!;
+        }))();
     }
 }

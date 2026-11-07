@@ -3,17 +3,17 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class FieldAccessTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FieldAccessTests
 {
     private const string MutableValues = """
         [Blittable] [Layout(LayoutKind.Sequential)] public struct Inner {
@@ -72,9 +72,16 @@ public sealed class FieldAccessTests
     public void PublicIrCannotForgeMutationThroughReadonlyFields(int typeIndex)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(MutableValues
-            + "int32 Main() { mut Outer value = new Outer(); value.Value.Value = 42; return value.Value.Value; }"));
+            + "int32 Main() { mut Outer value = new Outer(); value.Value.Value = 42; return value.Value.Value; }"),
+            new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var structure = program.Structures[typeIndex];
         var malformed = program with {
             Structures = program.Structures.SetItem(typeIndex, structure with {
@@ -93,9 +100,16 @@ public sealed class FieldAccessTests
             var modifier = writable ? "mut " : "";
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
                 "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public " + modifier + "int32 Value; public Cell(int32 value) { Value = value; } } "
-                + "public Cell Make() { return new Cell(" + initial.ToString(System.Globalization.CultureInfo.InvariantCulture) + "); }"));
+                + "public Cell Make() { return new Cell(" + initial.ToString(System.Globalization.CultureInfo.InvariantCulture) + "); }"),
+                new CompilationOptions {
+                    LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+                });
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Make"]);
+            return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), ["Make"]);
         }
         var producer = Produce(mutable, 1);
         var reference = ModuleCompiler.CreateReference(producer);
@@ -104,7 +118,11 @@ public sealed class FieldAccessTests
             + (mutable ? "value.Value = 42; " : "") + "return value.Value; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), producer);
         SemanticVerifier.Verify(ModuleCompiler.Link(consumer, Produce(mutable, 2)));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, Produce(!mutable, 2)))!;
         if (!mutable)
@@ -120,7 +138,7 @@ public sealed class FieldAccessTests
     public async Task SourceRangeInvariantsCannotBeBypassedAfterValidatedConstructionAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var range = await File.ReadAllTextAsync(TerrumProjectPaths.RepositoryFile(root, "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum"));
+        var range = await File.ReadAllTextAsync(TerrumProjectPaths.RepositoryFile(root, "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum")).ConfigureAwait(false);
         var entry = "using Terrum.CodeAnalysis; int32 Main() { require SourceRange.TryCreate(0, 1, init var range); "
             + "mut SourceRange copy = range; copy.Start = -1; return 0; }";
         var compilation = Compilation.Create([SyntaxTree.Parse(range), SyntaxTree.Parse(entry)]);

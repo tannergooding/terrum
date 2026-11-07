@@ -1,16 +1,17 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class OptionalManagedCoreTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class OptionalManagedCoreTests
 {
     private const string Source = """
         mut class Link {
@@ -50,7 +51,11 @@ public sealed class OptionalManagedCoreTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(compilation.NativeProfileVersion, Is.EqualTo("native-20"));
         Assert.That(ManagedClassTypes.IsOptional(program.Classes[0].Fields[1].Type), Is.True);
         Assert.That(NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast).Code, Is.Not.Empty);
@@ -88,7 +93,11 @@ public sealed class OptionalManagedCoreTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.NativeProfileVersion, Is.EqualTo("native-20"));
         Assert.That(NativeEmitter.EmitCode(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), NativeRuntimePolicy.FailFast).Code, Is.Not.Empty);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), NativeRuntimePolicy.FailFast).Code, Is.Not.Empty);
     }
 
     [Test]
@@ -108,7 +117,11 @@ public sealed class OptionalManagedCoreTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(NativeEmitter.EmitCode(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), NativeRuntimePolicy.FailFast).Code, Is.Not.Empty);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = compilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), NativeRuntimePolicy.FailFast).Code, Is.Not.Empty);
     }
 
     [Test]
@@ -122,7 +135,11 @@ public sealed class OptionalManagedCoreTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(compilation.NativeProfileVersion, Is.EqualTo("native-20"));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]))!;
     }
@@ -155,9 +172,17 @@ public sealed class OptionalManagedCoreTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var main = program.Functions[program.EntryPoint];
-        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual5 = main.Body.Statements[1]; Assert.That(__nunitActual5, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual5!; }))();
+        var local = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual5 = main.Body.Statements[1];
+            Assert.That(__nunitActual5, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual5!;
+        }))();
         var invalid = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(1,
@@ -193,8 +218,16 @@ public sealed class OptionalManagedCoreTests
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, invalid),
         }))!;
-        var conditional = ((global::System.Func<BoundIf>)(() => { var __nunitActual6 = main.Body.Statements[2]; Assert.That(__nunitActual6, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual6!; }))();
-        var pattern = ((global::System.Func<BoundIsSome>)(() => { var __nunitActual7 = conditional.Condition; Assert.That(__nunitActual7, Is.TypeOf<BoundIsSome>()); return (BoundIsSome)__nunitActual7!; }))();
+        var conditional = ((global::System.Func<BoundIf>)(() => {
+            var __nunitActual6 = main.Body.Statements[2];
+            Assert.That(__nunitActual6, Is.TypeOf<BoundIf>());
+            return (BoundIf)__nunitActual6!;
+        }))();
+        var pattern = ((global::System.Func<BoundIsSome>)(() => {
+            var __nunitActual7 = conditional.Condition;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundIsSome>());
+            return (BoundIsSome)__nunitActual7!;
+        }))();
         invalid = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(2, conditional with {

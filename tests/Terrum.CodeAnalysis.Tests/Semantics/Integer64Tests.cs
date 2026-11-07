@@ -5,17 +5,17 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class Integer64Tests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class Integer64Tests
 {
     [TestCase("return 9223372036854775807 == int64.MaxValue && -9223372036854775808 == int64.MinValue;",true)]
     [TestCase("return 18446744073709551615 == uint64.MaxValue && 0 == uint64.MinValue;",true)]
@@ -291,7 +291,7 @@ public sealed class Integer64Tests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Calculate");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase("uint32","/","2")]
     [TestCase("uint32","%","2147483648")]
@@ -304,7 +304,7 @@ public sealed class Integer64Tests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Calculate");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -395,7 +395,9 @@ public sealed class Integer64Tests
                 public Wide() { Signed = int64.MinValue; Unsigned = uint64.MaxValue; }
             }
             public Wide Make() { return new Wide(); }
-            """));
+            """), new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(library), ["Make"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var consumer = Compilation.Create(SyntaxTree.Parse("""
@@ -407,7 +409,11 @@ public sealed class Integer64Tests
             }
             """), reference);
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
-        var artifact = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = consumer.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), producer);
+        var artifact = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = consumer.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), producer);
         await ExecuteBothAsync(ModuleCompiler.Link(artifact, producer), 42).ConfigureAwait(true);
     }
     [TestCase("int64 Main() { return 0; }")]
@@ -448,7 +454,11 @@ public sealed class Integer64Tests
     {
         var program = Compile("int32 Main() { return 42; }");
         var function = program.Functions[0];
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = function.Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual1 = function.Body.Statements[0];
+            Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual1!;
+        }))();
         BoundExpression[] expressions = [
             new BoundConstant((long)int.MaxValue + 1, PrimitiveType.Int32, result.Span),
             new BoundCast(new BoundConstant(1, PrimitiveType.Bool, result.Span), PrimitiveType.Int32, result.Span),
@@ -478,9 +488,30 @@ public sealed class Integer64Tests
             }
             """);
         var statements = program.Functions[0].Body.Statements;
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual3 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))().Initializer; Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual3!; }))().Value, Is.EqualTo(-1L));
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual4 = statements[1]; Assert.That(__nunitActual4, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual4!; }))().Initializer; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))().Value, Is.EqualTo(long.MinValue));
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual7 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual6 = statements[2]; Assert.That(__nunitActual6, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual6!; }))().Initializer; Assert.That(__nunitActual7, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual7!; }))().Value, Is.EqualTo(-1L));
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual3 = ((global::System.Func<BoundLocal>)(() => {
+    var __nunitActual2 = statements[0];
+    Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>());
+    return (BoundLocal)__nunitActual2!; }))().Initializer;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual3!;
+        }))().Value, Is.EqualTo(-1L));
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual5 = ((global::System.Func<BoundLocal>)(() => {
+    var __nunitActual4 = statements[1];
+    Assert.That(__nunitActual4, Is.TypeOf<BoundLocal>());
+    return (BoundLocal)__nunitActual4!; }))().Initializer;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual5!;
+        }))().Value, Is.EqualTo(long.MinValue));
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual7 = ((global::System.Func<BoundLocal>)(() => {
+    var __nunitActual6 = statements[2];
+    Assert.That(__nunitActual6, Is.TypeOf<BoundLocal>());
+    return (BoundLocal)__nunitActual6!; }))().Initializer;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual7!;
+        }))().Value, Is.EqualTo(-1L));
     }
     [TestCase(PrimitiveType.Int64)]
     [TestCase(PrimitiveType.UInt64)]
@@ -497,7 +528,11 @@ public sealed class Integer64Tests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
     }
 
     private static async Task ExecuteBothAsync(BoundProgram program, int expected)
@@ -531,7 +566,11 @@ public sealed class Integer64Tests
     private static BoundProgram CompileLibrary(Compilation compilation)
     {
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
     }
 
     private static async Task RunAsync(string executable, ImmutableArray<string> arguments, int expected)

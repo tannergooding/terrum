@@ -1,13 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolOutputTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolOutputTests
 {
     private const string Value = """
         struct Value {
@@ -34,7 +35,11 @@ public sealed class StaticProtocolOutputTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Echo<Value>").ReturnType, Is.EqualTo(expected));
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions[program.EntryPoint].Variables, variable => variable.Name == "actual").Type, Is.EqualTo(expected));
     }
@@ -46,10 +51,10 @@ public sealed class StaticProtocolOutputTests
             ? "int32 Main() { require Pick<Value>(new Value(40), out var copy, out var count); return int32(copy.First) + count; }"
             : "int32 Main() { return 0; }";
         var source = Value + """
-            [NoThrow] bool Pick<T>(T value, out T result, out int32 count) where T : [Copy] {
+             bool Pick<T>(T value, out T result, out int32 count) where T : [Copy] {
                 return Forward<T>(value, out result, out count);
             }
-            [NoThrow] bool Forward<U>(U value, out U result, out int32 count) where U : [Copy] {
+             bool Forward<U>(U value, out U result, out int32 count) where U : [Copy] {
                 result = value;
                 count = 2;
                 return true;
@@ -57,7 +62,11 @@ public sealed class StaticProtocolOutputTests
             """ + entry;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
         if (instantiate)
@@ -109,12 +118,16 @@ public sealed class StaticProtocolOutputTests
         var body = resultType == "void"
             ? explicitType ? "result = value; return;" : "result = value;"
             : "result = value; return 7;";
-        var source = Value + "[NoThrow] " + resultType
+        var source = Value + " " + resultType
             + " Fill<T>(T value, out T result) where T : [Copy] { "
             + body + "} int32 Main() { " + completion + " }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         Assert.That(fill.ReturnType, Is.EqualTo(resultType == "void" ? PrimitiveType.Void
             : resultType == "uint64" ? PrimitiveType.UInt64 : PrimitiveType.Int32));
@@ -145,12 +158,16 @@ public sealed class StaticProtocolOutputTests
         var body = resultType == "void"
             ? explicitType ? "result = value; return;" : "result = value;"
             : "result = value; return " + returnValue + ";";
-        var source = Value + "[NoThrow] " + resultType
+        var source = Value + " " + resultType
             + " Fill<T>(T value, init ref<T> result) where T : [Copy] { "
             + body + "} int32 Main() { " + completion + " }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         var expectedReturn = resultType switch {
             "int32" => PrimitiveType.Int32,
@@ -260,7 +277,11 @@ public sealed class StaticProtocolOutputTests
             .Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value, int32>");
         var expectedReturn = resultType switch {
             "int32" => PrimitiveType.Int32,
@@ -318,7 +339,11 @@ public sealed class StaticProtocolOutputTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.False);
@@ -358,7 +383,11 @@ public sealed class StaticProtocolOutputTests
             """.Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.False);
@@ -429,7 +458,11 @@ public sealed class StaticProtocolOutputTests
             .Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         var expectedReturn = resultType switch {
             "int32" => PrimitiveType.Int32,
@@ -520,7 +553,11 @@ public sealed class StaticProtocolOutputTests
             + "return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         Assert.That(fill.ReturnType, Is.EqualTo(resultType == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64));
         Assert.That(fill.Variables[1].IsOut, Is.True);
@@ -574,7 +611,7 @@ public sealed class StaticProtocolOutputTests
     public void GenericFloatingResultAndFixedOutputsDoNotInferOutputTypes()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] float64 None<T>(int32 marker, init ref<T> result, out int32 count,
+             float64 None<T>(int32 marker, init ref<T> result, out int32 count,
                 init ref<float64> score) where T : [Copy] {
                 for (;;) { }
             }
@@ -800,7 +837,7 @@ public sealed class StaticProtocolOutputTests
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Fill(out Owner result) {
                 result = new Owner(42);
@@ -829,35 +866,43 @@ public sealed class StaticProtocolOutputTests
     public void AnOutputOnlyTypeParameterCanDescribeAnAlwaysAbsentResult()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-            [NoThrow] bool None<T>(out T result) where T : [Copy] { return false; }
+             bool None<T>(out T result) where T : [Copy] { return false; }
             int32 Main() {
                 if (None<Value>(out var result)) { return 1; }
                 return 42;
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))().Functions, function => function.Name == "None<Value>").ReturnType, Is.EqualTo(PrimitiveType.Bool));
+        Assert.That(global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))().Functions, function => function.Name == "None<Value>").ReturnType, Is.EqualTo(PrimitiveType.Bool));
     }
 
     [Test]
     public void UnusedGenericInitOutputIsCheckedAtDefinition()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-            [NoThrow] bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
+             bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
                 result = value;
                 return true;
             }
             int32 Main() { return 42; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))().Functions,function => function.Name.StartsWith("Fill<", StringComparison.Ordinal)),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))().Functions,function => function.Name.StartsWith("Fill<", StringComparison.Ordinal)),Is.False);
     }
 
     [Test]
     public void UntypedGenericInitDestinationDoesNotInferTheType()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
-            [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+             bool None<T>(init ref<T> result) where T : [Copy] { return false; }
             int32 Main() {
                 if (None(init var result)) { return 1; }
                 return 42;
@@ -897,7 +942,7 @@ public sealed class StaticProtocolOutputTests
             SyntaxTree.Parse("namespace Values;" + Value),
             SyntaxTree.Parse("""
                 namespace Helpers;
-                [NoThrow] uint64 Echo<T>(T ignored, uint64 value) where T : [Copy] { return value; }
+                 uint64 Echo<T>(T ignored, uint64 value) where T : [Copy] { return value; }
                 """),
             SyntaxTree.Parse("""
                 using Helpers;
@@ -910,7 +955,11 @@ public sealed class StaticProtocolOutputTests
                 """),
         ]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions[program.EntryPoint].Variables, variable => variable.Name == "result").Type, Is.EqualTo(PrimitiveType.UInt64));
     }
 

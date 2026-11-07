@@ -203,7 +203,7 @@ internal static partial class FloatingLiteralParser
             {
                 return false;
             }
-            value = Math.Min(Limit, value * 10 + (character - '0'));
+            value = Math.Min(Limit, (value * 10) + (character - '0'));
         }
         if (negative)
         {
@@ -237,6 +237,6 @@ internal static partial class FloatingLiteralParser
     private static ulong ExponentMask(int precision, int exponentBias)
     {
         var fractionBits = precision - 1;
-        return (ulong)(exponentBias * 2 + 1) << fractionBits;
+        return (ulong)((exponentBias * 2) + 1) << fractionBits;
     }
 }

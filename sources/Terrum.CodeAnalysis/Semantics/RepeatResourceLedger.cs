@@ -88,14 +88,17 @@ internal sealed class RepeatResourceLedger
     internal void ConsumeWork(ulong units = 1)
     {
         EnsureCallable();
-        var required = new BigInteger(_work) + units;
-        if (required > WorkLimit)
+        var remaining = WorkLimit - _work;
+        if (units > remaining)
         {
+            _work = WorkLimit;
+            PeakWork = Math.Max(PeakWork, _work);
             throw new SemanticRepeatResourceLimitException(
-                SemanticResourceDimension.Work, WorkLimit, required);
+                SemanticResourceDimension.Work, WorkLimit,
+                new BigInteger(WorkLimit) + 1);
         }
 
-        _work = checked((ulong)required);
+        _work += units;
         PeakWork = Math.Max(PeakWork, _work);
     }
 

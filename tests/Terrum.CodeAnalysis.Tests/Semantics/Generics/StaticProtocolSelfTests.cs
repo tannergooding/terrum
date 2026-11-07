@@ -4,40 +4,41 @@ using System;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolSelfTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolSelfTests
 {
     internal const string Source = """
         interface Addition<this TLeft, TRight, TResult> {
             static TResult operator +(TLeft left, TRight right);
         }
         interface Negate<this T, R> {
-            [NoThrow] static R operator -(T value);
+             static R operator -(T value);
         }
         interface Ordinary<A, B, C> {
             static C operator *(A left, B right);
         }
         struct Value : Addition<Value, Value>, Negate<Value>, Ordinary<Value, Value, Value> {
             public int32 Number;
-            [NoThrow] public Value(int32 number) { Number = number; }
+             public Value(int32 number) { Number = number; }
             public static Value operator +(Value left, Value right) {
                 return new Value(left.Number + right.Number);
             }
-            [NoThrow] public static Value operator -(Value value) {
+             public static Value operator -(Value value) {
                 return value;
             }
             public static Value operator *(Value left, Value right) {
                 return new Value(left.Number * right.Number);
             }
         }
-        [NoThrow] T Preserve<T>(T value) where T : Negate<T>, [Copy] {
+         T Preserve<T>(T value) where T : Negate<T>, [Copy] {
             return -value;
         }
         T Calculate<T>(T left, T right)
@@ -55,7 +56,11 @@ public sealed class StaticProtocolSelfTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions,static function => function.Name == "Calculate<Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))().Functions,static function => function.Name == "Calculate<Value>"),Is.True);
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -63,7 +68,11 @@ public sealed class StaticProtocolSelfTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var image = NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), policy);
+        var image = NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), policy);
         Assert.That(await StaticProtocolTests.RunAsync(image).ConfigureAwait(true), Is.EqualTo(42));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -88,7 +97,11 @@ public sealed class StaticProtocolSelfTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Comparison), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), policy), Is.EqualTo(42));
         var missingWitness = Comparison.Replace("Less<Box, bool>, AlsoLess<Box, bool>",
             "AlsoLess<Box, bool>", StringComparison.Ordinal);
         var rejected = Compilation.Create(SyntaxTree.Parse(missingWitness), (BoundRuntimePolicy)policy);
@@ -116,15 +129,27 @@ public sealed class StaticProtocolSelfTests
         var newLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(newSource), sourcePolicy);
         Assert.That(oldLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, oldLibrary.Diagnostics));
         Assert.That(newLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, newLibrary.Diagnostics));
-        var oldProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = oldLibrary.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
-        var newProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = newLibrary.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var oldProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = oldLibrary.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
+        var newProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = newLibrary.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var oldProducer = ModuleCompiler.CreateProducer(oldProgram, ["Read"]);
         var replacement = ModuleCompiler.CreateProducer(newProgram, ["Read"]);
         var oldConsumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(oldProducer), sourcePolicy);
         Assert.That(oldConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oldConsumerCompilation.Diagnostics));
         var oldConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = oldConsumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), oldProducer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual5 = oldConsumerCompilation.Program;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual5!;
+            }))(), oldProducer);
         var snapshot = SHA256.HashData(oldConsumer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(oldConsumer, oldProducer), policy), Is.EqualTo(42));
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(oldConsumer, replacement), policy), Is.EqualTo(44));
@@ -135,7 +160,11 @@ public sealed class StaticProtocolSelfTests
             NativeModuleCompiler.CreateGraphReference([oldNative]), sourcePolicy);
         Assert.That(nativeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = nativeConsumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), [oldNative], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = nativeConsumerCompilation.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(), [oldNative], policy);
         var nativeSnapshot = SHA256.HashData(nativeConsumer);
         var newNative = NativeModuleCompiler.CreateProducer(newProgram, ["Read"], "NodeB", policy);
         NativeModuleCompiler.ValidateGraph(nativeConsumer, [newNative]);
@@ -161,7 +190,9 @@ public sealed class StaticProtocolSelfTests
     {
         Assert.That(Source, Does.Contain(before));
         var compilation = Compilation.Create(SyntaxTree.Parse(Source.Replace(before, after, StringComparison.Ordinal)));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == code), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -174,12 +205,12 @@ public sealed class StaticProtocolSelfTests
     }
 
     [Test]
-    public void AFalseNoThrowSelfWitnessIsRejected()
+    public void RetiredNoThrowSelfWitnessUseIsDiagnosed()
     {
-        var source = Source.Replace("[NoThrow] public static Value operator -(Value value)",
-            "public static Value operator -(Value value)", StringComparison.Ordinal);
+        var source = Source.Replace(" public static Value operator -(Value value)",
+            "[NoThrow] public static Value operator -(Value value)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
     }
 
     [Test]

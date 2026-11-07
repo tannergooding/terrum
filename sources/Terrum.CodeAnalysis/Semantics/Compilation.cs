@@ -29,6 +29,10 @@ public readonly record struct CompilationOptions
     public const string WindowsX64NormalBackingAgreement =
         "terrum.experimental.windows-x64.normal-backing";
 
+    /// <summary>The exact host-selected Windows x64 agreement for externally bounded rootless references.</summary>
+    public const string WindowsX64RootlessReferencesAgreement =
+        "terrum.experimental.windows-x64.rootless-references";
+
     /// <summary>The source arithmetic defaults; zero-initialized options select Development.</summary>
     public SourceArithmeticProfile SourceArithmeticProfile { get; init; }
 
@@ -38,9 +42,24 @@ public readonly record struct CompilationOptions
     /// <summary>The explicit host-selected Core native registration for this using compilation, if any.</summary>
     public NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
 
+    /// <summary>The explicit host-selected Core layout registration for this using compilation, if any.</summary>
+    public LayoutCoreRegistrationSet? LayoutCoreRegistration { get; init; }
+
+    /// <summary>The explicit host-selected static-initialization Core registration for this using compilation, if any.</summary>
+    public StaticInitializationCoreRegistrationSet?
+        StaticInitializationCoreRegistration { get; init; }
+
+    /// <summary>The independently selected LazyInitialization Core registration for this using compilation, if any.</summary>
+    public LazyInitializationCoreRegistrationSet?
+        LazyInitializationCoreRegistration { get; init; }
+
     /// <summary>The explicit host-selected Core exception anchors for using Modules, if any.</summary>
     public ImmutableArray<CoreExceptionIdentitySelection>
         CoreExceptionIdentitySelections { get; init; }
+
+    /// <summary>The explicit host-selected Core contract-failure identities for using Modules, if any.</summary>
+    public CoreContractFailureIdentitySelection?
+        CoreContractFailureIdentitySelection { get; init; }
 
     /// <summary>The explicit host-selected target-lowering agreement, if any.</summary>
     public string? NativeLoweringAgreement { get; init; }
@@ -466,7 +485,7 @@ public sealed class Compilation
         {
             if (diagnostics.IsEmpty)
             {
-                sourceDiagnostics = ImmutableArray<SourceDiagnostic>.Empty;
+                sourceDiagnostics = [];
             }
             else
             {
@@ -544,9 +563,16 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds a source snapshot under an explicit checked-failure runtime policy.</summary>
@@ -570,9 +596,16 @@ public sealed class Compilation
         return CreateCore([tree], [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds source snapshots for explicit native-import emission.</summary>
@@ -588,9 +621,16 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds a library snapshot under an explicit checked-failure runtime policy.</summary>
@@ -605,9 +645,16 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds and verifies library definitions without requiring or selecting a Main entry point.</summary>
@@ -642,9 +689,16 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: true, cancellationToken, reference,
             options.RuntimePolicy, options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds consumer source against validated module declarations, without reading producer source or binding its bodies.</summary>
@@ -671,9 +725,16 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: false, cancellationToken, reference,
             options.RuntimePolicy, options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     internal static void ValidateOptions(CompilationOptions options)
@@ -689,6 +750,58 @@ public sealed class Compilation
             throw new ArgumentException("The selected Core native registration is invalid.",
                 nameof(options));
         }
+        if (options.LayoutCoreRegistration is LayoutCoreRegistrationSet layoutRegistration
+            && !layoutRegistration.IsValid())
+        {
+            throw new ArgumentException("The selected Core layout registration is invalid.",
+                nameof(options));
+        }
+        if (options.StaticInitializationCoreRegistration is
+                StaticInitializationCoreRegistrationSet staticInitializationRegistration
+            && !staticInitializationRegistration.IsValid())
+        {
+            throw new ArgumentException(
+                "The selected static-initialization Core registration is invalid.",
+                nameof(options));
+        }
+        if (options.LazyInitializationCoreRegistration is
+                LazyInitializationCoreRegistrationSet
+                    lazyInitializationRegistration
+            && !lazyInitializationRegistration.IsValid())
+        {
+            throw new ArgumentException(
+                "The selected LazyInitialization Core registration is invalid.",
+                nameof(options));
+        }
+        if (options.NativeCoreRegistration is NativeCoreRegistrationSet nativeRegistration
+            && options.LayoutCoreRegistration is LayoutCoreRegistrationSet selectedLayoutRegistration
+            && !ReferenceEquals(nativeRegistration.ModuleBindings,
+                selectedLayoutRegistration.ModuleBindings))
+        {
+            throw new ArgumentException(
+                "The selected Core native and layout registrations must share one provider binding snapshot.",
+                nameof(options));
+        }
+        var selectedBindings = options.NativeCoreRegistration?.ModuleBindings
+            ?? options.LayoutCoreRegistration?.ModuleBindings
+            ?? options.StaticInitializationCoreRegistration?.ModuleBindings
+            ?? options.LazyInitializationCoreRegistration?.ModuleBindings;
+        if ((options.LayoutCoreRegistration is LayoutCoreRegistrationSet composedLayoutRegistration
+                && !ReferenceEquals(selectedBindings,
+                    composedLayoutRegistration.ModuleBindings))
+            || (options.StaticInitializationCoreRegistration is
+                    StaticInitializationCoreRegistrationSet composedStaticRegistration
+                && !ReferenceEquals(selectedBindings,
+                    composedStaticRegistration.ModuleBindings))
+            || (options.LazyInitializationCoreRegistration is
+                    LazyInitializationCoreRegistrationSet composedLazyRegistration
+                && !ReferenceEquals(selectedBindings,
+                    composedLazyRegistration.ModuleBindings)))
+        {
+            throw new ArgumentException(
+                "Selected Core registrations must share one provider binding snapshot.",
+                nameof(options));
+        }
         if (!CoreExceptionIdentitySelectionContract.IsValidTable(
             options.CoreExceptionIdentitySelections))
         {
@@ -696,8 +809,19 @@ public sealed class Compilation
                 "The selected Core exception identities are invalid.",
                 nameof(options));
         }
+        if (options.CoreContractFailureIdentitySelection is
+                CoreContractFailureIdentitySelection contractFailureSelection
+            && !CoreContractFailureIdentitySelectionContract.IsValidTable(
+                [contractFailureSelection]))
+        {
+            throw new ArgumentException(
+                "The selected Core contract-failure identities are invalid.",
+                nameof(options));
+        }
         if (options.NativeLoweringAgreement is string agreement
-            && agreement != CompilationOptions.WindowsX64NormalBackingAgreement)
+            && agreement is not (
+                CompilationOptions.WindowsX64NormalBackingAgreement
+                or CompilationOptions.WindowsX64RootlessReferencesAgreement))
         {
             throw new ArgumentException("The selected native lowering agreement is unsupported.",
                 nameof(options));
@@ -708,16 +832,38 @@ public sealed class Compilation
         CompilationReference? reference = null, BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast,
         SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
         NativeCoreRegistrationSet? nativeCoreRegistration = null,
+        LayoutCoreRegistrationSet? layoutCoreRegistration = null,
+        StaticInitializationCoreRegistrationSet?
+            staticInitializationCoreRegistration = null,
+        LazyInitializationCoreRegistrationSet?
+            lazyInitializationCoreRegistration = null,
         string? nativeLoweringAgreement = null,
-        ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default)
+        ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default,
+        CoreContractFailureIdentitySelection?
+            coreContractFailureIdentitySelection = null)
     {
         ArgumentNullException.ThrowIfNull(tree);
         cancellationToken.ThrowIfCancellationRequested();
         var selectedNativeCoreRegistration = SelectNativeCoreRegistration(
             reference, nativeCoreRegistration);
+        var selectedLayoutCoreRegistration = SelectLayoutCoreRegistration(
+            reference, layoutCoreRegistration);
+        var selectedStaticInitializationCoreRegistration
+            = SelectStaticInitializationCoreRegistration(reference,
+                staticInitializationCoreRegistration);
+        var selectedLazyInitializationCoreRegistration
+            = SelectLazyInitializationCoreRegistration(reference,
+                lazyInitializationCoreRegistration);
+        ValidateCoreRegistrationComposition(selectedNativeCoreRegistration,
+            selectedLayoutCoreRegistration,
+            selectedStaticInitializationCoreRegistration,
+            selectedLazyInitializationCoreRegistration);
         var selectedCoreExceptionIdentitySelections
             = SelectCoreExceptionIdentitySelections(reference,
                 coreExceptionIdentitySelections);
+        var selectedCoreContractFailureIdentitySelections
+            = SelectCoreContractFailureIdentitySelections(reference,
+                coreContractFailureIdentitySelection);
 
         // Recovery nodes do not have the structural guarantees required for binding.
         if (tree.HasErrors)
@@ -728,14 +874,23 @@ public sealed class Compilation
         var binder = new Binder([tree], [], cancellationToken, isLibrary, reference, runtimePolicy,
             sourceArithmeticProfile: sourceArithmeticProfile,
             nativeCoreRegistration: selectedNativeCoreRegistration,
+            layoutCoreRegistration: selectedLayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                selectedStaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                selectedLazyInitializationCoreRegistration,
             nativeLoweringAgreement: nativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                selectedCoreExceptionIdentitySelections);
+                selectedCoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelections:
+                selectedCoreContractFailureIdentitySelections,
+            coreContractFailureIdentitySelection:
+                coreContractFailureIdentitySelection);
         var program = binder.Bind();
         var diagnosticCount = tree.Diagnostics.Length + binder.Diagnostics.Count;
         if (diagnosticCount == 0)
         {
-            return new Compilation(tree, ImmutableArray<Diagnostic>.Empty, program);
+            return new Compilation(tree, [], program);
         }
 
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>(diagnosticCount);
@@ -768,16 +923,140 @@ public sealed class Compilation
         {
             throw new ArgumentException(
                 "A Core native registration can be supplied only once for a using compilation.",
-                nameof(CompilationOptions.NativeCoreRegistration));
+                nameof(configured));
         }
 
         var selected = configured ?? reference?.NativeCoreRegistration;
         if (selected is not null && !selected.IsValid())
         {
-            throw new ArgumentException("The selected Core native registration is invalid.",
-                nameof(CompilationOptions.NativeCoreRegistration));
+            if (configured is not null)
+            {
+                throw new ArgumentException(
+                    "The selected Core native registration is invalid.",
+                    nameof(configured));
+            }
+
+            throw new ArgumentException(
+                "The referenced Core native registration is invalid.",
+                nameof(reference));
         }
         return selected;
+    }
+
+    private static LayoutCoreRegistrationSet? SelectLayoutCoreRegistration(
+        CompilationReference? reference, LayoutCoreRegistrationSet? configured)
+    {
+        if (configured is not null && reference?.LayoutCoreRegistration is not null)
+        {
+            throw new ArgumentException(
+                "A Core layout registration can be supplied only once for a using compilation.",
+                nameof(configured));
+        }
+
+        var selected = configured ?? reference?.LayoutCoreRegistration;
+        if (selected is not null && !selected.IsValid())
+        {
+            if (configured is not null)
+            {
+                throw new ArgumentException(
+                    "The selected Core layout registration is invalid.",
+                    nameof(configured));
+            }
+
+            throw new ArgumentException(
+                "The referenced Core layout registration is invalid.",
+                nameof(reference));
+        }
+        return selected;
+    }
+
+    private static StaticInitializationCoreRegistrationSet?
+        SelectStaticInitializationCoreRegistration(
+            CompilationReference? reference,
+            StaticInitializationCoreRegistrationSet? configured)
+    {
+        if (configured is not null
+            && reference?.StaticInitializationCoreRegistration is not null)
+        {
+            throw new ArgumentException(
+                "A static-initialization Core registration can be supplied only once for a using compilation.",
+                nameof(configured));
+        }
+
+        var selected = configured
+            ?? reference?.StaticInitializationCoreRegistration;
+        if (selected is not null && !selected.IsValid())
+        {
+            if (configured is not null)
+            {
+                throw new ArgumentException(
+                    "The selected static-initialization Core registration is invalid.",
+                    nameof(configured));
+            }
+
+            throw new ArgumentException(
+                "The referenced static-initialization Core registration is invalid.",
+                nameof(reference));
+        }
+        return selected;
+    }
+
+    private static LazyInitializationCoreRegistrationSet?
+        SelectLazyInitializationCoreRegistration(
+            CompilationReference? reference,
+            LazyInitializationCoreRegistrationSet? configured)
+    {
+        if (configured is not null
+            && reference?.LazyInitializationCoreRegistration is not null)
+        {
+            throw new ArgumentException(
+                "A LazyInitialization Core registration can be supplied only once for a using compilation.",
+                nameof(configured));
+        }
+
+        var selected = configured
+            ?? reference?.LazyInitializationCoreRegistration;
+        if (selected is not null && !selected.IsValid())
+        {
+            if (configured is not null)
+            {
+                throw new ArgumentException(
+                    "The selected LazyInitialization Core registration is invalid.",
+                    nameof(configured));
+            }
+
+            throw new ArgumentException(
+                "The referenced LazyInitialization Core registration is invalid.",
+                nameof(reference));
+        }
+        return selected;
+    }
+
+    private static void ValidateCoreRegistrationComposition(
+        NativeCoreRegistrationSet? nativeRegistration,
+        LayoutCoreRegistrationSet? layoutRegistration,
+        StaticInitializationCoreRegistrationSet?
+            staticInitializationRegistration,
+        LazyInitializationCoreRegistrationSet?
+            lazyInitializationRegistration)
+    {
+        var moduleBindings = nativeRegistration?.ModuleBindings
+            ?? layoutRegistration?.ModuleBindings
+            ?? staticInitializationRegistration?.ModuleBindings
+            ?? lazyInitializationRegistration?.ModuleBindings;
+        if ((layoutRegistration is not null
+                && !ReferenceEquals(moduleBindings,
+                    layoutRegistration.ModuleBindings))
+            || (staticInitializationRegistration is not null
+                && !ReferenceEquals(moduleBindings,
+                    staticInitializationRegistration.ModuleBindings))
+            || (lazyInitializationRegistration is not null
+                && !ReferenceEquals(moduleBindings,
+                    lazyInitializationRegistration.ModuleBindings)))
+        {
+            throw new ArgumentException(
+                "Selected Core registrations must share one provider binding snapshot.");
+        }
     }
 
     private static ImmutableArray<CoreExceptionIdentitySelection>
@@ -816,6 +1095,44 @@ public sealed class Compilation
         return result;
     }
 
+    private static ImmutableArray<CoreContractFailureIdentitySelection>
+        SelectCoreContractFailureIdentitySelections(
+            CompilationReference? reference,
+            CoreContractFailureIdentitySelection? configured)
+    {
+        var referenceSelections
+            = reference?.CoreContractFailureIdentitySelections ?? [];
+        if (referenceSelections.IsDefaultOrEmpty
+            && configured is null)
+        {
+            return [];
+        }
+
+        var selections = ImmutableArray.CreateBuilder<
+            CoreContractFailureIdentitySelection>(
+            referenceSelections.Length
+                + (configured is null ? 0 : 1));
+        if (!referenceSelections.IsDefaultOrEmpty)
+        {
+            selections.AddRange(referenceSelections);
+        }
+        if (configured is CoreContractFailureIdentitySelection selected)
+        {
+            selections.Add(selected);
+        }
+
+        var result = selections.MoveToImmutable();
+        if (!CoreContractFailureIdentitySelectionContract.IsValidTable(
+            result))
+        {
+            throw new ArgumentException(
+                "Reference and compilation Core contract-failure selections are duplicate or invalid.",
+                nameof(configured));
+        }
+
+        return result;
+    }
+
     /// <summary>Binds declarations across source files before resolving names and function bodies.</summary>
     /// <exception cref="ArgumentException">No source trees were supplied.</exception>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default) =>
@@ -829,9 +1146,16 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds multiple source snapshots under an explicit checked-failure runtime policy.</summary>
@@ -852,9 +1176,16 @@ public sealed class Compilation
         return CreateCore(trees, buffers, isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds source snapshots and shared host buffers under an explicit checked-failure runtime policy.</summary>
@@ -879,9 +1210,16 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds multiple library snapshots under an explicit checked-failure runtime policy.</summary>
@@ -902,9 +1240,16 @@ public sealed class Compilation
         return CreateCore(trees, buffers, isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
@@ -927,9 +1272,16 @@ public sealed class Compilation
             runtimePolicy: options.RuntimePolicy, coreLibrary: true,
             sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds multiple library source snapshots against validated external declarations.</summary>
@@ -957,9 +1309,16 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: true, cancellationToken, reference,
             options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     /// <summary>Binds consumer source snapshots against one validated module reference.</summary>
@@ -986,9 +1345,16 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: false, cancellationToken, reference,
             options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
             coreExceptionIdentitySelections:
-                options.CoreExceptionIdentitySelections);
+                options.CoreExceptionIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
     }
 
     private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
@@ -996,16 +1362,38 @@ public sealed class Compilation
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
         SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
         NativeCoreRegistrationSet? nativeCoreRegistration = null,
+        LayoutCoreRegistrationSet? layoutCoreRegistration = null,
+        StaticInitializationCoreRegistrationSet?
+            staticInitializationCoreRegistration = null,
+        LazyInitializationCoreRegistrationSet?
+            lazyInitializationCoreRegistration = null,
         string? nativeLoweringAgreement = null,
-        ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default)
+        ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default,
+        CoreContractFailureIdentitySelection?
+            coreContractFailureIdentitySelection = null)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
         var selectedNativeCoreRegistration = SelectNativeCoreRegistration(
             reference, nativeCoreRegistration);
+        var selectedLayoutCoreRegistration = SelectLayoutCoreRegistration(
+            reference, layoutCoreRegistration);
+        var selectedStaticInitializationCoreRegistration
+            = SelectStaticInitializationCoreRegistration(reference,
+                staticInitializationCoreRegistration);
+        var selectedLazyInitializationCoreRegistration
+            = SelectLazyInitializationCoreRegistration(reference,
+                lazyInitializationCoreRegistration);
+        ValidateCoreRegistrationComposition(selectedNativeCoreRegistration,
+            selectedLayoutCoreRegistration,
+            selectedStaticInitializationCoreRegistration,
+            selectedLazyInitializationCoreRegistration);
         var selectedCoreExceptionIdentitySelections
             = SelectCoreExceptionIdentitySelections(reference,
                 coreExceptionIdentitySelections);
+        var selectedCoreContractFailureIdentitySelections
+            = SelectCoreContractFailureIdentitySelections(reference,
+                coreContractFailureIdentitySelection);
         var snapshots = ImmutableArray.CreateBuilder<SyntaxTree>(
             trees is ICollection<SyntaxTree> collection ? collection.Count : 0);
         ImmutableArray<Diagnostic>.Builder? diagnostics = null;
@@ -1039,8 +1427,14 @@ public sealed class Compilation
         }
         var binder = new Binder(snapshotArray, buffers, cancellationToken, isLibrary, reference,
             runtimePolicy, coreLibrary, sourceArithmeticProfile,
-            selectedNativeCoreRegistration, nativeLoweringAgreement,
-            selectedCoreExceptionIdentitySelections);
+            selectedNativeCoreRegistration, selectedLayoutCoreRegistration,
+            nativeLoweringAgreement,
+            selectedCoreExceptionIdentitySelections,
+            selectedStaticInitializationCoreRegistration,
+            selectedCoreContractFailureIdentitySelections,
+            coreContractFailureIdentitySelection,
+            lazyInitializationCoreRegistration:
+                selectedLazyInitializationCoreRegistration);
         var program = binder.Bind();
         if (binder.Diagnostics.Count != 0)
         {
@@ -1053,8 +1447,8 @@ public sealed class Compilation
             sourceDiagnostics.AddRange(binder.SourceDiagnostics);
         }
         cancellationToken.ThrowIfCancellationRequested();
-        var diagnosticResult = diagnostics?.MoveToImmutable() ?? ImmutableArray<Diagnostic>.Empty;
-        var sourceDiagnosticResult = sourceDiagnostics?.MoveToImmutable() ?? ImmutableArray<SourceDiagnostic>.Empty;
+        var diagnosticResult = diagnostics?.MoveToImmutable() ?? [];
+        var sourceDiagnosticResult = sourceDiagnostics?.MoveToImmutable() ?? [];
         return new Compilation(snapshotArray[0], diagnosticResult, diagnosticResult.IsEmpty ? program : null,
             snapshotArray, sourceDiagnosticResult);
     }
@@ -1088,11 +1482,23 @@ public sealed class Compilation
         var coreExceptionIdentitySelections
             = SelectCoreExceptionIdentitySelections(null,
                 options.CoreExceptionIdentitySelections);
+        var coreContractFailureIdentitySelections
+            = SelectCoreContractFailureIdentitySelections(null,
+                options.CoreContractFailureIdentitySelection);
         var binder = new Binder([tree], buffers, cancellationToken, runtimePolicy: options.RuntimePolicy,
             sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            layoutCoreRegistration: options.LayoutCoreRegistration,
+            staticInitializationCoreRegistration:
+                options.StaticInitializationCoreRegistration,
+            lazyInitializationCoreRegistration:
+                options.LazyInitializationCoreRegistration,
             nativeLoweringAgreement: options.NativeLoweringAgreement,
-            coreExceptionIdentitySelections: coreExceptionIdentitySelections);
+            coreExceptionIdentitySelections: coreExceptionIdentitySelections,
+            coreContractFailureIdentitySelections:
+                coreContractFailureIdentitySelections,
+            coreContractFailureIdentitySelection:
+                options.CoreContractFailureIdentitySelection);
         var program = binder.Bind();
         var diagnostics = tree.Diagnostics.AddRange(binder.Diagnostics);
         return new Compilation(tree, diagnostics, diagnostics.IsEmpty ? program : null);

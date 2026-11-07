@@ -46,8 +46,10 @@ public enum PrimitiveType
     /// <summary>An explicitly nullable writable managed-node handle.</summary>
     OptionalWriteManagedNode,
     /// <summary>An IEEE-754 binary32 value stored as its raw 32-bit representation.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
     Float32,
     /// <summary>An IEEE-754 binary64 value stored as its raw 64-bit representation.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
     Float64,
     /// <summary>A compilation-local readonly descriptor of validated Copy token records, not a public ABI type.</summary>
     TokenSpan,
@@ -487,6 +489,8 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     internal ImmutableArray<BoundSourceGenericTypeDefinition>
         SourceGenericTypeDefinitions { get; init; } = [];
 
+    internal int SourceInputCount { get; init; }
+
     internal ImmutableArray<BoundSourceGenericTypeInstance>
         SourceGenericTypeInstances { get; init; } = [];
 
@@ -495,12 +499,37 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
         get; init;
     }
 
+    internal BoundStandardMethodProviderClosure?
+        StandardMethodProviderClosure { get; init; }
+
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
 
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
 
+    internal LayoutCoreRegistrationSet? LayoutCoreRegistration { get; init; }
+
+    internal StaticInitializationCoreRegistrationSet?
+        StaticInitializationCoreRegistration { get; init; }
+
+    internal LazyInitializationCoreRegistrationSet?
+        LazyInitializationCoreRegistration { get; init; }
+
+    internal ImmutableArray<BoundStaticFieldDefinition> StaticFields
+    {
+        get; init;
+    } = [];
+
+    internal ImmutableArray<BoundStaticInitializationGroup>
+        StaticInitializationGroups { get; init; } = [];
+
     internal ImmutableArray<CoreExceptionIdentitySelection>
         CoreExceptionIdentitySelections { get; init; } = [];
+
+    internal ImmutableArray<CoreContractFailureIdentitySelection>
+        CoreContractFailureIdentitySelections { get; init; } = [];
+
+    internal CoreContractFailureIdentitySelection?
+        CoreContractFailureIdentitySelection { get; init; }
 
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
 
@@ -509,6 +538,12 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; init; } = [];
 
     internal ImmutableArray<CheckedReferenceTypeDefinition> CheckedReferenceTypes { get; init; } = [];
+
+    internal ImmutableArray<BoundPrivateNominalTypeOrigin>
+        PrivateNominalTypeOrigins { get; init; } = [];
+
+    internal ImmutableArray<BoundPrivateClassReference>
+        PrivateClassReferences { get; init; } = [];
 
     internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; init; } = [];
 
@@ -563,6 +598,21 @@ internal sealed record BoundSourceGenericTypeInstance(
     int StructureIndex, int DefinitionIndex,
     ImmutableArray<PrimitiveType> TypeArguments);
 
+internal enum BoundDeclarationContractPhase : byte
+{
+    Precondition = 1,
+    NormalPostcondition = 2,
+}
+
+internal sealed record BoundDeclarationContractClause(
+    BoundDeclarationContractPhase Phase,
+    uint PhaseLocalOrdinal,
+    BoundExpression Predicate,
+    PrimitiveType? ExplicitFailureType,
+    CoreContractFailureDeclarationIdentity? SelectedFailureClass,
+    string? UsingModuleIdentity,
+    TextSpan Span);
+
 /// <summary>A loaded local A2 TypeDef and its retained ExportKey aliases; no keys means unpublished.</summary>
 internal sealed record BoundSourceTypePublication(int StructureIndex,
     ImmutableArray<string> ExportKeys, BoundStruct DeclarationSnapshot,
@@ -597,6 +647,45 @@ internal sealed record BoundStandardTypeOrigin(
     ImmutableArray<BoundNativeFixedArrayType> ExpectedFixedArrayTypes = default,
     ImmutableArray<NativePointerTypeDefinition> ExpectedNativePointerTypes = default);
 
+internal sealed record BoundStandardMethodProviderClosure(
+    int RootArtifactIndex, int RootModuleRow, string RootModuleIdentity,
+    ImmutableArray<BoundStandardMethodProviderArtifact> Artifacts,
+    ImmutableArray<BoundStandardMethodProviderModule> Modules,
+    ImmutableArray<BoundStandardMethodProviderEdge> MethodEdges,
+    ImmutableArray<BoundStandardTypeProviderEdge> TypeEdges);
+
+internal sealed record BoundStandardMethodProviderArtifact(
+    int ArtifactIndex, string SchemaIdentity,
+    ImmutableArray<byte> ArtifactSnapshot);
+
+internal sealed record BoundStandardMethodProviderModule(
+    int ArtifactIndex, int ModuleRow, string Identity,
+    uint GoverningRuleEdition, uint TargetRequirement, uint RuntimePolicy,
+    int EntryMethodDefRow, int MethodDefStart, int MethodDefEnd,
+    BoundProgram Program, ImmutableArray<int> FunctionIndexByMethodRow,
+    ImmutableArray<int> FunctionIndexByImportRow);
+
+internal readonly record struct BoundStandardMethodProviderMethodOrigin(
+    int ArtifactIndex, int ModuleRow, int MethodDefRow,
+    uint DefinitionId, int FunctionIndex);
+
+internal sealed record BoundStandardMethodProviderEdge(
+    int ConsumerArtifactIndex, int ConsumerModuleRow,
+    string ConsumerModuleIdentity, int ImportRow, int ModuleRefRow,
+    BoundStandardMethodProviderMethodOrigin Expected,
+    string ProducerIdentity, string ExportKey,
+    uint TargetRequirement, uint RuntimePolicy,
+    int ProviderArtifactIndex, int ProviderModuleRow,
+    string ProviderModuleIdentity, int ExportRow,
+    BoundStandardMethodProviderMethodOrigin Actual);
+
+internal sealed record BoundStandardTypeProviderEdge(
+    int ConsumerArtifactIndex, int ConsumerModuleRow, int ImportRow,
+    int ModuleRefRow, uint ExpectedDefinitionId, string ProducerIdentity,
+    string ExportKey, uint TargetRequirement, uint RuntimePolicy,
+    int ProviderArtifactIndex, int ProviderModuleRow, int ExportRow,
+    uint ActualDefinitionId);
+
 /// <summary>A sealed, image-private managed payload with non-null initialized fields.</summary>
 public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
@@ -607,7 +696,7 @@ public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fi
 }
 
 /// <summary>A compact value type of at most sixteen bytes, with checked value fields, a compilation-local token cursor capture, or a compiler-sealed opaque payload.</summary>
-public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
+public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, ulong Size)
 {
     internal TokenSpanTypeRole TokenSpanRole { get; init; }
     internal BoundStandardTypeOrigin? StandardTypeOrigin { get; init; }
@@ -621,6 +710,18 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
 
     /// <summary>Whether this Copy value has the storage and call ABI of its sole scalar field.</summary>
     public bool IsTransparent { get; init; }
+
+    /// <summary>The selected aggregate packing, or zero when packing does not apply.</summary>
+    public int Packing { get; init; }
+
+    /// <summary>The exact source-selected aggregate alignment, when present.</summary>
+    public int? DeclaredAlignment { get; init; }
+
+    /// <summary>The completed object alignment in bytes.</summary>
+    public int Alignment { get; init; }
+
+    /// <summary>The strongest explicit alignment required by this type or any subobject.</summary>
+    public int RequiredAlignment { get; init; } = 1;
 
     internal bool IsUnion
         => !IsSequential && !IsTransparent
@@ -656,7 +757,7 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
 }
 
 /// <summary>A naturally aligned field whose offset and width are in bytes.</summary>
-public sealed record BoundStructField(string Name, PrimitiveType Type, int Offset, int Size)
+public sealed record BoundStructField(string Name, PrimitiveType Type, ulong Offset, ulong Size)
 {
     /// <summary>Whether assignment is permitted after the declaring receiver's construction.</summary>
     public bool IsMutable { get; init; }
@@ -670,6 +771,49 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
     /// <summary>Whether direct access requires an explicit unsafe caller scope.</summary>
     public bool RequiresUnsafeCaller { get; init; }
 }
+
+internal sealed record BoundStaticOwnerIdentity(
+    string Name,
+    ImmutableDictionary<string, PrimitiveType> TypeArguments);
+
+internal sealed record BoundFriendTarget(
+    PrimitiveType Type,
+    int GenericDefinitionIndex,
+    ImmutableArray<PrimitiveType?> TypeArguments);
+
+internal sealed record BoundStaticFieldDefinition(
+    BoundStaticOwnerIdentity Owner,
+    PrimitiveType OwnerType,
+    string Name,
+    PrimitiveType Type,
+    uint DeclarationOrdinal,
+    int SourceInputOrdinal,
+    int SourceOffset,
+    int EagerGroupIndex,
+    int InitializerFunctionIndex,
+    bool IsLazy,
+    bool IsMutable,
+    bool IsPrivate,
+    bool IsInternal,
+    bool RequiresUnsafeCaller,
+    TextSpan Span)
+{
+    internal string? BackingPropertyName { get; init; }
+    internal bool IsFile { get; init; }
+    internal ImmutableArray<BoundFriendTarget> FriendTargets
+    {
+        get; init;
+    } = [];
+}
+
+internal sealed record BoundStaticInitializationGroup(
+    BoundStaticOwnerIdentity Owner,
+    PrimitiveType OwnerType,
+    BoundStaticInitializationTrigger Trigger,
+    int StaticConstructorFunctionIndex,
+    ImmutableArray<int> StaticFieldIndexes,
+    ImmutableArray<int> EagerInitializerFunctionIndexes,
+    TextSpan Span);
 
 internal enum BoundDependencyRelation : byte
 {
@@ -774,9 +918,18 @@ internal sealed record BoundCopyOriginSummary(
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    internal int SourceInputOrdinal { get; init; } = -1;
+    internal ImmutableArray<BoundFriendTarget> FriendTargets
+    {
+        get; init;
+    } = [];
+
     internal DirectNativeImport? DirectNativeImport { get; init; }
     internal NativeOutputDeclarationRole? NativeOutputRole { get; init; }
     internal ImmutableArray<NativeOutputContract> NativeOutputContracts { get; init; } = [];
+    internal ImmutableArray<BoundDeclarationContractClause>
+        DeclarationContractClauses { get; init; } = [];
+    internal bool HasRawUnionReturnCoverage { get; init; }
     internal ImmutableArray<byte> RawUnionReturnCoverage { get; init; } = [];
     internal BoundModuleImport? ModuleImport { get; init; }
     /// <summary>Whether this external declaration originated in a module reference rather than source import syntax.</summary>
@@ -784,6 +937,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     internal PrimitiveType? NativeFunctionPointerType { get; init; }
     internal NativeCallingConvention? NativeCallableConvention { get; init; }
     internal string? NativeCallableEntryName { get; init; }
+    internal bool HasNativeExport { get; init; }
+    internal string? NativeExportEntryName { get; init; }
+    internal bool NativeExportUsesDeclarationName { get; init; }
 
     internal NativeVTableMethodDefinition? NativeVTableMethod { get; init; }
     internal TrRmScalarGraph? IndexedBody { get; init; }
@@ -810,6 +966,10 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
     public bool IsConstructor { get; init; }
 
+    internal int ConstructionHomeIndex { get; init; } = -1;
+
+    internal int StaticFieldInitializerIndex { get; init; } = -1;
+
     /// <summary>Whether calls are limited to the declaring struct.</summary>
     public bool IsPrivate { get; init; }
 
@@ -834,6 +994,20 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Source constructor called by a compiler-defined class factory, or -1.</summary>
     public int ClassConstructor { get; init; } = -1;
 
+    internal BoundStaticConstructorIdentity? StaticConstructorIdentity
+    {
+        get; init;
+    }
+
+    internal BoundStaticInitializationTrigger? StaticInitializationTrigger
+    {
+        get; init;
+    }
+
+    internal ImmutableDictionary<string, PrimitiveType>
+        StaticConstructorOwnerTypeArguments { get; init; }
+            = [];
+
     /// <summary>Constructor input slots whose backing dependencies must be forwarded before publication. Never persisted.</summary>
     public ImmutableArray<int> CapturedParameters { get; init; } = [];
 
@@ -850,6 +1024,46 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
 internal sealed record BoundModuleImport(string ProducerIdentity, string ExportKey,
     uint TargetRequirement, uint RuntimePolicy);
+
+internal enum BoundPrivateNominalOriginKind : byte
+{
+    OwnedDefinition = 1,
+    ImportedExpectation = 2,
+}
+
+internal sealed record BoundPrivateNominalTypeOrigin(
+    PrimitiveType PrivateType,
+    BoundPrivateNominalOriginKind OriginKind,
+    bool IsExported,
+    string UsingModuleIdentity,
+    string LocalDeclarationKey,
+    string? SelectedModuleIdentity = null,
+    string? SelectedExportKey = null);
+
+internal sealed record BoundPrivateClassSnapshot(
+    ImmutableArray<BoundStruct> Structures,
+    ImmutableArray<BoundClass> Classes,
+    ImmutableArray<CheckedReferenceTypeDefinition> CheckedReferenceTypes,
+    ImmutableArray<NativeFunctionPointerSignatureDefinition>
+        NativeFunctionPointerSignatures,
+    ImmutableArray<NativePointerTypeDefinition> NativePointerTypes,
+    ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes,
+    ImmutableArray<BoundPrivateNominalTypeOrigin> NominalTypeOrigins,
+    ImmutableArray<BoundEnumDefinition> EnumDefinitions = default);
+
+internal sealed record BoundPrivateClassReference(
+    PrimitiveType ClassType,
+    BoundPrivateNominalTypeOrigin Origin,
+    BoundPrivateClassSnapshot ExpectedSnapshot,
+    PrimitiveType ExpectedClassType,
+    bool IsSourceLookupRoot,
+    ImmutableArray<int> ExpectedStructureMapping,
+    ImmutableArray<int> ExpectedClassMapping,
+    ImmutableArray<int> ExpectedNativePointerMapping = default,
+    ImmutableArray<int> ExpectedNativeFunctionPointerMapping = default,
+    ImmutableArray<int> ExpectedNativeFixedArrayMapping = default,
+    ImmutableArray<int> ExpectedCheckedReferenceMapping = default,
+    ImmutableArray<int> ExpectedEnumMapping = default);
 
 internal enum NativeImportResolutionMode : byte
 {
@@ -959,6 +1173,9 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
     /// <summary>Whether this source parameter aliases an existing readonly scalar place.</summary>
     internal bool IsImplicitRef { get; init; }
 
+    /// <summary>Whether an implicit-reference formal stores its complete descriptor type.</summary>
+    internal bool IsCanonicalImplicitReference { get; init; }
+
     /// <summary>Whether this local is a hidden temporary backing an implicit-reference argument.</summary>
     internal bool IsImplicitReferenceTemporary { get; init; }
 
@@ -1017,6 +1234,17 @@ public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpressi
     public ImmutableArray<int> NestedFields { get; init; } = [];
 
     internal bool IsUnsafeAuthorized { get; init; }
+}
+
+/// <summary>Writes through one statically bound field identity.</summary>
+/// <param name="Field">The static-field declaration index.</param>
+/// <param name="Value">The assigned value.</param>
+/// <param name="Span">The source range.</param>
+public sealed record BoundStaticFieldAssignment(
+    int Field, BoundExpression Value, TextSpan Span) : BoundStatement(Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+    internal bool IsInitializationAuthority { get; init; }
 }
 
 /// <summary>A checked write to a compiler-supplied writable buffer.</summary>
@@ -1248,6 +1476,194 @@ public sealed record BoundReferenceWrite(BoundExpression Descriptor, BoundExpres
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with {
             Descriptor = rewrite(Descriptor),
+            Value = rewrite(Value),
+        };
+}
+
+internal abstract record BoundPrivatePlace(PrimitiveType Type)
+{
+    internal abstract bool HasValidNestedExpressions { get; }
+    internal abstract ImmutableArray<BoundExpression> NestedExpressions { get; }
+    internal abstract BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite);
+}
+
+internal sealed record BoundPrivateLocalPlace(int Variable,
+    PrimitiveType Type) : BoundPrivatePlace(Type)
+{
+    internal override bool HasValidNestedExpressions => true;
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [];
+    internal override BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this;
+}
+
+internal sealed record BoundPrivateInlineFieldPlace(PrimitiveType OwnerType,
+    uint FieldOrdinal, BoundPrivatePlace Receiver, PrimitiveType Type)
+    : BoundPrivatePlace(Type)
+{
+    internal override bool HasValidNestedExpressions =>
+        Receiver is not null && Receiver.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Receiver.NestedExpressions;
+    internal override BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Receiver = Receiver.RewriteNestedExpressions(rewrite),
+        };
+}
+
+internal sealed record BoundPrivateObjectFieldPlace(PrimitiveType OwnerType,
+    uint FieldOrdinal, BoundExpression Receiver, PrimitiveType Type)
+    : BoundPrivatePlace(Type)
+{
+    internal override bool HasValidNestedExpressions =>
+        Receiver is not null && Receiver.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [Receiver];
+    internal override BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Receiver = rewrite(Receiver),
+        };
+}
+
+internal sealed record BoundPrivateReferentPlace(
+    BoundExpression Descriptor, PrimitiveType Type) : BoundPrivatePlace(Type)
+{
+    internal override bool HasValidNestedExpressions =>
+        Descriptor is not null && Descriptor.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [Descriptor];
+    internal override BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Descriptor = rewrite(Descriptor),
+        };
+}
+
+internal sealed record BoundPrivateFixedArrayElementPlace(
+    PrimitiveType ArrayType, BoundPrivatePlace ArrayPlace,
+    BoundExpression Index, PrimitiveType Type) : BoundPrivatePlace(Type)
+{
+    internal override bool HasValidNestedExpressions =>
+        ArrayPlace is not null && ArrayPlace.HasValidNestedExpressions
+        && Index is not null && Index.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [.. ArrayPlace.NestedExpressions, Index];
+    internal override BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            ArrayPlace = ArrayPlace.RewriteNestedExpressions(rewrite),
+            Index = rewrite(Index),
+        };
+}
+
+internal sealed record BoundPrivateInvocationBufferElementPlace(
+    int Buffer, BoundExpression Index, PrimitiveType Type)
+    : BoundPrivatePlace(Type)
+{
+    internal override bool HasValidNestedExpressions =>
+        Index is not null && Index.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [Index];
+    internal override BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Index = rewrite(Index),
+        };
+}
+
+internal sealed record BoundPrivateLexicalViewElementPlace(
+    int Variable, BoundExpression Index, PrimitiveType Type)
+    : BoundPrivatePlace(Type)
+{
+    internal override bool HasValidNestedExpressions =>
+        Index is not null && Index.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [Index];
+    internal override BoundPrivatePlace RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Index = rewrite(Index),
+        };
+}
+
+internal sealed record BoundPrivateReferenceForm(byte FormationKind,
+    BoundPrivatePlace Place, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Place is not null && Place.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Place.NestedExpressions;
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Place = Place.RewriteNestedExpressions(rewrite),
+        };
+}
+
+internal sealed record BoundPrivatePlaceRead(byte UseKind,
+    BoundPrivatePlace Place, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Place is not null && Place.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Place.NestedExpressions;
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Place = Place.RewriteNestedExpressions(rewrite),
+        };
+}
+
+internal sealed record BoundPrivatePlaceIsInitialized(
+    BoundPrivatePlace Place, TextSpan Span)
+    : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Place is not null && Place.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Place.NestedExpressions;
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Place = Place.RewriteNestedExpressions(rewrite),
+        };
+}
+
+internal sealed record BoundInitializationAttenuation(
+    BoundExpression Descriptor, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Descriptor is not null && Descriptor.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [Descriptor];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Descriptor = rewrite(Descriptor),
+        };
+}
+
+internal sealed record BoundPrivateCheckedStore(byte Transition,
+    BoundPrivatePlace Destination, BoundExpression Value, TextSpan Span)
+    : BoundExpression(PrimitiveType.Void, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Destination is not null && Destination.HasValidNestedExpressions
+        && Value is not null && Value.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [.. Destination.NestedExpressions, Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Destination = Destination.RewriteNestedExpressions(rewrite),
+            Value = rewrite(Value),
+        };
+}
+
+internal sealed record BoundImplicitReferenceMaterialize(
+    int BackingVariable, BoundExpression Value, PrimitiveType Type,
+    TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        Value is not null && Value.HasValidNestedExpressions;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
             Value = rewrite(Value),
         };
 }
@@ -1610,6 +2026,9 @@ public sealed record BoundIsVariablePattern(BoundExpression Value, int Variable,
 /// <param name="Span">The source range.</param>
 public sealed record BoundRead(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
+internal sealed record BoundContractReturnValue(PrimitiveType Type,
+    TextSpan Span) : BoundExpression(Type, Span);
+
 /// <summary>Transfers a named unique owner and vacates its source.</summary>
 public sealed record BoundMove(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
@@ -1866,6 +2285,29 @@ public sealed record BoundFieldRead(BoundExpression Receiver, int Field, Primiti
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Receiver];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Receiver = rewrite(Receiver) };
+}
+
+/// <summary>Reads a static field through its bound declaration identity.</summary>
+/// <summary>Reads one statically bound field identity.</summary>
+/// <param name="Field">The static-field declaration index.</param>
+/// <param name="Type">The field's declared value type.</param>
+/// <param name="Span">The source range.</param>
+public sealed record BoundStaticFieldRead(
+    int Field, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+    internal BoundStaticFieldAccessAuthority Authority { get; init; }
+        = BoundStaticFieldAccessAuthority.EagerGroupCompletion;
+
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this;
+}
+
+internal enum BoundStaticFieldAccessAuthority : byte
+{
+    EagerGroupCompletion,
+    InitializationPhase,
 }
 
 /// <summary>A caller-owned output slot passed through private callee scratch storage.</summary>

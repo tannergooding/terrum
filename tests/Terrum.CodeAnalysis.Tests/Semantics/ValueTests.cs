@@ -8,17 +8,17 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class ValueTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ValueTests
 {
     [TestCase("int32 Main() { return int32(uint32(42)); }",42)]
     [TestCase("int32 Main() { char16 unit = char16(uint32(65535)); return int32(unit); }",65535)]
@@ -28,7 +28,9 @@ public sealed class ValueTests
     [TestCase("namespace Example; [Blittable] [Layout(LayoutKind.Sequential)] public struct Value { public int32 Number; public Value(int32 number) { Number = number; } } int32 F(/*type*/ Example.Value value) { return value.Number; } int32 Main() { /*local*/ Example.Value value = new /*new*/ Example.Value(7); require int32 /*constant*/ .MaxValue > value.Number; return Example /*call*/ .F(value); }",7)]
     public async Task ScalarValuesExecuteInNativeCodeAsync(string source, int expected)
     {
-        var program = Compile(source);
+        var program = Compile(source, new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         Assert.That(code.EntryPoint, Is.InRange(0, code.Code.Length - 1));
         Assert.That(code.Functions[0].Start, Is.EqualTo(code.EntryPoint));
@@ -104,7 +106,9 @@ public sealed class ValueTests
             }
             int32 Main() { Pair value = new Pair(true, 7); return value.Read(); }
             """;
-        var program = Compile(Source);
+        var program = Compile(Source, new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
         Assert.That(program.Structures[0].Fields[0].Offset, Is.EqualTo(0));
         Assert.That(program.Structures[0].Fields[1].Offset, Is.EqualTo(4));
         Assert.That(program.Structures[0].Size, Is.EqualTo(8));
@@ -222,10 +226,16 @@ public sealed class ValueTests
                 return 0;
             }
             """);
-        var compilation = Compilation.Create(trees);
+        var compilation = Compilation.Create(trees, new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(await RunNativeAsync(NativeEmitter.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(0));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(0));
     }
 
     [Test]
@@ -238,7 +248,11 @@ public sealed class ValueTests
         var compilation = Compilation.Create(trees);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(await RunNativeAsync(NativeEmitter.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(9));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(9));
     }
 
     [Test]
@@ -285,7 +299,11 @@ public sealed class ValueTests
         ];
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), buffers);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         SemanticVerifier.Verify(program);
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         Assert.That(code.ReadOnlyDataLength, Is.EqualTo(8));
@@ -306,7 +324,11 @@ public sealed class ValueTests
             [new HostBuffer("Output", PrimitiveType.Int32, [0], true)]);
         Assert.That(outputArgument.Program, Is.Null);
         var outOfRange = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Host.Source[-1]; }"), buffers);
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = outOfRange.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = outOfRange.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540004)));
     }
     [TestCase("int32 Main() { if (Try(out var x)) { return x; } return 0; } bool Try(out int32 x) { return true; }",false)]
@@ -325,7 +347,11 @@ public sealed class ValueTests
         if (valid)
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))());
+            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = compilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))());
         }
         else
         {
@@ -542,11 +568,18 @@ public sealed class ValueTests
         Assert.That(Compilation.Create(SyntaxTree.Parse(source)).Program, Is.Null);
     }
 
-    private static BoundProgram Compile(string source)
+    private static BoundProgram Compile(string source,
+        CompilationOptions? options = null)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = options is null
+            ? Compilation.Create(SyntaxTree.Parse(source))
+            : Compilation.Create(SyntaxTree.Parse(source), options.Value);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
     }
 
     private static async Task<int> RunNativeAsync(byte[] image)

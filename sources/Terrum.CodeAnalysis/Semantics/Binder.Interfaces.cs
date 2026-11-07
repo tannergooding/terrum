@@ -1537,7 +1537,7 @@ internal sealed partial class Binder
     private static SyntaxNode? FirstInterfaceTypeNode(SyntaxNode declaration) =>
         declaration.Children.OfType<SyntaxNode>().FirstOrDefault(static child =>
             child.Kind is SyntaxKind.TypeName or SyntaxKind.ReferenceTypeName
-                or SyntaxKind.AttributedTypeName or SyntaxKind.InlineArrayTypeName);
+                or SyntaxKind.AttributedTypeName or SyntaxKind.FixedArrayTypeName);
 
     private static SyntaxNode? AssociatedTypeDefaultNode(SyntaxNode declaration)
     {

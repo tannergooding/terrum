@@ -65,6 +65,8 @@ public enum SyntaxKind
     EmptyStatement,
     /// <summary>An identifier expression.</summary>
     NameExpression,
+    /// <summary>The saved result referenced by a declaration postcondition.</summary>
+    ReturnValueReference,
     /// <summary>A literal expression.</summary>
     LiteralExpression,
     /// <summary>An expression enclosed in parentheses.</summary>
@@ -91,6 +93,8 @@ public enum SyntaxKind
     IndexExpression,
     /// <summary>A bracket initializer, admitted only by a closed local storage gate.</summary>
     ArrayInitializerExpression,
+    /// <summary>A target-typed fixed-array repeat initializer.</summary>
+    FixedArrayRepeatExpression,
     /// <summary>A half-open slice range used as an index argument.</summary>
     SliceRangeExpression,
     /// <summary>An intentionally omitted lower or upper slice bound.</summary>
@@ -227,7 +231,7 @@ public enum SyntaxKind
     SetAccessor,
     /// <summary>An interface property initializer accessor.</summary>
     InitAccessor,
-    /// <summary>An interface callable contract clause.</summary>
+    /// <summary>A declaration precondition or normal-postcondition clause.</summary>
     ContractClause,
     /// <summary>An indexer parameter list.</summary>
     IndexerParameterList,

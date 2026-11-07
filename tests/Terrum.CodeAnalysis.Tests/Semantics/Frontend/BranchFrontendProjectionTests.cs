@@ -2,13 +2,14 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class BranchFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class BranchFrontendProjectionTests
 {
     [TestCase("if",32,4)]
     [TestCase("while",36,3)]
@@ -39,7 +40,7 @@ public sealed class BranchFrontendProjectionTests
         innerCondition.CopyTo(words, 50);
         result.CopyTo(words, 58);
         int[] branch = [4, 2, 0, outer, end - outer];
-        int[] nested = [kind, 2, 1, inner, text.IndexOf('}', inner) + 1 - inner];
+        int[] nested = [kind, 2, 1, inner, text.IndexOf('}', inner, System.StringComparison.Ordinal) + 1 - inner];
         int[] marker = [5, 3, -1, otherwise, end - otherwise];
         branch.CopyTo(words, 332);
         nested.CopyTo(words, 337);
@@ -61,7 +62,7 @@ public sealed class BranchFrontendProjectionTests
         {
             var original = words[index];
             words[index] = changed;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
             words[index] = original;
         }
     }
@@ -116,23 +117,23 @@ public sealed class BranchFrontendProjectionTests
         Reject(341, words[341] - 1);
         Reject(43, 1);
         Reject(39, 0);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("else", "xxxx", StringComparison.Ordinal)), Bytes()));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("true", "false", StringComparison.Ordinal)), Bytes()));
 
         void Reject(int index, int changed)
         {
             var original = words[index];
             words[index] = changed;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int type, int start, int length,
             int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -144,7 +145,7 @@ public sealed class BranchFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;

@@ -2,14 +2,15 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class ConversionFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ConversionFrontendProjectionTests
 {
     [TestCase(7,"0",0)]
     [TestCase(7,"55296",55296)]
@@ -52,11 +53,11 @@ public sealed class ConversionFrontendProjectionTests
         Assert.That(ScalarFrontendHost.ReadResult(source, Encode(words)).IsValid, Is.True);
 
         words[node + 1] = type == 7 ? 8 : 7;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
         words[node + 1] = type;
 
         words[node + 6] ^= 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
         words[node + 6] ^= 1;
 
         var changedLiteral = codeUnit switch {
@@ -66,12 +67,12 @@ public sealed class ConversionFrontendProjectionTests
         };
         var changedSource = SourceText.From(text.Replace($"char16({literal})",
             $"char16({changedLiteral})", StringComparison.Ordinal));
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(changedSource, Encode(words)));
 
         var changedType = SourceText.From(text.Replace("char16(", "uint32(",
             StringComparison.Ordinal));
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(changedType, Encode(words)));
     }
     [TestCase(7,"0",0)]
@@ -136,26 +137,26 @@ public sealed class ConversionFrontendProjectionTests
             BoundRuntimePolicy.FailFast).Projection.IsValid, Is.True);
 
         program[frame + 4 + node + 1] = type == 7 ? 8 : 7;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
             Encode(program), BoundRuntimePolicy.FailFast));
         program[frame + 4 + node + 1] = type;
 
         program[frame + 4 + node + 6] ^= 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
             Encode(program), BoundRuntimePolicy.FailFast));
         program[frame + 4 + node + 6] ^= 1;
 
         if (type == 8)
         {
             program[frame + 4 + node + 7] ^= 1;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
                 Encode(program), BoundRuntimePolicy.FailFast));
             program[frame + 4 + node + 7] ^= 1;
         }
         else
         {
             program[frame + 4 + node + 7] = 1;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
                 Encode(program), BoundRuntimePolicy.FailFast));
             program[frame + 4 + node + 7] = 0;
         }
@@ -167,12 +168,12 @@ public sealed class ConversionFrontendProjectionTests
         };
         var changedLiteralSource = SourceText.From(text.Replace($"char16({literal})",
             $"char16({changedLiteral})", StringComparison.Ordinal));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(changedLiteralSource,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(changedLiteralSource,
             bytes, Encode(program), BoundRuntimePolicy.FailFast));
 
         var changedType = SourceText.From(text.Replace("char16(", "uint32(",
             StringComparison.Ordinal));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(changedType,
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(changedType,
             bytes, Encode(program), BoundRuntimePolicy.FailFast));
     }
 
@@ -213,23 +214,23 @@ public sealed class ConversionFrontendProjectionTests
         Reject(42 + 16 + 1, 4);
         Reject(42 + 16 + 5, 0);
         Reject(42 + 16 + 6, 1);
-        Reject(42 + 3 * 8, 1);
+        Reject(42 + (3 * 8), 1);
         Reject(298, 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("uint64(", "int64(", StringComparison.Ordinal)), Bytes()));
 
         void Reject(int index, int value)
         {
             var original = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int type, int start, int end,
             int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -291,7 +292,7 @@ public sealed class ConversionFrontendProjectionTests
         Reject(0, 21);
         Reject(0, 22);
         Reject(301, 0);
-        Reject(42 + 3 * 8 + 2, secondCast + 1);
+        Reject(42 + (3 * 8) + 2, secondCast + 1);
         Reject(337 + 2, 5);
         Reject(342, 1);
 
@@ -299,14 +300,14 @@ public sealed class ConversionFrontendProjectionTests
         {
             var original = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int type, int start, int end,
             int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -318,7 +319,7 @@ public sealed class ConversionFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;
@@ -335,7 +336,6 @@ public sealed class ConversionFrontendProjectionTests
             }
             return bytes;
         }
-
     }
 
     [Test]
@@ -377,7 +377,7 @@ public sealed class ConversionFrontendProjectionTests
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4, 4), words[index]);
         }
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
     }
 

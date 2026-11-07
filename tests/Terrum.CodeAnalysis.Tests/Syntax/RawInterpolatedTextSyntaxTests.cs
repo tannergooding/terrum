@@ -9,7 +9,8 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class RawInterpolatedTextSyntaxTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class RawInterpolatedTextSyntaxTests
 {
     [Test]
     public void LexesAndParsesDollarCountedHolesAndLiteralBraceRemainders()

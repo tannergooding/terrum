@@ -2,14 +2,15 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolComparisonTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolComparisonTests
 {
     private const string LessSource = """
         interface Less<A, B, C> { static C operator <(A left, B right); }
@@ -62,7 +63,11 @@ public sealed class StaticProtocolComparisonTests
         Assert.That(syntax.HasErrors, Is.False, string.Join(Environment.NewLine, syntax.Diagnostics));
         var compilation = Compilation.Create(syntax);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         SemanticVerifier.Verify(program);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function =>
             function.Name == "Value." + name && function.ReturnType == PrimitiveType.Bool),Is.True);
@@ -91,6 +96,8 @@ public sealed class StaticProtocolComparisonTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
+
+    [Test]
     public void RetiredNoThrowOnStaticProtocolRequirementIsDiagnosed()
     {
         var source = LessSource.Replace("static C operator <",
@@ -134,7 +141,11 @@ public sealed class StaticProtocolComparisonTests
                 "new Value(20) < new Value(22)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))());
+        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))());
     }
 
     [Test]
@@ -185,7 +196,11 @@ public sealed class StaticProtocolComparisonTests
         }
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(program.Functions.All(static function => !function.NoFailureProof), Is.True);
         SemanticVerifier.Verify(program);
     }
@@ -224,7 +239,11 @@ public sealed class StaticProtocolComparisonTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         SemanticVerifier.Verify(program);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "TryChoose<First, Second>"),Is.True);
     }
@@ -253,7 +272,11 @@ public sealed class StaticProtocolComparisonTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(LessSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var index = Array.FindIndex(program.Functions.ToArray(), static function =>
             function.Name == "Value.op_LessThan");
         Assert.That(index >= 0, Is.True);

@@ -4,14 +4,14 @@ using System;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed partial class GenericControlFlowModuleTests
+internal sealed partial class GenericControlFlowModuleTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -19,10 +19,10 @@ public sealed partial class GenericControlFlowModuleTests
     {
         const string Original = "public int32 Read() { return 40; }";
         const string Replacement = """
-            [NoThrow] bool Condition() {
+             bool Condition() {
                 return (uint64.MaxValue > uint64(int64.MaxValue)) && !false;
             }
-            [NoThrow] int32 Secret() {
+             int32 Secret() {
                 require (true & (uint64.MaxValue > uint64(int64.MaxValue))) == true;
                 return int32(uint32(6 * 7));
             }
@@ -33,8 +33,8 @@ public sealed partial class GenericControlFlowModuleTests
         var replacementProgram = Compile(Replacement, policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, ["Read"]);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(101));
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(104));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(replacement, false), Is.EqualTo(ModuleCompiler.GetNativeProfileVersion(original, false)));
         Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Functions).Name, Is.EqualTo("Read"));
 
@@ -43,13 +43,37 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
         var condition = global::System.Linq.Enumerable.Single(linked.Functions, function => function.Name == "$producer.Condition");
-        var conditionResult = ((global::System.Func<BoundReturn>)(() => { var __nunitActual0 = global::System.Linq.Enumerable.Single(condition.Body.Statements); Assert.That(__nunitActual0, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual0!; }))();
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual1 = conditionResult.Value; Assert.That(__nunitActual1, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual1!; }))().Value, Is.EqualTo(1L));
+        var conditionResult = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual0 = global::System.Linq.Enumerable.Single(condition.Body.Statements);
+            Assert.That(__nunitActual0, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual0!;
+        }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual1 = conditionResult.Value;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual1!;
+        }))().Value, Is.EqualTo(1L));
         var secret = global::System.Linq.Enumerable.Single(linked.Functions, function => function.Name == "$producer.Secret");
-        var requirement = ((global::System.Func<BoundRequire>)(() => { var __nunitActual2 = secret.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundRequire>()); return (BoundRequire)__nunitActual2!; }))();
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual3 = requirement.Condition; Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual3!; }))().Value, Is.EqualTo(1L));
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = secret.Body.Statements[1]; Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = result.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))().Value, Is.EqualTo(42L));
+        var requirement = ((global::System.Func<BoundRequire>)(() => {
+            var __nunitActual2 = secret.Body.Statements[0];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundRequire>());
+            return (BoundRequire)__nunitActual2!;
+        }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual3 = requirement.Condition;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual3!;
+        }))().Value, Is.EqualTo(1L));
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual4 = secret.Body.Statements[1];
+            Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual4!;
+        }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual5 = result.Value;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual5!;
+        }))().Value, Is.EqualTo(42L));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
         Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));

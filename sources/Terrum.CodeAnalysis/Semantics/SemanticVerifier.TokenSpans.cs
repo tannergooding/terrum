@@ -751,11 +751,18 @@ public static partial class SemanticVerifier
         internal static StorageProjection Rebase(
             StorageProjection destinationPrefix,
             StorageProjection sourcePrefix,
-            StorageProjection source)
+            StorageProjection source,
+            RepeatResourceLedger? resources = null)
         {
             var sourcePrefixSegments = sourcePrefix.ProjectionPath.Segments;
             var sourceSegments = source.ProjectionPath.Segments;
-            if (!sourcePrefix.ProjectionPath.IsPrefixOf(source.ProjectionPath))
+            var isPrefix = resources is null
+                ? sourcePrefix.ProjectionPath.IsPrefixOf(
+                    source.ProjectionPath)
+                : InitializationState.StorageProjectionPathIsPrefixOf(
+                    resources, sourcePrefix.ProjectionPath,
+                    source.ProjectionPath);
+            if (!isPrefix)
             {
                 return new StorageProjection(
                     StorageProjectionKind.UnknownElement, 0, 0);
@@ -3282,11 +3289,12 @@ public static partial class SemanticVerifier
             PrimitiveType referentType;
             if (formal.IsImplicitRef)
             {
-                if (!IsImplicitReferenceType(formal.Type, program))
+                referentType = ImplicitReferenceValueType(formal,
+                    program);
+                if (!IsImplicitReferenceType(referentType, program))
                 {
                     return false;
                 }
-                referentType = formal.Type;
             }
             else if (CheckedReferenceTypeContract.IsValidType(
                 formal.Type, program.CheckedReferenceTypes))
@@ -7181,17 +7189,13 @@ public static partial class SemanticVerifier
         {
             if (!NativeFixedArrayContract.TryGetLayout(type,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var layout))
+                    out _))
             {
                 throw InvalidEffect(default, "Ownership");
             }
-            if (layout.ElementCount != 0)
+            if (CarriesCopyOrigin(type, program))
             {
-                CollectCopyOriginFieldLeaves(layout.ElementType,
-                    StorageProjection.Combine(projection,
-                        StorageProjection.ForArrayRange(0,
-                            layout.ElementCount)),
-                    program, result, activeTypes, ref remaining, depth + 1);
+                result.Add((projection, type));
             }
             return;
         }
@@ -7229,6 +7233,10 @@ public static partial class SemanticVerifier
         if (IsNativePointerValue(type, program))
         {
             result.Add((projection, type));
+            return;
+        }
+        if (!CarriesNativePointer(type, program))
+        {
             return;
         }
         if (NativeFixedArrayTypes.IsType(type))
@@ -7970,6 +7978,23 @@ public static partial class SemanticVerifier
             case BoundMutableFieldLoan loan:
                 return CopyOriginOfExpression(loan.Place, loan.Type, relativeProjection,
                     facts, function, program, ref remaining, depth + 1);
+            case BoundNativeFixedArrayElement element
+                when element.Type == valueType:
+                var elementProjection = StorageProjection.Combine(
+                    NativeFixedArrayElementProjection(element.Variable,
+                        element.FieldPlace, element.Layout, element.Index,
+                        function, program),
+                    relativeProjection);
+                return CopyOriginFactAtProjection(element.Variable,
+                    elementProjection, facts);
+            case BoundNativeFixedArrayPathElement path
+                when path.Type == valueType:
+                var pathProjection = StorageProjection.Combine(
+                    NativeFixedArrayPathProjection(path.Variable,
+                        path.FieldPlace, path.Projections, function,
+                        program), relativeProjection);
+                return CopyOriginFactAtProjection(path.Variable,
+                    pathProjection, facts);
             case BoundFieldRead field when TryGetNativePointerFieldPlace(field,
                 function, program, out var variable, out var sourcePrefix):
                 var sourceProjection = StorageProjection.Combine(sourcePrefix, relativeProjection);
@@ -8305,6 +8330,58 @@ public static partial class SemanticVerifier
             facts.ClearCopyOriginFieldValues(destination, destinationPrefix);
         }
 
+        if (expression is BoundNativeFixedArrayRepeatInitialization repeat
+            && NativeFixedArrayTypes.IsType(destinationType))
+        {
+            if (repeat.Type != destinationType
+                || !NativeFixedArrayContract.MatchesLayout(repeat.Layout,
+                    program)
+                || repeat.Layout.CarrierType != destinationType
+                || repeat.Seed.Type != repeat.Layout.ElementType)
+            {
+                throw Invalid(expression.Span);
+            }
+            if (repeat.Layout.ElementCount == 0)
+            {
+                return;
+            }
+
+            var elementLeaves = CopyOriginFieldLeaves(
+                repeat.Layout.ElementType, program, ref remaining,
+                depth + 1);
+            var elementPrefix = StorageProjection.Combine(
+                destinationPrefix,
+                repeat.Layout.ElementCount == 1
+                    ? StorageProjection.ForArrayIndex(0)
+                    : StorageProjection.ForArrayRange(0,
+                        repeat.Layout.ElementCount));
+            foreach (var leaf in elementLeaves)
+            {
+                Count(ref remaining, depth + 1);
+                var destinationProjection = StorageProjection.Combine(
+                    elementPrefix, leaf.Projection);
+                if (!IsCopyOriginFieldProjection(destinationProjection))
+                {
+                    continue;
+                }
+
+                var value = CopyOriginOfExpression(repeat.Seed,
+                    repeat.Layout.ElementType, leaf.Projection, facts,
+                    function, program, ref remaining, depth + 1);
+                if (destinationProjection.ProjectionPath.IsConcrete)
+                {
+                    facts.SetCopyOriginFieldValue(destination,
+                        destinationProjection, value);
+                }
+                else
+                {
+                    facts.SetCopyOriginFieldValueTemplate(destination,
+                        destinationProjection, value, ref remaining);
+                }
+            }
+            return;
+        }
+
         if (expression is BoundNativeFixedArrayInitialization initialization
             && NativeFixedArrayTypes.IsType(destinationType))
         {
@@ -8439,7 +8516,9 @@ public static partial class SemanticVerifier
             var rootFact = CopyOriginOfExpression(expression, type,
                 StorageProjection.WholeObject, facts, function, program,
                 ref remaining, depth + 1);
-            if (rootFact.IsAvailable && rootFact.Origins.Count != 0)
+            if (rootFact.IsAvailable && rootFact.Origins.Count != 0
+                && CopyOriginSourcesMatchDestination(rootFact.Origins, type,
+                    function, program, ref remaining, depth + 1))
             {
                 var rootOrigins = new HashSet<BoundCopyOrigin>();
                 foreach (var origin in rootFact.Origins)
@@ -8461,7 +8540,10 @@ public static partial class SemanticVerifier
             Count(ref remaining, depth + 1);
             var valueFact = CopyOriginOfExpression(expression, type, leaf.Projection,
                 facts, function, program, ref remaining, depth + 1);
-            if (!valueFact.IsAvailable || valueFact.Origins.Count == 0)
+            if (!valueFact.IsAvailable || valueFact.Origins.Count == 0
+                || !CopyOriginSourcesMatchDestination(valueFact.Origins,
+                    leaf.Type, function, program, ref remaining,
+                    depth + 1))
             {
                 continue;
             }
@@ -8558,13 +8640,29 @@ public static partial class SemanticVerifier
         }
         if (formal.IsImplicitRef)
         {
-            referentType = formal.Type;
-            if (argument.Type != referentType)
+            referentType = ImplicitReferenceValueType(formal, program);
+            if (!IsImplicitReferenceType(referentType, program))
             {
                 return false;
             }
-
-            referentExpression = argument;
+            if (formal.IsCanonicalImplicitReference)
+            {
+                if (!IsPrivateImplicitReferenceArgument(argument.Type,
+                        formal, program))
+                {
+                    return false;
+                }
+                referentExpression = new BoundReferenceRead(argument,
+                    referentType, argument.Span);
+            }
+            else
+            {
+                if (argument.Type != referentType)
+                {
+                    return false;
+                }
+                referentExpression = argument;
+            }
             return true;
         }
         if (!CheckedReferenceTypeContract.IsValidType(
@@ -10312,6 +10410,166 @@ public static partial class SemanticVerifier
 
     private static SortedDictionary<StorageProjection,
         InitializationState.RawUnionArrayElementState>
+        RawUnionArrayFactsFromCoverage(PrimitiveType type,
+            byte[] coverage, InitializationState initialized,
+            BoundProgram program, ref int remaining, int depth,
+            out RepeatResourceLedger.StateLease? outputState)
+    {
+        outputState = null;
+        var result = new SortedDictionary<StorageProjection,
+            InitializationState.RawUnionArrayElementState>(
+                StorageProjectionComparer.Instance);
+        if (!CarriesRawUnionArrayFacts(program, type))
+        {
+            return result;
+        }
+        if (coverage.Length != MaterializedPayloadSize(type, program))
+        {
+            throw Invalid();
+        }
+
+        var resources = initialized.RepeatResources;
+        var resultState = resources.ReservePersistentState(
+            BigInteger.Zero);
+        var resultStateTransferred = false;
+        var resultHeaderWritten = false;
+        try
+        {
+            Add(type, 0, StorageProjection.WholeObject, coverage,
+                ref remaining, depth);
+            if (result.Count == 0)
+            {
+                return result;
+            }
+
+            outputState = resultState;
+            resultStateTransferred = true;
+            return result;
+        }
+        finally
+        {
+            if (!resultStateTransferred)
+            {
+                resultState.Dispose();
+            }
+        }
+
+        void Add(PrimitiveType currentType, int offset,
+            StorageProjection prefix, ReadOnlySpan<byte> valueBytes,
+            ref int remaining, int currentDepth)
+        {
+            Count(ref remaining, currentDepth);
+            if (NativeFixedArrayTypes.IsType(currentType))
+            {
+                if (!CarriesRawUnionPayloadFacts(program, currentType)
+                    || !NativeFixedArrayContract.TryGetLayout(currentType,
+                        program.Structures,
+                        program.NativeFixedArrayTypes, out var layout))
+                {
+                    return;
+                }
+
+                var elementSize = MaterializedPayloadSize(
+                    layout.ElementType, program);
+                var extent = MaterializedPayloadSize(currentType, program);
+                if (valueBytes.Length != extent
+                    || layout.ElementStride < (ulong)elementSize
+                    || layout.ByteExtent != (ulong)extent
+                    || (layout.ElementCount != 0
+                        && layout.ElementStride == 0)
+                    || layout.ElementCount > (ulong)extent + 1UL)
+                {
+                    throw Invalid();
+                }
+
+                var defaultBytes = GuaranteedInitializedPayloadBytes(
+                    layout.ElementType, program);
+                if (defaultBytes.Length != elementSize)
+                {
+                    throw Invalid();
+                }
+                InitializationState.RawUnionArrayElementState? state = null;
+                for (ulong element = 0;
+                    element < layout.ElementCount; element++)
+                {
+                    Count(ref remaining, currentDepth + 1);
+                    var elementOffset = checked((int)(element
+                        * layout.ElementStride));
+                    if (elementOffset > valueBytes.Length
+                        || elementSize > valueBytes.Length - elementOffset)
+                    {
+                        throw Invalid();
+                    }
+
+                    var elementBytes = valueBytes.Slice(elementOffset,
+                        elementSize);
+                    if (!defaultBytes.AsSpan().SequenceEqual(elementBytes))
+                    {
+                        state ??= new InitializationState
+                            .RawUnionArrayElementState(layout, defaultBytes,
+                                defaultBytes, resources);
+                        _ = state.Set(element, elementBytes);
+                    }
+                    var elementProjection = StorageProjection.Combine(
+                        prefix, StorageProjection.ForArrayIndex(element));
+                    Add(layout.ElementType,
+                        checked(offset + elementOffset), elementProjection,
+                        elementBytes, ref remaining, currentDepth + 1);
+                }
+
+                if (state is not null)
+                {
+                    var key = prefix;
+                    if (result.ContainsKey(key))
+                    {
+                        throw Invalid();
+                    }
+                    if (!resultHeaderWritten)
+                    {
+                        InitializationState
+                            .ChargeRepeatRootListHeader(resources);
+                        resultState.Add(16);
+                        resultHeaderWritten = true;
+                    }
+                    InitializationState.ChargeRepeatRoot(resources, key);
+                    resultState.Add(
+                        InitializationState.RawUnionArrayRootLogicalBytes(
+                            key) + state.LogicalBytes());
+                    result.Add(key, state);
+                }
+                return;
+            }
+
+            if (!HasFields(program, currentType)
+                || ManagedClassTypes.IsClass(currentType))
+            {
+                return;
+            }
+
+            var fields = Fields(program, currentType);
+            for (var fieldIndex = 0; fieldIndex < fields.Length;
+                fieldIndex++)
+            {
+                Count(ref remaining, currentDepth + 1);
+                var field = fields[fieldIndex];
+                var fieldOffset = MaterializedPayloadOffset(field.Offset);
+                var fieldSize = MaterializedPayloadSize(field.Type,
+                    program);
+                if (fieldOffset > valueBytes.Length
+                    || fieldSize > valueBytes.Length - fieldOffset)
+                {
+                    throw Invalid();
+                }
+                Add(field.Type, checked(offset + fieldOffset),
+                    prefix.AppendField(currentType, fieldIndex),
+                    valueBytes.Slice(fieldOffset, fieldSize),
+                    ref remaining, currentDepth + 1);
+            }
+        }
+    }
+
+    private static SortedDictionary<StorageProjection,
+        InitializationState.RawUnionArrayElementState>
         RawUnionArrayFactsOfExpression(BoundExpression expression,
             InitializationState initialized, BoundFunction function,
             BoundProgram program, ref int remaining, int depth,
@@ -10543,22 +10801,26 @@ public static partial class SemanticVerifier
             BoundProgram program, ref int remaining, int depth,
             out RepeatResourceLedger.StateLease? outputState)
     {
-        outputState = null;
-        var result = new SortedDictionary<StorageProjection,
-            InitializationState.RawUnionArrayElementState>(
-                StorageProjectionComparer.Instance);
+            outputState = null;
+            var returnCoverage = RawUnionInitializedPayloadBytesForCall(call,
+                    target, summary, stagedInputs,
+                    initialized.RawUnionReturnCoverageSummaries, program);
+            var result = RawUnionArrayFactsFromCoverage(call.Type,
+                    returnCoverage, initialized, program, ref remaining, depth,
+                    out var resultState);
         if (summary is null)
         {
-            return result;
+                outputState = resultState;
+                return result;
         }
 
         var resources = initialized.RepeatResources;
-        var resultState = resources.ReservePersistentState(
-            BigInteger.Zero);
+        var persistentResultState = resultState
+                ?? resources.ReservePersistentState(BigInteger.Zero);
         var resultStateTransferred = false;
         try
         {
-            var resultHeaderWritten = false;
+                var resultHeaderWritten = result.Count != 0;
             foreach (var fact in summary.Facts)
             {
                 Count(ref remaining, depth + 1);
@@ -10655,8 +10917,11 @@ public static partial class SemanticVerifier
                                 in sourceFacts)
                             {
                                 Count(ref remaining, depth + 1);
-                                if (!sourcePrefix.ProjectionPath.IsPrefixOf(
-                                        sourceArrayPrefix.ProjectionPath))
+                                if (!InitializationState
+                                        .StorageProjectionPathIsPrefixOf(
+                                            resources,
+                                            sourcePrefix.ProjectionPath,
+                                            sourceArrayPrefix.ProjectionPath))
                                 {
                                     continue;
                                 }
@@ -10664,7 +10929,7 @@ public static partial class SemanticVerifier
                                 var destinationArrayPrefix
                                     = StorageProjection.Rebase(
                                         destinationPrefix, sourcePrefix,
-                                        sourceArrayPrefix);
+                                        sourceArrayPrefix, resources);
                                 if (current.Count == 0)
                                 {
                                     InitializationState
@@ -10790,7 +11055,7 @@ public static partial class SemanticVerifier
                         {
                             InitializationState
                                 .ChargeRepeatRootListHeader(resources);
-                            resultState.Add(16);
+                            persistentResultState.Add(16);
                             resultHeaderWritten = true;
                         }
 
@@ -10800,24 +11065,20 @@ public static partial class SemanticVerifier
                                 out var existingState))
                         {
                             var existingBytes = existingState.LogicalBytes();
-                            var mergedBytes
-                                = existingState.MergeLogicalBytes(state);
-                            resultState.Add(mergedBytes);
-                            var mergedState = existingState.CreateMerge(
-                                state, resultState,
-                                outputAlreadyReserved: true);
-                            result[arrayPrefix] = mergedState;
-                            resultState.Remove(existingBytes);
+                            result[arrayPrefix]
+                                = existingState.CreateGuaranteeUnion(state,
+                                    persistentResultState);
+                            persistentResultState.Remove(existingBytes);
                         }
                         else
                         {
-                            resultState.Add(
+                            persistentResultState.Add(
                                 InitializationState
                                     .RawUnionArrayRootLogicalBytes(
                                         arrayPrefix)
                                 + state.LogicalBytes());
                             result.Add(arrayPrefix,
-                                state.CloneTo(resultState,
+                                state.CloneTo(persistentResultState,
                                     outputAlreadyReserved: true));
                         }
                     }
@@ -10833,7 +11094,7 @@ public static partial class SemanticVerifier
                 return result;
             }
 
-            outputState = resultState;
+            outputState = persistentResultState;
             resultStateTransferred = true;
             return result;
         }
@@ -10841,7 +11102,7 @@ public static partial class SemanticVerifier
         {
             if (!resultStateTransferred)
             {
-                resultState.Dispose();
+                persistentResultState.Dispose();
             }
         }
     }
@@ -10851,7 +11112,8 @@ public static partial class SemanticVerifier
     {
         if (summary is null || summary.Facts.IsDefaultOrEmpty
             || summary.Facts.Length > MaximumAnalysisVisits
-            || function.IsExternal || function.Intrinsic != BoundIntrinsic.None
+            || (function.IsExternal && !function.IsModuleReference)
+            || function.Intrinsic != BoundIntrinsic.None
             || function.IsClassConstructor || function.IsCleanup || function.DoesNotReturn
             || function.DirectNativeImport is not null || function.NativeVTableMethod is not null
             || function.NativeFunctionPointerType is not null
@@ -11008,11 +11270,11 @@ public static partial class SemanticVerifier
         }
         if (formal.IsImplicitRef)
         {
-            if (!IsImplicitReferenceType(formal.Type, program))
+            type = ImplicitReferenceValueType(formal, program);
+            if (!IsImplicitReferenceType(type, program))
             {
                 return false;
             }
-            type = formal.Type;
             return true;
         }
         if (!CheckedReferenceTypeContract.IsValidType(
@@ -11096,6 +11358,36 @@ public static partial class SemanticVerifier
             && prefixSteps.AsSpan().SequenceEqual(pathSteps.AsSpan(0, prefixSteps.Length));
     }
 
+    private static bool CopyOriginSourcesMatchDestination(
+        IEnumerable<CopyValueOrigin> origins, PrimitiveType destinationType,
+        BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        foreach (var origin in origins)
+        {
+            Count(ref remaining, depth + 1);
+            if (!origin.IsValid)
+            {
+                return false;
+            }
+
+            var source = new BoundCopyOrigin(
+                (BoundCopyOriginSourceKind)origin.SourceKind,
+                (BoundCopyOriginSourceView)origin.SourceView,
+                origin.SourceOrdinal, BoundCopyOriginPath(origin.SourcePath));
+            if (!TryGetCopyOriginSourceType(function, source, program,
+                    out var sourceRootType)
+                || !TryResolveCopyOriginFieldPath(sourceRootType,
+                    source.SourcePath, program, out var sourceType)
+                || sourceType != destinationType)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>
         CopyOriginFactsForFreshReceiver(PrimitiveType type, BackingDependencies facts,
             BoundProgram program, ref int remaining, int depth)
@@ -11107,7 +11399,10 @@ public static partial class SemanticVerifier
             Count(ref remaining, depth + 1);
             if (leaf.Projection.Kind != StorageProjectionKind.InlineFieldPath
                 || !facts.TryGetCopyOriginFieldValue(0, leaf.Projection, out var valueFact)
-                || !valueFact.IsAvailable || valueFact.Origins.Count == 0)
+                || !valueFact.IsAvailable || valueFact.Origins.Count == 0
+                || !CopyOriginSourcesMatchDestination(valueFact.Origins,
+                    leaf.Type, facts.Function, program, ref remaining,
+                    depth + 1))
             {
                 continue;
             }
@@ -11167,10 +11462,13 @@ public static partial class SemanticVerifier
         }
 
         var formal = function.Variables[slot];
+        var formalValueType = formal.IsImplicitRef
+            ? ImplicitReferenceValueType(formal, program)
+            : formal.Type;
         if (formal.IsOut || formal.IsInit
-            || !IsCopyOriginValueType(formal.Type, program)
-            || !CarriesCopyOrigin(formal.Type, program)
-            || (!formal.IsImplicitRef && IsUnique(program, formal.Type)))
+            || !IsCopyOriginValueType(formalValueType, program)
+            || !CarriesCopyOrigin(formalValueType, program)
+            || (!formal.IsImplicitRef && IsUnique(program, formalValueType)))
         {
             return false;
         }
@@ -12727,6 +13025,41 @@ public static partial class SemanticVerifier
         {
             case BoundNull when type.IsOptional:
                 break;
+            case BoundPrivateReferenceForm formation
+                when formation.FormationKind == 1
+                    && !type.IsInitialization:
+                result = ReferenceTargetsSummary(
+                    new BoundReferenceFormation(
+                        PrivateBodyPlaceExpression(formation.Place,
+                            function, program, formation.Span,
+                            ref remaining, depth + 1),
+                        formation.Type, formation.Span),
+                    facts, function, program, ref remaining, depth + 1);
+                break;
+            case BoundPrivateReferenceForm formation
+                when formation.FormationKind == 2
+                    && formation.Place is BoundPrivateReferentPlace referent:
+                result = ReferenceTargetsSummary(referent.Descriptor,
+                    facts, function, program, ref remaining, depth + 1);
+                break;
+            case BoundPrivatePlaceRead { UseKind: 3 } read:
+                result = ReferenceTargetsSummary(
+                    PrivateBodyPlaceExpression(read.Place, function,
+                        program, read.Span, ref remaining, depth + 1),
+                    facts, function, program, ref remaining, depth + 1);
+                break;
+            case BoundInitializationAttenuation attenuation:
+                result = ReferenceTargetsSummary(attenuation.Descriptor,
+                    facts, function, program, ref remaining, depth + 1);
+                break;
+            case BoundImplicitReferenceMaterialize materialize:
+                result = ReferenceTargetsSummary(
+                    new BoundReferenceFormation(
+                        new BoundRead(materialize.BackingVariable,
+                            type.ReferentType, materialize.Span),
+                        materialize.Type, materialize.Span),
+                    facts, function, program, ref remaining, depth + 1);
+                break;
             case BoundOptionalLift lift when type.IsOptional:
                 if (!SourceOptionalTypes.TryGetRequired(
                     expression.Type, program.CheckedReferenceTypes,
@@ -13993,6 +14326,23 @@ public static partial class SemanticVerifier
                     facts.ReferenceObligations[move.Variable] ?? EmptyBackingSources,
                     facts.ReferenceBackingSources[move.Variable] ?? EmptyBackingSources,
                     isAvailable: true);
+            case BoundPrivateReferenceForm formation:
+                var privateTargets = ReferenceTargetsOfExpression(
+                    formation, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                var privateObligations = ReferenceObligationsOfExpression(
+                    formation, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                var privateBackingSources
+                    = formation.Place is BoundPrivateReferentPlace referent
+                        ? ReferenceFieldValueOfDescriptorExpression(
+                            referent.Descriptor, facts, state, function,
+                            program, ref remaining, depth + 1, fieldMasks)
+                            .BackingSources
+                        : EmptyBackingSources;
+                return new ReferenceFieldValue(privateTargets,
+                    privateObligations, privateBackingSources,
+                    privateTargets.Count != 0);
             case BoundReferenceFormation formation:
                 var formedTargets = ReferenceTargetsOfExpression(formation, facts,
                     state, function, program, ref remaining, depth + 1, fieldMasks);
@@ -14565,6 +14915,282 @@ public static partial class SemanticVerifier
         {
             case BoundNull when type.IsOptional:
                 break;
+            case BoundPrivateReferenceForm formation:
+                if (formation.Type != expression.Type
+                    || type.IsOptional || type.IsGarbageCollected
+                    || type.ReferentType != formation.Place.Type)
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                if (formation.FormationKind == 1
+                    && !type.IsInitialization)
+                {
+                    var placeExpression = PrivateBodyPlaceExpression(
+                        formation.Place, function, program,
+                        formation.Span, ref remaining, depth + 1);
+                    result = ReferenceTargetsOfExpression(
+                        new BoundReferenceFormation(placeExpression,
+                            formation.Type, formation.Span),
+                        facts, state, function, program, ref remaining,
+                        depth + 1, fieldMasks);
+                }
+                else if (formation.FormationKind == 1
+                    && type.IsInitialization)
+                {
+                    var placeExpression = PrivateBodyPlaceExpression(
+                        formation.Place, function, program,
+                        formation.Span, ref remaining, depth + 1);
+                    int placeVariable;
+                    var placeProjection = StorageProjection.WholeObject;
+                    if (placeExpression is BoundRead local)
+                    {
+                        placeVariable = local.Variable;
+                    }
+                    else if (placeExpression is BoundFieldRead field
+                        && TryGetFieldProjectionPath(field, function,
+                            program, out placeVariable, out var fieldPath))
+                    {
+                        placeProjection
+                            = StorageProjection.ForFieldPath(fieldPath);
+                    }
+                    else
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    if ((uint)placeVariable
+                            >= (uint)function.Variables.Length
+                        || !function.Variables[placeVariable]
+                            .IsInitializationLocal
+                        || !state.IsVacant(placeVariable)
+                        || state.HasPartialValue(placeVariable)
+                        || state.IsNativeOutputReserved(placeVariable))
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    if (placeProjection.Kind
+                        == StorageProjectionKind.InlineFieldPath
+                        && (fieldMasks is null
+                            || !PrivateStoragePlaceIsVacant(placeVariable,
+                                placeProjection, state, fieldMasks, program)))
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    var instances = facts.StorageInstanceSet(placeVariable);
+                    if (instances.Count != 1)
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    var instance = instances.Single();
+                    if (!instance.IsKnown)
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    _ = result.Add(ProvenanceAnchor.ForReferencePlace(
+                        facts.FunctionActivation, placeVariable, instance,
+                        placeProjection,
+                        state.FieldPlaceGeneration(placeVariable,
+                            placeProjection)));
+                }
+                else if (formation.FormationKind == 2
+                    && formation.Place is BoundPrivateReferentPlace referent)
+                {
+                    var sourceType = program.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(
+                            referent.Descriptor.Type)];
+                    if (sourceType.IsOptional
+                        || sourceType.IsGarbageCollected
+                        || sourceType.IsInitialization
+                            != type.IsInitialization
+                        || (type.IsWritable && !sourceType.IsWritable))
+                    {
+                        throw InvalidEffect(formation.Span,
+                            "CheckedReference");
+                    }
+                    result = ReferenceTargetsOfExpression(
+                        referent.Descriptor, facts, state, function, program,
+                        ref remaining, depth + 1, fieldMasks);
+                    if (!type.IsInitialization)
+                    {
+                        foreach (var target in result)
+                        {
+                            ValidateReferenceTarget(target,
+                                type.ReferentType, facts, state, function,
+                                program, formation.Span, fieldMasks);
+                        }
+                    }
+                }
+                else if (formation.FormationKind == 2
+                    && !type.IsInitialization)
+                {
+                    var placeExpression = PrivateBodyPlaceExpression(
+                        formation.Place, function, program,
+                        formation.Span, ref remaining, depth + 1);
+                    result = ReferenceTargetsOfExpression(
+                        new BoundReferenceFormation(placeExpression,
+                            formation.Type, formation.Span),
+                        facts, state, function, program, ref remaining,
+                        depth + 1, fieldMasks);
+                }
+                else
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                break;
+            case BoundPrivatePlaceRead { UseKind: 3 } borrowedDescriptor:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        expression.Type, program.CheckedReferenceTypes)
+                    || type.IsOptional || type.IsGarbageCollected)
+                {
+                    throw InvalidEffect(borrowedDescriptor.Span,
+                        "CheckedReference");
+                }
+                if (borrowedDescriptor.Place
+                    is BoundPrivateLocalPlace descriptorLocal)
+                {
+                    if ((uint)descriptorLocal.Variable
+                            >= (uint)function.Variables.Length
+                        || function.Variables[descriptorLocal.Variable].Type
+                            != expression.Type
+                        || !state[descriptorLocal.Variable]
+                        || state.HasRetiredValue(descriptorLocal.Variable)
+                        || facts.ReferenceTargets[
+                            descriptorLocal.Variable] is not { Count: > 0 }
+                            privateDescriptorTargets)
+                    {
+                        throw InvalidEffect(borrowedDescriptor.Span,
+                            "CheckedReference");
+                    }
+                    result.UnionWith(privateDescriptorTargets);
+                    if (!type.IsInitialization)
+                    {
+                        foreach (var target in privateDescriptorTargets)
+                        {
+                            ValidateReferenceTarget(target,
+                                type.ReferentType, facts, state, function,
+                                program, borrowedDescriptor.Span,
+                                fieldMasks);
+                        }
+                    }
+                }
+                else if (PrivateBodyPlaceExpression(
+                        borrowedDescriptor.Place, function, program,
+                        borrowedDescriptor.Span, ref remaining, depth + 1)
+                    is BoundFieldRead descriptorField)
+                {
+                    var descriptorValue
+                        = ReferenceFieldValueOfDescriptorExpression(
+                            descriptorField, facts, state, function, program,
+                            ref remaining, depth + 1, fieldMasks);
+                    if (!descriptorValue.IsAvailable
+                        || descriptorValue.Targets.Count == 0)
+                    {
+                        throw InvalidEffect(borrowedDescriptor.Span,
+                            "CheckedReference");
+                    }
+                    result.UnionWith(descriptorValue.Targets);
+                    if (!type.IsInitialization)
+                    {
+                        foreach (var target in descriptorValue.Targets)
+                        {
+                            ValidateReferenceTarget(target,
+                                type.ReferentType, facts, state, function,
+                                program, borrowedDescriptor.Span,
+                                fieldMasks);
+                        }
+                    }
+                }
+                else
+                {
+                    throw InvalidEffect(borrowedDescriptor.Span,
+                        "CheckedReference");
+                }
+                break;
+            case BoundPrivatePlaceRead privateRead:
+                if (privateRead.UseKind is not (1 or 2))
+                {
+                    throw InvalidEffect(privateRead.Span,
+                        "CheckedReference");
+                }
+                var placeValue = privateRead.Place
+                    is BoundPrivateReferentPlace referentPlace
+                    ? (BoundExpression)new BoundReferenceRead(
+                        referentPlace.Descriptor, privateRead.Type,
+                        privateRead.Span)
+                    : PrivateBodyPlaceExpression(privateRead.Place,
+                        function, program, privateRead.Span,
+                        ref remaining, depth + 1);
+                if (privateRead.UseKind == 2)
+                {
+                    placeValue = placeValue switch {
+                        BoundRead read => new BoundMove(read.Variable,
+                            read.Type, privateRead.Span),
+                        BoundFieldRead field => new BoundFieldMove(
+                            field, field.Type, privateRead.Span),
+                        _ => throw InvalidEffect(privateRead.Span,
+                            "CheckedReference"),
+                    };
+                }
+                result = ReferenceTargetsOfExpression(placeValue, facts,
+                    state, function, program, ref remaining, depth + 1,
+                    fieldMasks);
+                break;
+            case BoundInitializationAttenuation attenuation:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        attenuation.Descriptor.Type,
+                        program.CheckedReferenceTypes)
+                    || type.IsInitialization
+                    || type.IsOptional || type.IsGarbageCollected)
+                {
+                    throw InvalidEffect(attenuation.Span,
+                        "CheckedReference");
+                }
+                var attenuationSource = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(
+                        attenuation.Descriptor.Type)];
+                if (!attenuationSource.IsInitialization
+                    || attenuationSource.IsOptional
+                    || attenuationSource.IsGarbageCollected
+                    || attenuationSource.ReferentType != type.ReferentType
+                    || attenuationSource.IsWritable != type.IsWritable)
+                {
+                    throw InvalidEffect(attenuation.Span,
+                        "CheckedReference");
+                }
+                result = ReferenceTargetsOfExpression(
+                    attenuation.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                foreach (var target in result)
+                {
+                    ValidateReferenceTarget(target, type.ReferentType,
+                        facts, state, function, program, attenuation.Span,
+                        fieldMasks);
+                }
+                break;
+            case BoundImplicitReferenceMaterialize materialize:
+                if (materialize.BackingVariable < 0
+                    || materialize.BackingVariable
+                        >= function.Variables.Length
+                    || function.Variables[materialize.BackingVariable].Type
+                        != type.ReferentType
+                    || type.IsInitialization || type.IsOptional
+                    || type.IsGarbageCollected || type.IsWritable)
+                {
+                    throw InvalidEffect(materialize.Span,
+                        "CheckedReference");
+                }
+                result = ReferenceTargetsOfExpression(
+                    new BoundReferenceFormation(
+                        new BoundRead(materialize.BackingVariable,
+                            type.ReferentType, materialize.Span),
+                        materialize.Type, materialize.Span),
+                    facts, state, function, program, ref remaining,
+                    depth + 1, fieldMasks);
+                break;
             case BoundOptionalLift lift when type.IsOptional:
                 if (!SourceOptionalTypes.TryGetRequired(
                     expression.Type, program.CheckedReferenceTypes,
@@ -14892,6 +15518,115 @@ public static partial class SemanticVerifier
         {
             case BoundNull when type.IsOptional:
                 break;
+            case BoundPrivateReferenceForm formation:
+                if (formation.FormationKind == 1
+                    && !type.IsInitialization)
+                {
+                    var placeExpression = PrivateBodyPlaceExpression(
+                        formation.Place, function, program,
+                        formation.Span, ref remaining, depth + 1);
+                    result = ReferenceObligationsOfExpression(
+                        new BoundReferenceFormation(placeExpression,
+                            formation.Type, formation.Span),
+                        facts, state, function, program, ref remaining,
+                        depth + 1, fieldMasks);
+                }
+                else if (formation.FormationKind == 2
+                    && formation.Place is BoundPrivateReferentPlace referent)
+                {
+                    result.UnionWith(ReferenceObligationsOfExpression(
+                        referent.Descriptor, facts, state, function, program,
+                        ref remaining, depth + 1, fieldMasks));
+                    result.UnionWith(ReferenceDescriptorPlacesOfExpression(
+                        referent.Descriptor, facts, state, function, program,
+                        ref remaining, depth + 1, fieldMasks));
+                }
+                else if (formation.FormationKind == 2
+                    && !type.IsInitialization)
+                {
+                    var placeExpression = PrivateBodyPlaceExpression(
+                        formation.Place, function, program,
+                        formation.Span, ref remaining, depth + 1);
+                    result = ReferenceObligationsOfExpression(
+                        new BoundReferenceFormation(placeExpression,
+                            formation.Type, formation.Span),
+                        facts, state, function, program, ref remaining,
+                        depth + 1, fieldMasks);
+                }
+                break;
+            case BoundPrivatePlaceRead { UseKind: 3 } borrowedDescriptor:
+                if (borrowedDescriptor.Place
+                    is BoundPrivateLocalPlace descriptorLocal
+                    && (uint)descriptorLocal.Variable
+                        < (uint)facts.ReferenceObligations.Length)
+                {
+                    if (facts.ReferenceObligations[
+                            descriptorLocal.Variable] is { } borrowedObligations)
+                    {
+                        result.UnionWith(borrowedObligations);
+                    }
+                }
+                else if (PrivateBodyPlaceExpression(
+                        borrowedDescriptor.Place, function, program,
+                        borrowedDescriptor.Span, ref remaining, depth + 1)
+                    is BoundFieldRead descriptorField)
+                {
+                    var descriptorValue
+                        = ReferenceFieldValueOfDescriptorExpression(
+                            descriptorField, facts, state, function, program,
+                            ref remaining, depth + 1, fieldMasks);
+                    if (!descriptorValue.IsAvailable)
+                    {
+                        throw InvalidEffect(borrowedDescriptor.Span,
+                            "CheckedReference");
+                    }
+                    result.UnionWith(descriptorValue.Obligations);
+                }
+                else
+                {
+                    throw InvalidEffect(borrowedDescriptor.Span,
+                        "CheckedReference");
+                }
+                break;
+            case BoundPrivatePlaceRead privateRead:
+                if (privateRead.UseKind is not (1 or 2))
+                {
+                    throw InvalidEffect(privateRead.Span,
+                        "CheckedReference");
+                }
+                var placeValue = privateRead.Place
+                    is BoundPrivateReferentPlace referentPlace
+                    ? (BoundExpression)new BoundReferenceRead(
+                        referentPlace.Descriptor, privateRead.Type,
+                        privateRead.Span)
+                    : PrivateBodyPlaceExpression(privateRead.Place,
+                        function, program, privateRead.Span,
+                        ref remaining, depth + 1);
+                if (privateRead.UseKind == 2)
+                {
+                    placeValue = placeValue switch {
+                        BoundRead read => new BoundMove(read.Variable,
+                            read.Type, privateRead.Span),
+                        BoundFieldRead field => new BoundFieldMove(
+                            field, field.Type, privateRead.Span),
+                        _ => throw InvalidEffect(privateRead.Span,
+                            "CheckedReference"),
+                    };
+                }
+                result = ReferenceObligationsOfExpression(placeValue,
+                    facts, state, function, program, ref remaining,
+                    depth + 1, fieldMasks);
+                break;
+            case BoundInitializationAttenuation attenuation:
+                result.UnionWith(ReferenceObligationsOfExpression(
+                    attenuation.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                result.UnionWith(ReferenceDescriptorPlacesOfExpression(
+                    attenuation.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                break;
+            case BoundImplicitReferenceMaterialize:
+                break;
             case BoundOptionalLift lift when type.IsOptional:
                 if (!SourceOptionalTypes.TryGetRequired(
                     expression.Type, program.CheckedReferenceTypes,
@@ -15075,6 +15810,36 @@ public static partial class SemanticVerifier
         switch (expression)
         {
             case BoundNull when type.IsOptional:
+                break;
+            case BoundPrivatePlaceRead { UseKind: 3 } borrowedDescriptor:
+                if (borrowedDescriptor.Place
+                    is BoundPrivateLocalPlace descriptorLocal)
+                {
+                    if ((uint)descriptorLocal.Variable
+                            >= (uint)function.Variables.Length
+                        || function.Variables[descriptorLocal.Variable].Type
+                            != expression.Type
+                        || !state[descriptorLocal.Variable]
+                        || state.HasRetiredValue(descriptorLocal.Variable))
+                    {
+                        throw InvalidEffect(borrowedDescriptor.Span,
+                            "CheckedReference");
+                    }
+                    if (IsReferenceParameterSlot(function,
+                            descriptorLocal.Variable))
+                    {
+                        _ = result.Add(
+                            ProvenanceAnchor.ForIncomingReferenceDescriptor(
+                                descriptorLocal.Variable));
+                        break;
+                    }
+                }
+                var descriptorPlaceExpression = PrivateBodyPlaceExpression(
+                    borrowedDescriptor.Place, function, program,
+                    borrowedDescriptor.Span, ref remaining, depth + 1);
+                result = ReferenceDescriptorPlacesOfExpression(
+                    descriptorPlaceExpression, facts, state, function,
+                    program, ref remaining, depth + 1, fieldMasks);
                 break;
             case BoundOptionalLift lift when type.IsOptional:
                 if (!SourceOptionalTypes.TryGetRequired(
@@ -15754,18 +16519,31 @@ public static partial class SemanticVerifier
             return;
         }
 
-        var hasBacking = TokenSpanContract.IsDependent(argument.Type, program.Structures);
+        var targetSlot = parameterIndex
+            + (target.IsConstructor ? 1 : 0);
+        var implicitReferenceArgument
+            = (uint)targetSlot < (uint)target.Variables.Length
+            && target.Variables[targetSlot].IsImplicitRef
+            && IsPrivateImplicitReferenceArgument(argument.Type,
+                target.Variables[targetSlot], program);
+        var sourceValue = implicitReferenceArgument
+            ? new BoundReferenceRead(argument,
+                ImplicitReferenceValueType(
+                    target.Variables[targetSlot], program), argument.Span)
+            : argument;
+        var sourceType = sourceValue.Type;
+        var hasBacking = TokenSpanContract.IsDependent(sourceType, program.Structures);
         var hasReference = CheckedReferenceTypeContract.IsValidType(
-            argument.Type, program.CheckedReferenceTypes);
-        var hasReferenceFields = IsInlineStructStorage(argument.Type, program)
-            && ReferenceFieldLeaves(argument.Type, program, ref remaining, depth + 1).Count != 0;
+            sourceType, program.CheckedReferenceTypes);
+        var hasReferenceFields = IsInlineStructStorage(sourceType, program)
+            && ReferenceFieldLeaves(sourceType, program, ref remaining, depth + 1).Count != 0;
         var resultDependency = ResultDependencyContract(target);
         var hasReferenceResultSource =
             CheckedReferenceTypeContract.IsValidType(
                 target.ReturnType, program.CheckedReferenceTypes)
             && resultDependency?.Sources.Any(source =>
                 DependencyCallParameterIndex(target, source) == parameterIndex) == true;
-        var hasNativePointer = CarriesNativePointer(argument, program);
+        var hasNativePointer = CarriesNativePointer(sourceValue, program);
         if (!hasBacking && !hasReference && !hasReferenceFields
             && !hasReferenceResultSource && !hasNativePointer
             && target.NativeOutputContracts.IsEmpty)
@@ -15774,37 +16552,37 @@ public static partial class SemanticVerifier
         }
 
         var backingSources = hasBacking
-            ? new HashSet<ProvenanceAnchor>(BackingOf(argument, dependencies,
+            ? new HashSet<ProvenanceAnchor>(BackingOf(sourceValue, dependencies,
                 program, ref remaining, depth + 1))
             : [];
         if (hasReference)
         {
             var referenceValue = ReferenceFieldValueOfDescriptorExpression(
-                argument, dependencies, initialized, dependencies.Function,
+                sourceValue, dependencies, initialized, dependencies.Function,
                 program, ref remaining, depth + 1, fieldMasks);
             backingSources.UnionWith(referenceValue.BackingSources);
         }
         var referenceTargets = hasReference
-            ? ReferenceTargetsOfExpression(argument, dependencies, initialized,
+            ? ReferenceTargetsOfExpression(sourceValue, dependencies, initialized,
                 dependencies.Function, program, ref remaining, depth + 1, fieldMasks)
             : EmptyBackingSources;
         var referenceObligations = hasReference
-            ? ReferenceObligationsOfExpression(argument, dependencies, initialized,
+            ? ReferenceObligationsOfExpression(sourceValue, dependencies, initialized,
                 dependencies.Function, program, ref remaining, depth + 1, fieldMasks)
             : EmptyBackingSources;
         var referenceFieldValues = hasReferenceFields
-            ? ReferenceFieldValuesOfExpression(argument, argument.Type, dependencies,
+            ? ReferenceFieldValuesOfExpression(sourceValue, sourceType, dependencies,
                 initialized, dependencies.Function, program, ref remaining,
                 depth + 1, fieldMasks)
             : EmptyReferenceFieldValues;
         var nativePointerSources = hasNativePointer
-            ? NativePointerBackingOf(argument, dependencies, program, ref remaining, depth + 1)
+            ? NativePointerBackingOf(sourceValue, dependencies, program, ref remaining, depth + 1)
             : EmptyBackingSources;
         var nativePointerMayBeUnknown = hasNativePointer
-            && NativePointerMayBeUnknownOf(argument, dependencies, program,
+            && NativePointerMayBeUnknownOf(sourceValue, dependencies, program,
                 ref remaining, depth + 1);
         var nativePointerExtent = hasNativePointer
-            ? NativePointerExtentFactsOfExpression(argument, dependencies,
+            ? NativePointerExtentFactsOfExpression(sourceValue, dependencies,
                 dependencies.Function, program, ref remaining, depth + 1)
             : new NativePointerExtentFact([], MayBeOpaque: false, IsUnavailable: false);
         nativePointerExtent = nativePointerExtent with {

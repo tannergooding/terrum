@@ -2,13 +2,14 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class ReturnFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ReturnFrontendProjectionTests
 {
     [Test]
     public void ReaderConsumesEveryReturnRootAndRejectsForgedSourceOrControl()
@@ -38,7 +39,7 @@ public sealed class ReturnFrontendProjectionTests
         Node(0, 0, 5, text.IndexOf("flag", branch, StringComparison.Ordinal), 4, 1, 0);
         Node(1, 3, 1, text.IndexOf("42", StringComparison.Ordinal), 2, -1, 42);
         Node(2, 3, 1, text.IndexOf("43", StringComparison.Ordinal), 2, -1, 43);
-        var branchEnd = text.LastIndexOf('}') - 1;
+        var branchEnd = text.LastIndexOf('}', System.StringComparison.Ordinal) - 1;
         Statement(0, 4, 2, 0, branch, branchEnd);
         Statement(1, 8, 0, 1, firstReturn, firstReturn + 10);
         Statement(2, 5, 4, -1, otherwise, branchEnd);
@@ -59,28 +60,28 @@ public sealed class ReturnFrontendProjectionTests
         Reject(343, 9);
         Reject(349, 1);
         Reject(64, 44);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("return 43;", "return 44;", StringComparison.Ordinal)), Bytes()));
         const string incomplete = "public int32 Value(bool flag) { if (flag) { return 42; } }";
         words[37] = 2;
         words[298] = 2;
         words[333] = 2;
-        words[336] = incomplete.LastIndexOf('}') - 1 - branch;
+        words[336] = incomplete.LastIndexOf('}', System.StringComparison.Ordinal) - 1 - branch;
         Array.Clear(words, 58, 8);
         Array.Clear(words, 342, 10);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(incomplete), Bytes()));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(incomplete), Bytes()));
 
         void Reject(int index, int value)
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = old;
         }
 
         void Node(int index, int operation, int type, int start, int length, int left, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -92,7 +93,7 @@ public sealed class ReturnFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;

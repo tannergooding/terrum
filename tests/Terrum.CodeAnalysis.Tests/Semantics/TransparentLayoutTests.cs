@@ -5,15 +5,16 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class TransparentLayoutTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TransparentLayoutTests
 {
     private const string Library = """
         [Blittable] [Layout(LayoutKind.Transparent)] public struct Number {
@@ -33,7 +34,7 @@ public sealed class TransparentLayoutTests
         Assert.That(structure.IsTransparent, Is.True);
         Assert.That(structure.Size, Is.EqualTo(4));
         var producer = ModuleCompiler.CreateProducer(program, ["Wrap", "Unwrap"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).IsTransparent, Is.True);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(Consumer, reference, policy), producer);
@@ -72,15 +73,20 @@ public sealed class TransparentLayoutTests
         Assert.That(global::System.Linq.Enumerable.Any(uncommitted.Diagnostics,
             static diagnostic => diagnostic.Code == "TRM3005"), Is.True);
     }
-    [TestCase("[Layout(Transparent)] struct Empty { }")]
-    [TestCase("[Layout(Transparent)] struct Pair { int32 A; int32 B; }")]
-    [TestCase("[Layout(Transparent)] unique struct Owner { int32 Value; }")]
-    [TestCase("[Layout(Transparent)] struct Inner { int32 Value; } [Layout(Transparent)] struct Outer { Inner Value; }")]
-    [TestCase("[Layout(Transparent)] struct Unsupported { OwnedInt32Buffer Value; }")]
-    [TestCase("[Layout(Transparent)] [Layout(Transparent)] struct Repeat { int32 Value; }")]
+    [TestCase("[Layout(LayoutKind.Transparent)] struct Empty { }")]
+    [TestCase("[Layout(LayoutKind.Transparent)] struct Pair { int32 A; int32 B; }")]
+    [TestCase("[Layout(LayoutKind.Transparent)] unique struct Owner { int32 Value; }")]
+    [TestCase("[Layout(LayoutKind.Transparent)] struct Inner { int32 Value; } [Layout(LayoutKind.Transparent)] struct Outer { Inner Value; }")]
+    [TestCase("[Layout(LayoutKind.Transparent)] struct Unsupported { OwnedInt32Buffer Value; }")]
+    [TestCase("[Layout(LayoutKind.Transparent)] [Layout(LayoutKind.Transparent)] struct Repeat { int32 Value; }")]
     public void UnsupportedTransparentDeclarationsDiagnose(string declaration)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(declaration + "int32 Main() { return 0; }"));
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(declaration + "int32 Main() { return 0; }"),
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code is "TRM3001" or "TRM3005"),Is.True);
     }
@@ -88,7 +94,12 @@ public sealed class TransparentLayoutTests
     [TestCase("return Wrap(42);","TRM3007")]
     public void TransparentValuesDoNotImplicitlyConvertToOrFromCarriers(string body, string diagnosticCode)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(Library + "int32 Main() { " + body + " }"));
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(Library + "int32 Main() { " + body + " }"),
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == diagnosticCode),Is.True);
     }
 
@@ -116,7 +127,7 @@ public sealed class TransparentLayoutTests
     public void PrivateTransparentDependencySelectsItsMetadataWithoutExportingItsType()
     {
         const string Source = """
-            [Layout(Transparent)] struct Hidden {
+            [Layout(LayoutKind.Transparent)] struct Hidden {
                 int64 Value;
                 public Hidden(int64 value) { Value = value; }
                 public int32 Read() { return int32(Value); }
@@ -124,7 +135,7 @@ public sealed class TransparentLayoutTests
             public int32 Read() { Hidden value = new Hidden(42); return value.Read(); }
             """;
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(Source, NativeRuntimePolicy.FailFast), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.CreateReference(producer).Structures, Is.Empty);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer("int32 Main() { return Read(); }",
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);
@@ -171,11 +182,20 @@ public sealed class TransparentLayoutTests
         NativeRuntimePolicy policy)
     {
         var tree = SyntaxTree.Parse(source);
+        var options = new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            LayoutCoreRegistration =
+                LayoutCoreRegistrationTestData.Create(),
+        };
         var compilation = reference is null
-            ? Compilation.CreateLibrary(tree, (BoundRuntimePolicy)policy)
-            : Compilation.CreateLibrary(tree, reference, (BoundRuntimePolicy)policy);
+            ? Compilation.CreateLibrary(tree, options)
+            : Compilation.CreateLibrary(tree, reference, options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static BoundProgram CompileConsumer(string source, CompilationReference reference,
@@ -183,7 +203,11 @@ public sealed class TransparentLayoutTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static string RepositoryRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

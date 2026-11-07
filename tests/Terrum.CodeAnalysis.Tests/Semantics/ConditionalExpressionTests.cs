@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
@@ -11,11 +12,11 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class ConditionalExpressionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ConditionalExpressionTests
 {
     [Test]
     public void ConditionalIsRightAssociativeAndBelowBinaryOperators()
@@ -26,8 +27,16 @@ public sealed class ConditionalExpressionTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         var choices = tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ConditionalExpression).ToArray();
         Assert.That(choices.Length, Is.EqualTo(2));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual0 = choices[0].Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual0!; }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual1 = choices[0].Children[2]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual1!; }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual0 = choices[0].Children[0];
+            Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual0!;
+        }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual1 = choices[0].Children[2];
+            Assert.That(__nunitActual1, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual1!;
+        }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
         Assert.That(choices[0].Children[4], Is.SameAs(choices[1]));
     }
 
@@ -83,8 +92,8 @@ public sealed class ConditionalExpressionTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { " + declaration + " return 42; }"));
         Assert.That(compilation.HasErrors, Is.True);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"
-            || diagnostic.Code == "TRM3014"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code is "TRM3007"
+            or "TRM3014"),Is.True);
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -124,8 +133,8 @@ public sealed class ConditionalExpressionTests
 
             int32 Main() {
                 mut UnitChooser chooser = new UnitChooser();
-                chooser.Choose({{selectTrue.ToString().ToLowerInvariant()}});
-                chooser.ChooseReturn({{selectTrue.ToString().ToLowerInvariant()}});
+                chooser.Choose({{(selectTrue ? "true" : "false")}});
+                chooser.ChooseReturn({{(selectTrue ? "true" : "false")}});
                 return chooser.Value;
             }
             """;
@@ -189,7 +198,7 @@ public sealed class ConditionalExpressionTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "F");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -237,8 +246,16 @@ public sealed class ConditionalExpressionTests
         var program = Compile("int32 Main() { bool flag = true; return flag ? 42 : 0; }",
             NativeRuntimePolicy.FailFast);
         var function = program.Functions[program.EntryPoint];
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual2 = function.Body.Statements[^1]; Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual2!; }))();
-        var choice = ((global::System.Func<BoundConditional>)(() => { var __nunitActual3 = result.Value; Assert.That(__nunitActual3, Is.TypeOf<BoundConditional>()); return (BoundConditional)__nunitActual3!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual2 = function.Body.Statements[^1];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual2!;
+        }))();
+        var choice = ((global::System.Func<BoundConditional>)(() => {
+            var __nunitActual3 = result.Value;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundConditional>());
+            return (BoundConditional)__nunitActual3!;
+        }))();
         foreach (var malformed in new[] {
             choice with { Condition = choice.WhenTrue },
             choice with { WhenFalse = choice.Condition },
@@ -250,11 +267,10 @@ public sealed class ConditionalExpressionTests
                     result with { Value = malformed }),
                 }
             };
-            Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
                 Functions = program.Functions.SetItem(program.EntryPoint, changed),
             }));
         }
-
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -316,19 +332,27 @@ public sealed class ConditionalExpressionTests
         const string Consumer = "int32 Main() { return Choose(true); }";
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(Library), (BoundRuntimePolicy)policy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = library.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = library.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Choose"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var forgedOldReader = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forgedOldReader.AsSpan(4, 4), 40);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedOldReader));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedOldReader));
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer), reference,
             runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = consumerCompilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Choose"], "Conditional", policy);
@@ -336,7 +360,11 @@ public sealed class ConditionalExpressionTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(nativeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = nativeConsumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = nativeConsumerCompilation.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -345,6 +373,10 @@ public sealed class ConditionalExpressionTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
     }
 }

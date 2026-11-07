@@ -4,17 +4,18 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class ScalarFrontendMutationAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ScalarFrontendMutationAuditTests
 {
     [TestCase(false,"<<",88)]
     [TestCase(true,"<<",88)]
@@ -29,7 +30,7 @@ public sealed class ScalarFrontendMutationAuditTests
         Assert.That(hosted.HasErrors, Is.EqualTo(inferred));
         if (inferred)
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         }
         else
         {
@@ -43,15 +44,19 @@ public sealed class ScalarFrontendMutationAuditTests
         var (source, bytes) = ShiftFixture(false);
         var program = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var producer = ModuleCompiler.CreateProducer(program, ["Value"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(104));
         var obsolete = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(obsolete.AsSpan(4), 44);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(obsolete));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(obsolete));
         const string client = "int32 Main() { return Value(5) + 10; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(client),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), producer);
 
         var (replacementSource, replacementBytes) = ShiftFixture(false, initial: 2);
         var replacementProgram = ScalarFrontendHost.BindLibrary(
@@ -65,7 +70,11 @@ public sealed class ScalarFrontendMutationAuditTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), (BoundRuntimePolicy)policy);
         Assert.That(nativeClient.HasErrors, Is.False, string.Join(Environment.NewLine, nativeClient.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = nativeClient.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = nativeClient.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), [nativeProducer], policy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(
             replacementProgram, ["Value"], "FrontendShifts", policy);
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
@@ -78,9 +87,9 @@ public sealed class ScalarFrontendMutationAuditTests
         {
             NativeModuleCompiler.ValidateGraph(nativeConsumer, [dependency]);
             Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
-                [dependency], TimeSpan.FromSeconds(10), policy), Is.EqualTo(expected));
+                [dependency], TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(expected));
             Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer,
-                [dependency], apphost, TimeSpan.FromSeconds(30), policy), Is.EqualTo(expected));
+                [dependency], apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(expected));
         }
     }
 
@@ -109,19 +118,26 @@ public sealed class ScalarFrontendMutationAuditTests
         var compound = text.IndexOf("((x))", StringComparison.Ordinal);
         var update = text.IndexOf("x++", StringComparison.Ordinal);
         var result = text.IndexOf("return", StringComparison.Ordinal);
-        Node(0, 3, text.IndexOf('4'), 1, -1, -1, 4);
+        Node(0, 3, text.IndexOf('4', System.StringComparison.Ordinal), 1, -1, -1, 4);
         Node(1, 0, compound + 2, 1, 1, -1);
         Node(2, 46, compound + 1, 3, 1, -1);
         Node(3, 46, compound, 5, 2, -1);
         Node(4, 0, update, 1, 1, -1);
         Node(5, 86, update, 3, 4, -1);
         Node(6, 91, compound, update + 3 - compound, 3, 5);
-        Node(7, 0, text.LastIndexOf('x'), 1, 1, -1);
-        Statement(0, 1, 1, 0, text.IndexOf("mut", StringComparison.Ordinal), text.IndexOf(';') + 1);
+        Node(7, 0, text.LastIndexOf('x', System.StringComparison.Ordinal), 1, 1, -1);
+        Statement(0, 1, 1, 0, text.IndexOf("mut", StringComparison.Ordinal), text.IndexOf(';', System.StringComparison.Ordinal) + 1);
         Statement(1, 9, 1, 6, compound, update + 4);
-        Statement(2, 8, 0, 7, result, text.LastIndexOf(';') + 1);
+        Statement(2, 8, 0, 7, result, text.LastIndexOf(';', System.StringComparison.Ordinal) + 1);
         var program = ScalarFrontendHost.BindLibrary(source, Bytes(), BoundRuntimePolicy.FailFast);
-        var operation = ((global::System.Func<BoundCompoundAssignment>)(() => { var __nunitActual3 = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual2 = program.Functions[0].Body.Statements[1]; Assert.That(__nunitActual2, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual2!; }))().Expression; Assert.That(__nunitActual3, Is.TypeOf<BoundCompoundAssignment>()); return (BoundCompoundAssignment)__nunitActual3!; }))();
+        var operation = ((global::System.Func<BoundCompoundAssignment>)(() => {
+            var __nunitActual3 = ((global::System.Func<BoundExpressionStatement>)(() => {
+    var __nunitActual2 = program.Functions[0].Body.Statements[1];
+    Assert.That(__nunitActual2, Is.TypeOf<BoundExpressionStatement>());
+    return (BoundExpressionStatement)__nunitActual2!; }))().Expression;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundCompoundAssignment>());
+            return (BoundCompoundAssignment)__nunitActual3!;
+        }))();
         Assert.That(operation.Place, Is.TypeOf<BoundRead>());
         Assert.That(operation.Right, Is.TypeOf<BoundUpdate>());
         for (var version = 1; version <= 84; version++)
@@ -132,23 +148,23 @@ public sealed class ScalarFrontendMutationAuditTests
         Reject(338, 2);
         Reject(339, 0);
         Reject(337, 10);
-        Reject(42 + 3 * 8, 57);
-        Reject(42 + 3 * 8 + 3, 4);
-        Reject(42 + 5 * 8 + 6, 1);
-        Reject(42 + 6 * 8 + 5, 3);
-        Reject(42 + 6 * 8 + 5, 7);
+        Reject(42 + (3 * 8), 57);
+        Reject(42 + (3 * 8) + 3, 4);
+        Reject(42 + (5 * 8) + 6, 1);
+        Reject(42 + (6 * 8) + 5, 3);
+        Reject(42 + (6 * 8) + 5, 7);
 
         void Reject(int index, int replacement)
         {
             var original = words[index];
             words[index] = replacement;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int start, int length, int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = 1;
             words[offset + 2] = start;
@@ -160,7 +176,7 @@ public sealed class ScalarFrontendMutationAuditTests
 
         void Statement(int index, int kind, int slot, int expression, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = expression;
@@ -209,12 +225,12 @@ public sealed class ScalarFrontendMutationAuditTests
         Node(0, 3, literal, 1, -1, -1, initial);
         Node(1, 0, count, 5, 1, -1, 0);
         Node(2, opcode, literal, count + 5 - literal, 0, 1, 0);
-        Node(3, 0, text.LastIndexOf('x'), 1, 2, -1, 0);
+        Node(3, 0, text.LastIndexOf('x', System.StringComparison.Ordinal), 1, 2, -1, 0);
         words[332] = 1;
         words[333] = 2;
         words[334] = 2;
         words[335] = text.IndexOf(localType + " x", StringComparison.Ordinal);
-        words[336] = text.IndexOf(';') + 1 - words[335];
+        words[336] = text.IndexOf(';', System.StringComparison.Ordinal) + 1 - words[335];
         var bytes = new byte[words.Length * sizeof(int)];
         for (var i = 0; i < words.Length; i++)
         {
@@ -224,7 +240,7 @@ public sealed class ScalarFrontendMutationAuditTests
 
         void Node(int index, int operation, int start, int length, int left, int right, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = 1;
             words[offset + 2] = start;

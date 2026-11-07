@@ -73,6 +73,7 @@ internal sealed partial class Binder
             || constant.Bits.High != 0
             || !NativeFixedArrayContract.TryCreateType(resolvedElement,
                 constant.Bits.Low, _structs, _nativeFixedArrayTypes,
+                _nativeFixedArrayTypeIndexes,
                 out var resolvedArrayType, out _))
         {
             Report("TRM3030", "A fixed-array extent must be an exact closed uint64 value with a valid layout.",
@@ -166,7 +167,8 @@ internal sealed partial class Binder
         {
             if (NativeFixedArrayTypes.IsType(elementType))
             {
-                bound.Add(BindNativeFixedArrayValue(element, elementType));
+                bound.Add(BindNativeFixedArrayValueOrInitializer(element,
+                    elementType));
                 continue;
             }
 
@@ -230,7 +232,7 @@ internal sealed partial class Binder
     {
         if (node.Kind != SyntaxKind.IndexExpression
             || !TryBindNativeFixedArrayAccessPath(node, out var variable,
-                out var projections))
+                out var fieldPlace, out var projections))
         {
             Report("TRM3030", "A native pointer address requires an admitted fixed-array element.", span);
             return ErrorExpression(span);
@@ -247,11 +249,19 @@ internal sealed partial class Binder
             return ErrorExpression(span);
         }
         if (pointer.PointeeType != layout.ElementType
-            || (pointer.IsWritable && (!_variables[variable].IsMutable
-                || !NativeFixedArrayContract.AllowsMutableLocal(layout))))
+            || (pointer.IsWritable
+                && ((fieldPlace is null
+                        && !_variables[variable].IsMutable)
+                    || !NativeFixedArrayContract.AllowsMutableLocal(layout)
+                    || !NativeFixedArrayContract.AllowsMutableLocal(
+                        projections[0].Layout))))
         {
             Report("TRM3030", "The fixed-array element does not match the native pointer access mode.", span);
             return ErrorExpression(span);
+        }
+        if (pointer.IsWritable && fieldPlace is BoundFieldRead writableField)
+        {
+            CheckUpdateFieldPlace(writableField);
         }
 
         if (_unsafeDepth == 0)
@@ -263,6 +273,7 @@ internal sealed partial class Binder
             leaf.Index, pointerType, span) {
             IsUnsafeAuthorized = _unsafeDepth != 0,
             Projections = projections.Length > 1 ? projections : [],
+            FieldPlace = fieldPlace,
         };
     }
 

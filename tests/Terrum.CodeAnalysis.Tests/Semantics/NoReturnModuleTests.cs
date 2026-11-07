@@ -4,15 +4,16 @@ using System;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class NoReturnModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NoReturnModuleTests
 {
     private const string Returning = "public void Stop() { }";
     private const string Terminating = "[DoesNotReturn] public void Stop() { require false; }";
@@ -27,7 +28,11 @@ public sealed class NoReturnModuleTests
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = result.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = result.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static byte[] Producer(string source) =>
@@ -42,7 +47,11 @@ public sealed class NoReturnModuleTests
     {
         var result = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer), policy);
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = result.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = result.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     [Test]
@@ -114,7 +123,11 @@ public sealed class NoReturnModuleTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var semanticProducer = ModuleCompiler.CreateProducer(program, ["Exercise"]);
         var semanticConsumer = CompileConsumer("int32 Main() { return Exercise(); }", semanticProducer, policy);
         var linked = ModuleCompiler.Link(ModuleCompiler.CreateConsumer(semanticConsumer, semanticProducer),

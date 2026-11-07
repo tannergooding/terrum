@@ -5,21 +5,21 @@ using System.Buffers.Binary;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed partial class GenericControlFlowModuleTests
+internal sealed partial class GenericControlFlowModuleTests
 {
     private const string ScalarProducer = """
-        [NoThrow] T Choose<T>(T left, T right, bool first) where T : [Copy] {
+         T Choose<T>(T left, T right, bool first) where T : [Copy] {
             if (first) { return left; }
             return right;
         }
-        [NoThrow] bool TryCopy<T>(T value, out T result) where T : [Copy] {
+         bool TryCopy<T>(T value, out T result) where T : [Copy] {
             result = value;
             return true;
         }
@@ -36,46 +36,46 @@ public sealed partial class GenericControlFlowModuleTests
             public int64 Second;
             public Pair(int64 first, int64 second) { First = first; Second = second; }
         }
-        [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+         bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
             result = value;
             return publish;
         }
-        [NoThrow] int32 Fill<T>(T value, int32 marker, out T result, out T duplicate) where T : [Copy] {
+         int32 Fill<T>(T value, int32 marker, out T result, out T duplicate) where T : [Copy] {
             result = value;
             duplicate = value;
             if (marker != 42) { return 0; }
             return 7;
         }
-        [NoThrow] void FillVoid<T>(T value, out T result) where T : [Copy] {
+         void FillVoid<T>(T value, out T result) where T : [Copy] {
             result = value;
         }
-        [NoThrow] int32 FillInit<T>(T value, int32 marker, init ref<T> result) where T : [Copy] {
+         int32 FillInit<T>(T value, int32 marker, init ref<T> result) where T : [Copy] {
             result = value;
             if (marker != 42) { return 0; }
             return 7;
         }
-        [NoThrow] int32 FillFloating<T>(T value, int32 status, out T result,
+         int32 FillFloating<T>(T value, int32 status, out T result,
             init ref<T> initialized) where T : [Copy] {
             result = value;
             initialized = value;
             return status;
         }
-        [NoThrow] float32 FillFloating32<T>(T value, out T result, init ref<T> initialized)
+         float32 FillFloating32<T>(T value, out T result, init ref<T> initialized)
             where T : [Copy] {
             result = value;
             initialized = value;
             return float32(-0.0);
         }
-        [NoThrow] float64 FillFloating64<T>(T value, out T result, init ref<T> initialized)
+         float64 FillFloating64<T>(T value, out T result, init ref<T> initialized)
             where T : [Copy] {
             result = value;
             initialized = value;
             return float64(-0.0);
         }
-        [NoThrow] void FillInitVoid<T>(T value, init ref<T> result) where T : [Copy] {
+         void FillInitVoid<T>(T value, init ref<T> result) where T : [Copy] {
             result = value;
         }
-        [NoThrow] int32 FillMixed<T, U>(T value, U second, int32 status, out T result,
+         int32 FillMixed<T, U>(T value, U second, int32 status, out T result,
             init ref<U> initialized, out int32 count, init ref<float64> score)
             where T : [Copy] where U : [Copy] {
             result = value;
@@ -84,7 +84,7 @@ public sealed partial class GenericControlFlowModuleTests
             score = float64(3.5);
             return status;
         }
-        [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
+         int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
         public int32 PowerProbe() {
             if (TryCopy(new Pair(1, 2), false, out var missing)) { return 1; }
             require TryCopy(new Pair(40, 2), true, out var result);
@@ -149,7 +149,7 @@ public sealed partial class GenericControlFlowModuleTests
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(Compile(source, policy), ["PowerProbe"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.That(reference.Structures, Is.Empty);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("PowerProbe"));
@@ -231,7 +231,7 @@ public sealed partial class GenericControlFlowModuleTests
                 require complete;
                 return status;
             }
-            [NoThrow] void CopyMixedVoid<T, U>(T value, U second, out T result,
+             void CopyMixedVoid<T, U>(T value, U second, out T result,
                 init ref<U> initialized) where T : [Copy] where U : [Copy] {
                 result = value;
                 initialized = second;
@@ -700,12 +700,12 @@ public sealed partial class GenericControlFlowModuleTests
         NativeRuntimePolicy policy)
     {
         const string FloatingProducer = """
-            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
-            [NoThrow] bool TryCopy<T>(T value, out T result) where T : [Copy] {
+             T Identity<T>(T value) where T : [Copy] { return value; }
+             bool TryCopy<T>(T value, out T result) where T : [Copy] {
                 result = Identity(value);
                 return true;
             }
-            [NoThrow] bool TryInitialize<T>(T value, init ref<T> result) where T : [Copy] {
+             bool TryInitialize<T>(T value, init ref<T> result) where T : [Copy] {
                 result = Identity(value);
                 return true;
             }
@@ -763,32 +763,32 @@ public sealed partial class GenericControlFlowModuleTests
             struct Inner {
                 public float32 Single;
                 public int32 Marker;
-                [NoThrow] public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
+                 public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
             }
             struct Pair {
                 public Inner Nested;
                 public float64 Wide;
-                [NoThrow] public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
-                [NoThrow] public float32 ReadSingle() { return Nested.Single; }
+                 public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
+                 public float32 ReadSingle() { return Nested.Single; }
             }
-            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
-            [NoThrow] bool TryCreatePair(init ref<Pair> result) {
+             T Identity<T>(T value) where T : [Copy] { return value; }
+             bool TryCreatePair(init ref<Pair> result) {
                 result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
-            [NoThrow] float32 CopyFloat(float32 value) { return value; }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+             float32 CopyFloat(float32 value) { return value; }
+             T Forward<T>(T value) where T : [Copy] {
                 if (!TryCreatePair(init var pair)) { return Identity(value); }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) {
                     return Identity(value);
                 }
                 return Identity(value);
             }
-            [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+             bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
                 result = Forward(value);
                 return publish;
             }
-            [NoThrow] bool TryCopyInit<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
+             bool TryCopyInit<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
                 if (!publish) { return false; }
                 result = Forward(value);
                 return true;

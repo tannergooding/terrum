@@ -5,15 +5,16 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class LifetimeEndTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class LifetimeEndTests
 {
     [TestCase("int32 value = 1; value = _; return 42;")]
     [TestCase("uint64 value = 18446744073709551615; value = _; return 42;")]
@@ -101,7 +102,11 @@ public sealed class LifetimeEndTests
         Assert.That(compilation.HasErrors, Is.EqualTo(endBeforeRetry));
         if (!endBeforeRetry)
         {
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
                 NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         }
     }
@@ -113,7 +118,7 @@ public sealed class LifetimeEndTests
             unique struct Owner {
                 public int32 Value;
                 public Owner() { Value = 42; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             bool Fill(init ref<Owner> value) { value = new Owner(); return true; }
             int32 Main() {
@@ -147,7 +152,11 @@ public sealed class LifetimeEndTests
         Assert.That(compilation.HasErrors, Is.EqualTo(!retireView));
         if (retireView)
         {
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(),
                 NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         }
         else
@@ -195,7 +204,7 @@ public sealed class LifetimeEndTests
             unique struct Owner {
                 public int32 Value;
                 public Owner() { Value = 1; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             public int32 Read() {
                 init Owner owner;
@@ -208,16 +217,24 @@ public sealed class LifetimeEndTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var retiredRevision = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(retiredRevision.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retiredRevision))!;
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = consumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = consumerCompilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
@@ -227,7 +244,11 @@ public sealed class LifetimeEndTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = nativeCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = nativeCompilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))(), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
@@ -247,8 +268,12 @@ public sealed class LifetimeEndTests
             int32 Unused() { int32 value = 1; value = _; return 1; }
             public int32 Read() { int32 value = 1; return 42; }
             """));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = scalar.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = scalar.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(), ["Read"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         _ = ModuleCompiler.CreateReference(producer);
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -264,7 +289,11 @@ public sealed class LifetimeEndTests
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = producerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = producerCompilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         const string Client = """
             int32 Main() {
                 int32 result = Read();
@@ -277,8 +306,12 @@ public sealed class LifetimeEndTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Client),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = consumerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = consumerCompilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))(), producer);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer))!;
@@ -288,7 +321,11 @@ public sealed class LifetimeEndTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), (BoundRuntimePolicy)policy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = nativeCompilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual8 = nativeCompilation.Program;
+                Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual8!;
+            }))(), [nativeProducer], policy);
         NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeProducer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
@@ -304,7 +341,11 @@ public sealed class LifetimeEndTests
             """);
         var functionIndex = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "End"));
         var function = program.Functions[functionIndex];
-        var end = ((global::System.Func<BoundLifetimeEnd>)(() => { var __nunitActual9 = function.Body.Statements[1]; Assert.That(__nunitActual9, Is.TypeOf<BoundLifetimeEnd>()); return (BoundLifetimeEnd)__nunitActual9!; }))();
+        var end = ((global::System.Func<BoundLifetimeEnd>)(() => {
+            var __nunitActual9 = function.Body.Statements[1];
+            Assert.That(__nunitActual9, Is.TypeOf<BoundLifetimeEnd>());
+            return (BoundLifetimeEnd)__nunitActual9!;
+        }))();
         var fill = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill"));
         var initialized = new BoundCall(fill,
             [new BoundOutArgument(end.Variable, false, PrimitiveType.Int32, end.Span) { IsInit = true }],
@@ -327,7 +368,11 @@ public sealed class LifetimeEndTests
     {
         var program = Bind("int32 Main() { int32 value = 1; value = _; return 42; }");
         var function = program.Functions[program.EntryPoint];
-        var end = ((global::System.Func<BoundLifetimeEnd>)(() => { var __nunitActual10 = function.Body.Statements[1]; Assert.That(__nunitActual10, Is.TypeOf<BoundLifetimeEnd>()); return (BoundLifetimeEnd)__nunitActual10!; }))();
+        var end = ((global::System.Func<BoundLifetimeEnd>)(() => {
+            var __nunitActual10 = function.Body.Statements[1];
+            Assert.That(__nunitActual10, Is.TypeOf<BoundLifetimeEnd>());
+            return (BoundLifetimeEnd)__nunitActual10!;
+        }))();
         foreach (var forged in new BoundStatement[] {
             end with { Variable = -1 },
             end with { Variable = function.Variables.Length },
@@ -358,9 +403,17 @@ public sealed class LifetimeEndTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Read() { int32 value = 1; value = _; return 42; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
         var function = global::System.Linq.Enumerable.Single(program.Functions);
-        var end = ((global::System.Func<BoundLifetimeEnd>)(() => { var __nunitActual12 = function.Body.Statements[1]; Assert.That(__nunitActual12, Is.TypeOf<BoundLifetimeEnd>()); return (BoundLifetimeEnd)__nunitActual12!; }))();
+        var end = ((global::System.Func<BoundLifetimeEnd>)(() => {
+            var __nunitActual12 = function.Body.Statements[1];
+            Assert.That(__nunitActual12, Is.TypeOf<BoundLifetimeEnd>());
+            return (BoundLifetimeEnd)__nunitActual12!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
         var marker = new byte[14];
         marker[0] = 26;
@@ -380,13 +433,21 @@ public sealed class LifetimeEndTests
             unique struct Owner {
                 public int32 Id;
                 public Owner() { Id = 1; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             int32 Main() { Owner owner = new Owner(); owner = _; return 42; }
             """);
         var function = program.Functions[program.EntryPoint];
-        var cleanup = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual13 = function.Body.Statements[1]; Assert.That(__nunitActual13, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual13!; }))();
-        var end = ((global::System.Func<BoundLifetimeEnd>)(() => { var __nunitActual14 = cleanup.Body.Statements[0]; Assert.That(__nunitActual14, Is.TypeOf<BoundLifetimeEnd>()); return (BoundLifetimeEnd)__nunitActual14!; }))();
+        var cleanup = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual13 = function.Body.Statements[1];
+            Assert.That(__nunitActual13, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual13!;
+        }))();
+        var end = ((global::System.Func<BoundLifetimeEnd>)(() => {
+            var __nunitActual14 = cleanup.Body.Statements[0];
+            Assert.That(__nunitActual14, Is.TypeOf<BoundLifetimeEnd>());
+            return (BoundLifetimeEnd)__nunitActual14!;
+        }))();
         Assert.That(end.CleanupFunction >= 0, Is.True);
         var forged = program with {
             Functions = program.Functions.SetItem(program.EntryPoint,
@@ -415,6 +476,10 @@ public sealed class LifetimeEndTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
     }
 }

@@ -20,9 +20,12 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class CallerUnsafeTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CallerUnsafeTests
 {
     private const int FixedLayoutModuleVersion = 78;
+    private const int NativeFixedArrayModuleVersion = 103;
+    private const int WideFixedLayoutModuleVersion = 104;
 
     private const string PairDeclaration = """
         [Blittable] [Layout(LayoutKind.Sequential)]
@@ -372,12 +375,24 @@ public sealed class CallerUnsafeTests
             "first.First + second.Second + 1 + a * 10000", StringComparison.Ordinal)
         .Replace("unsafe { return Echo(input); }", "return Echo(input);", StringComparison.Ordinal);
 
+    private static CompilationOptions CreateCompilationOptions(
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
+        => new() {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
+
     private static BoundProgram CompileLibrary(string source,
         BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            CreateCompilationOptions(policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static byte[] ReplaceModuleString(byte[] module, string oldValue, string newValue)
@@ -645,7 +660,11 @@ public sealed class CallerUnsafeTests
             """;
         var returnCompilation = Compilation.Create(SyntaxTree.Parse(returnSource), buffers);
         Assert.That(returnCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, returnCompilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = returnCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = returnCompilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(41));
 
         const string discardSource = """
@@ -654,7 +673,11 @@ public sealed class CallerUnsafeTests
             """;
         var discardCompilation = Compilation.Create(SyntaxTree.Parse(discardSource), buffers);
         Assert.That(discardCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, discardCompilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = discardCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = discardCompilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
@@ -670,7 +693,11 @@ public sealed class CallerUnsafeTests
             """;
         var shortCircuitCompilation = Compilation.Create(SyntaxTree.Parse(shortCircuitSource));
         Assert.That(shortCircuitCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, shortCircuitCompilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = shortCircuitCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = shortCircuitCompilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         const string conditionSource = """
@@ -679,7 +706,11 @@ public sealed class CallerUnsafeTests
             """;
         var conditionCompilation = Compilation.Create(SyntaxTree.Parse(conditionSource));
         Assert.That(conditionCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, conditionCompilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = conditionCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = conditionCompilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         const string outputSource = """
@@ -692,7 +723,11 @@ public sealed class CallerUnsafeTests
             """;
         var outputCompilation = Compilation.Create(SyntaxTree.Parse(outputSource));
         Assert.That(outputCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, outputCompilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = outputCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = outputCompilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
@@ -799,7 +834,11 @@ public sealed class CallerUnsafeTests
         var safeWrapper = Compilation.Create(SyntaxTree.Parse(source
             + " int32 Main() { require Box.TryCreate(21, out var box); return box.SafeRead(); }"));
         Assert.That(safeWrapper.HasErrors, Is.False, string.Join(Environment.NewLine, safeWrapper.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = safeWrapper.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions, static function => function.Name == "Box.SafeRead").RequiresUnsafeCaller, Is.False);
+        Assert.That(global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = safeWrapper.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))().Functions, static function => function.Name == "Box.SafeRead").RequiresUnsafeCaller, Is.False);
     }
 
     [Test]
@@ -897,7 +936,7 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(
         CompileLibrary(UnsafeFieldExpressionModuleSource, policy),
         ["MakeOuter", "MakeLeafOuter", "ReadValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var (owner, fieldName, expected) in new[]
@@ -918,7 +957,7 @@ public sealed class CallerUnsafeTests
                 UnsafeOuter outer = MakeOuter(40);
                 return outer.Value.Value;
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(unscoped.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(unscoped.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
@@ -927,21 +966,33 @@ public sealed class CallerUnsafeTests
                 UnsafeOuter outer = MakeOuter(40);
                 return unsafe(outer.Value.Value);
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(expressionScoped.HasErrors, Is.False, string.Join(Environment.NewLine, expressionScoped.Diagnostics));
-        var expressionProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = expressionScoped.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var expressionProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = expressionScoped.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
         var expressionMain = expressionProgram.Functions[expressionProgram.EntryPoint];
-        var expressionReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual8 = expressionMain.Body.Statements[^1]; Assert.That(__nunitActual8, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual8!; }))();
-        var unsafeRead = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual9 = expressionReturn.Value; Assert.That(__nunitActual9, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual9!; }))();
+        var expressionReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual8 = expressionMain.Body.Statements[^1];
+            Assert.That(__nunitActual8, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual8!;
+        }))();
+        var unsafeRead = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual9 = expressionReturn.Value;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual9!;
+        }))();
         var expressionConsumer = ModuleCompiler.CreateConsumer(expressionProgram, producer);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
+            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])expressionConsumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
             ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
@@ -951,7 +1002,11 @@ public sealed class CallerUnsafeTests
         var expressionConsumerCompilation = Compilation.Create(
             SyntaxTree.Parse(UnsafeFieldModuleExpressionConsumerSource), reference, policy);
         Assert.That(expressionConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, expressionConsumerCompilation.Diagnostics));
-        var expressionConsumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = expressionConsumerCompilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var expressionConsumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = expressionConsumerCompilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         var expressionConsumerModule = ModuleCompiler.CreateConsumer(expressionConsumerProgram, producer);
         Assert.That(NativeJit.Execute(
             ModuleCompiler.Link(expressionConsumerModule, producer), runtimePolicy), Is.EqualTo(121));
@@ -967,7 +1022,7 @@ public sealed class CallerUnsafeTests
             Functions = expressionProgram.Functions.SetItem(
                 expressionProgram.Functions.IndexOf(expressionMain), strippedMain),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(strippedProgram, producer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(strippedProgram, producer));
 
         Span<byte> wrapperPrefix = stackalloc byte[1 + sizeof(int) + (2 * sizeof(int))];
         wrapperPrefix[0] = 31;
@@ -982,7 +1037,7 @@ public sealed class CallerUnsafeTests
         expressionConsumer.AsSpan(0, wrapperOffset).CopyTo(strippedConsumer);
         expressionConsumer.AsSpan(wrapperOffset + wrapperPrefix.Length)
             .CopyTo(strippedConsumer.AsSpan(wrapperOffset));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(strippedConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(strippedConsumer, producer));
 
         foreach (var mutation in new[] { "outer.Value.Value++;", "outer.Value.Value += 1;" })
         {
@@ -994,10 +1049,22 @@ public sealed class CallerUnsafeTests
                 }
                 """), reference, policy);
             Assert.That(mutationCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, mutationCompilation.Diagnostics));
-            var mutationProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = mutationCompilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+            var mutationProgram = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual11 = mutationCompilation.Program;
+                Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual11!;
+            }))();
             var mutationMain = mutationProgram.Functions[mutationProgram.EntryPoint];
-            var mutationBlock = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual12 = mutationMain.Body.Statements[1]; Assert.That(__nunitActual12, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual12!; }))();
-            var mutationStatement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual13 = mutationBlock.Body.Statements[0]; Assert.That(__nunitActual13, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual13!; }))();
+            var mutationBlock = ((global::System.Func<BoundUnsafe>)(() => {
+                var __nunitActual12 = mutationMain.Body.Statements[1];
+                Assert.That(__nunitActual12, Is.TypeOf<BoundUnsafe>());
+                return (BoundUnsafe)__nunitActual12!;
+            }))();
+            var mutationStatement = ((global::System.Func<BoundExpressionStatement>)(() => {
+                var __nunitActual13 = mutationBlock.Body.Statements[0];
+                Assert.That(__nunitActual13, Is.TypeOf<BoundExpressionStatement>());
+                return (BoundExpressionStatement)__nunitActual13!;
+            }))();
             var scopedMutation = mutationStatement with {
                 Expression = new BoundUnsafeExpression(
                     mutationStatement.Expression, mutationStatement.Expression.Span),
@@ -1028,7 +1095,11 @@ public sealed class CallerUnsafeTests
             """), reference, policy);
         Assert.That(unrelatedMutationCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, unrelatedMutationCompilation.Diagnostics));
         var unrelatedMutationConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = unrelatedMutationCompilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual14 = unrelatedMutationCompilation.Program;
+                Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual14!;
+            }))(), producer);
         Assert.That(NativeJit.Execute(
             ModuleCompiler.Link(unrelatedMutationConsumer, producer), runtimePolicy), Is.EqualTo(40));
 
@@ -1045,9 +1116,17 @@ public sealed class CallerUnsafeTests
         var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse(UnsafeFieldModuleConsumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = consumerCompilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = consumerCompilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
         var main = consumerProgram.Functions[consumerProgram.EntryPoint];
-        var unsafeBlock = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual16 = main.Body.Statements[^1]; Assert.That(__nunitActual16, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual16!; }))();
+        var unsafeBlock = ((global::System.Func<BoundUnsafe>)(() => {
+            var __nunitActual16 = main.Body.Statements[^1];
+            Assert.That(__nunitActual16, Is.TypeOf<BoundUnsafe>());
+            return (BoundUnsafe)__nunitActual16!;
+        }))();
         var forgedMain = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(main.Body.Statements.Length - 1, unsafeBlock.Body),
@@ -1056,16 +1135,16 @@ public sealed class CallerUnsafeTests
         var forgedProgram = consumerProgram with {
             Functions = consumerProgram.Functions.SetItem(consumerProgram.EntryPoint, forgedMain),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
 
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         const byte BoundUnsafeStatementTag = 11;
@@ -1080,7 +1159,7 @@ public sealed class CallerUnsafeTests
         consumer.AsSpan(0, unsafeScopeOffset).CopyTo(forgedConsumer);
         consumer.AsSpan(unsafeScopeOffset + unsafeScope.Length)
             .CopyTo(forgedConsumer.AsSpan(unsafeScopeOffset));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forgedConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forgedConsumer, producer));
 
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeJit.Execute(linked, runtimePolicy), Is.EqualTo(45));
@@ -1091,7 +1170,7 @@ public sealed class CallerUnsafeTests
             .Replace("unsafe { Value = value; }", "Value = value;", StringComparison.Ordinal);
         var safeReplacement = ModuleCompiler.CreateProducer(
             CompileLibrary(safeReplacementSource, policy), ["MakeOuter", "MakeLeafOuter"]);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, safeReplacement));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, safeReplacement));
 
         var safeConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -1102,8 +1181,12 @@ public sealed class CallerUnsafeTests
             """), ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = safeConsumerCompilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual17 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual17!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -1122,7 +1205,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateGraphReference([provider]), policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = graphCompilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), [provider], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual18 = graphCompilation.Program;
+                Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual18!;
+            }))(), [provider], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [provider]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(
             graphConsumer, [provider], TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(121));
@@ -1136,7 +1223,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateReferenceSet(providers), policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = setCompilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual19 = setCompilation.Program;
+                Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual19!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
             consumerSet, providers, TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(121));
@@ -1154,17 +1245,33 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(program, exports);
         var callerUnsafeMutableBlockProgram = CompileLibrary(UnsafeMutableFieldLoanModuleSource.Replace(
             "public mut int32 Next()", "public unsafe mut int32 Next()", StringComparison.Ordinal), policy);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
             callerUnsafeMutableBlockProgram, ["InvokeUnsafeLeaf"]));
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
             program, ["LoanCounter.UnsafeNextBy"]));
 
         var expressionFunction = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "InvokeExpressionScoped");
         var expressionFunctionIndex = program.Functions.IndexOf(expressionFunction);
-        var expressionReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual20 = expressionFunction.Body.Statements[^1]; Assert.That(__nunitActual20, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual20!; }))();
-        var expressionScope = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual21 = expressionReturn.Value; Assert.That(__nunitActual21, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual21!; }))();
-        var expressionCall = ((global::System.Func<BoundCall>)(() => { var __nunitActual22 = expressionScope.Expression; Assert.That(__nunitActual22, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual22!; }))();
-        var receiverLoan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual23 = expressionCall.Arguments[0]; Assert.That(__nunitActual23, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual23!; }))();
+        var expressionReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual20 = expressionFunction.Body.Statements[^1];
+            Assert.That(__nunitActual20, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual20!;
+        }))();
+        var expressionScope = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual21 = expressionReturn.Value;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual21!;
+        }))();
+        var expressionCall = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual22 = expressionScope.Expression;
+            Assert.That(__nunitActual22, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual22!;
+        }))();
+        var receiverLoan = ((global::System.Func<BoundMutableFieldLoan>)(() => {
+            var __nunitActual23 = expressionCall.Arguments[0];
+            Assert.That(__nunitActual23, Is.TypeOf<BoundMutableFieldLoan>());
+            return (BoundMutableFieldLoan)__nunitActual23!;
+        }))();
 
         var wrappedReceiverCall = expressionCall with {
             Arguments = expressionCall.Arguments.SetItem(
@@ -1198,17 +1305,33 @@ public sealed class CallerUnsafeTests
         var remappedReceiverException = TestExceptionCapture.Capture(() =>
             ModuleCompiler.CreateProducer(remappedReceiverProgram, ["InvokeExpressionScoped"]));
         Assert.That(remappedReceiverException is ModuleContractException or ArgumentException, Is.True, remappedReceiverException?.ToString());
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateReference(WrapSerializedMutableFieldLoan(producer, receiverLoan)));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateReference(RemapSerializedCallReceiver(producer, "LoanCounter.NextBy")));
 
         var unsafeMethodFunction = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "InvokeExpressionScopedUnsafeMethod");
         var unsafeMethodFunctionIndex = program.Functions.IndexOf(unsafeMethodFunction);
-        var unsafeMethodReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual24 = unsafeMethodFunction.Body.Statements[^1]; Assert.That(__nunitActual24, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual24!; }))();
-        var unsafeMethodScope = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual25 = unsafeMethodReturn.Value; Assert.That(__nunitActual25, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual25!; }))();
-        var unsafeMethodCall = ((global::System.Func<BoundCall>)(() => { var __nunitActual26 = unsafeMethodScope.Expression; Assert.That(__nunitActual26, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual26!; }))();
-        var unsafeMethodLoan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual27 = unsafeMethodCall.Arguments[0]; Assert.That(__nunitActual27, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual27!; }))();
+        var unsafeMethodReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual24 = unsafeMethodFunction.Body.Statements[^1];
+            Assert.That(__nunitActual24, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual24!;
+        }))();
+        var unsafeMethodScope = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual25 = unsafeMethodReturn.Value;
+            Assert.That(__nunitActual25, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual25!;
+        }))();
+        var unsafeMethodCall = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual26 = unsafeMethodScope.Expression;
+            Assert.That(__nunitActual26, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual26!;
+        }))();
+        var unsafeMethodLoan = ((global::System.Func<BoundMutableFieldLoan>)(() => {
+            var __nunitActual27 = unsafeMethodCall.Arguments[0];
+            Assert.That(__nunitActual27, Is.TypeOf<BoundMutableFieldLoan>());
+            return (BoundMutableFieldLoan)__nunitActual27!;
+        }))();
         var unscopedUnsafeMethodFunction = unsafeMethodFunction with {
             Body = unsafeMethodFunction.Body with {
                 Statements = unsafeMethodFunction.Body.Statements.SetItem(
@@ -1219,7 +1342,7 @@ public sealed class CallerUnsafeTests
         var unscopedUnsafeMethodProgram = program with {
             Functions = program.Functions.SetItem(unsafeMethodFunctionIndex, unscopedUnsafeMethodFunction),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
             unscopedUnsafeMethodProgram, ["InvokeExpressionScopedUnsafeMethod"]));
 
         var remappedUnsafeMethodCall = WithArgumentParameterIndices(unsafeMethodCall, [1, 0, 2]);
@@ -1238,10 +1361,12 @@ public sealed class CallerUnsafeTests
         var remappedUnsafeMethodException = TestExceptionCapture.Capture(() => ModuleCompiler.CreateProducer(
             remappedUnsafeMethodProgram, ["InvokeExpressionScopedUnsafeMethod"]));
         Assert.That(remappedUnsafeMethodException is ModuleContractException or ArgumentException, Is.True, remappedUnsafeMethodException?.ToString());
-        foreach (var invalidMapping in new[] {
-            ImmutableArray.Create(0, 0, 1),
-            ImmutableArray.Create(0, 1, 3),
-        })
+        ImmutableArray<int>[] invalidMappings =
+        [
+            [0, 0, 1],
+            [0, 1, 3],
+        ];
+        foreach (var invalidMapping in invalidMappings)
         {
             var invalidMappingCall = WithArgumentParameterIndices(unsafeMethodCall, invalidMapping);
             var invalidMappingFunction = unsafeMethodFunction with {
@@ -1260,13 +1385,13 @@ public sealed class CallerUnsafeTests
                 invalidMappingProgram, ["InvokeExpressionScopedUnsafeMethod"]));
             Assert.That(invalidMappingException is ModuleContractException or ArgumentException, Is.True, invalidMappingException?.ToString());
         }
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateReference(WrapSerializedMutableFieldLoan(producer, unsafeMethodLoan)));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateReference(RemapSerializedCallReceiver(producer, "LoanCounter.UnsafeNextBy")));
         foreach (var invalidMapping in new[] {
             new[] { 0, 0, 1 },
-            new[] { 0, 1, 3 },
+            [0, 1, 3],
         })
         {
             var invalidMappingArtifact = SetSerializedCallParameterMapping(
@@ -1274,7 +1399,7 @@ public sealed class CallerUnsafeTests
             var invalidMappingReadException = TestExceptionCapture.Capture(() => ModuleCompiler.CreateReference(invalidMappingArtifact));
             Assert.That(invalidMappingReadException is ModuleContractException or ModuleFormatException, Is.True, invalidMappingReadException?.ToString());
         }
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateReference(StripSerializedUnsafeExpression(producer, unsafeMethodScope)));
         var unsafeMethodContract = GetModuleStringStartingWith(producer, "LoanCounter.UnsafeNextBy|");
         Assert.That(unsafeMethodContract, Does.Contain("|MutReceiver|"));
@@ -1312,7 +1437,11 @@ public sealed class CallerUnsafeTests
             }
             """), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = consumerCompilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual28 = consumerCompilation.Program;
+            Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual28!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -1342,9 +1471,13 @@ public sealed class CallerUnsafeTests
                 mut UnsafeLeafOwner owner = new UnsafeLeafOwner(new LoanCounter(40));
                 return unsafe(owner.Value.NextBy(second: 1, first: 0));
             }
-            """), policy);
+            """), CreateCompilationOptions(policy));
         Assert.That(receiverConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, receiverConsumerCompilation.Diagnostics));
-        var receiverConsumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual29 = receiverConsumerCompilation.Program; Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual29!; }))();
+        var receiverConsumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual29 = receiverConsumerCompilation.Program;
+            Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual29!;
+        }))();
         var unrelatedProducer = ModuleCompiler.CreateProducer(
             CompileLibrary("public int32 Helper() { return 0; }", policy), ["Helper"]);
         var consumerLocalCompilation = Compilation.Create(SyntaxTree.Parse(
@@ -1354,21 +1487,34 @@ public sealed class CallerUnsafeTests
                 mut UnsafeLeafOwner owner = new UnsafeLeafOwner(new LoanCounter(40));
                 return unsafe(owner.Value.UnsafeNextBy(second: 1, first: 0));
             }
-            """), ModuleCompiler.CreateReference(unrelatedProducer), policy);
+            """), ModuleCompiler.CreateReference(unrelatedProducer),
+            CreateCompilationOptions(policy));
         Assert.That(consumerLocalCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerLocalCompilation.Diagnostics));
-        var consumerLocalProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual30 = consumerLocalCompilation.Program; Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual30!; }))();
+        var consumerLocalProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual30 = consumerLocalCompilation.Program;
+            Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual30!;
+        }))();
         var consumerLocal = ModuleCompiler.CreateConsumer(consumerLocalProgram, unrelatedProducer);
         Assert.That(NativeJit.Execute(
             ModuleCompiler.Link(consumerLocal, unrelatedProducer), runtimePolicy), Is.EqualTo(41));
         var consumerLocalMain = global::System.Linq.Enumerable.Single(consumerLocalProgram.Functions, function => function.Name == "Main");
-        var consumerLocalReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual31 = consumerLocalMain.Body.Statements[^1]; Assert.That(__nunitActual31, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual31!; }))();
-        var consumerLocalScope = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual32 = consumerLocalReturn.Value; Assert.That(__nunitActual32, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual32!; }))();
+        var consumerLocalReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual31 = consumerLocalMain.Body.Statements[^1];
+            Assert.That(__nunitActual31, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual31!;
+        }))();
+        var consumerLocalScope = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual32 = consumerLocalReturn.Value;
+            Assert.That(__nunitActual32, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual32!;
+        }))();
         var strippedConsumerLocal = StripSerializedUnsafeExpression(consumerLocal, consumerLocalScope);
         var strippedConsumerLocalException = TestExceptionCapture.Capture(() => ModuleCompiler.Link(strippedConsumerLocal, unrelatedProducer));
         Assert.That(strippedConsumerLocalException is ModuleContractException or ModuleFormatException, Is.True, strippedConsumerLocalException?.ToString());
         foreach (var invalidMapping in new[] {
             new[] { 0, 0, 1 },
-            new[] { 0, 1, 3 },
+            [0, 1, 3],
         })
         {
             var invalidMappingConsumer = SetSerializedCallParameterMapping(
@@ -1383,29 +1529,54 @@ public sealed class CallerUnsafeTests
                 mut LoanCounter value = new LoanCounter(40);
                 return unsafe(value.UnsafeNextBy(second: 1, first: 0));
             }
-            """), ModuleCompiler.CreateReference(unrelatedProducer), policy);
+            """), ModuleCompiler.CreateReference(unrelatedProducer),
+            CreateCompilationOptions(policy));
         Assert.That(localReceiverCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, localReceiverCompilation.Diagnostics));
-        var localReceiverProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual33 = localReceiverCompilation.Program; Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual33!; }))();
+        var localReceiverProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual33 = localReceiverCompilation.Program;
+            Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual33!;
+        }))();
         var localReceiverException = TestExceptionCapture.Capture(() => ModuleCompiler.CreateConsumer(localReceiverProgram, unrelatedProducer));
         Assert.That(localReceiverException is ModuleContractException or ArgumentException, Is.True, localReceiverException?.ToString());
         var receiverConsumer = ModuleCompiler.CreateConsumer(receiverConsumerProgram, unrelatedProducer);
         Assert.That(NativeJit.Execute(
             ModuleCompiler.Link(receiverConsumer, unrelatedProducer), runtimePolicy), Is.EqualTo(41));
         var receiverConsumerMain = global::System.Linq.Enumerable.Single(receiverConsumerProgram.Functions, function => function.Name == "Main");
-        var receiverConsumerReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual34 = receiverConsumerMain.Body.Statements[^1]; Assert.That(__nunitActual34, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual34!; }))();
-        var receiverConsumerScope = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual35 = receiverConsumerReturn.Value; Assert.That(__nunitActual35, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual35!; }))();
-        var receiverConsumerCall = ((global::System.Func<BoundCall>)(() => { var __nunitActual36 = receiverConsumerScope.Expression; Assert.That(__nunitActual36, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual36!; }))();
-        var receiverConsumerLoan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual37 = receiverConsumerCall.Arguments[0]; Assert.That(__nunitActual37, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual37!; }))();
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(
+        var receiverConsumerReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual34 = receiverConsumerMain.Body.Statements[^1];
+            Assert.That(__nunitActual34, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual34!;
+        }))();
+        var receiverConsumerScope = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual35 = receiverConsumerReturn.Value;
+            Assert.That(__nunitActual35, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual35!;
+        }))();
+        var receiverConsumerCall = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual36 = receiverConsumerScope.Expression;
+            Assert.That(__nunitActual36, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual36!;
+        }))();
+        var receiverConsumerLoan = ((global::System.Func<BoundMutableFieldLoan>)(() => {
+            var __nunitActual37 = receiverConsumerCall.Arguments[0];
+            Assert.That(__nunitActual37, Is.TypeOf<BoundMutableFieldLoan>());
+            return (BoundMutableFieldLoan)__nunitActual37!;
+        }))();
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(
             WrapSerializedMutableFieldLoan(receiverConsumer, receiverConsumerLoan), unrelatedProducer));
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(
             RemapSerializedCallReceiver(receiverConsumer, "LoanCounter.NextBy"), unrelatedProducer));
 
         foreach (var export in blockExports)
         {
             var function = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == export);
             var functionIndex = program.Functions.IndexOf(function);
-            var unsafeBlock = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual38 = function.Body.Statements[^1]; Assert.That(__nunitActual38, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual38!; }))();
+            var unsafeBlock = ((global::System.Func<BoundUnsafe>)(() => {
+                var __nunitActual38 = function.Body.Statements[^1];
+                Assert.That(__nunitActual38, Is.TypeOf<BoundUnsafe>());
+                return (BoundUnsafe)__nunitActual38!;
+            }))();
             var forgedFunction = function with {
                 Body = function.Body with {
                     Statements = function.Body.Statements.SetItem(
@@ -1430,15 +1601,23 @@ public sealed class CallerUnsafeTests
             singleExport.AsSpan(0, unsafeScopeOffset).CopyTo(forgedArtifact);
             singleExport.AsSpan(unsafeScopeOffset + unsafeScope.Length)
                 .CopyTo(forgedArtifact.AsSpan(unsafeScopeOffset));
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedArtifact));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedArtifact));
         }
 
         foreach (var export in expressionExports)
         {
             var function = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == export);
             var functionIndex = program.Functions.IndexOf(function);
-            var returnStatement = ((global::System.Func<BoundReturn>)(() => { var __nunitActual39 = function.Body.Statements[^1]; Assert.That(__nunitActual39, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual39!; }))();
-            var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual40 = returnStatement.Value; Assert.That(__nunitActual40, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual40!; }))();
+            var returnStatement = ((global::System.Func<BoundReturn>)(() => {
+                var __nunitActual39 = function.Body.Statements[^1];
+                Assert.That(__nunitActual39, Is.TypeOf<BoundReturn>());
+                return (BoundReturn)__nunitActual39!;
+            }))();
+            var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => {
+                var __nunitActual40 = returnStatement.Value;
+                Assert.That(__nunitActual40, Is.TypeOf<BoundUnsafeExpression>());
+                return (BoundUnsafeExpression)__nunitActual40!;
+            }))();
             var forgedFunction = function with {
                 Body = function.Body with {
                     Statements = function.Body.Statements.SetItem(
@@ -1520,10 +1699,15 @@ public sealed class CallerUnsafeTests
                     + InvokeExpressionScopedUnsafeMethod()
                     + unsafe(owner.Value.UnsafeNextBy(second: 1, first: 0));
             }
-            """), NativeModuleCompiler.CreateReferenceSet(providers), policy);
+            """), NativeModuleCompiler.CreateReferenceSet(providers),
+            CreateCompilationOptions(policy));
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual41 = setCompilation.Program; Assert.That(__nunitActual41, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual41!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual41 = setCompilation.Program;
+                Assert.That(__nunitActual41, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual41!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(166));
@@ -1538,17 +1722,26 @@ public sealed class CallerUnsafeTests
                     + InvokeExpressionScopedUnsafeMethod()
                     + unsafe(owner.Value.UnsafeNextBy(second: 1, first: 0));
             }
-            """), NativeModuleCompiler.CreateGraphReference([provider]), policy);
+            """), NativeModuleCompiler.CreateGraphReference([provider]),
+            CreateCompilationOptions(policy));
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
         var middle = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual42 = middleCompilation.Program; Assert.That(__nunitActual42, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual42!; }))(), ["Forward"],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual42 = middleCompilation.Program;
+                Assert.That(__nunitActual42, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual42!;
+            }))(), ["Forward"],
             "UnsafeLoanMiddle", [provider], runtimePolicy);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Forward(); }"),
             NativeModuleCompiler.CreateGraphReference([middle]), policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual43 = rootCompilation.Program; Assert.That(__nunitActual43, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual43!; }))(), [middle], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual43 = rootCompilation.Program;
+                Assert.That(__nunitActual43, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual43!;
+            }))(), [middle], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(root, [middle, provider]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(166));
@@ -1572,7 +1765,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateReferenceSet(providers), policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual44 = setCompilation.Program; Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual44!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual44 = setCompilation.Program;
+                Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual44!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(45));
@@ -1582,7 +1779,7 @@ public sealed class CallerUnsafeTests
         var safeProvider = NativeModuleCompiler.CreateProducer(
             CompileLibrary(safeFieldSource, policy), ["MakeOuter", "MakeLeafOuter"],
             "UnsafeFieldProvider", runtimePolicy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(consumerSet, [safeProvider, helper]));
 
         var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -1596,7 +1793,11 @@ public sealed class CallerUnsafeTests
             """), NativeModuleCompiler.CreateGraphReference([provider]), policy);
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
         var middle = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual45 = middleCompilation.Program; Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual45!; }))(), ["Forward"],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual45 = middleCompilation.Program;
+                Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual45!;
+            }))(), ["Forward"],
             "UnsafeFieldMiddle", [provider], runtimePolicy);
 
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(
@@ -1604,9 +1805,13 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateGraphReference([middle]), policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual46 = rootCompilation.Program; Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual46!; }))(), [middle], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual46 = rootCompilation.Program;
+                Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual46!;
+            }))(), [middle], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(root, [middle, provider]);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(root, [middle, safeProvider]));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -1664,7 +1869,8 @@ public sealed class CallerUnsafeTests
             }
             """;
 
-        var safeUse = Compilation.Create(SyntaxTree.Parse(declaration + body));
+        var safeUse = Compilation.Create(SyntaxTree.Parse(declaration + body),
+            CreateCompilationOptions());
         Assert.That(safeUse.Program, Is.Null);
         Assert.That(safeUse.Diagnostics.Count(static diagnostic => diagnostic.Code == "TRM3028"), Is.EqualTo(3));
 
@@ -1680,7 +1886,7 @@ public sealed class CallerUnsafeTests
                     return combined.Value + unary.Value + updated.Value;
                 }
             }
-            """));
+            """), CreateCompilationOptions());
         Assert.That(authorizedUse.HasErrors, Is.False, string.Join(Environment.NewLine, authorizedUse.Diagnostics));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -1732,7 +1938,7 @@ public sealed class CallerUnsafeTests
             Assert.That(reader.ReadBoolean(), Is.True);
             forgedProducer[operatorMarkerOffset] = 0;
         }
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedProducer));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.Functions.Single(static function => function.Name == "Number.op_LogicalNot").IsOperator, Is.True);
         Assert.That(reference.Functions.Single(static function => function.Name == "Number.op_Equality").IsOperator, Is.True);
@@ -1765,7 +1971,11 @@ public sealed class CallerUnsafeTests
             """;
         var client = Compilation.Create(SyntaxTree.Parse(clientSource), reference, policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual47 = client.Program; Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual47!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual47 = client.Program;
+            Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual47!;
+        }))(), producer);
         var malformedConsumer = (byte[])consumer.Clone();
         var canonicalName = Encoding.UTF8.GetBytes("Number.op_Addition");
         var firstNameOffset = malformedConsumer.AsSpan().IndexOf(canonicalName);
@@ -1776,7 +1986,7 @@ public sealed class CallerUnsafeTests
         var malformedName = Encoding.UTF8.GetBytes("Number.op_FakeName");
         Assert.That(malformedName.Length, Is.EqualTo(canonicalName.Length));
         malformedName.CopyTo(malformedConsumer.AsSpan(contractNameOffset));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(malformedConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(malformedConsumer, producer));
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), (NativeRuntimePolicy)policy), Is.EqualTo(42));
 
         var runtimePolicy = (NativeRuntimePolicy)policy;
@@ -1787,7 +1997,11 @@ public sealed class CallerUnsafeTests
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(clientSource), graphReference, policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual48 = graphCompilation.Program; Assert.That(__nunitActual48, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual48!; }))(), [nativeProducer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual48 = graphCompilation.Program;
+                Assert.That(__nunitActual48, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual48!;
+            }))(), [nativeProducer], runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
 
@@ -1799,7 +2013,11 @@ public sealed class CallerUnsafeTests
         var setCompilation = Compilation.Create(SyntaxTree.Parse(clientSource), setReference, policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual49 = setCompilation.Program; Assert.That(__nunitActual49, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual49!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual49 = setCompilation.Program;
+                Assert.That(__nunitActual49, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual49!;
+            }))(), providers, runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
 
@@ -1808,14 +2026,14 @@ public sealed class CallerUnsafeTests
         var mismatchedProducer = ModuleCompiler.CreateProducer(CompileLibrary(ordinaryAddition, policy),
             ["Magnitude.#ctor", "Number.#ctor", "Number.op_LogicalNot", "Number.op_Equality",
                 "Number.op_Addition", "Number.op_Subtraction"]);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, mismatchedProducer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, mismatchedProducer));
         var mismatchedNativeProducer = NativeModuleCompiler.CreateProducer(
             CompileLibrary(ordinaryAddition, policy),
             ["Magnitude.#ctor", "Number.#ctor", "Number.op_LogicalNot", "Number.op_Equality",
                 "Number.op_Addition", "Number.op_Subtraction"], "StaticOperators", runtimePolicy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(graphConsumer, [mismatchedNativeProducer]));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(consumerSet, [mismatchedNativeProducer, helper]));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -1880,7 +2098,7 @@ public sealed class CallerUnsafeTests
                 Number result = left + right;
                 return result.Value;
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(unscopedCompilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(unscopedCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
         var operandScopedCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1890,16 +2108,32 @@ public sealed class CallerUnsafeTests
                 Number result = unsafe(left) + right;
                 return result.Value;
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(operandScopedCompilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(operandScopedCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
         var combine = global::System.Linq.Enumerable.Single(providerProgram.Functions, static function => function.Name == "Number.Combine");
-        var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual50 = combine.Body.Statements[^1]; Assert.That(__nunitActual50, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual50!; }))();
-        var scope = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual51 = returned.Value; Assert.That(__nunitActual51, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual51!; }))();
-        var multiply = ((global::System.Func<BoundCall>)(() => { var __nunitActual52 = scope.Expression; Assert.That(__nunitActual52, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual52!; }))();
+        var returned = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual50 = combine.Body.Statements[^1];
+            Assert.That(__nunitActual50, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual50!;
+        }))();
+        var scope = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual51 = returned.Value;
+            Assert.That(__nunitActual51, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual51!;
+        }))();
+        var multiply = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual52 = scope.Expression;
+            Assert.That(__nunitActual52, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual52!;
+        }))();
         Assert.That(providerProgram.Functions[multiply.Function].IsOperator, Is.True);
-        var addition = ((global::System.Func<BoundCall>)(() => { var __nunitActual53 = multiply.Arguments[0]; Assert.That(__nunitActual53, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual53!; }))();
+        var addition = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual53 = multiply.Arguments[0];
+            Assert.That(__nunitActual53, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual53!;
+        }))();
         Assert.That(providerProgram.Functions[addition.Function].IsOperator, Is.True);
 
         var unscopedCombine = combine with {
@@ -1911,7 +2145,7 @@ public sealed class CallerUnsafeTests
         var unscopedProgram = providerProgram with {
             Functions = providerProgram.Functions.SetItem(providerProgram.Functions.IndexOf(combine), unscopedCombine),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(unscopedProgram, exports));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(unscopedProgram, exports));
 
         var remappedMultiply = WithArgumentParameterIndices(multiply, [1, 0]);
         var remappedCombine = combine with {
@@ -1924,26 +2158,37 @@ public sealed class CallerUnsafeTests
         var remappedProgram = providerProgram with {
             Functions = providerProgram.Functions.SetItem(providerProgram.Functions.IndexOf(combine), remappedCombine),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(remappedProgram, exports));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(remappedProgram, exports));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
             StripSerializedUnsafeExpression(producer, scope)));
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateReference(
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateReference(
             SetSerializedCallParameterMapping(producer, "Number.op_Multiply", [1, 0])));
 
-        var semanticCompilation = Compilation.Create(SyntaxTree.Parse(clientSource), reference, policy);
+        var semanticCompilation = Compilation.Create(
+            SyntaxTree.Parse(clientSource), reference,
+            CreateCompilationOptions(policy));
         Assert.That(semanticCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, semanticCompilation.Diagnostics));
         var semanticConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual54 = semanticCompilation.Program; Assert.That(__nunitActual54, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual54!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual54 = semanticCompilation.Program;
+                Assert.That(__nunitActual54, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual54!;
+            }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(semanticConsumer, producer), (NativeRuntimePolicy)policy), Is.EqualTo(42));
 
         var runtimePolicy = (NativeRuntimePolicy)policy;
         var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, exports,
             "CallerUnsafeBinaryOperators", runtimePolicy);
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(clientSource),
-            NativeModuleCompiler.CreateGraphReference([nativeProducer]), policy);
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]),
+            CreateCompilationOptions(policy));
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual55 = graphCompilation.Program; Assert.That(__nunitActual55, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual55!; }))(), [nativeProducer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual55 = graphCompilation.Program;
+                Assert.That(__nunitActual55, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual55!;
+            }))(), [nativeProducer], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [nativeProducer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(
             graphConsumer, [nativeProducer], TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -1953,10 +2198,15 @@ public sealed class CallerUnsafeTests
             "CallerUnsafeBinaryOperatorHelper", runtimePolicy);
         var providers = new[] { nativeProducer, helper };
         var setCompilation = Compilation.Create(SyntaxTree.Parse(clientSource),
-            NativeModuleCompiler.CreateReferenceSet(providers), policy);
+            NativeModuleCompiler.CreateReferenceSet(providers),
+            CreateCompilationOptions(policy));
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual56 = setCompilation.Program; Assert.That(__nunitActual56, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual56!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual56 = setCompilation.Program;
+                Assert.That(__nunitActual56, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual56!;
+            }))(), providers, runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
             consumerSet, providers, TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -2083,11 +2333,23 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
         var reference = ModuleCompiler.CreateReference(producer);
         var increment = global::System.Linq.Enumerable.Single(providerProgram.Functions, static function => function.Name == "Number.Increment");
-        var incrementReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual57 = increment.Body.Statements[^1]; Assert.That(__nunitActual57, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual57!; }))();
-        var incrementScope = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual58 = incrementReturn.Value; Assert.That(__nunitActual58, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual58!; }))();
-        var incrementUpdate = ((global::System.Func<BoundNominalUpdate>)(() => { var __nunitActual59 = incrementScope.Expression; Assert.That(__nunitActual59, Is.TypeOf<BoundNominalUpdate>()); return (BoundNominalUpdate)__nunitActual59!; }))();
+        var incrementReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual57 = increment.Body.Statements[^1];
+            Assert.That(__nunitActual57, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual57!;
+        }))();
+        var incrementScope = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual58 = incrementReturn.Value;
+            Assert.That(__nunitActual58, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual58!;
+        }))();
+        var incrementUpdate = ((global::System.Func<BoundNominalUpdate>)(() => {
+            var __nunitActual59 = incrementScope.Expression;
+            Assert.That(__nunitActual59, Is.TypeOf<BoundNominalUpdate>());
+            return (BoundNominalUpdate)__nunitActual59!;
+        }))();
         Assert.That(providerProgram.Functions[incrementUpdate.Function].IsOperator, Is.True);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
             StripSerializedUnsafeExpression(producer, incrementScope)));
         var unscopedReturn = incrementReturn with { Value = incrementUpdate };
         var unscopedIncrement = increment with {
@@ -2100,7 +2362,7 @@ public sealed class CallerUnsafeTests
             Functions = providerProgram.Functions.SetItem(
                 providerProgram.Functions.IndexOf(increment), unscopedIncrement),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(unscopedProgram, exports));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(unscopedProgram, exports));
         var forgedUpdateException = TestExceptionCapture.Capture(() => ModuleCompiler.CreateReference(
             SetSerializedNominalUpdateOperator(producer, incrementUpdate, TokenKind.MinusMinus)));
         Assert.That(forgedUpdateException is ModuleContractException or ModuleFormatException, Is.True, forgedUpdateException?.ToString());
@@ -2114,7 +2376,7 @@ public sealed class CallerUnsafeTests
                 Number result = -unsafe(value);
                 return result.Value;
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(operandScopedCompilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(operandScopedCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
@@ -2124,24 +2386,35 @@ public sealed class CallerUnsafeTests
                 value++;
                 return value.Value;
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(unscopedUpdate.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(unscopedUpdate.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
-        var semanticCompilation = Compilation.Create(SyntaxTree.Parse(clientSource), reference, policy);
+        var semanticCompilation = Compilation.Create(
+            SyntaxTree.Parse(clientSource), reference,
+            CreateCompilationOptions(policy));
         Assert.That(semanticCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, semanticCompilation.Diagnostics));
         var semanticConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual60 = semanticCompilation.Program; Assert.That(__nunitActual60, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual60!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual60 = semanticCompilation.Program;
+                Assert.That(__nunitActual60, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual60!;
+            }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(semanticConsumer, producer), (NativeRuntimePolicy)policy), Is.EqualTo(42));
 
         var runtimePolicy = (NativeRuntimePolicy)policy;
         var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, exports,
             "CallerUnsafeOperators", runtimePolicy);
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(clientSource),
-            NativeModuleCompiler.CreateGraphReference([nativeProducer]), policy);
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]),
+            CreateCompilationOptions(policy));
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual61 = graphCompilation.Program; Assert.That(__nunitActual61, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual61!; }))(), [nativeProducer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual61 = graphCompilation.Program;
+                Assert.That(__nunitActual61, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual61!;
+            }))(), [nativeProducer], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [nativeProducer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(
             graphConsumer, [nativeProducer], TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -2151,10 +2424,15 @@ public sealed class CallerUnsafeTests
             "CallerUnsafeOperatorHelper", runtimePolicy);
         var providers = new[] { nativeProducer, helper };
         var setCompilation = Compilation.Create(SyntaxTree.Parse(clientSource),
-            NativeModuleCompiler.CreateReferenceSet(providers), policy);
+            NativeModuleCompiler.CreateReferenceSet(providers),
+            CreateCompilationOptions(policy));
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual62 = setCompilation.Program; Assert.That(__nunitActual62, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual62!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual62 = setCompilation.Program;
+                Assert.That(__nunitActual62, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual62!;
+            }))(), providers, runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
             consumerSet, providers, TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -2199,12 +2477,24 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
         var reference = ModuleCompiler.CreateReference(producer);
         var create = global::System.Linq.Enumerable.Single(providerProgram.Functions, static function => function.Name == "Number.Create");
-        var createReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual63 = create.Body.Statements[^1]; Assert.That(__nunitActual63, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual63!; }))();
-        var createScope = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual64 = createReturn.Value; Assert.That(__nunitActual64, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual64!; }))();
-        var constructorCall = ((global::System.Func<BoundCall>)(() => { var __nunitActual65 = createScope.Expression; Assert.That(__nunitActual65, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual65!; }))();
+        var createReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual63 = create.Body.Statements[^1];
+            Assert.That(__nunitActual63, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual63!;
+        }))();
+        var createScope = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual64 = createReturn.Value;
+            Assert.That(__nunitActual64, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual64!;
+        }))();
+        var constructorCall = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual65 = createScope.Expression;
+            Assert.That(__nunitActual65, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual65!;
+        }))();
         Assert.That(providerProgram.Functions[constructorCall.Function].IsConstructor, Is.True);
         Assert.That(providerProgram.Functions[constructorCall.Function].RequiresUnsafeCaller, Is.True);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
             StripSerializedUnsafeExpression(producer, createScope)));
         var unscopedReturn = createReturn with { Value = constructorCall };
         var unscopedCreate = create with {
@@ -2217,14 +2507,14 @@ public sealed class CallerUnsafeTests
             Functions = providerProgram.Functions.SetItem(
                 providerProgram.Functions.IndexOf(create), unscopedCreate),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(unscopedProgram, exports));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(unscopedProgram, exports));
 
         var unscopedCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 Number value = new Number(40, 0);
                 return value.Value;
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(unscopedCompilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(unscopedCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
@@ -2234,13 +2524,18 @@ public sealed class CallerUnsafeTests
                 Number value = new Number(unsafe(Danger()), 0);
                 return value.Value;
             }
-            """), reference, policy);
+            """), reference, CreateCompilationOptions(policy));
         Assert.That(argumentOnlyCompilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(argumentOnlyCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
-        var compilation = Compilation.Create(SyntaxTree.Parse(clientSource), reference, policy);
+        var compilation = Compilation.Create(SyntaxTree.Parse(clientSource),
+            reference, CreateCompilationOptions(policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual66 = compilation.Program; Assert.That(__nunitActual66, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual66!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual66 = compilation.Program;
+            Assert.That(__nunitActual66, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual66!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), (NativeRuntimePolicy)policy), Is.EqualTo(42));
 
@@ -2249,20 +2544,30 @@ public sealed class CallerUnsafeTests
         var safeProducer = ModuleCompiler.CreateProducer(CompileLibrary(safeDeclaration, policy), exports);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, safeProducer), (NativeRuntimePolicy)policy), Is.EqualTo(42));
         var safeReference = ModuleCompiler.CreateReference(safeProducer);
-        var safeCompilation = Compilation.Create(SyntaxTree.Parse(clientSource), safeReference, policy);
+        var safeCompilation = Compilation.Create(SyntaxTree.Parse(clientSource),
+            safeReference, CreateCompilationOptions(policy));
         Assert.That(safeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual67 = safeCompilation.Program; Assert.That(__nunitActual67, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual67!; }))(), safeProducer);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual67 = safeCompilation.Program;
+                Assert.That(__nunitActual67, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual67!;
+            }))(), safeProducer);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
 
         var runtimePolicy = (NativeRuntimePolicy)policy;
         var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, exports,
             "CallerUnsafeConstructors", runtimePolicy);
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(clientSource),
-            NativeModuleCompiler.CreateGraphReference([nativeProducer]), policy);
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]),
+            CreateCompilationOptions(policy));
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual68 = graphCompilation.Program; Assert.That(__nunitActual68, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual68!; }))(), [nativeProducer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual68 = graphCompilation.Program;
+                Assert.That(__nunitActual68, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual68!;
+            }))(), [nativeProducer], runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(
             graphConsumer, [nativeProducer], TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
 
@@ -2271,10 +2576,15 @@ public sealed class CallerUnsafeTests
             "CallerUnsafeConstructorHelper", runtimePolicy);
         var providers = new[] { nativeProducer, helper };
         var setCompilation = Compilation.Create(SyntaxTree.Parse(clientSource),
-            NativeModuleCompiler.CreateReferenceSet(providers), policy);
+            NativeModuleCompiler.CreateReferenceSet(providers),
+            CreateCompilationOptions(policy));
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual69 = setCompilation.Program; Assert.That(__nunitActual69, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual69!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual69 = setCompilation.Program;
+                Assert.That(__nunitActual69, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual69!;
+            }))(), providers, runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
             consumerSet, providers, TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -2293,13 +2603,17 @@ public sealed class CallerUnsafeTests
         var scopedCall = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { unsafe { return Danger(); } }"), reference);
         Assert.That(scopedCall.HasErrors, Is.False, string.Join(Environment.NewLine, scopedCall.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual70 = scopedCall.Program; Assert.That(__nunitActual70, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual70!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual70 = scopedCall.Program;
+            Assert.That(__nunitActual70, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual70!;
+        }))(), producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
         var linked = ModuleCompiler.Link(consumer, producer);
         SemanticVerifier.Verify(linked);
@@ -2307,14 +2621,22 @@ public sealed class CallerUnsafeTests
         var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, ["Danger"],
             "UnsafeProvider", NativeRuntimePolicy.FailFast);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual71 = scopedCall.Program; Assert.That(__nunitActual71, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual71!; }))(), nativeProducer, NativeRuntimePolicy.FailFast);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual71 = scopedCall.Program;
+                Assert.That(__nunitActual71, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual71!;
+            }))(), nativeProducer, NativeRuntimePolicy.FailFast);
         NativeModuleCompiler.Validate(nativeConsumer, nativeProducer);
 
         var expressionScopedCall = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return unsafe(Danger() + 1); }"), reference);
         Assert.That(expressionScopedCall.HasErrors, Is.False, string.Join(Environment.NewLine, expressionScopedCall.Diagnostics));
         var expressionConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual72 = expressionScopedCall.Program; Assert.That(__nunitActual72, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual72!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual72 = expressionScopedCall.Program;
+                Assert.That(__nunitActual72, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual72!;
+            }))(), producer);
         var expressionLinked = ModuleCompiler.Link(expressionConsumer, producer);
         SemanticVerifier.Verify(expressionLinked);
         Assert.That(NativeJit.Execute(expressionLinked, NativeRuntimePolicy.FailFast), Is.EqualTo(43));
@@ -2323,7 +2645,11 @@ public sealed class CallerUnsafeTests
             "int32 Main() { return unsafe(Danger()) + 1; }"), reference);
         Assert.That(nestedExpressionScope.HasErrors, Is.False, string.Join(Environment.NewLine, nestedExpressionScope.Diagnostics));
         var nestedExpressionConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual73 = nestedExpressionScope.Program; Assert.That(__nunitActual73, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual73!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual73 = nestedExpressionScope.Program;
+                Assert.That(__nunitActual73, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual73!;
+            }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(nestedExpressionConsumer, producer),
             NativeRuntimePolicy.FailFast), Is.EqualTo(43));
 
@@ -2333,7 +2659,11 @@ public sealed class CallerUnsafeTests
         Assert.That(global::System.Linq.Enumerable.Any(leakedExpressionScope.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
         var expressionNativeConsumer = NativeModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual74 = expressionScopedCall.Program; Assert.That(__nunitActual74, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual74!; }))(), nativeProducer, NativeRuntimePolicy.FailFast);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual74 = expressionScopedCall.Program;
+                Assert.That(__nunitActual74, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual74!;
+            }))(), nativeProducer, NativeRuntimePolicy.FailFast);
         NativeModuleCompiler.Validate(expressionNativeConsumer, nativeProducer);
 
         var safeProducer = ModuleCompiler.CreateProducer(
@@ -2343,10 +2673,14 @@ public sealed class CallerUnsafeTests
             SyntaxTree.Parse("int32 Main() { return Danger(); }"), safeReference);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual75 = safeConsumerCompilation.Program; Assert.That(__nunitActual75, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual75!; }))(), safeProducer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual75 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual75, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual75!;
+            }))(), safeProducer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(safeConsumer, safeProducer),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, safeProducer),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
@@ -2394,13 +2728,17 @@ public sealed class CallerUnsafeTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual76 = consumerCompilation.Program; Assert.That(__nunitActual76, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual76!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual76 = consumerCompilation.Program;
+                Assert.That(__nunitActual76, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual76!;
+            }))(), producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -2425,8 +2763,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeProvider), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual77 = safeConsumerCompilation.Program; Assert.That(__nunitActual77, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual77!; }))(), safeProvider);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual77 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual77, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual77!;
+            }))(), safeProvider);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -2481,12 +2823,12 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
         var computeContract = GetModuleStringStartingWith(producer, "Value.Compute|");
         var forgedProducer = ReplaceModuleString(producer, "Value.Compute", "Value.$producer.Compute");
         forgedProducer = ReplaceModuleString(forgedProducer, computeContract,
             computeContract.Replace("Value.Compute", "Value.$producer.Compute", StringComparison.Ordinal));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedProducer));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var compute = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.Compute");
@@ -2508,14 +2850,18 @@ public sealed class CallerUnsafeTests
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual78 = consumerCompilation.Program; Assert.That(__nunitActual78, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual78!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual78 = consumerCompilation.Program;
+            Assert.That(__nunitActual78, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual78!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -2528,11 +2874,27 @@ public sealed class CallerUnsafeTests
             "int32 Main() { Value value = new Value(1); return unsafe(value.Compute(second: 3, first: 2)); }"),
             reference, policy);
         Assert.That(identityCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, identityCompilation.Diagnostics));
-        var identityProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual79 = identityCompilation.Program; Assert.That(__nunitActual79, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual79!; }))();
+        var identityProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual79 = identityCompilation.Program;
+            Assert.That(__nunitActual79, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual79!;
+        }))();
         var identityMain = global::System.Linq.Enumerable.Single(identityProgram.Functions, static function => function.Name == "Main");
-        var identityReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual80 = identityMain.Body.Statements[^1]; Assert.That(__nunitActual80, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual80!; }))();
-        var identityWrapper = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual81 = identityReturn.Value; Assert.That(__nunitActual81, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual81!; }))();
-        var identityCall = ((global::System.Func<BoundCall>)(() => { var __nunitActual82 = identityWrapper.Expression; Assert.That(__nunitActual82, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual82!; }))();
+        var identityReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual80 = identityMain.Body.Statements[^1];
+            Assert.That(__nunitActual80, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual80!;
+        }))();
+        var identityWrapper = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual81 = identityReturn.Value;
+            Assert.That(__nunitActual81, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual81!;
+        }))();
+        var identityCall = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual82 = identityWrapper.Expression;
+            Assert.That(__nunitActual82, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual82!;
+        }))();
         Assert.That(identityCall.Arguments.Length, Is.EqualTo(3));
         var computeFunctionIndex = providerProgram.Functions.IndexOf(
             global::System.Linq.Enumerable.Single(providerProgram.Functions, static function => function.Name == "Value.Compute"));
@@ -2550,7 +2912,7 @@ public sealed class CallerUnsafeTests
             var malformedProgram = providerProgram with { Functions = malformedFunctions };
             var malformedExports = exports.Select(export =>
                 export == "Value.Compute" ? malformedName : export).ToArray();
-            Assert.Throws<ModuleContractException>(() =>
+            _ = Assert.Throws<ModuleContractException>(() =>
                 ModuleCompiler.CreateProducer(malformedProgram, malformedExports));
         }
 
@@ -2565,11 +2927,11 @@ public sealed class CallerUnsafeTests
             Functions = identityProgram.Functions.SetItem(
                 identityProgram.Functions.IndexOf(identityMain), strippedMain),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(strippedProgram, producer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(strippedProgram, producer));
 
         var identityConsumer = ModuleCompiler.CreateConsumer(identityProgram, producer);
         var strippedConsumer = StripSerializedUnsafeExpression(identityConsumer, identityWrapper);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(strippedConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(strippedConsumer, producer));
 
         var safeReplacementSource = Source
             .Replace("public unsafe int32 Compute", "public int32 Compute", StringComparison.Ordinal)
@@ -2589,8 +2951,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual83 = safeConsumerCompilation.Program; Assert.That(__nunitActual83, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual83!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual83 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual83, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual83!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -2627,7 +2993,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -2651,7 +3017,11 @@ public sealed class CallerUnsafeTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual84 = consumerCompilation.Program; Assert.That(__nunitActual84, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual84!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual84 = consumerCompilation.Program;
+                Assert.That(__nunitActual84, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual84!;
+            }))(), producer);
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
             ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
@@ -2663,10 +3033,22 @@ public sealed class CallerUnsafeTests
             "int32 Main() { Value value = new Value(42); return unsafe(value.Read); }"),
             reference, policy);
         Assert.That(getterOnlyCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, getterOnlyCompilation.Diagnostics));
-        var getterOnlyProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual85 = getterOnlyCompilation.Program; Assert.That(__nunitActual85, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual85!; }))();
+        var getterOnlyProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual85 = getterOnlyCompilation.Program;
+            Assert.That(__nunitActual85, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual85!;
+        }))();
         var getterOnlyMain = global::System.Linq.Enumerable.Single(getterOnlyProgram.Functions, static function => function.Name == "Main");
-        var getterOnlyReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual86 = getterOnlyMain.Body.Statements[getterOnlyMain.Body.Statements.Length - 1]; Assert.That(__nunitActual86, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual86!; }))();
-        var getterOnlyWrapper = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual87 = getterOnlyReturn.Value; Assert.That(__nunitActual87, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual87!; }))();
+        var getterOnlyReturn = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual86 = getterOnlyMain.Body.Statements[getterOnlyMain.Body.Statements.Length - 1];
+            Assert.That(__nunitActual86, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual86!;
+        }))();
+        var getterOnlyWrapper = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual87 = getterOnlyReturn.Value;
+            Assert.That(__nunitActual87, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual87!;
+        }))();
         var getterOnlyConsumer = ModuleCompiler.CreateConsumer(getterOnlyProgram, producer);
         Assert.That(NativeJit.Execute(
             ModuleCompiler.Link(getterOnlyConsumer, producer), runtimePolicy), Is.EqualTo(42));
@@ -2682,7 +3064,7 @@ public sealed class CallerUnsafeTests
             Functions = getterOnlyProgram.Functions.SetItem(
                 getterOnlyProgram.Functions.IndexOf(getterOnlyMain), strippedGetterMain),
         };
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateConsumer(strippedGetterProgram, producer));
 
         Span<byte> getterWrapperPrefix = stackalloc byte[1 + sizeof(int) + (2 * sizeof(int))];
@@ -2698,7 +3080,7 @@ public sealed class CallerUnsafeTests
         getterOnlyConsumer.AsSpan(0, getterWrapperOffset).CopyTo(strippedGetterConsumer);
         getterOnlyConsumer.AsSpan(getterWrapperOffset + getterWrapperPrefix.Length)
             .CopyTo(strippedGetterConsumer.AsSpan(getterWrapperOffset));
-        Assert.Throws<ModuleFormatException>(() =>
+        _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.Link(strippedGetterConsumer, producer));
 
         var safeReplacementSource = Source
@@ -2714,8 +3096,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual88 = safeConsumerCompilation.Program; Assert.That(__nunitActual88, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual88!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual88 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual88, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual88!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -2745,7 +3131,7 @@ public sealed class CallerUnsafeTests
         string[] exports = ["Value.#get:Read", "Value.SafeRead"];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -2763,13 +3149,17 @@ public sealed class CallerUnsafeTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual89 = consumerCompilation.Program; Assert.That(__nunitActual89, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual89!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual89 = consumerCompilation.Program;
+                Assert.That(__nunitActual89, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual89!;
+            }))(), producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -2791,8 +3181,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual90 = safeConsumerCompilation.Program; Assert.That(__nunitActual90, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual90!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual90 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual90, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual90!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -2825,7 +3219,7 @@ public sealed class CallerUnsafeTests
             "ScalarOps.ReadInstance", "Top", "Forward", "MakeScalarOps", "EchoForward",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(source, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var name in exports[..3])
@@ -2845,18 +3239,30 @@ public sealed class CallerUnsafeTests
             """;
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual91 = consumerCompilation.Program; Assert.That(__nunitActual91, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual91!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual91 = consumerCompilation.Program;
+            Assert.That(__nunitActual91, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual91!;
+        }))();
         var main = global::System.Linq.Enumerable.Single(consumerProgram.Functions, static function => function.Name == "Main");
-        var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual92 = main.Body.Statements[1]; Assert.That(__nunitActual92, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual92!; }))();
-        var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual93 = returned.Value; Assert.That(__nunitActual93, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual93!; }))();
+        var returned = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual92 = main.Body.Statements[1];
+            Assert.That(__nunitActual92, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual92!;
+        }))();
+        var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => {
+            var __nunitActual93 = returned.Value;
+            Assert.That(__nunitActual93, Is.TypeOf<BoundUnsafeExpression>());
+            return (BoundUnsafeExpression)__nunitActual93!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var strippedFunction = main with {
@@ -2868,7 +3274,7 @@ public sealed class CallerUnsafeTests
             Functions = consumerProgram.Functions.SetItem(
                 consumerProgram.Functions.IndexOf(main), strippedFunction),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(strippedProgram, producer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(strippedProgram, producer));
 
         Span<byte> wrapperPrefix = stackalloc byte[1 + sizeof(int) + (2 * sizeof(int))];
         wrapperPrefix[0] = 31;
@@ -2883,7 +3289,7 @@ public sealed class CallerUnsafeTests
         consumer.AsSpan(0, wrapperOffset).CopyTo(strippedConsumer);
         consumer.AsSpan(wrapperOffset + wrapperPrefix.Length)
             .CopyTo(strippedConsumer.AsSpan(wrapperOffset));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(strippedConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(strippedConsumer, producer));
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
             ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
@@ -2912,8 +3318,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeProducer), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual95 = safeConsumerCompilation.Program; Assert.That(__nunitActual95, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual95!; }))(), safeProducer);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual95 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual95, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual95!;
+            }))(), safeProducer);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -2925,19 +3335,23 @@ public sealed class CallerUnsafeTests
         ];
         var producer = ModuleCompiler.CreateProducer(
             CompileLibrary(CopyValueExpressionProviderSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(
             SyntaxTree.Parse(CopyValueExpressionConsumerSource), reference, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual96 = compilation.Program; Assert.That(__nunitActual96, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual96!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual96 = compilation.Program;
+            Assert.That(__nunitActual96, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual96!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -2952,8 +3366,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual97 = safeCompilation.Program; Assert.That(__nunitActual97, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual97!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual97 = safeCompilation.Program;
+                Assert.That(__nunitActual97, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual97!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -2983,7 +3401,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateReferenceSet(providers), policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual98 = setCompilation.Program; Assert.That(__nunitActual98, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual98!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual98 = setCompilation.Program;
+                Assert.That(__nunitActual98, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual98!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -2993,14 +3415,22 @@ public sealed class CallerUnsafeTests
             """), NativeModuleCompiler.CreateGraphReference([provider]), policy);
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
         var middle = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual99 = middleCompilation.Program; Assert.That(__nunitActual99, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual99!; }))(), ["Forward"],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual99 = middleCompilation.Program;
+                Assert.That(__nunitActual99, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual99!;
+            }))(), ["Forward"],
             "UnsafeStaticMiddle", [provider], runtimePolicy);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Forward(); }"),
             NativeModuleCompiler.CreateGraphReference([middle]), policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual100 = rootCompilation.Program; Assert.That(__nunitActual100, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual100!; }))(), [middle], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual100 = rootCompilation.Program;
+                Assert.That(__nunitActual100, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual100!;
+            }))(), [middle], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(root, [middle, provider]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -3024,7 +3454,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateGraphReference([provider]), policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual101 = graphCompilation.Program; Assert.That(__nunitActual101, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual101!; }))(), [provider], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual101 = graphCompilation.Program;
+                Assert.That(__nunitActual101, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual101!;
+            }))(), [provider], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [provider]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [provider],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(12436));
@@ -3038,7 +3472,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateReferenceSet(providers), policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual102 = setCompilation.Program; Assert.That(__nunitActual102, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual102!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual102 = setCompilation.Program;
+                Assert.That(__nunitActual102, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual102!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(12436));
@@ -3080,7 +3518,7 @@ public sealed class CallerUnsafeTests
             "GetterOwner.#get:StaticNested",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(CopyValueGetterSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(producer);
 
         foreach (var (name, isStatic, parameterCount) in new[]
@@ -3113,13 +3551,17 @@ public sealed class CallerUnsafeTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual103 = consumerCompilation.Program; Assert.That(__nunitActual103, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual103!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual103 = consumerCompilation.Program;
+                Assert.That(__nunitActual103, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual103!;
+            }))(), producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -3138,8 +3580,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual104 = safeConsumerCompilation.Program; Assert.That(__nunitActual104, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual104!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual104 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual104, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual104!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
 
     [Test]
@@ -3206,13 +3652,17 @@ public sealed class CallerUnsafeTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual105 = consumerCompilation.Program; Assert.That(__nunitActual105, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual105!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual105 = consumerCompilation.Program;
+                Assert.That(__nunitActual105, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual105!;
+            }))(), producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -3237,8 +3687,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual106 = safeConsumerCompilation.Program; Assert.That(__nunitActual106, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual106!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual106 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual106, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual106!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -3264,13 +3718,17 @@ public sealed class CallerUnsafeTests
         var compilation = Compilation.Create(SyntaxTree.Parse(CopyValueConsumerSource), reference, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual107 = compilation.Program; Assert.That(__nunitActual107, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual107!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual107 = compilation.Program;
+                Assert.That(__nunitActual107, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual107!;
+            }))(), producer);
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(unsupportedConsumer.AsSpan(4, sizeof(int)),
                 unsupportedVersion);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(unsupportedConsumer, producer));
         }
 
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
@@ -3285,8 +3743,12 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateReference(safeReplacement), policy);
         Assert.That(safeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeConsumerCompilation.Diagnostics));
         var safeConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual108 = safeConsumerCompilation.Program; Assert.That(__nunitActual108, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual108!; }))(), safeReplacement);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual108 = safeConsumerCompilation.Program;
+                Assert.That(__nunitActual108, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual108!;
+            }))(), safeReplacement);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(safeConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -3321,7 +3783,11 @@ public sealed class CallerUnsafeTests
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), graphReference, policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual109 = graphCompilation.Program; Assert.That(__nunitActual109, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual109!; }))(), [producer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual109 = graphCompilation.Program;
+                Assert.That(__nunitActual109, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual109!;
+            }))(), [producer], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [producer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -3341,7 +3807,11 @@ public sealed class CallerUnsafeTests
         var setCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), setReference, policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual110 = setCompilation.Program; Assert.That(__nunitActual110, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual110!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual110 = setCompilation.Program;
+                Assert.That(__nunitActual110, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual110!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -3393,7 +3863,11 @@ public sealed class CallerUnsafeTests
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), graphReference, policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual111 = graphCompilation.Program; Assert.That(__nunitActual111, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual111!; }))(), [producer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual111 = graphCompilation.Program;
+                Assert.That(__nunitActual111, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual111!;
+            }))(), [producer], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [producer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(168));
@@ -3411,7 +3885,11 @@ public sealed class CallerUnsafeTests
         var setCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), setReference, policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual112 = setCompilation.Program; Assert.That(__nunitActual112, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual112!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual112 = setCompilation.Program;
+                Assert.That(__nunitActual112, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual112!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(168));
@@ -3456,7 +3934,11 @@ public sealed class CallerUnsafeTests
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), graphReference, policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual113 = graphCompilation.Program; Assert.That(__nunitActual113, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual113!; }))(), [producer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual113 = graphCompilation.Program;
+                Assert.That(__nunitActual113, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual113!;
+            }))(), [producer], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [producer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(126));
@@ -3474,7 +3956,11 @@ public sealed class CallerUnsafeTests
         var setCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), setReference, policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual114 = setCompilation.Program; Assert.That(__nunitActual114, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual114!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual114 = setCompilation.Program;
+                Assert.That(__nunitActual114, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual114!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(126));
@@ -3523,7 +4009,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateGraphReference([provider]), policy);
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
         var middle = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual115 = middleCompilation.Program; Assert.That(__nunitActual115, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual115!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual115 = middleCompilation.Program;
+                Assert.That(__nunitActual115, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual115!;
+            }))(),
             ["ForwardNested", "ForwardOdd"], "CopyGetterMiddle", [provider], runtimePolicy);
         var providers = new[] { provider, middle };
 
@@ -3531,7 +4021,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateGraphReference(providers), policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual116 = graphCompilation.Program; Assert.That(__nunitActual116, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual116!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual116 = graphCompilation.Program;
+                Assert.That(__nunitActual116, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual116!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, providers);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(209));
@@ -3545,7 +4039,11 @@ public sealed class CallerUnsafeTests
             setReference, policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual117 = setCompilation.Program; Assert.That(__nunitActual117, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual117!; }))(), setProviders, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual117 = setCompilation.Program;
+                Assert.That(__nunitActual117, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual117!;
+            }))(), setProviders, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, setProviders);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, setProviders,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(142));
@@ -3567,7 +4065,11 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateGraphReference(setProviders), policy);
         Assert.That(directGraphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, directGraphCompilation.Diagnostics));
         var directGraphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual118 = directGraphCompilation.Program; Assert.That(__nunitActual118, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual118!; }))(), setProviders, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual118 = directGraphCompilation.Program;
+                Assert.That(__nunitActual118, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual118!;
+            }))(), setProviders, runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(directGraphConsumer, setProviders,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(142));
         NativeModuleCompiler.ValidateGraph(directGraphConsumer, [safeReplacement, helper]);
@@ -3586,7 +4088,11 @@ public sealed class CallerUnsafeTests
             """), NativeModuleCompiler.CreateGraphReference(providers), policy);
         Assert.That(nestedForwardCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nestedForwardCompilation.Diagnostics));
         var nestedForwardConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual119 = nestedForwardCompilation.Program; Assert.That(__nunitActual119, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual119!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual119 = nestedForwardCompilation.Program;
+                Assert.That(__nunitActual119, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual119!;
+            }))(), providers, runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nestedForwardConsumer, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(20));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nestedForwardConsumer,
@@ -3603,7 +4109,11 @@ public sealed class CallerUnsafeTests
             """), NativeModuleCompiler.CreateGraphReference(providers), policy);
         Assert.That(oddForwardCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oddForwardCompilation.Diagnostics));
         var oddForwardConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual120 = oddForwardCompilation.Program; Assert.That(__nunitActual120, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual120!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual120 = oddForwardCompilation.Program;
+                Assert.That(__nunitActual120, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual120!;
+            }))(), providers, runtimePolicy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(oddForwardConsumer, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(5));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(oddForwardConsumer,
@@ -3647,7 +4157,11 @@ public sealed class CallerUnsafeTests
         var graphCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), graphReference, policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual121 = graphCompilation.Program; Assert.That(__nunitActual121, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual121!; }))(), [producer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual121 = graphCompilation.Program;
+                Assert.That(__nunitActual121, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual121!;
+            }))(), [producer], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [producer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -3665,7 +4179,11 @@ public sealed class CallerUnsafeTests
         var setCompilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), setReference, policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual122 = setCompilation.Program; Assert.That(__nunitActual122, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual122!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual122 = setCompilation.Program;
+                Assert.That(__nunitActual122, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual122!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -3695,7 +4213,11 @@ public sealed class CallerUnsafeTests
             SyntaxTree.Parse(CopyValueConsumerSource), graphReference, policy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual123 = graphCompilation.Program; Assert.That(__nunitActual123, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual123!; }))(), [producer], runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual123 = graphCompilation.Program;
+                Assert.That(__nunitActual123, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual123!;
+            }))(), [producer], runtimePolicy);
         NativeModuleCompiler.ValidateGraph(graphConsumer, [producer]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [producer],
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(23608));
@@ -3711,7 +4233,11 @@ public sealed class CallerUnsafeTests
             SyntaxTree.Parse(CopyValueConsumerSource), setReference, policy);
         Assert.That(setCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, setCompilation.Diagnostics));
         var consumerSet = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual124 = setCompilation.Program; Assert.That(__nunitActual124, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual124!; }))(), providers, runtimePolicy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual124 = setCompilation.Program;
+                Assert.That(__nunitActual124, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual124!;
+            }))(), providers, runtimePolicy);
         NativeModuleCompiler.ValidateConsumerSet(consumerSet, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumerSet, providers,
             TimeSpan.FromSeconds(10), runtimePolicy).ConfigureAwait(true), Is.EqualTo(23608));
@@ -3732,7 +4258,7 @@ public sealed class CallerUnsafeTests
                 public static unsafe int32 Read() { return 42; }
             }
             """);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(privateLayoutStaticMethod, ["Value.Read"]));
 
         var uniqueOwnerStaticMethod = CompileLibrary("""
@@ -3743,7 +4269,7 @@ public sealed class CallerUnsafeTests
                 public static unsafe int32 Read() { return 42; }
             }
             """);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(uniqueOwnerStaticMethod, ["Value.Read"]));
 
         var mutableMethod = CompileLibrary("""
@@ -3755,7 +4281,7 @@ public sealed class CallerUnsafeTests
                 public mut unsafe int32 Read() { return Number; }
             }
             """);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(mutableMethod, ["Value.Read"]));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(mutableMethod, ["Value.Read"]));
 
         var classMethod = CompileLibrary("""
             public class Box {
@@ -3764,7 +4290,7 @@ public sealed class CallerUnsafeTests
                 public unsafe int32 Read() { return Number; }
             }
             """);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(classMethod, ["Box.Read"]));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(classMethod, ["Box.Read"]));
 
         var classGetter = CompileLibrary("""
             public class Box {
@@ -3773,7 +4299,7 @@ public sealed class CallerUnsafeTests
                 public int32 Read { unsafe get { return Number; } }
             }
             """);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(classGetter, ["Box.#get:Read"]));
 
         var unsupportedValueTypes = new[]
@@ -3826,7 +4352,7 @@ public sealed class CallerUnsafeTests
         foreach (var source in unsupportedValueTypes)
         {
             var program = CompileLibrary(source);
-            Assert.Throws<ModuleContractException>(() =>
+            _ = Assert.Throws<ModuleContractException>(() =>
                 ModuleCompiler.CreateProducer(program, ["Value.Read"]));
         }
     }
@@ -3839,9 +4365,17 @@ public sealed class CallerUnsafeTests
             CompileLibrary("public unsafe int32 Danger() { return 42; }"), ["Danger"]);
         var compilation = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual125 = compilation.Program; Assert.That(__nunitActual125, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual125!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual125 = compilation.Program;
+            Assert.That(__nunitActual125, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual125!;
+        }))();
         var main = program.Functions[program.EntryPoint];
-        var unsafeBlock = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual126 = global::System.Linq.Enumerable.Single(main.Body.Statements); Assert.That(__nunitActual126, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual126!; }))();
+        var unsafeBlock = ((global::System.Func<BoundUnsafe>)(() => {
+            var __nunitActual126 = global::System.Linq.Enumerable.Single(main.Body.Statements);
+            Assert.That(__nunitActual126, Is.TypeOf<BoundUnsafe>());
+            return (BoundUnsafe)__nunitActual126!;
+        }))();
 
         var forgedMain = main with {
             Body = main.Body with { Statements = [unsafeBlock.Body] },
@@ -3849,7 +4383,7 @@ public sealed class CallerUnsafeTests
         var forgedProgram = program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forgedMain),
         };
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
 
         var consumer = ModuleCompiler.CreateConsumer(program, producer);
         const byte BoundUnsafeStatementTag = 11;
@@ -3865,7 +4399,7 @@ public sealed class CallerUnsafeTests
         consumer.AsSpan(0, unsafeScopeOffset).CopyTo(forgedConsumer);
         consumer.AsSpan(unsafeScopeOffset + unsafeScope.Length)
             .CopyTo(forgedConsumer.AsSpan(unsafeScopeOffset));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forgedConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forgedConsumer, producer));
     }
 
     [Test]
@@ -3879,14 +4413,22 @@ public sealed class CallerUnsafeTests
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
         var middle = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual127 = middleCompilation.Program; Assert.That(__nunitActual127, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual127!; }))(), ["SafeWrapper"], "SafeMiddle", [leaf], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual127 = middleCompilation.Program;
+                Assert.That(__nunitActual127, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual127!;
+            }))(), ["SafeWrapper"], "SafeMiddle", [leaf], policy);
 
         var rootCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return SafeWrapper(); }"),
             NativeModuleCompiler.CreateGraphReference([middle]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual128 = rootCompilation.Program; Assert.That(__nunitActual128, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual128!; }))(), [middle], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual128 = rootCompilation.Program;
+                Assert.That(__nunitActual128, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual128!;
+            }))(), [middle], policy);
         NativeModuleCompiler.ValidateGraph(root, [middle, leaf]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
@@ -3909,7 +4451,11 @@ public sealed class CallerUnsafeTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var consumer = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual129 = compilation.Program; Assert.That(__nunitActual129, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual129!; }))(), providers, policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual129 = compilation.Program;
+                Assert.That(__nunitActual129, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual129!;
+            }))(), providers, policy);
         NativeModuleCompiler.ValidateConsumerSet(consumer, providers);
         Assert.That(NativeModuleCompiler.InspectConsumerSet(consumer).Dependencies, Does.Contain("UnsafeSetProvider"));
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, providers,
@@ -3929,14 +4475,19 @@ public sealed class CallerUnsafeTests
                 public int32 Placeholder;
                 public static bool Danger(out int32 value) { value = 42; return true; }
             }
-            """), NativeModuleCompiler.CreateGraphReference([dependency]), (BoundRuntimePolicy)policy);
+            """), NativeModuleCompiler.CreateGraphReference([dependency]),
+            CreateCompilationOptions((BoundRuntimePolicy)policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var graph = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual130 = compilation.Program; Assert.That(__nunitActual130, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual130!; }))(), ["Box.Danger"], "GraphProvider", [dependency], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual130 = compilation.Program;
+                Assert.That(__nunitActual130, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual130!;
+            }))(), ["Box.Danger"], "GraphProvider", [dependency], policy);
         var forged = ForgeCallerUnsafeMemberGraphPackage(graph, "Box.Danger");
 
-        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([forged]));
-        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([forged]));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forged));
 
         var uniqueCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
@@ -3954,17 +4505,22 @@ public sealed class CallerUnsafeTests
                     return owned.Number;
                 }
             }
-            """), NativeModuleCompiler.CreateGraphReference([dependency]), (BoundRuntimePolicy)policy);
+            """), NativeModuleCompiler.CreateGraphReference([dependency]),
+            CreateCompilationOptions((BoundRuntimePolicy)policy));
         Assert.That(uniqueCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, uniqueCompilation.Diagnostics));
         var uniqueGraph = NativeModuleCompiler.CreateGraphProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual131 = uniqueCompilation.Program; Assert.That(__nunitActual131, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual131!; }))(), ["Box.Danger"],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual131 = uniqueCompilation.Program;
+                Assert.That(__nunitActual131, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual131!;
+            }))(), ["Box.Danger"],
             "UniqueContractProvider", [dependency], policy);
         var forgedUnique = ForgeCallerUnsafeMemberGraphPackage(uniqueGraph, "Box.Danger",
             static contract => contract.Replace("|in:2|", "|in:Owned:E:Unique:-|",
                 StringComparison.Ordinal));
 
-        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([forgedUnique]));
-        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forgedUnique));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([forgedUnique]));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forgedUnique));
 
         var contractLength = BinaryPrimitives.ReadInt32LittleEndian(uniqueGraph.AsSpan(11, sizeof(int)));
         var imageLength = BinaryPrimitives.ReadInt32LittleEndian(uniqueGraph.AsSpan(15, sizeof(int)));
@@ -3975,9 +4531,9 @@ public sealed class CallerUnsafeTests
         forgedUnsafeField[contractStart + unsafeFlagOffset] = 1;
         SHA256.HashData(forgedUnsafeField.AsSpan(0, forgedUnsafeField.Length - SHA256.HashSizeInBytes))
             .CopyTo(forgedUnsafeField, forgedUnsafeField.Length - SHA256.HashSizeInBytes);
-        Assert.Throws<ModuleFormatException>(() =>
+        _ = Assert.Throws<ModuleFormatException>(() =>
             NativeModuleCompiler.CreateGraphReference([forgedUnsafeField]));
-        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forgedUnsafeField));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forgedUnsafeField));
     }
 
     [Test]
@@ -4015,13 +4571,17 @@ public sealed class CallerUnsafeTests
             """), ModuleCompiler.CreateReference(producer));
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual132 = consumerCompilation.Program; Assert.That(__nunitActual132, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual132!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual132 = consumerCompilation.Program;
+                Assert.That(__nunitActual132, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual132!;
+            }))(), producer);
         var forged = ForgeRepeatedNestedCopyModule(consumer, layerNames);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer));
         var repeatedSupportedCopyLayout = ForgeRepeatedNestedCopyModule(
             consumer, layerNames, makeLeafPrivate: false);
-        Assert.Throws<ModuleFormatException>(() =>
+        _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.Link(repeatedSupportedCopyLayout, producer));
     }
 
@@ -4055,10 +4615,21 @@ public sealed class CallerUnsafeTests
             {
                 offset += sizeof(byte);
             }
-            offset += sizeof(int) + (sizeof(byte) * 4);
+            offset += (version >= WideFixedLayoutModuleVersion
+                ? sizeof(ulong) : sizeof(int)) + (sizeof(byte) * 4);
             if (version >= FixedLayoutModuleVersion)
             {
                 offset += sizeof(int) + sizeof(byte);
+            }
+            if (version >= NativeFixedArrayModuleVersion)
+            {
+                offset += sizeof(int);
+                var hasDeclaredAlignment = forged[offset++] != 0;
+                if (hasDeclaredAlignment)
+                {
+                    offset += sizeof(int);
+                }
+                offset += sizeof(int) * 2;
             }
             var hasCleanup = forged[offset++] != 0;
             if (hasCleanup)
@@ -4072,7 +4643,9 @@ public sealed class CallerUnsafeTests
             {
                 SkipModuleString(forged, ref offset);
                 typeOffsets.Add(offset);
-                offset += sizeof(int) * 3;
+                offset += sizeof(int)
+                    + (version >= WideFixedLayoutModuleVersion
+                        ? sizeof(ulong) * 2 : sizeof(int) * 2);
                 if (field == 0)
                 {
                     firstFieldPrivateOffsets.Add(name, offset);
@@ -4138,15 +4711,23 @@ public sealed class CallerUnsafeTests
         var caller = Compilation.Create(SyntaxTree.Parse(
             "unsafe int32 Danger() { return 42; } int32 Main() { return unsafe(Danger()); }"));
         Assert.That(caller.HasErrors, Is.False, string.Join(Environment.NewLine, caller.Diagnostics));
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual133 = caller.Program; Assert.That(__nunitActual133, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual133!; }))(), "unsafe-call"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual133 = caller.Program;
+                Assert.That(__nunitActual133, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual133!;
+            }))(), "unsafe-call"));
 
         var scopedCaller = Compilation.Create(SyntaxTree.Parse(
             "unsafe int32 Danger() { return 42; }"
             + " int32 Main() { unsafe { return Danger(); } }"));
         Assert.That(scopedCaller.HasErrors, Is.False, string.Join(Environment.NewLine, scopedCaller.Diagnostics));
         var executable = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual134 = scopedCaller.Program; Assert.That(__nunitActual134, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual134!; }))(), "unsafe-block-call"));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual134 = scopedCaller.Program;
+                Assert.That(__nunitActual134, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual134!;
+            }))(), "unsafe-block-call"));
         Assert.That(NativeJit.Execute(executable, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
@@ -4165,7 +4746,11 @@ public sealed class CallerUnsafeTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual135 = compilation.Program; Assert.That(__nunitActual135, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual135!; }))(), "nested-unsafe-regions");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual135 = compilation.Program;
+                Assert.That(__nunitActual135, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual135!;
+            }))(), "nested-unsafe-regions");
         Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -4191,7 +4776,11 @@ public sealed class CallerUnsafeTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual136 = compilation.Program; Assert.That(__nunitActual136, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual136!; }))(), "unsafe-nested-loop-transfers");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual136 = compilation.Program;
+                Assert.That(__nunitActual136, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual136!;
+            }))(), "unsafe-nested-loop-transfers");
         Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast), Is.EqualTo(3));
     }
@@ -4214,7 +4803,11 @@ public sealed class CallerUnsafeTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual137 = compilation.Program; Assert.That(__nunitActual137, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual137!; }))(), "unsafe-terminal-assignment-prefix");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual137 = compilation.Program;
+                Assert.That(__nunitActual137, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual137!;
+            }))(), "unsafe-terminal-assignment-prefix");
         Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -4229,8 +4822,12 @@ public sealed class CallerUnsafeTests
             + " outer: while (value < 1) { while (value < 1) { unsafe { "
             + transfer + " } } } return 42; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual138 = compilation.Program; Assert.That(__nunitActual138, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual138!; }))(), "unsafe-loop-transfer"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual138 = compilation.Program;
+                Assert.That(__nunitActual138, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual138!;
+            }))(), "unsafe-loop-transfer"));
     }
 
     [Test]
@@ -4241,17 +4838,21 @@ public sealed class CallerUnsafeTests
             + " int32 Main() { unsafe { return Danger(); } }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual139 = compilation.Program; Assert.That(__nunitActual139, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual139!; }))(), "unsafe-region-layout");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual139 = compilation.Program;
+                Assert.That(__nunitActual139, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual139!;
+            }))(), "unsafe-region-layout");
         var bodyOffset = BodyRowOffset(artifact, 2);
         Assert.That(artifact[bodyOffset] & 0xFC, Is.EqualTo(0x08));
 
         var invalidForm = (byte[])artifact.Clone();
         invalidForm[bodyOffset] |= 0x04;
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(invalidForm));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(invalidForm));
 
         var reservedBit = (byte[])artifact.Clone();
         reservedBit[bodyOffset] |= 0x10;
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(reservedBit));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(reservedBit));
     }
 
     [Test]
@@ -4268,9 +4869,13 @@ public sealed class CallerUnsafeTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual140 = compilation.Program; Assert.That(__nunitActual140, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual140!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual140 = compilation.Program;
+                Assert.That(__nunitActual140, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual140!;
+            }))(),
             "Danger", "Caller");
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "retired-nothrow-uncalled-indexed"));
     }
 
@@ -4282,13 +4887,17 @@ public sealed class CallerUnsafeTests
             + " int32 Main() { unsafe { return Danger(); } }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual141 = compilation.Program; Assert.That(__nunitActual141, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual141!; }))(), "unsafe-region-exit");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual141 = compilation.Program;
+                Assert.That(__nunitActual141, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual141!;
+            }))(), "unsafe-region-exit");
         var malformed = (byte[])artifact.Clone();
         var regionOffset = RegionTableOffset(malformed, 2);
         var width = 1 << (malformed[BodyRowOffset(malformed, 2)] & 3);
         var header = ReadCompactCount(malformed, regionOffset + 1 + width, width);
         WriteCompactCount(malformed, regionOffset + 1 + (2 * width), width, header);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -4307,7 +4916,11 @@ public sealed class CallerUnsafeTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual142 = compilation.Program; Assert.That(__nunitActual142, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual142!; }))(), "unsafe-region-entry");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual142 = compilation.Program;
+                Assert.That(__nunitActual142, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual142!;
+            }))(), "unsafe-region-entry");
         var malformed = (byte[])artifact.Clone();
         var bodyRow = BodyRowOffset(malformed, 2);
         var regionOffset = RegionTableOffset(malformed, 2);
@@ -4316,7 +4929,7 @@ public sealed class CallerUnsafeTests
         var regionHeader = ReadCompactCount(malformed, regionHeaderOffset, width);
         var alternateHeader = FindOtherBlockInRegion(malformed, 2, 1, regionHeader);
         WriteCompactCount(malformed, regionHeaderOffset, width, alternateHeader);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -4326,13 +4939,17 @@ public sealed class CallerUnsafeTests
             "int32 Main() { mut int32 value = 0; unsafe { value = 1; } return value; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual143 = compilation.Program; Assert.That(__nunitActual143, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual143!; }))(), "unsafe-region-designated-exit");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual143 = compilation.Program;
+                Assert.That(__nunitActual143, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual143!;
+            }))(), "unsafe-region-designated-exit");
         var malformed = (byte[])artifact.Clone();
         var bodyOffset = BodyRowOffset(malformed, 1);
         var regionOffset = RegionTableOffset(malformed, 1);
         var width = 1 << (malformed[bodyOffset] & 3);
         WriteCompactCount(malformed, regionOffset + 1 + (2 * width), width, 1);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -4350,7 +4967,11 @@ public sealed class CallerUnsafeTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual144 = compilation.Program; Assert.That(__nunitActual144, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual144!; }))(), "unsafe-region-parent-exit");
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual144 = compilation.Program;
+                Assert.That(__nunitActual144, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual144!;
+            }))(), "unsafe-region-parent-exit");
         var malformed = (byte[])artifact.Clone();
         var bodyOffset = BodyRowOffset(malformed, 2);
         var regionOffset = RegionTableOffset(malformed, 2);
@@ -4358,7 +4979,7 @@ public sealed class CallerUnsafeTests
         var nestedUnsafeRegion = regionOffset + 1 + (4 * width);
         Assert.That(malformed[nestedUnsafeRegion], Is.EqualTo(6));
         WriteCompactCount(malformed, nestedUnsafeRegion + 1 + (2 * width), width, 1);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     private static int BodyRowOffset(byte[] artifact, int row)
@@ -4379,7 +5000,7 @@ public sealed class CallerUnsafeTests
         var sectionCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12));
         for (var section = 0; section < sectionCount; section++)
         {
-            var entryOffset = 32 + section * 16;
+            var entryOffset = 32 + (section * 16);
             if (BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(entryOffset)) == kind)
             {
                 return (
@@ -4418,7 +5039,7 @@ public sealed class CallerUnsafeTests
             + (2 * valueCount * width)
             + ((blockCount + 1) * width)
             + (valueCount * width);
-        var blockDataOffset = blockOffsetsOffset + ((2 * blockCount + 1) * width);
+        var blockDataOffset = blockOffsetsOffset + (((2 * blockCount) + 1) * width);
         for (var block = 1; block <= blockCount; block++)
         {
             if (block == excludedBlock)
@@ -4478,7 +5099,7 @@ public sealed class CallerUnsafeTests
             public int32 Read() { Cell cell = new Cell(); return unsafe(cell.Value); }
             """);
 
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "unsafe-field"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "unsafe-field"));
 
         var classProgram = CompileLibrary("""
             public class Box {
@@ -4490,8 +5111,8 @@ public sealed class CallerUnsafeTests
                 return unsafe(box.Value);
             }
             """);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(classProgram, ["Read"]));
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(classProgram, "unsafe-class-field"));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(classProgram, ["Read"]));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(classProgram, "unsafe-class-field"));
 
         var fieldLoanProgram = CompileLibrary("""
             [Blittable]
@@ -4536,7 +5157,7 @@ public sealed class CallerUnsafeTests
         var safeFieldLoanModule = ModuleCompiler.CreateProducer(safeFieldLoanProgram, ["Invoke"]);
         var forgedFieldLoanModule = (byte[])safeFieldLoanModule.Clone();
         forgedFieldLoanModule[FindModuleFieldUnsafeFlagOffset(forgedFieldLoanModule, "Owner", "Value")] = 1;
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedFieldLoanModule));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedFieldLoanModule));
 
         const string uniqueOwnerFieldLoanSource = """
             [Blittable]
@@ -4567,14 +5188,14 @@ public sealed class CallerUnsafeTests
         var unsafeUniqueOwnerProgram = CompileLibrary(uniqueOwnerFieldLoanSource
             .Replace("public mut Counter Value;", "public unsafe mut Counter Value;",
                 StringComparison.Ordinal));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(unsafeUniqueOwnerProgram, ["Invoke"]));
         var unsafeUniqueExpressionLoanProgram = CompileLibrary(uniqueOwnerFieldLoanSource
             .Replace("public mut Counter Value;", "public unsafe mut Counter Value;",
                 StringComparison.Ordinal)
             .Replace("unsafe { return owner.Nested.Value.Next(); }",
                 "return unsafe(owner.Nested.Value.Next());", StringComparison.Ordinal));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(unsafeUniqueExpressionLoanProgram, ["Invoke"]));
 
         var safeUniqueOwnerModule = ModuleCompiler.CreateProducer(
@@ -4582,7 +5203,7 @@ public sealed class CallerUnsafeTests
         var forgedUnsafeUniqueOwnerModule = (byte[])safeUniqueOwnerModule.Clone();
         forgedUnsafeUniqueOwnerModule[FindModuleFieldUnsafeFlagOffset(
             forgedUnsafeUniqueOwnerModule, "Inner", "Value")] = 1;
-        Assert.Throws<ModuleFormatException>(() =>
+        _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(forgedUnsafeUniqueOwnerModule));
     }
 
@@ -4615,6 +5236,16 @@ public sealed class CallerUnsafeTests
             {
                 offset += sizeof(int) + sizeof(byte);
             }
+            if (version >= NativeFixedArrayModuleVersion)
+            {
+                offset += sizeof(int);
+                var hasDeclaredAlignment = module[offset++] != 0;
+                if (hasDeclaredAlignment)
+                {
+                    offset += sizeof(int);
+                }
+                offset += sizeof(int) * 2;
+            }
             if (module[offset++] != 0)
             {
                 SkipModuleString(module, ref offset);
@@ -4624,7 +5255,8 @@ public sealed class CallerUnsafeTests
             for (var field = 0; field < fieldCount; field++)
             {
                 var currentField = ReadModuleString(module, ref offset);
-                offset += sizeof(int) * 3;
+                offset += sizeof(int) + (version >= WideFixedLayoutModuleVersion
+                    ? sizeof(ulong) * 2 : sizeof(int) * 2);
                 var unsafeFlagOffset = offset + (sizeof(byte) * 3);
                 offset += sizeof(byte) * 4;
                 if (name == structureName && currentField == fieldName)

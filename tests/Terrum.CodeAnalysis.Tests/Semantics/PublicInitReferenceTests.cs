@@ -5,15 +5,16 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class PublicInitReferenceTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class PublicInitReferenceTests
 {
     private const string ScalarLibrary = """
         public bool TryFill(bool available, init ref<int32> result) {
@@ -37,7 +38,7 @@ public sealed class PublicInitReferenceTests
         var boundPolicy = (BoundRuntimePolicy)policy;
         var program = CompileLibrary(ScalarLibrary, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["TryFill"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Variables[1].IsInit, Is.True);
         var consumerProgram = CompileConsumer(ScalarConsumer, reference, policy);
@@ -95,7 +96,7 @@ public sealed class PublicInitReferenceTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public int32 Make(init ref<int32> result) { result = 40; return 2; }
             public void Fill(init ref<int32> result) { result = 41; }
@@ -166,7 +167,7 @@ public sealed class PublicInitReferenceTests
             CompileLibrary(ScalarLibrary, NativeRuntimePolicy.FailFast), ["TryFill"]);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(ScalarConsumer,
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 32);
         var error = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer))!;
         Assert.That(error.Message, Is.EqualTo("Unknown module format or version."));
@@ -258,7 +259,7 @@ public sealed class PublicInitReferenceTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public bool TryTicket(bool available, init ref<Ticket> ticket) {
                 ticket = new Ticket(42);
@@ -293,7 +294,7 @@ public sealed class PublicInitReferenceTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             class Cell {
                 public int32 Value;
@@ -314,11 +315,19 @@ public sealed class PublicInitReferenceTests
         CompilationReference? reference = null)
     {
         var tree = SyntaxTree.Parse(source);
+        var options = new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
         var compilation = reference is null
-            ? Compilation.CreateLibrary(tree, (BoundRuntimePolicy)policy)
-            : Compilation.CreateLibrary(tree, reference, (BoundRuntimePolicy)policy);
+            ? Compilation.CreateLibrary(tree, options)
+            : Compilation.CreateLibrary(tree, reference, options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static BoundProgram CompileConsumer(string source, CompilationReference reference,
@@ -326,7 +335,11 @@ public sealed class PublicInitReferenceTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static string RepositoryRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

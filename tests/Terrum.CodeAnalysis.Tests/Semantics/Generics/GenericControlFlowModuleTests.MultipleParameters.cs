@@ -6,15 +6,15 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed partial class GenericControlFlowModuleTests
+internal sealed partial class GenericControlFlowModuleTests
 {
     private const string MultipleCopyValues = """
         struct Left {
@@ -26,16 +26,16 @@ public sealed partial class GenericControlFlowModuleTests
             public int64 Spare;
             public Right(int64 number) { Number = number; Spare = 0; }
         }
-        [NoThrow] A First<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         A First<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
             return first;
         }
-        [NoThrow] B Reverse<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         B Reverse<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
             return First<B, A>(second, first);
         }
-        [NoThrow] B ReverseInferred<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         B ReverseInferred<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
             return First(second, first);
         }
-        [NoThrow] bool Publish<A, B>(A first, B second, out A left, out B right)
+         bool Publish<A, B>(A first, B second, out A left, out B right)
             where A : [Copy] where B : [Copy] {
             left = first;
             right = second;
@@ -79,7 +79,11 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "First<Left, Right>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "First<Right, Left>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "First<Left, Left>"),Is.True);
@@ -121,7 +125,7 @@ public sealed partial class GenericControlFlowModuleTests
                 return Combine(new Left(20), new Right(2)).Number
                     + int32(First<Right, Left>(new Right(2), new Left(1)).Number);
             }
-            [NoThrow] A First<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+             A First<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
                 return first;
             }
             """;
@@ -132,7 +136,7 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var replacementProgram = Compile(Replacement, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["PowerProbe"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.CreateReference(replacement).Structures, Is.Empty);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Combine<Left, Right>"),Is.True);
@@ -160,7 +164,11 @@ public sealed partial class GenericControlFlowModuleTests
             "samples", "LanguageFeatures", "Generics", "multi-type-generics.terrum")).ConfigureAwait(true);
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var sample = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var sample = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(sample, policy)).ConfigureAwait(true), Is.EqualTo(42));
         var original = ModuleCompiler.CreateProducer(Compile(
             "public int32 GenericPairProbe() { return 40; }", policy), ["GenericPairProbe"]);
@@ -272,7 +280,7 @@ public sealed partial class GenericControlFlowModuleTests
     public void ExistingTypedOutputEstablishesTheSecondIndependentFormal()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(MultipleCopyValues + """
-            [NoThrow] bool Absent<A, B>(A first, out B result)
+             bool Absent<A, B>(A first, out B result)
                 where A : [Copy] where B : [Copy] {
                 return false;
             }
@@ -283,7 +291,11 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))().Functions,function => function.Name == "Absent<Left, Right>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))().Functions,function => function.Name == "Absent<Left, Right>"),Is.True);
     }
     [TestCase("bool","true")]
     [TestCase("int32","int32(2)")]
@@ -300,7 +312,11 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Functions,function => function.Name == $"Reverse<Left, {type}>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))().Functions,function => function.Name == $"Reverse<Left, {type}>"),Is.True);
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -308,7 +324,7 @@ public sealed partial class GenericControlFlowModuleTests
     {
         var argument = incompatibleTypedArgument ? "int32(42)" : "42";
         var compilation = Compilation.Create(SyntaxTree.Parse(MultipleCopyValues + """
-            [NoThrow] B Second<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+             B Second<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
                 return second;
             }
             int32 Main() {
@@ -321,7 +337,11 @@ public sealed partial class GenericControlFlowModuleTests
         else
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))().Functions,function => function.Name == "Second<Left, int64>"),Is.True);
+            Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = compilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))().Functions,function => function.Name == "Second<Left, int64>"),Is.True);
         }
     }
 
@@ -348,16 +368,15 @@ public sealed partial class GenericControlFlowModuleTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase(false)]
-    [TestCase(true)]
-    public void NoThrowTupleHelpersUseDeclaredCalleeEffect(bool noThrow)
+    [Test]
+    public void TupleHelpersRemainValidWithoutNoThrowPromises()
     {
         var source = """
-            [NoThrow] A Forward<A, B>(A first, B second)
+             A Forward<A, B>(A first, B second)
                 where A : [Copy] where B : [Copy] {
                 return Pick<B, A>(second, first);
             }
-            """ + (noThrow ? "[NoThrow] " : "") + """
+            """ + """
             B Pick<A, B>(A first, B second)
                 where A : [Copy] where B : [Copy] {
                 return second;
@@ -365,14 +384,7 @@ public sealed partial class GenericControlFlowModuleTests
             int32 Main() { return Forward<int32, bool>(int32(42), true); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        if (noThrow)
-        {
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        }
-        else
-        {
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        }
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -397,7 +409,11 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
             NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true), Is.EqualTo(42));
     }

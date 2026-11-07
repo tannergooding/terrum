@@ -1,16 +1,20 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class ImplicitReferenceParameterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ImplicitReferenceParameterTests
 {
+    private const string LocalAggregateSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-1";
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ReadsAndForwardsTheCallerPlace(NativeRuntimePolicy policy)
@@ -25,12 +29,55 @@ public sealed class ImplicitReferenceParameterTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(program.Functions[0].Variables[0].IsImplicitRef, Is.True);
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(41));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-test"));
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-test"));
+        if (policy == NativeRuntimePolicy.FailFast)
+        {
+            var loaded = LoadStandardLocalAggregate(program,
+                "implicit-ref-test");
+            Assert.That(NativeJit.Execute(loaded, policy), Is.EqualTo(41));
+        }
+    }
+
+    [Test]
+    public void StandardLocalAggregateRoundTripBorrowsNestedFieldPlaces()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Inner {
+                internal mut int32 Value;
+                internal Inner(int32 value) { Value = value; }
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Outer {
+                internal mut Inner Nested;
+                internal Outer(int32 value) { Nested = new Inner(value); }
+            }
+            int32 Read(implicit ref<int32> value) { return value; }
+            int32 Main() {
+                mut Outer outer = new Outer(42);
+                return Read(outer.Nested.Value);
+            }
+            """), new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var loaded = LoadStandardLocalAggregate(program,
+            "implicit-ref-field-test");
+
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -51,7 +98,11 @@ public sealed class ImplicitReferenceParameterTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -71,7 +122,11 @@ public sealed class ImplicitReferenceParameterTests
             (BoundRuntimePolicy)policy);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -94,7 +149,11 @@ public sealed class ImplicitReferenceParameterTests
             """), (BoundRuntimePolicy)policy);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -113,10 +172,18 @@ public sealed class ImplicitReferenceParameterTests
                 Pair pair = new Pair(42);
                 return Reborrow(pair);
             }
-            """), (BoundRuntimePolicy)policy);
+            """), new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -137,7 +204,11 @@ public sealed class ImplicitReferenceParameterTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(58));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -151,22 +222,38 @@ public sealed class ImplicitReferenceParameterTests
             """), (BoundRuntimePolicy)policy);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         var main = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Main");
         Assert.That(global::System.Linq.Enumerable.Any(main.Variables,static variable => variable.IsImplicitReferenceTemporary),Is.True);
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-temp-test"));
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-temp-test"));
+        if (policy == NativeRuntimePolicy.FailFast)
+        {
+            var loaded = LoadStandardLocalAggregate(program,
+                "implicit-ref-temp-test");
+            Assert.That(NativeJit.Execute(loaded, policy), Is.EqualTo(42));
+        }
 
         var mainIndex = program.Functions.IndexOf(main);
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual8 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual7 = main.Body.Statements[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual7!; }))().Value; Assert.That(__nunitActual8, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual8!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual8 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual7 = main.Body.Statements[^1];
+    Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual7!; }))().Value;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual8!;
+        }))();
         var temporary = call.ImplicitReferenceTemporary(0);
         var forgedMain = main with {
             Variables = main.Variables.SetItem(temporary,
                 main.Variables[temporary] with { Type = PrimitiveType.UInt32 }),
         };
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(mainIndex, forgedMain),
         }));
     }
@@ -189,7 +276,11 @@ public sealed class ImplicitReferenceParameterTests
             """), (BoundRuntimePolicy)policy);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(17));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -212,7 +303,11 @@ public sealed class ImplicitReferenceParameterTests
             """), (BoundRuntimePolicy)policy);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(702));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -234,7 +329,11 @@ public sealed class ImplicitReferenceParameterTests
             """), (BoundRuntimePolicy)policy);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(33));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -266,7 +365,11 @@ public sealed class ImplicitReferenceParameterTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -306,22 +409,22 @@ public sealed class ImplicitReferenceParameterTests
     public void BorrowsAndMaterializesNonUniqueAggregateReferences(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            struct Triple {
-                public int32 First;
-                public int32 Second;
-                public int32 Third;
-                public Triple(int32 value) {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Triple {
+                public mut int32 First;
+                public mut int32 Second;
+                public mut int32 Third;
+                internal Triple(int32 value) {
                     First = value;
                     Second = value + 1;
                     Third = value + 2;
                 }
             }
-            struct Quad {
-                public int32 First;
-                public int32 Second;
-                public int32 Third;
-                public int32 Fourth;
-                public Quad(int32 value) {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Quad {
+                public mut int32 First;
+                public mut int32 Second;
+                public mut int32 Third;
+                public mut int32 Fourth;
+                internal Quad(int32 value) {
                     First = value;
                     Second = value + 1;
                     Third = value + 2;
@@ -345,14 +448,27 @@ public sealed class ImplicitReferenceParameterTests
                 return Forward(value) + Read(new Triple(40)) + copy.Third
                     + ReadQuad(large) + largeCopy.Fourth;
             }
-            """), (BoundRuntimePolicy)policy);
+            """), new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(277));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-aggregate-test"));
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-aggregate-test"));
+        if (policy == NativeRuntimePolicy.FailFast)
+        {
+            var loaded = LoadStandardLocalAggregate(program,
+                "implicit-ref-aggregate-test");
+            Assert.That(NativeJit.Execute(loaded, policy), Is.EqualTo(277));
+        }
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -382,8 +498,24 @@ public sealed class ImplicitReferenceParameterTests
             """), (BoundRuntimePolicy)policy);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(99));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
+    }
+
+    private static BoundProgram LoadStandardLocalAggregate(
+        BoundProgram program, string moduleIdentity)
+    {
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, LocalAggregateSchemaIdentity, 1);
+        return TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(LocalAggregateSchemaIdentity,
+                artifact),
+            moduleIdentity,
+            Array.Empty<TrRmStandardArtifactInput>());
     }
 }

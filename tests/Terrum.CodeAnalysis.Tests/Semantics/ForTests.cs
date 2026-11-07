@@ -1,14 +1,15 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class ForTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ForTests
 {
     [TestCase("for (mut int32 i = 0; i < 3; i = i + 1) { }")]
     [TestCase("for (/* init */;/* condition */;/* step */) { return; }")]
@@ -21,7 +22,11 @@ public sealed class ForTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
         var loop = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ForStatement);
         Assert.That(loop.Children.Length, Is.EqualTo(9));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual0 = loop.Children[8]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual0!; }))().Kind, Is.EqualTo(SyntaxKind.Block));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual0 = loop.Children[8];
+            Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual0!;
+        }))().Kind, Is.EqualTo(SyntaxKind.Block));
         Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantNodes(),node => node.Kind == SyntaxKind.MissingExpression),Is.False);
     }
     [TestCase("for (mut int32 i = 0 i < 3; i = i + 1) { }")]
@@ -66,16 +71,40 @@ public sealed class ForTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Sum() { mut int32 sum = 0; for (mut int32 i = 0; i < 4; i = i + 1) { sum = sum + i; } return sum; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
-        var scope = ((global::System.Func<BoundBlock>)(() => { var __nunitActual2 = program.Functions[0].Body.Statements[1]; Assert.That(__nunitActual2, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual2!; }))();
-        _ = ((global::System.Func<BoundLocal>)(() => { var __nunitActual3 = scope.Statements[0]; Assert.That(__nunitActual3, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual3!; }))();
-        var loop = ((global::System.Func<BoundWhile>)(() => { var __nunitActual4 = scope.Statements[1]; Assert.That(__nunitActual4, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual4!; }))();
-        Assert.That(((global::System.Func<BoundBlock>)(() => { var __nunitActual5 = loop.Body; Assert.That(__nunitActual5, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual5!; }))().Statements.Length, Is.EqualTo(2));
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
+        var scope = ((global::System.Func<BoundBlock>)(() => {
+            var __nunitActual2 = program.Functions[0].Body.Statements[1];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundBlock>());
+            return (BoundBlock)__nunitActual2!;
+        }))();
+        _ = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual3 = scope.Statements[0];
+            Assert.That(__nunitActual3, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual3!;
+        }))();
+        var loop = ((global::System.Func<BoundWhile>)(() => {
+            var __nunitActual4 = scope.Statements[1];
+            Assert.That(__nunitActual4, Is.TypeOf<BoundWhile>());
+            return (BoundWhile)__nunitActual4!;
+        }))();
+        Assert.That(((global::System.Func<BoundBlock>)(() => {
+            var __nunitActual5 = loop.Body;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundBlock>());
+            return (BoundBlock)__nunitActual5!;
+        }))().Statements.Length, Is.EqualTo(2));
         var producer = ModuleCompiler.CreateProducer(program, ["Sum"]);
         var consumer = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Sum(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
-        var artifact = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = consumer.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
+        var artifact = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = consumer.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), producer);
         SemanticVerifier.Verify(ModuleCompiler.Link(artifact, producer));
     }
 }

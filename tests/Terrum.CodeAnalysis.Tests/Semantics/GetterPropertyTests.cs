@@ -5,17 +5,17 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class GetterPropertyTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class GetterPropertyTests
 {
     internal const string ValueSource = """
         struct Counter {
@@ -44,7 +44,11 @@ public sealed class GetterPropertyTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(ValueSource));
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var getter = global::System.Linq.Enumerable.Single(program.Functions, function => function.PropertyName == "Value"
             && function.DeclaringStruct == "Counter");
         Assert.That(getter.Name, Is.EqualTo("Counter.#get:Value"));
@@ -82,9 +86,16 @@ public sealed class GetterPropertyTests
             }
             int32 Main() { return Counter.Read() + unsafe(Counter.UnsafeValue); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         foreach (var propertyName in new[] { "Base", "Value" })
         {
             var getter = global::System.Linq.Enumerable.Single(program.Functions, function => function.DeclaringStruct == "Counter" && function.PropertyName == propertyName);
@@ -215,9 +226,17 @@ public sealed class GetterPropertyTests
                 return 91;
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = policy,
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
 
         var staticPairGetter = global::System.Linq.Enumerable.Single(program.Functions, static function => function.PropertyName == "StaticPair");
         Assert.That(staticPairGetter.IsStatic, Is.True);
@@ -271,17 +290,23 @@ public sealed class GetterPropertyTests
     }
 
     [Test]
-    public void StaticComputedGetterDoesNotAddClassPropertySupport()
+    public void StaticComputedClassGetterHasNoBackingStorage()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             class Box {
                 public int32 Placeholder;
+                public Box() { Placeholder = 0; }
                 public static int32 Value { get { return 42; } }
             }
-            int32 Main() { return 0; }
+            int32 Main() { return Box.Value; }
             """));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3001"),Is.True);
-        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.StaticFields, Is.Empty);
+        Assert.That(global::System.Linq.Enumerable.Single(
+            compilation.Program.Functions,
+            static function => function.PropertyName == "Value").IsStatic,
+            Is.True);
     }
 
     [Test]
@@ -289,7 +314,11 @@ public sealed class GetterPropertyTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ValueSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         foreach (var owner in new[] { "Counter", "Box" })
         {
             var index = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, function => function.PropertyName == "Value" && function.DeclaringStruct == owner));
@@ -307,7 +336,7 @@ public sealed class GetterPropertyTests
             }))!;
         }
     }
-    [TestCase("public int32 Value { get; }","TRM1002")]
+    [TestCase("public int32 Value { get; }","TRM3001")]
     [TestCase("public int32 Value { get { return _value; } set { _value = 1; } }","TRM1002")]
     [TestCase("public int32 Value { [DoesNotReturn] get { return _value; } }","TRM3001")]
     [TestCase("public mut int32 Value { get { return _value; } }","TRM3001")]
@@ -366,7 +395,7 @@ public sealed class GetterPropertyTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Box.Read");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -384,16 +413,28 @@ public sealed class GetterPropertyTests
         const string Consumer = "int32 Main() { Counter value = Counter.Create(); return value.Value; }";
         string[] exports = ["Counter.Create", "Counter.#get:Value"];
         var boundPolicy = (BoundRuntimePolicy)policy;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Library), boundPolicy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Library),
+            new CompilationOptions {
+                RuntimePolicy = boundPolicy,
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), boundPolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual5 = consumerCompilation.Program;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual5!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Single(linked.Functions, function => function.Name == "Counter.#get:Value").PropertyName, Is.EqualTo("Value"));
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
@@ -404,7 +445,11 @@ public sealed class GetterPropertyTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), boundPolicy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = nativeCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = nativeCompilation.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -433,7 +478,11 @@ public sealed class GetterPropertyTests
             NativeModuleCompiler.CreateGraphReference([middle]), (BoundRuntimePolicy)policy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
         var root = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = rootCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), [middle], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual7 = rootCompilation.Program;
+                Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual7!;
+            }))(), [middle], policy);
         NativeModuleCompiler.ValidateGraph(root, [middle, leaf]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
@@ -455,12 +504,16 @@ public sealed class GetterPropertyTests
             }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = consumerCompilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual8 = consumerCompilation.Program;
+                Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual8!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Single(linked.Functions, function => function.Name == "$producer.Fill")
             .Variables[0].IsInit, Is.True);
@@ -484,7 +537,11 @@ public sealed class GetterPropertyTests
             int32 Main() { Counter value = Counter.Create(); return value.Read(); }
             """), ModuleCompiler.CreateReference(producer));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -493,11 +550,19 @@ public sealed class GetterPropertyTests
         CompilationReference? reference = null)
     {
         var tree = SyntaxTree.Parse(source);
+        var options = new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
         var compilation = reference is null
-            ? Compilation.CreateLibrary(tree, (BoundRuntimePolicy)policy)
-            : Compilation.CreateLibrary(tree, reference, (BoundRuntimePolicy)policy);
+            ? Compilation.CreateLibrary(tree, options)
+            : Compilation.CreateLibrary(tree, reference, options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
     }
 
     private static async Task RunNativeImageAsync(byte[] image, int expected)

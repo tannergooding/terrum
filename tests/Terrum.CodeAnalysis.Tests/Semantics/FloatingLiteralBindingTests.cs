@@ -4,18 +4,18 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class FloatingLiteralBindingTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FloatingLiteralBindingTests
 {
     private delegate long Float32ToFloat64(int value);
     private delegate int Float64ToFloat32(long value);
@@ -132,9 +132,21 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements); Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))();
-        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual2 = result.Value; Assert.That(__nunitActual2, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual1 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements);
+            Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual1!;
+        }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual2 = result.Value;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual2!;
+        }))();
         Assert.That(constant.Type, Is.EqualTo(type == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64));
         Assert.That(constant.Value, Is.EqualTo(bits));
     }
@@ -146,8 +158,16 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual4 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements);
+            Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual4!;
+        }))();
         Assert.That(result.Value, Is.TypeOf<BoundConstant>());
     }
     [TestCase("float32","0x1.fp+2",0x40F80000L)]
@@ -157,7 +177,11 @@ public sealed class FloatingLiteralBindingTests
         var source = $"public {type} Read() {{ return {literal}; }}";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
 
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
@@ -167,11 +191,22 @@ public sealed class FloatingLiteralBindingTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
             $"int32 Main() {{ {type} value = Read(); return 42; }}"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = consumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = consumerCompilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         var persistedRead = global::System.Linq.Enumerable.Single(linked.Functions, static function => function.Name == "Read");
-        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual8 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual7 = global::System.Linq.Enumerable.Single(persistedRead.Body.Statements); Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual7!; }))().Value; Assert.That(__nunitActual8, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual8!; }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual8 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual7 = global::System.Linq.Enumerable.Single(persistedRead.Body.Statements);
+    Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual7!; }))().Value;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual8!;
+        }))();
         Assert.That(constant.Value, Is.EqualTo(bits));
     }
     [TestCase("float64","float64(float32(0.1))",0x3FB99999A0000000L)]
@@ -183,9 +218,21 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"public {type} Read() {{ return {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual10 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements); Assert.That(__nunitActual10, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual10!; }))();
-        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual11 = result.Value; Assert.That(__nunitActual11, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual10 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements);
+            Assert.That(__nunitActual10, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual10!;
+        }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual11 = result.Value;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual11!;
+        }))();
         Assert.That(constant.Type, Is.EqualTo(type == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64));
         Assert.That(constant.Value, Is.EqualTo(bits));
     }
@@ -202,9 +249,21 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"public {type} Read() {{ return {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual13 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements); Assert.That(__nunitActual13, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual13!; }))();
-        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual14 = result.Value; Assert.That(__nunitActual14, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual14!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual13 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements);
+            Assert.That(__nunitActual13, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual13!;
+        }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual14 = result.Value;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual14!;
+        }))();
         Assert.That(constant.Type, Is.EqualTo(type == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64));
         Assert.That(constant.Value, Is.EqualTo(bits));
     }
@@ -216,9 +275,21 @@ public sealed class FloatingLiteralBindingTests
             SyntaxTree.Parse($"public {type} Read() {{ return {type}(char16(65535)); }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual16 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements); Assert.That(__nunitActual16, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual16!; }))();
-        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual17 = result.Value; Assert.That(__nunitActual17, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual17!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual16 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements);
+            Assert.That(__nunitActual16, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual16!;
+        }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual17 = result.Value;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual17!;
+        }))();
         Assert.That(constant.Type, Is.EqualTo(type == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64));
         var expected = type == "float32"
             ? unchecked((uint)BitConverter.SingleToInt32Bits(65535.0f))
@@ -236,9 +307,21 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"public {type} Read() {{ return {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual19 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements); Assert.That(__nunitActual19, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual19!; }))();
-        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual20 = result.Value; Assert.That(__nunitActual20, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual20!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = compilation.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual19 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements);
+            Assert.That(__nunitActual19, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual19!;
+        }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual20 = result.Value;
+            Assert.That(__nunitActual20, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual20!;
+        }))();
         Assert.That(constant.Type, Is.EqualTo(type switch {
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
@@ -257,9 +340,21 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"public {type} Read() {{ return {type}({expression}); }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = compilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual22 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements); Assert.That(__nunitActual22, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual22!; }))();
-        var cast = ((global::System.Func<BoundCast>)(() => { var __nunitActual23 = result.Value; Assert.That(__nunitActual23, Is.TypeOf<BoundCast>()); return (BoundCast)__nunitActual23!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual21 = compilation.Program;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual21!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual22 = global::System.Linq.Enumerable.Single(program.Functions[0].Body.Statements);
+            Assert.That(__nunitActual22, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual22!;
+        }))();
+        var cast = ((global::System.Func<BoundCast>)(() => {
+            var __nunitActual23 = result.Value;
+            Assert.That(__nunitActual23, Is.TypeOf<BoundCast>());
+            return (BoundCast)__nunitActual23!;
+        }))();
         Assert.That(cast.Type, Is.EqualTo(type switch {
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
@@ -274,7 +369,11 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             " public float64 Widen(float32 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = compilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual24 = compilation.Program;
+            Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual24!;
+        }))();
 
         var producer = ModuleCompiler.CreateProducer(program, ["Widen"]);
         var reference = ModuleCompiler.CreateReference(producer);
@@ -282,10 +381,21 @@ public sealed class FloatingLiteralBindingTests
             "int32 Main() { _ = Widen(0.1); return 42; }"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = consumerCompilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual25 = consumerCompilation.Program;
+            Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual25!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         var widen = global::System.Linq.Enumerable.Single(linked.Functions, static function => function.Name == "Widen");
-        var cast = ((global::System.Func<BoundCast>)(() => { var __nunitActual27 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual26 = global::System.Linq.Enumerable.Single(widen.Body.Statements); Assert.That(__nunitActual26, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual26!; }))().Value; Assert.That(__nunitActual27, Is.TypeOf<BoundCast>()); return (BoundCast)__nunitActual27!; }))();
+        var cast = ((global::System.Func<BoundCast>)(() => {
+            var __nunitActual27 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual26 = global::System.Linq.Enumerable.Single(widen.Body.Statements);
+    Assert.That(__nunitActual26, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual26!; }))().Value;
+            Assert.That(__nunitActual27, Is.TypeOf<BoundCast>());
+            return (BoundCast)__nunitActual27!;
+        }))();
         Assert.That(cast.Operand.Type, Is.EqualTo(PrimitiveType.Float32));
         Assert.That(cast.Type, Is.EqualTo(PrimitiveType.Float64));
         Assert.That(NativeEmitter.EmitLibrary(program, ["Widen"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
@@ -297,7 +407,11 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             " public float64 Convert(uint64 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = compilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual28 = compilation.Program;
+            Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual28!;
+        }))();
 
         var producer = ModuleCompiler.CreateProducer(program, ["Convert"]);
         var reference = ModuleCompiler.CreateReference(producer);
@@ -305,10 +419,21 @@ public sealed class FloatingLiteralBindingTests
             "int32 Main() { _ = Convert(uint64(0xFFFFFFFFFFFFFFFF)); return 42; }"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual29 = consumerCompilation.Program; Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual29!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual29 = consumerCompilation.Program;
+            Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual29!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         var convert = global::System.Linq.Enumerable.Single(linked.Functions, static function => function.Name == "Convert");
-        var cast = ((global::System.Func<BoundCast>)(() => { var __nunitActual31 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual30 = global::System.Linq.Enumerable.Single(convert.Body.Statements); Assert.That(__nunitActual30, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual30!; }))().Value; Assert.That(__nunitActual31, Is.TypeOf<BoundCast>()); return (BoundCast)__nunitActual31!; }))();
+        var cast = ((global::System.Func<BoundCast>)(() => {
+            var __nunitActual31 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual30 = global::System.Linq.Enumerable.Single(convert.Body.Statements);
+    Assert.That(__nunitActual30, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual30!; }))().Value;
+            Assert.That(__nunitActual31, Is.TypeOf<BoundCast>());
+            return (BoundCast)__nunitActual31!;
+        }))();
         Assert.That(cast.Operand.Type, Is.EqualTo(PrimitiveType.UInt64));
         Assert.That(cast.Type, Is.EqualTo(PrimitiveType.Float64));
         Assert.That(NativeEmitter.EmitLibrary(program, ["Convert"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
@@ -321,7 +446,11 @@ public sealed class FloatingLiteralBindingTests
             " public float32 Narrow(char16 value) { return float32(value); } "
             + " public float64 Widen(char16 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual32 = compilation.Program; Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual32!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual32 = compilation.Program;
+            Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual32!;
+        }))();
 
         var producer = ModuleCompiler.CreateProducer(program, ["Narrow", "Widen"]);
         var reference = ModuleCompiler.CreateReference(producer);
@@ -329,12 +458,23 @@ public sealed class FloatingLiteralBindingTests
             "int32 Main() { _ = Narrow(char16(65535)); _ = Widen(char16(65535)); return 42; }"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual33 = consumerCompilation.Program; Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual33!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual33 = consumerCompilation.Program;
+            Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual33!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         foreach (var name in new[] { "Narrow", "Widen" })
         {
             var function = global::System.Linq.Enumerable.Single(linked.Functions, item => item.Name == name);
-            var cast = ((global::System.Func<BoundCast>)(() => { var __nunitActual35 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual34 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual34, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual34!; }))().Value; Assert.That(__nunitActual35, Is.TypeOf<BoundCast>()); return (BoundCast)__nunitActual35!; }))();
+            var cast = ((global::System.Func<BoundCast>)(() => {
+                var __nunitActual35 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual34 = global::System.Linq.Enumerable.Single(function.Body.Statements);
+    Assert.That(__nunitActual34, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual34!; }))().Value;
+                Assert.That(__nunitActual35, Is.TypeOf<BoundCast>());
+                return (BoundCast)__nunitActual35!;
+            }))();
             Assert.That(cast.Operand.Type, Is.EqualTo(PrimitiveType.Char16));
             Assert.That(cast.Type, Is.EqualTo(name == "Narrow" ? PrimitiveType.Float32 : PrimitiveType.Float64));
         }
@@ -348,7 +488,11 @@ public sealed class FloatingLiteralBindingTests
             " public float32 Narrow(char16 value) { return float32(value); } "
             + " public float64 Widen(char16 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual36 = compilation.Program; Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual36!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual36 = compilation.Program;
+            Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual36!;
+        }))();
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-char16-float-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
@@ -407,7 +551,11 @@ public sealed class FloatingLiteralBindingTests
             public float64 CopyFloat64(float64 value) { return Forward(value); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual37 = compilation.Program; Assert.That(__nunitActual37, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual37!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual37 = compilation.Program;
+            Assert.That(__nunitActual37, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual37!;
+        }))();
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-copy-float-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
@@ -498,7 +646,11 @@ public sealed class FloatingLiteralBindingTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual38 = compilation.Program; Assert.That(__nunitActual38, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual38!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual38 = compilation.Program;
+            Assert.That(__nunitActual38, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual38!;
+        }))();
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-generic-output-float-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
@@ -556,7 +708,11 @@ public sealed class FloatingLiteralBindingTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual39 = compilation.Program; Assert.That(__nunitActual39, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual39!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual39 = compilation.Program;
+            Assert.That(__nunitActual39, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual39!;
+        }))();
         Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -567,7 +723,11 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Convert(float64 value) { return int32(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual40 = compilation.Program; Assert.That(__nunitActual40, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual40!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual40 = compilation.Program;
+            Assert.That(__nunitActual40, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual40!;
+        }))();
 
         var producer = ModuleCompiler.CreateProducer(program, ["Convert"]);
         var reference = ModuleCompiler.CreateReference(producer);
@@ -575,10 +735,21 @@ public sealed class FloatingLiteralBindingTests
             "int32 Main() { return Convert(41.9); }"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual41 = consumerCompilation.Program; Assert.That(__nunitActual41, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual41!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual41 = consumerCompilation.Program;
+            Assert.That(__nunitActual41, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual41!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         var convert = global::System.Linq.Enumerable.Single(linked.Functions, static function => function.Name == "Convert");
-        var cast = ((global::System.Func<BoundCast>)(() => { var __nunitActual43 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual42 = global::System.Linq.Enumerable.Single(convert.Body.Statements); Assert.That(__nunitActual42, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual42!; }))().Value; Assert.That(__nunitActual43, Is.TypeOf<BoundCast>()); return (BoundCast)__nunitActual43!; }))();
+        var cast = ((global::System.Func<BoundCast>)(() => {
+            var __nunitActual43 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual42 = global::System.Linq.Enumerable.Single(convert.Body.Statements);
+    Assert.That(__nunitActual42, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual42!; }))().Value;
+            Assert.That(__nunitActual43, Is.TypeOf<BoundCast>());
+            return (BoundCast)__nunitActual43!;
+        }))();
         Assert.That(cast.Operand.Type, Is.EqualTo(PrimitiveType.Float64));
         Assert.That(cast.Type, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(NativeEmitter.EmitLibrary(program, ["Convert"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
@@ -673,10 +844,18 @@ public sealed class FloatingLiteralBindingTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual44 = compilation.Program; Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual44!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual44 = compilation.Program;
+            Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual44!;
+        }))();
         var executableCompilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(executableCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, executableCompilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual45 = executableCompilation.Program; Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual45!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual45 = executableCompilation.Program;
+            Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual45!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-operators-{Guid.NewGuid():N}.dll");
@@ -776,7 +955,11 @@ public sealed class FloatingLiteralBindingTests
             + " public float64 Multiply64(float64 left, float64 right) { return left * right; } "
             + " public float64 Divide64(float64 left, float64 right) { return left / right; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual46 = compilation.Program; Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual46!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual46 = compilation.Program;
+            Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual46!;
+        }))();
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-mxcsr-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         const uint floatingControlMask = 0x03000300;
@@ -834,7 +1017,11 @@ public sealed class FloatingLiteralBindingTests
             + "public int32 Catch(float64 value) { unsafe { try { return int32(value); } catch { return 42; } } }"),
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual47 = compilation.Program; Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual47!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual47 = compilation.Program;
+            Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual47!;
+        }))();
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-conversion-mxcsr-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         const uint floatingControlMask = 0x03000300;
@@ -896,9 +1083,17 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual48 = compilation.Program; Assert.That(__nunitActual48, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual48!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual48 = compilation.Program;
+            Assert.That(__nunitActual48, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual48!;
+        }))();
         var negate = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Negate");
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual49 = global::System.Linq.Enumerable.Single(negate.Body.Statements); Assert.That(__nunitActual49, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual49!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual49 = global::System.Linq.Enumerable.Single(negate.Body.Statements);
+            Assert.That(__nunitActual49, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual49!;
+        }))();
         Assert.That(result.Value, Is.TypeOf<BoundUnary>());
         Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
@@ -913,7 +1108,11 @@ public sealed class FloatingLiteralBindingTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual50 = compilation.Program; Assert.That(__nunitActual50, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual50!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual50 = compilation.Program;
+            Assert.That(__nunitActual50, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual50!;
+        }))();
         Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -925,7 +1124,11 @@ public sealed class FloatingLiteralBindingTests
             " public float64 Add(float64 left, float64 right) { return left + right; } "
             + " public bool Less(float64 left, float64 right) { return left < right; }"));
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual51 = producerCompilation.Program; Assert.That(__nunitActual51, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual51!; }))();
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual51 = producerCompilation.Program;
+            Assert.That(__nunitActual51, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual51!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Add", "Less"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var clientCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -937,7 +1140,11 @@ public sealed class FloatingLiteralBindingTests
         Assert.That(clientCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, clientCompilation.Diagnostics));
 
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual52 = clientCompilation.Program; Assert.That(__nunitActual52, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual52!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual52 = clientCompilation.Program;
+                Assert.That(__nunitActual52, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual52!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -957,7 +1164,11 @@ public sealed class FloatingLiteralBindingTests
             + " public float32 FromUInt32Single(uint32 value) { return float32(value); } "
             + " public float64 FromInt64Wide(int64 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual53 = compilation.Program; Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual53!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual53 = compilation.Program;
+            Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual53!;
+        }))();
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-conversion-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
@@ -1020,7 +1231,11 @@ public sealed class FloatingLiteralBindingTests
             + "public int64 FromFloat32ToInt64(float32 value) { return int64(value); } "
             + "public uint64 FromFloat32ToUInt64(float32 value) { return uint64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual54 = compilation.Program; Assert.That(__nunitActual54, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual54!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual54 = compilation.Program;
+            Assert.That(__nunitActual54, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual54!;
+        }))();
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-to-integer-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
@@ -1092,7 +1307,11 @@ public sealed class FloatingLiteralBindingTests
         var source = $"int32 Main() {{ unsafe {{ try {{ _ = {expression}; }} catch {{ return 42; }} }} return 0; }}";
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual55 = compilation.Program; Assert.That(__nunitActual55, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual55!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual55 = compilation.Program;
+            Assert.That(__nunitActual55, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual55!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
@@ -1103,7 +1322,11 @@ public sealed class FloatingLiteralBindingTests
             "public int32 Catch(float64 value) { unsafe { try { return int32(value); } catch { return 42; } } }"),
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual56 = compilation.Program; Assert.That(__nunitActual56, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual56!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual56 = compilation.Program;
+            Assert.That(__nunitActual56, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual56!;
+        }))();
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-to-integer-nonfinite-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
@@ -1136,7 +1359,7 @@ public sealed class FloatingLiteralBindingTests
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Convert");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     private static Float32ToFloat64 ExportFloat32ToFloat64(IntPtr library, string name)
@@ -1349,6 +1572,7 @@ public sealed class FloatingLiteralBindingTests
         }
     }
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [DllImport("ucrtbase.dll", EntryPoint = "_controlfp_s", CallingConvention = CallingConvention.Cdecl)]
     private static extern int ControlFloatingPointEnvironment(out uint current, uint value, uint mask);
 }

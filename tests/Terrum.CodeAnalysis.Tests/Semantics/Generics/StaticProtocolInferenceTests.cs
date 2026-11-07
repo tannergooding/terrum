@@ -1,13 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolInferenceTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolInferenceTests
 {
     private const string Values = """
         struct Value {
@@ -44,7 +45,7 @@ public sealed class StaticProtocolInferenceTests
     public void ExistingTypedOutLocalInfersTypeWithoutPublishingItDuringInference()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            [NoThrow] bool None<T>(out T result) where T : [Copy] { return false; }
+             bool None<T>(out T result) where T : [Copy] { return false; }
             int32 Main() {
                 mut Value target = new Value(42);
                 if (None(out target)) { return 1; }
@@ -52,7 +53,11 @@ public sealed class StaticProtocolInferenceTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions,function => function.Name == "None<Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))().Functions,function => function.Name == "None<Value>"),Is.True);
     }
 
     [Test]
@@ -97,7 +102,11 @@ public sealed class StaticProtocolInferenceTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().Functions,function => function.Name == $"Identity<{type}>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))().Functions,function => function.Name == $"Identity<{type}>"),Is.True);
     }
 
     [Test]
@@ -113,7 +122,11 @@ public sealed class StaticProtocolInferenceTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var functions = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))().Functions;
+        var functions = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))().Functions;
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Identity<float32>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Identity<float64>"),Is.True);
     }
@@ -220,26 +233,18 @@ public sealed class StaticProtocolInferenceTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase(false)]
-    [TestCase(true)]
-    public void InferredHelperUsesDeclaredNoThrowEffect(bool helperNoThrow)
+
+    [Test]
+    public void InferredHelperCallsNeedNoGeneralNoThrowDeclaration()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            [NoThrow] U Wrap<U>(U value) where U : [Copy] {
+             U Wrap<U>(U value) where U : [Copy] {
                 return Leaf(value);
             }
-            """ + (helperNoThrow ? "[NoThrow] " : "") + """
             V Leaf<V>(V value) where V : [Copy] { return value; }
             int32 Main() { return Wrap(new Value(42)).Number; }
             """));
-        if (helperNoThrow)
-        {
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        }
-        else
-        {
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        }
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]

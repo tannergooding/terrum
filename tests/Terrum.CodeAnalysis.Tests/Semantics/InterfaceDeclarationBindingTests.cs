@@ -8,7 +8,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class InterfaceDeclarationBindingTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class InterfaceDeclarationBindingTests
 {
     [Test]
     public void BindsGenericFormalsDefaultsAndBaseInstances()
@@ -48,9 +49,11 @@ public sealed class InterfaceDeclarationBindingTests
         var interfaces = compilation.Program!.Interfaces;
         var view = interfaces.Single(static item =>
             item.QualifiedName == "IView");
-        BoundInterfaceType ResultType(string name) =>
-            view.Members.Single(member => member.Name == name)
+        BoundInterfaceType ResultType(string name)
+        {
+            return view.Members.Single(member => member.Name == name)
                 .ResultType!;
+        }
 
         Assert.That(ResultType("HideSecond").TypeArguments[0].Kind,
             Is.EqualTo(BoundInterfaceTypeArgumentKind.Type));

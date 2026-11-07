@@ -5,15 +5,16 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class VacantLocalTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class VacantLocalTests
 {
     internal const string ScalarSource = """
         bool Fill(bool publish, init ref<int32> value) {
@@ -68,7 +69,11 @@ public sealed class VacantLocalTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             ScalarSource.Replace("init var value;", declaration, StringComparison.Ordinal)));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var read = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Read");
         var variable = global::System.Linq.Enumerable.Single(read.Variables, item => item.Name == "value");
         Assert.That(variable.Type, Is.EqualTo(type));
@@ -81,11 +86,19 @@ public sealed class VacantLocalTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ScalarSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var index = program.Functions.Select((function, slot) => (function, slot))
             .Single(item => item.function.Name == "Read").slot;
         var read = program.Functions[index];
-        var vacant = ((global::System.Func<BoundVacantLocal>)(() => { var __nunitActual2 = read.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundVacantLocal>()); return (BoundVacantLocal)__nunitActual2!; }))();
+        var vacant = ((global::System.Func<BoundVacantLocal>)(() => {
+            var __nunitActual2 = read.Body.Statements[0];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundVacantLocal>());
+            return (BoundVacantLocal)__nunitActual2!;
+        }))();
         var malformed = read with {
             Body = read.Body with {
                 Statements = read.Body.Statements.SetItem(0, vacant with { Variable = -1 }),
@@ -115,16 +128,24 @@ public sealed class VacantLocalTests
             unique struct Owner {
                 public int32 Number;
                 public Owner() { Number = 0; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             int32 Main() { init Owner owner; return 42; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         var index = program.Functions.Select((function, slot) => (function, slot))
             .Single(item => item.function.Name == "Main").slot;
         var main = program.Functions[index];
-        var vacant = ((global::System.Func<BoundVacantLocal>)(() => { var __nunitActual4 = main.Body.Statements[0]; Assert.That(__nunitActual4, Is.TypeOf<BoundVacantLocal>()); return (BoundVacantLocal)__nunitActual4!; }))();
+        var vacant = ((global::System.Func<BoundVacantLocal>)(() => {
+            var __nunitActual4 = main.Body.Statements[0];
+            Assert.That(__nunitActual4, Is.TypeOf<BoundVacantLocal>());
+            return (BoundVacantLocal)__nunitActual4!;
+        }))();
         var malformed = main with {
             Body = main.Body with {
                 Statements = [
@@ -173,7 +194,7 @@ public sealed class VacantLocalTests
     {
         var source = $$"""
             bool Fill(init ref<int32> value) { value = 42; return true; }
-            [NoThrow] bool Copy<T>(T source, init ref<T> value) where T : [Copy] {
+             bool Copy<T>(T source, init ref<T> value) where T : [Copy] {
                 value = source;
                 return true;
             }
@@ -191,7 +212,7 @@ public sealed class VacantLocalTests
     public void GenericInputAndVacantOutputCannotEstablishContradictoryTypes()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
+             bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
                 result = source;
                 return true;
             }
@@ -211,9 +232,13 @@ public sealed class VacantLocalTests
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(ScalarSource.Replace(
             "int32 Main() { return Read(); }", "", StringComparison.Ordinal)), runtimePolicy: runtimePolicy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = library.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = library.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var oldHeader = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldHeader.AsSpan(4, 4), 39);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldHeader))!;
@@ -221,7 +246,11 @@ public sealed class VacantLocalTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             reference, runtimePolicy: runtimePolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = consumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = consumerCompilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
@@ -231,7 +260,11 @@ public sealed class VacantLocalTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: runtimePolicy);
         Assert.That(nativeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = nativeConsumerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual7 = nativeConsumerCompilation.Program;
+                Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual7!;
+            }))(), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ScalarSource.Replace(
@@ -239,7 +272,11 @@ public sealed class VacantLocalTests
             "int32 Main() { return Read(); }", "", StringComparison.Ordinal)), runtimePolicy: runtimePolicy);
         Assert.That(replacementCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
         var replacement = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = replacementCompilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), ["Read"], "NodeB", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual8 = replacementCompilation.Program;
+                Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual8!;
+            }))(), ["Read"], "NodeB", policy);
         NativeModuleCompiler.ValidateGraph(nativeConsumer, [replacement]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [replacement],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));

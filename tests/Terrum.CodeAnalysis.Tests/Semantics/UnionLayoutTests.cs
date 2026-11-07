@@ -3,10 +3,10 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
@@ -17,7 +17,7 @@ internal sealed class UnionLayoutTests
     [Test]
     public void RawUnionAlternativesUseOverlappingStorage()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Union)]
             public struct RawWord {
@@ -50,14 +50,14 @@ internal sealed class UnionLayoutTests
             public uint32 Read(RawWord value) {
             """;
 
-        var unsafeCompilation = Compilation.CreateLibrary(
+        var unsafeCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + "unsafe { return value.Narrow; } }"),
             BoundRuntimePolicy.FailFast);
         Assert.That(unsafeCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 unsafeCompilation.Diagnostics));
 
-        var safeCompilation = Compilation.CreateLibrary(
+        var safeCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + "return value.Narrow; }"),
             BoundRuntimePolicy.FailFast);
         Assert.That(safeCompilation.Diagnostics.Any(static diagnostic =>
@@ -80,7 +80,7 @@ internal sealed class UnionLayoutTests
             }
             """;
 
-        var narrowCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var narrowCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint32 ReadNarrow(RawWord value) {
                     unsafe { return value.Narrow; }
@@ -90,7 +90,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 narrowCompilation.Diagnostics));
 
-        var wideCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var wideCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadWide(RawWord value) {
                     unsafe { return value.Wide; }
@@ -99,7 +99,7 @@ internal sealed class UnionLayoutTests
         Assert.That(wideCompilation.HasErrors, Is.True,
             string.Join(Environment.NewLine, wideCompilation.Diagnostics));
 
-        var uninitializedNarrowCompilation = Compilation.CreateLibrary(
+        var uninitializedNarrowCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint32 InitializeAndReadNarrow() {
                     init mut RawWord value;
@@ -113,7 +113,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 uninitializedNarrowCompilation.Diagnostics));
 
-        var uninitializedWideCompilation = Compilation.CreateLibrary(
+        var uninitializedWideCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 InitializeAndReadWide() {
                     init mut RawWord value;
@@ -127,7 +127,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 uninitializedWideCompilation.Diagnostics));
 
-        var overwriteWideCompilation = Compilation.CreateLibrary(
+        var overwriteWideCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 OverwriteWide() {
                     mut RawWord value = new RawWord(7);
@@ -142,7 +142,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 overwriteWideCompilation.Diagnostics));
 
-        var copiedWideCompilation = Compilation.CreateLibrary(
+        var copiedWideCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 CopyNarrowUnion() {
                     mut RawWord value = new RawWord(7);
@@ -154,7 +154,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 copiedWideCompilation.Diagnostics));
 
-        var joinedNarrowCompilation = Compilation.CreateLibrary(
+        var joinedNarrowCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint32 ReadJoinedCommonBytes(bool chooseWide) {
                     init mut RawWord value;
@@ -170,7 +170,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 joinedNarrowCompilation.Diagnostics));
 
-        var joinedWideCompilation = Compilation.CreateLibrary(
+        var joinedWideCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 ReadJoinedWideBytes(bool chooseWide) {
                     init mut RawWord value;
@@ -238,7 +238,7 @@ internal sealed class UnionLayoutTests
             }
             """;
 
-        var constructionOnly = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var constructionOnly = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public int32 ConstructEnvelope() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -248,7 +248,7 @@ internal sealed class UnionLayoutTests
         Assert.That(constructionOnly.HasErrors, Is.False,
             string.Join(Environment.NewLine, constructionOnly.Diagnostics));
 
-        var storedWideOnly = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var storedWideOnly = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public int32 StoreNestedWide() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -259,7 +259,7 @@ internal sealed class UnionLayoutTests
         Assert.That(storedWideOnly.HasErrors, Is.False,
             string.Join(Environment.NewLine, storedWideOnly.Diagnostics));
 
-        var constructedNestedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var constructedNestedWide = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ConstructNestedWide() {
                     mut WideEnvelope value = new WideEnvelope(7);
@@ -270,7 +270,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 constructedNestedWide.Diagnostics));
 
-        var vacantNestedConstruction = Compilation.CreateLibrary(
+        var vacantNestedConstruction = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 InitializeNestedUnionAlternative() {
                     init mut WideEnvelope value;
@@ -284,7 +284,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 vacantNestedConstruction.Diagnostics));
 
-        var repeatedNestedInitialization = Compilation.CreateLibrary(
+        var repeatedNestedInitialization = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 RejectSecondNestedUnionInitialization() {
                     init mut WideEnvelope value;
@@ -299,7 +299,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 repeatedNestedInitialization.Diagnostics));
 
-        var partialNestedChild = Compilation.CreateLibrary(
+        var partialNestedChild = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public int32 RejectPartialNestedUnionConstruction() {
                     init mut WideEnvelope value;
@@ -311,7 +311,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 partialNestedChild.Diagnostics));
 
-        var completedMultiParent = Compilation.CreateLibrary(
+        var completedMultiParent = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 CompleteMultiFieldParent() {
                     init mut MultiEnvelope value;
@@ -324,7 +324,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 completedMultiParent.Diagnostics));
 
-        var incompleteMultiParent = Compilation.CreateLibrary(
+        var incompleteMultiParent = CreateLayoutLibrary(
             SyntaxTree.Parse(prefix + """
                 public uint64 RejectIncompleteMultiFieldParent() {
                     init mut MultiEnvelope value;
@@ -338,7 +338,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 incompleteMultiParent.Diagnostics));
 
-        var storedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var storedWide = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 StoreAndReadNestedWide() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -351,7 +351,7 @@ internal sealed class UnionLayoutTests
         Assert.That(storedWide.HasErrors, Is.False,
             string.Join(Environment.NewLine, storedWide.Diagnostics));
 
-        var narrowThenWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var narrowThenWide = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterNarrow() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -364,7 +364,7 @@ internal sealed class UnionLayoutTests
         Assert.That(narrowThenWide.HasErrors, Is.True,
             string.Join(Environment.NewLine, narrowThenWide.Diagnostics));
 
-        var copiedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var copiedWide = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 CopyNestedWideBeforeOverlappingStore() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -379,7 +379,7 @@ internal sealed class UnionLayoutTests
         Assert.That(copiedWide.HasErrors, Is.False,
             string.Join(Environment.NewLine, copiedWide.Diagnostics));
 
-        var joinedNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var joinedNarrow = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterConditionalStore(bool widen) {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -395,7 +395,7 @@ internal sealed class UnionLayoutTests
         Assert.That(joinedNarrow.HasErrors, Is.True,
             string.Join(Environment.NewLine, joinedNarrow.Diagnostics));
 
-        var joinedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var joinedWide = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterBothBranches(bool widen) {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -413,7 +413,7 @@ internal sealed class UnionLayoutTests
         Assert.That(joinedWide.HasErrors, Is.False,
             string.Join(Environment.NewLine, joinedWide.Diagnostics));
 
-        var loopNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var loopNarrow = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterOptionalLoop(
                     bool shouldWrite) {
@@ -432,7 +432,7 @@ internal sealed class UnionLayoutTests
         Assert.That(loopNarrow.HasErrors, Is.True,
             string.Join(Environment.NewLine, loopNarrow.Diagnostics));
 
-        var finallyNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var finallyNarrow = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterFinallyStore() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -450,7 +450,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 finallyNarrow.Diagnostics));
 
-        var failureWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var failureWide = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterCheckedFailure() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -468,7 +468,7 @@ internal sealed class UnionLayoutTests
         Assert.That(failureWide.HasErrors, Is.False,
             string.Join(Environment.NewLine, failureWide.Diagnostics));
 
-        var failureNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var failureNarrow = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 RejectNestedWideAfterCheckedFailure() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -487,7 +487,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 failureNarrow.Diagnostics));
 
-        var selfCopy = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var selfCopy = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterSelfCopy() {
                     mut Envelope value = new Envelope(new RawWord(1));
@@ -501,7 +501,7 @@ internal sealed class UnionLayoutTests
         Assert.That(selfCopy.HasErrors, Is.False,
             string.Join(Environment.NewLine, selfCopy.Diagnostics));
 
-        var conditionalFull = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var conditionalFull = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadNestedWideAfterFullConditional(bool choose) {
                     mut RawWord first = new RawWord(0);
@@ -519,7 +519,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 conditionalFull.Diagnostics));
 
-        var conditionalPartial = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var conditionalPartial = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 RejectNestedWideAfterPartialConditional(
                     bool choose) {
@@ -563,7 +563,7 @@ internal sealed class UnionLayoutTests
             }
             """;
 
-        var preserved = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var preserved = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public unsafe int32 ReadNestedPointer() {
                     int32 value = 42;
@@ -578,7 +578,7 @@ internal sealed class UnionLayoutTests
         Assert.That(preserved.HasErrors, Is.False,
             string.Join(Environment.NewLine, preserved.Diagnostics));
 
-        var invalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var invalidated = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public unsafe int32 ReadNestedPointerAfterOverwrite() {
                     int32 value = 42;
@@ -599,7 +599,7 @@ internal sealed class UnionLayoutTests
                     StringComparison.Ordinal)), Is.True,
             string.Join(Environment.NewLine, invalidated.Diagnostics));
 
-        var copiedInvalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var copiedInvalidated = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public unsafe int32 ReadCopiedNestedPointerAfterOverwrite() {
                     int32 value = 42;
@@ -623,7 +623,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 copiedInvalidated.Diagnostics));
 
-        var restored = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var restored = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public unsafe int32 ReadNestedPointerAfterRestore() {
                     int32 value = 42;
@@ -640,7 +640,7 @@ internal sealed class UnionLayoutTests
         Assert.That(restored.HasErrors, Is.False,
             string.Join(Environment.NewLine, restored.Diagnostics));
 
-        var maybeInvalidated = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var maybeInvalidated = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public unsafe int32 ReadNestedPointerAfterConditionalOverwrite(
                     bool overwrite) {
@@ -688,7 +688,7 @@ internal sealed class UnionLayoutTests
                 }
             }
             """;
-        var unrelatedPointer = Compilation.CreateLibrary(
+        var unrelatedPointer = CreateLayoutLibrary(
             SyntaxTree.Parse(siblingPrefix + """
                 public unsafe int32 ReadUnrelatedPointerAfterOverwrite() {
                     int32 value = 42;
@@ -770,7 +770,7 @@ internal sealed class UnionLayoutTests
             }
             """;
 
-        var forwarded = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var forwarded = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ForwardWideThroughCalls() {
                     mut RawWord word = new RawWord(0);
@@ -783,7 +783,7 @@ internal sealed class UnionLayoutTests
         Assert.That(forwarded.HasErrors, Is.False,
             string.Join(Environment.NewLine, forwarded.Diagnostics));
 
-        var staged = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var staged = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 PreserveStagedWideAcrossLaterArgument() {
                     mut RawWord word = new RawWord(0);
@@ -795,7 +795,7 @@ internal sealed class UnionLayoutTests
         Assert.That(staged.HasErrors, Is.False,
             string.Join(Environment.NewLine, staged.Diagnostics));
 
-        var nestedPath = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var nestedPath = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ForwardWideThroughNestedField() {
                     mut RawWord word = new RawWord(0);
@@ -808,7 +808,7 @@ internal sealed class UnionLayoutTests
         Assert.That(nestedPath.HasErrors, Is.False,
             string.Join(Environment.NewLine, nestedPath.Diagnostics));
 
-        var narrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var narrow = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 RejectPaddedWideThroughConstructor() {
                     mut RawWord word = new RawWord(0);
@@ -820,7 +820,7 @@ internal sealed class UnionLayoutTests
         Assert.That(narrow.HasErrors, Is.True,
             string.Join(Environment.NewLine, narrow.Diagnostics));
 
-        var nestedNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var nestedNarrow = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 RejectPaddedWideThroughNestedField() {
                     mut RawWord word = new RawWord(0);
@@ -838,7 +838,7 @@ internal sealed class UnionLayoutTests
     [Test]
     public void RawUnionAlternativeStoreInvalidatesPaddingCoverage()
     {
-        var partialCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var partialCompilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Sparse {
@@ -867,7 +867,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 partialCompilation.Diagnostics));
 
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Sparse {
@@ -906,7 +906,7 @@ internal sealed class UnionLayoutTests
     [Test]
     public void RawUnionOverlappingStoreInvalidatesPointerValidity()
     {
-        var preservedCompilation = Compilation.CreateLibrary(
+        var preservedCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse("""
                 [Blittable]
                 [Layout(LayoutKind.Union)]
@@ -931,7 +931,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 preservedCompilation.Diagnostics));
 
-        var invalidatedCompilation = Compilation.CreateLibrary(
+        var invalidatedCompilation = CreateLayoutLibrary(
             SyntaxTree.Parse("""
                 [Blittable]
                 [Layout(LayoutKind.Union)]
@@ -967,7 +967,7 @@ internal sealed class UnionLayoutTests
     [Test]
     public void RawUnionCallSitesConsumeVerifiedReturnCoverage()
     {
-        var wideCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var wideCompilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Union)]
             public struct RawWord {
@@ -992,7 +992,7 @@ internal sealed class UnionLayoutTests
         Assert.That(wideCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, wideCompilation.Diagnostics));
 
-        var narrowCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var narrowCompilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Union)]
             public struct RawWord {
@@ -1020,6 +1020,143 @@ internal sealed class UnionLayoutTests
     }
 
     [Test]
+    public void NestedRawUnionReturnCoverageIntersectsNormalResults()
+    {
+        const string declarations = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Envelope {
+                public RawWord Inner;
+
+                internal Envelope(RawWord inner) {
+                    Inner = inner;
+                }
+            }
+            """;
+
+        var complete = CreateLayoutLibrary(SyntaxTree.Parse(
+            declarations + """
+            public Envelope MakeWide(bool chooseFirst) {
+                init mut RawWord value;
+                if (chooseFirst) {
+                    unsafe { value.Wide = uint64(7); }
+                } else {
+                    unsafe { value.Wide = uint64(9); }
+                }
+                return new Envelope(value);
+            }
+
+            public uint64 ReadNestedWide(bool chooseFirst) {
+                mut Envelope value = MakeWide(chooseFirst);
+                unsafe { return value.Inner.Wide; }
+            }
+            """), BoundRuntimePolicy.FailFast);
+        Assert.That(complete.HasErrors, Is.False,
+            string.Join(Environment.NewLine, complete.Diagnostics));
+
+        var incomplete = CreateLayoutLibrary(SyntaxTree.Parse(
+            declarations + """
+            public Envelope MakeMixed(bool chooseWide) {
+                init mut RawWord value;
+                if (chooseWide) {
+                    unsafe { value.Wide = uint64(7); }
+                } else {
+                    unsafe { value.Narrow = uint32(9); }
+                }
+                return new Envelope(value);
+            }
+
+            public uint64 ReadNestedWide(bool chooseWide) {
+                mut Envelope value = MakeMixed(chooseWide);
+                unsafe { return value.Inner.Wide; }
+            }
+            """), BoundRuntimePolicy.FailFast);
+        Assert.That(incomplete.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                incomplete.Diagnostics));
+        Assert.That(incomplete.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine,
+                incomplete.Diagnostics));
+    }
+
+    [Test]
+    public void ExceptionalBranchesDoNotWeakenNormalUnionReturnCoverage()
+    {
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+
+            public RawWord MakeWideOrThrow(bool chooseWide) {
+                if (chooseWide) {
+                    init mut RawWord value;
+                    unsafe { value.Wide = uint64(7); }
+                    return value;
+                }
+                require false;
+            }
+
+            public uint64 ObserveWide(bool chooseWide) {
+                mut RawWord value = MakeWideOrThrow(chooseWide);
+                unsafe { return value.Wide; }
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void MixedRecursiveUnionReturnsDoNotPublishCoverage()
+    {
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint32 Narrow;
+                public mut uint64 Wide;
+            }
+
+            public RawWord MakeWide() {
+                init mut RawWord value;
+                unsafe { value.Wide = uint64(7); }
+                return value;
+            }
+
+            public RawWord MakeMixed(bool chooseWide) {
+                if (chooseWide) {
+                    return MakeWide();
+                }
+                return MakeMixed(true);
+            }
+
+            public uint64 ObserveWide() {
+                mut RawWord value = MakeMixed(true);
+                unsafe { return value.Wide; }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine,
+                compilation.Diagnostics));
+    }
+
+    [Test]
     public void RawUnionAlternativeInitializationTracksWrittenBytes()
     {
         const string prefix = """
@@ -1034,7 +1171,7 @@ internal sealed class UnionLayoutTests
             }
             """;
 
-        var narrowCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var narrowCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint32 ReadNarrow() {
                     mut RawWord value = new RawWord(7);
@@ -1045,7 +1182,7 @@ internal sealed class UnionLayoutTests
             string.Join(Environment.NewLine,
                 narrowCompilation.Diagnostics));
 
-        var wideCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var wideCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
             prefix + """
                 public uint64 ReadWide() {
                     mut RawWord value = new RawWord(7);
@@ -1059,7 +1196,7 @@ internal sealed class UnionLayoutTests
     [Test]
     public void RejectsOwningAlternativeInRawUnion()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public unique struct Owner {
@@ -1082,7 +1219,7 @@ internal sealed class UnionLayoutTests
     [Test]
     public void PrivateModuleRoundTripPreservesRawUnionLayout()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Union)]
             public struct RawWord {
@@ -1106,4 +1243,11 @@ internal sealed class UnionLayoutTests
         Assert.That(rawWord.Fields[0].Offset, Is.Zero);
         Assert.That(rawWord.Fields[1].Offset, Is.Zero);
     }
+
+    private static Compilation CreateLayoutLibrary(SyntaxTree tree,
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
+        => Compilation.CreateLibrary(tree, new CompilationOptions {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
 }

@@ -2,16 +2,17 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class NamedTransferFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NamedTransferFrontendProjectionTests
 {
     private const string Source = "public int32 Value() { @const: while (true) { do { break const; } while (false); } return 42; }";
     [TestCase(false)]
@@ -31,13 +32,40 @@ public sealed class NamedTransferFrontendProjectionTests
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), bytes, policy);
             var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-            var outer = ((global::System.Func<BoundWhile>)(() => { var __nunitActual0 = actual.Functions[0].Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual0!; }))();
-            var inner = ((global::System.Func<BoundWhile>)(() => { var __nunitActual2 = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => { var __nunitActual1 = outer.Body; Assert.That(__nunitActual1, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual1!; }))().Statements); Assert.That(__nunitActual2, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual2!; }))();
-            var transfer = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => { var __nunitActual3 = inner.Body; Assert.That(__nunitActual3, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual3!; }))().Statements);
-            Assert.That(continuing ? ((global::System.Func<BoundContinue>)(() => { var __nunitActual4 = transfer; Assert.That(__nunitActual4, Is.TypeOf<BoundContinue>()); return (BoundContinue)__nunitActual4!; }))().TargetDepth
-                : ((global::System.Func<BoundBreak>)(() => { var __nunitActual5 = transfer; Assert.That(__nunitActual5, Is.TypeOf<BoundBreak>()); return (BoundBreak)__nunitActual5!; }))().TargetDepth, Is.EqualTo(2));
+            var outer = ((global::System.Func<BoundWhile>)(() => {
+                var __nunitActual0 = actual.Functions[0].Body.Statements[0];
+                Assert.That(__nunitActual0, Is.TypeOf<BoundWhile>());
+                return (BoundWhile)__nunitActual0!;
+            }))();
+            var inner = ((global::System.Func<BoundWhile>)(() => {
+                var __nunitActual2 = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => {
+    var __nunitActual1 = outer.Body;
+    Assert.That(__nunitActual1, Is.TypeOf<BoundBlock>());
+    return (BoundBlock)__nunitActual1!; }))().Statements);
+                Assert.That(__nunitActual2, Is.TypeOf<BoundWhile>());
+                return (BoundWhile)__nunitActual2!;
+            }))();
+            var transfer = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => {
+                var __nunitActual3 = inner.Body;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundBlock>());
+                return (BoundBlock)__nunitActual3!;
+            }))().Statements);
+            Assert.That(continuing ? ((global::System.Func<BoundContinue>)(() => {
+                var __nunitActual4 = transfer;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundContinue>());
+                return (BoundContinue)__nunitActual4!;
+            }))().TargetDepth
+                : ((global::System.Func<BoundBreak>)(() => {
+                    var __nunitActual5 = transfer;
+                    Assert.That(__nunitActual5, Is.TypeOf<BoundBreak>());
+                    return (BoundBreak)__nunitActual5!;
+                }))().TargetDepth, Is.EqualTo(2));
             // The continuing case is deliberately compile-only.
-            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = hosted.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), ["Value"],
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = hosted.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(), ["Value"],
                 (NativeRuntimePolicy)policy)));
         }
     }
@@ -73,7 +101,7 @@ public sealed class NamedTransferFrontendProjectionTests
     {
         var words = Projection(Source, false);
         words[index] = value;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source), Bytes(words)));
     }
     [TestCase("break const;","break Const;")]
     [TestCase("break const;","break other;")]
@@ -84,7 +112,7 @@ public sealed class NamedTransferFrontendProjectionTests
     [TestCase("return 42;","return 43;")]
     public void IndependentNamedTransferRejectsContradictingSource(string before, string after)
     {
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(
             Source.Replace(before, after, StringComparison.Ordinal)), Bytes(Projection(Source, false))));
     }
     [TestCase("",false)]
@@ -103,27 +131,21 @@ public sealed class NamedTransferFrontendProjectionTests
     [TestCase("/*\u2028*/",true)]
     [TestCase("// gap\n",true)]
     [TestCase("/// gap\n",true)]
-    public void IndependentHistoricalAndEffectHeadersEnforcePhysicalLineAttachment(string gap, bool invalid)
+    public void IndependentHistoricalHeaderEnforcesPhysicalLineAttachmentAndRetiredEffectBit(string gap, bool invalid)
     {
-        foreach (var effects in new[] { false, true })
+        var text = Source.Replace("@const: ", "@const:" + gap, StringComparison.Ordinal);
+        var words = Projection(text, false);
+        if (invalid)
         {
-            var text = (effects ? "[NoThrow] " : "")
-                + Source.Replace("@const: ", "@const:" + gap, StringComparison.Ordinal);
-            var words = Projection(text, false);
-            if (effects)
-            {
-                words[0] = 87;
-                words[2] = 3;
-            }
-            if (invalid)
-            {
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
-            }
-            else
-            {
-                Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
-            }
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
+        else
+        {
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
+        }
+        words[0] = 87;
+        words[2] |= 2;
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
     [TestCase(16384,true)]
     [TestCase(16385,false)]
@@ -137,7 +159,7 @@ public sealed class NamedTransferFrontendProjectionTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(source), Bytes(Projection(Source, false))));
         }
     }
@@ -152,7 +174,7 @@ public sealed class NamedTransferFrontendProjectionTests
         words[346] = 6;
         Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[343] = 0;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
     [Test]
@@ -163,7 +185,7 @@ public sealed class NamedTransferFrontendProjectionTests
         words[337] = 17;
         words[340] = duplicate.IndexOf("const: do", StringComparison.Ordinal);
         words[341] = duplicate.IndexOf(" } return", StringComparison.Ordinal) - words[340];
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(duplicate), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(duplicate), Bytes(words)));
 
         const string inactive = "public int32 Value() { a: do {} while (false); while (true) { break a; } return 42; }";
         words = Projection(inactive, false);
@@ -171,7 +193,7 @@ public sealed class NamedTransferFrontendProjectionTests
         words[333] = 1;
         words[334] = 0;
         words[335] = inactive.IndexOf("a:", StringComparison.Ordinal);
-        words[336] = inactive.IndexOf(';') + 1 - words[335];
+        words[336] = inactive.IndexOf(';', System.StringComparison.Ordinal) + 1 - words[335];
         words[337] = 3;
         words[338] = 3;
         words[339] = 1;
@@ -179,7 +201,7 @@ public sealed class NamedTransferFrontendProjectionTests
         words[341] = inactive.IndexOf(" return", StringComparison.Ordinal) - words[340];
         Node(words, 0, 21, inactive.IndexOf("false", StringComparison.Ordinal), 5, 5, 0);
         Node(words, 1, 20, inactive.IndexOf("true", StringComparison.Ordinal), 4, 5, 0);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(inactive), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(inactive), Bytes(words)));
     }
 
     private static int[] Projection(string text, bool continuing)
@@ -201,15 +223,15 @@ public sealed class NamedTransferFrontendProjectionTests
         var inner = text.IndexOf("do {", StringComparison.Ordinal);
         Statement(words, 1, 11, 3, 1, inner, outerEnd - 2);
         var transfer = text.IndexOf(continuing ? "continue" : "break", StringComparison.Ordinal);
-        Statement(words, 2, continuing ? 20 : 19, 0, -1, transfer, text.IndexOf(';') + 1);
+        Statement(words, 2, continuing ? 20 : 19, 0, -1, transfer, text.IndexOf(';', System.StringComparison.Ordinal) + 1);
         var returned = text.IndexOf("return", StringComparison.Ordinal);
-        Statement(words, 3, 8, 0, 2, returned, text.LastIndexOf(';') + 1);
+        Statement(words, 3, 8, 0, 2, returned, text.LastIndexOf(';', System.StringComparison.Ordinal) + 1);
         return words;
     }
 
     private static void Node(int[] words, int index, int operation, int start, int length, int type, int low)
     {
-        var offset = 42 + index * 8;
+        var offset = 42 + (index * 8);
         words[offset] = operation;
         words[offset + 1] = type;
         words[offset + 2] = start;
@@ -220,7 +242,7 @@ public sealed class NamedTransferFrontendProjectionTests
 
     private static void Statement(int[] words, int index, int kind, int slot, int root, int start, int end)
     {
-        var offset = 332 + index * 5;
+        var offset = 332 + (index * 5);
         words[offset] = kind;
         words[offset + 1] = slot;
         words[offset + 2] = root;

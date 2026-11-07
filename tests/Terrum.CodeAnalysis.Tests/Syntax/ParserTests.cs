@@ -3,15 +3,18 @@
 using System;
 using System.Linq;
 using System.Threading;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class ParserTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ParserTests
 {
+    private static readonly string[] s_twoTypeParameterNames = ["TLeft", "TRight"];
+
     [Test]
     public void DiscardStatementRetainsItsDistinctShapeAndTrivia()
     {
@@ -20,9 +23,21 @@ public sealed class ParserTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-47"));
         var discard = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual0 = discard.Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual0!; }))().Token.Kind, Is.EqualTo(TokenKind.Underscore));
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual1 = discard.Children[1]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual1!; }))().Token.Kind, Is.EqualTo(TokenKind.Equals));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual2 = discard.Children[2]; Assert.That(__nunitActual2, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual2!; }))().Kind, Is.EqualTo(SyntaxKind.InvocationExpression));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual0 = discard.Children[0];
+            Assert.That(__nunitActual0, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual0!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.Underscore));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual1 = discard.Children[1];
+            Assert.That(__nunitActual1, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual1!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.Equals));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual2 = discard.Children[2];
+            Assert.That(__nunitActual2, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual2!;
+        }))().Kind, Is.EqualTo(SyntaxKind.InvocationExpression));
         AssertLossless(tree);
     }
 
@@ -34,8 +49,16 @@ public sealed class ParserTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-47"));
         var alias = global::System.Linq.Enumerable.Single(tree.Root.Children.OfType<SyntaxNode>(), static node => node.Kind == SyntaxKind.AliasDeclaration);
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual3 = alias.Children[2]; Assert.That(__nunitActual3, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual3!; }))().Token.Name, Is.EqualTo("Count"));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual4 = alias.Children[4]; Assert.That(__nunitActual4, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual4!; }))().Kind, Is.EqualTo(SyntaxKind.TypeName));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual3 = alias.Children[2];
+            Assert.That(__nunitActual3, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual3!;
+        }))().Token.Name, Is.EqualTo("Count"));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual4 = alias.Children[4];
+            Assert.That(__nunitActual4, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual4!;
+        }))().Kind, Is.EqualTo(SyntaxKind.TypeName));
         AssertLossless(tree);
 
         var spacing = SyntaxTree.Parse("alias Count=int32;");
@@ -119,15 +142,15 @@ public sealed class ParserTests
             static node => node.Kind == SyntaxKind.ArrayInitializerExpression);
         var elements = initializer.Children.OfType<SyntaxNode>().ToArray();
         Assert.That(elements.Select(static element => element.Kind),
-            Is.EqualTo(new[] {
+            Is.EqualTo([
                 SyntaxKind.InvocationExpression,
                 SyntaxKind.CollectionSpreadElement,
                 SyntaxKind.InvocationExpression,
-            }));
+            ]));
 
         var spread = elements[1];
         Assert.That(spread.Children.OfType<SyntaxTokenElement>()
-            .Select(static token => token.Token.Kind), Is.EqualTo(new[] { TokenKind.DotDot }));
+            .Select(static token => token.Token.Kind), Is.EqualTo([TokenKind.DotDot]));
         Assert.That(spread.Children.OfType<SyntaxNode>().Single().Kind,
             Is.EqualTo(SyntaxKind.InvocationExpression));
         AssertLossless(tree);
@@ -152,14 +175,14 @@ public sealed class ParserTests
             .ToArray();
         Assert.That(declarations, Has.Length.EqualTo(2));
         Assert.That(declarations.Select(static declaration => declaration.Kind),
-            Is.EqualTo(new[] { SyntaxKind.StructDeclaration, SyntaxKind.ClassDeclaration }));
+            Is.EqualTo([SyntaxKind.StructDeclaration, SyntaxKind.ClassDeclaration]));
         Assert.That(declarations.Select(declaration =>
                 declaration.Children.OfType<SyntaxNode>()
                     .Single(static node => node.Kind == SyntaxKind.TypeParameterList)
                     .Children.OfType<SyntaxTokenElement>()
                     .Where(static token => token.Token.Kind == TokenKind.Identifier)
                     .Select(static token => token.Token.Name)),
-            Is.EqualTo(new[] { new[] { "TLeft", "TRight" }, new[] { "T" } }));
+            Is.EqualTo([s_twoTypeParameterNames, ["T"]]));
         AssertLossless(tree);
     }
 
@@ -207,7 +230,7 @@ public sealed class ParserTests
                     .ToArray()),
             Is.EqualTo(new[] {
                 new[] { SyntaxKind.TypeParameterList, SyntaxKind.ConstraintClause },
-                new[] { SyntaxKind.TypeParameterList, SyntaxKind.ConformanceList, SyntaxKind.ConstraintClause },
+                [SyntaxKind.TypeParameterList, SyntaxKind.ConformanceList, SyntaxKind.ConstraintClause],
             }.ToArray()));
         AssertLossless(tree);
     }
@@ -275,7 +298,7 @@ public sealed class ParserTests
                     or SyntaxKind.IndexerDeclaration or SyntaxKind.AssociatedTypeRequirement
                     or SyntaxKind.InterfaceConstantDeclaration)
                 .Select(static node => node.Kind),
-            Is.EqualTo(new[] {
+            Is.EqualTo([
                 SyntaxKind.FunctionDeclaration,
                 SyntaxKind.FunctionDeclaration,
                 SyntaxKind.OperatorDeclaration,
@@ -283,9 +306,50 @@ public sealed class ParserTests
                 SyntaxKind.IndexerDeclaration,
                 SyntaxKind.AssociatedTypeRequirement,
                 SyntaxKind.InterfaceConstantDeclaration,
-            }));
+            ]));
         Assert.That(declaration.DescendantNodes().Count(static node => node.Kind == SyntaxKind.ContractClause),
             Is.EqualTo(2));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesInstanceAndStaticConstructorContractClausesLosslessly()
+    {
+        const string Source = """
+            struct Example {
+                int32 Value;
+                Example() require true ensure this.Value == 0 { this.Value = 0; }
+                [Terrum.StaticInitializer(Terrum.StaticInitializationTrigger.GroupedStaticFieldAccess)]
+                static Example() require true ensure true;
+            }
+            """;
+
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.ConstructorDeclaration), Is.EqualTo(2));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.ContractClause), Is.EqualTo(4));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesDeclarationPostconditionReturnReference()
+    {
+        const string Source = """
+            int32 Identity(int32 value) ensure return == value { return value; }
+            """;
+
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.ReturnValueReference), Is.EqualTo(1));
         AssertLossless(tree);
     }
 
@@ -403,9 +467,27 @@ public sealed class ParserTests
         var tree = SyntaxTree.Parse("void F() { return " + type + "(/* conversion */ value) + 1; }");
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var cast = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.InvocationExpression);
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual6 = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual5 = cast.Children[0]; Assert.That(__nunitActual5, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual5!; }))().Children[0]; Assert.That(__nunitActual6, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual6!; }))().Token.Text, Is.EqualTo(type));
-        var arguments = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual7 = cast.Children[1]; Assert.That(__nunitActual7, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual7!; }))();
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual9 = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual8 = arguments.Children[1]; Assert.That(__nunitActual8, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual8!; }))().Children[0]; Assert.That(__nunitActual9, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual9!; }))().Kind, Is.EqualTo(SyntaxKind.NameExpression));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual6 = ((global::System.Func<SyntaxNode>)(() => {
+    var __nunitActual5 = cast.Children[0];
+    Assert.That(__nunitActual5, Is.TypeOf<SyntaxNode>());
+    return (SyntaxNode)__nunitActual5!; }))().Children[0];
+            Assert.That(__nunitActual6, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual6!;
+        }))().Token.Text, Is.EqualTo(type));
+        var arguments = ((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual7 = cast.Children[1];
+            Assert.That(__nunitActual7, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual7!;
+        }))();
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual9 = ((global::System.Func<SyntaxNode>)(() => {
+    var __nunitActual8 = arguments.Children[1];
+    Assert.That(__nunitActual8, Is.TypeOf<SyntaxNode>());
+    return (SyntaxNode)__nunitActual8!; }))().Children[0];
+            Assert.That(__nunitActual9, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual9!;
+        }))().Kind, Is.EqualTo(SyntaxKind.NameExpression));
         var addition = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.BinaryExpression);
         Assert.That(addition.Children[0], Is.SameAs(cast));
         AssertLossless(tree);
@@ -456,8 +538,16 @@ public sealed class ParserTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var requirement = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.RequireStatement);
         Assert.That(requirement.Children.Length, Is.EqualTo(3));
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual10 = requirement.Children[0]; Assert.That(__nunitActual10, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual10!; }))().Token.Kind, Is.EqualTo(TokenKind.RequireKeyword));
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual11 = requirement.Children[2]; Assert.That(__nunitActual11, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual11!; }))().Token.Kind, Is.EqualTo(TokenKind.Semicolon));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual10 = requirement.Children[0];
+            Assert.That(__nunitActual10, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual10!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.RequireKeyword));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual11 = requirement.Children[2];
+            Assert.That(__nunitActual11, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual11!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.Semicolon));
         AssertLossless(tree);
     }
 
@@ -469,12 +559,28 @@ public sealed class ParserTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var region = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.TryFinallyStatement);
         Assert.That(region.Children.Length, Is.EqualTo(4));
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual12 = region.Children[0]; Assert.That(__nunitActual12, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual12!; }))().Token.Kind, Is.EqualTo(TokenKind.TryKeyword));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual13 = region.Children[1]; Assert.That(__nunitActual13, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual13!; }))().Kind, Is.EqualTo(SyntaxKind.Block));
-        var keyword = ((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual14 = region.Children[2]; Assert.That(__nunitActual14, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual14!; }))().Token;
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual12 = region.Children[0];
+            Assert.That(__nunitActual12, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual12!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.TryKeyword));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual13 = region.Children[1];
+            Assert.That(__nunitActual13, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual13!;
+        }))().Kind, Is.EqualTo(SyntaxKind.Block));
+        var keyword = ((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual14 = region.Children[2];
+            Assert.That(__nunitActual14, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual14!;
+        }))().Token;
         Assert.That(keyword.Kind, Is.EqualTo(TokenKind.FinallyKeyword));
         Assert.That(global::System.Linq.Enumerable.Any(keyword.LeadingTrivia,trivia => trivia.Text == "/* keyword */"),Is.True);
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual15 = region.Children[3]; Assert.That(__nunitActual15, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual15!; }))().Kind, Is.EqualTo(SyntaxKind.Block));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual15 = region.Children[3];
+            Assert.That(__nunitActual15, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual15!;
+        }))().Kind, Is.EqualTo(SyntaxKind.Block));
         Assert.That(region.Span.Start, Is.EqualTo(Source.IndexOf("try", StringComparison.Ordinal)));
         Assert.That(region.Span.End, Is.EqualTo(Source.LastIndexOf("} }", StringComparison.Ordinal) + 1));
         AssertLossless(tree);
@@ -501,17 +607,49 @@ public sealed class ParserTests
         var tree = SyntaxTree.Parse(Source);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var unsafeBlock = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.UnsafeStatement);
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual16 = unsafeBlock.Children[0]; Assert.That(__nunitActual16, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual16!; }))().Token.Kind, Is.EqualTo(TokenKind.UnsafeKeyword));
-        var scope = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual17 = unsafeBlock.Children[1]; Assert.That(__nunitActual17, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual17!; }))();
-        var open = ((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual18 = scope.Children[0]; Assert.That(__nunitActual18, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual18!; }))().Token;
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual16 = unsafeBlock.Children[0];
+            Assert.That(__nunitActual16, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual16!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.UnsafeKeyword));
+        var scope = ((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual17 = unsafeBlock.Children[1];
+            Assert.That(__nunitActual17, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual17!;
+        }))();
+        var open = ((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual18 = scope.Children[0];
+            Assert.That(__nunitActual18, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual18!;
+        }))().Token;
         Assert.That(global::System.Linq.Enumerable.Any(open.LeadingTrivia,trivia => trivia.Text == "/* scope */"),Is.True);
         var region = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.TryCatchStatement);
         Assert.That(region.Children.Length, Is.EqualTo(6));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual19 = region.Children[1]; Assert.That(__nunitActual19, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual19!; }))().Kind, Is.EqualTo(SyntaxKind.Block));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual20 = region.Children[2]; Assert.That(__nunitActual20, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual20!; }))().Token.LeadingTrivia,trivia => trivia.Text == "/* recovery */"),Is.True);
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual21 = region.Children[3]; Assert.That(__nunitActual21, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual21!; }))().Kind, Is.EqualTo(SyntaxKind.Block));
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual22 = region.Children[4]; Assert.That(__nunitActual22, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual22!; }))().Token.Kind, Is.EqualTo(TokenKind.FinallyKeyword));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual23 = region.Children[5]; Assert.That(__nunitActual23, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual23!; }))().Kind, Is.EqualTo(SyntaxKind.Block));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual19 = region.Children[1];
+            Assert.That(__nunitActual19, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual19!;
+        }))().Kind, Is.EqualTo(SyntaxKind.Block));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual20 = region.Children[2];
+            Assert.That(__nunitActual20, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual20!;
+        }))().Token.LeadingTrivia,trivia => trivia.Text == "/* recovery */"),Is.True);
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual21 = region.Children[3];
+            Assert.That(__nunitActual21, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual21!;
+        }))().Kind, Is.EqualTo(SyntaxKind.Block));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual22 = region.Children[4];
+            Assert.That(__nunitActual22, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual22!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.FinallyKeyword));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual23 = region.Children[5];
+            Assert.That(__nunitActual23, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual23!;
+        }))().Kind, Is.EqualTo(SyntaxKind.Block));
         AssertLossless(tree);
     }
     [TestCase("void F() { unsafe { try { } catch return; } return; }",TokenKind.OpenBrace)]
@@ -566,7 +704,9 @@ public sealed class ParserTests
     {
         var tree = SyntaxTree.Parse(text);
         Assert.That(tree.Diagnostics.Length, Is.EqualTo(2));
-        {var __nunitItems0 = tree.Diagnostics;        Assert.Multiple(() => {
+        {
+            var __nunitItems0 = tree.Diagnostics;
+            Assert.Multiple(() => {
             foreach (var __nunitItem24 in __nunitItems0)
             {
                 {
@@ -574,7 +714,8 @@ public sealed class ParserTests
                     Assert.That(tree.Source.GetSubText(__nunitItem24.Span), Is.EqualTo("?"));
                 }
             }
-        });}
+        });
+        }
         AssertLossless(tree);
     }
     [TestCase("T?")]
@@ -597,8 +738,16 @@ public sealed class ParserTests
     public void PreservesOperatorPrecedence(string text, SyntaxKind kind, string outer, string inner)
     {
         var binaries = SyntaxTree.Parse(text).Root.DescendantNodes().Where(node => node.Kind == kind).ToArray();
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual25 = binaries[0].Children[1]; Assert.That(__nunitActual25, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual25!; }))().Token.Text, Is.EqualTo(outer));
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual26 = binaries[1].Children[1]; Assert.That(__nunitActual26, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual26!; }))().Token.Text, Is.EqualTo(inner));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual25 = binaries[0].Children[1];
+            Assert.That(__nunitActual25, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual25!;
+        }))().Token.Text, Is.EqualTo(outer));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual26 = binaries[1].Children[1];
+            Assert.That(__nunitActual26, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual26!;
+        }))().Token.Text, Is.EqualTo(inner));
     }
 
     [Test]
@@ -606,8 +755,16 @@ public sealed class ParserTests
     {
         var tree = SyntaxTree.Parse("int32 F() { return a - b - c; }");
         var outer = tree.Root.DescendantNodes().First(node => node.Kind == SyntaxKind.BinaryExpression);
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual27 = outer.Children[0]; Assert.That(__nunitActual27, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual27!; }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
-        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual28 = outer.Children[2]; Assert.That(__nunitActual28, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual28!; }))().Kind, Is.EqualTo(SyntaxKind.NameExpression));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual27 = outer.Children[0];
+            Assert.That(__nunitActual27, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual27!;
+        }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual28 = outer.Children[2];
+            Assert.That(__nunitActual28, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual28!;
+        }))().Kind, Is.EqualTo(SyntaxKind.NameExpression));
     }
 
     [Test]
@@ -624,11 +781,31 @@ public sealed class ParserTests
             static node => node.Kind == SyntaxKind.InvocationExpression), Is.EqualTo(2));
 
         var outer = global::System.Linq.Enumerable.Single(genericNames, static node =>
-            ((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual29 = node.Children[0]; Assert.That(__nunitActual29, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual29!; }))().Token.Text == "Outer");
-        var outerArguments = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual30 = outer.Children[1]; Assert.That(__nunitActual30, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual30!; }))();
-        var inner = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual31 = outerArguments.Children[1]; Assert.That(__nunitActual31, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual31!; }))();
-        var box = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual32 = inner.Children[2]; Assert.That(__nunitActual32, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual32!; }))();
-        var primitive = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual33 = box.Children[2]; Assert.That(__nunitActual33, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual33!; }))();
+            ((global::System.Func<SyntaxTokenElement>)(() => {
+                var __nunitActual29 = node.Children[0];
+                Assert.That(__nunitActual29, Is.TypeOf<SyntaxTokenElement>());
+                return (SyntaxTokenElement)__nunitActual29!;
+            }))().Token.Text == "Outer");
+        var outerArguments = ((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual30 = outer.Children[1];
+            Assert.That(__nunitActual30, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual30!;
+        }))();
+        var inner = ((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual31 = outerArguments.Children[1];
+            Assert.That(__nunitActual31, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual31!;
+        }))();
+        var box = ((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual32 = inner.Children[2];
+            Assert.That(__nunitActual32, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual32!;
+        }))();
+        var primitive = ((global::System.Func<SyntaxNode>)(() => {
+            var __nunitActual33 = box.Children[2];
+            Assert.That(__nunitActual33, Is.TypeOf<SyntaxNode>());
+            return (SyntaxNode)__nunitActual33!;
+        }))();
         Assert.That(inner.Kind, Is.EqualTo(SyntaxKind.TypeName));
         Assert.That(box.Kind, Is.EqualTo(SyntaxKind.TypeName));
         Assert.That(primitive.Kind, Is.EqualTo(SyntaxKind.TypeName));
@@ -661,7 +838,13 @@ public sealed class ParserTests
         Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantNodes(),static node => node.Kind == SyntaxKind.GenericNameExpression),Is.False);
         Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantNodes(),static node => node.Kind == SyntaxKind.BinaryExpression),Is.True);
         Assert.That(global::System.Linq.Enumerable.Count(tree.Root.DescendantNodes(),static node => node.Kind == SyntaxKind.ReturnStatement),Is.EqualTo(1));
-        {var __nunitItems1 = tree.Diagnostics;        Assert.Multiple(() => { foreach (var __nunitItem34 in __nunitItems1) { Assert.That(__nunitItem34.Span.End, Is.InRange(0, Source.Length)); } });}
+        {
+            var __nunitItems1 = tree.Diagnostics;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem34 in __nunitItems1)
+    {
+        Assert.That(__nunitItem34.Span.End, Is.InRange(0, Source.Length)); } });
+        }
         AssertLossless(tree);
     }
     [TestCase("void F( { return ;")]
@@ -680,7 +863,13 @@ public sealed class ParserTests
         var tree = SyntaxTree.Parse(text);
         Assert.That(tree.HasErrors, Is.True);
         AssertLossless(tree);
-        {var __nunitItems2 = tree.Diagnostics;        Assert.Multiple(() => { foreach (var __nunitItem35 in __nunitItems2) { Assert.That(__nunitItem35.Span.End, Is.InRange(0, text.Length)); } });}
+        {
+            var __nunitItems2 = tree.Diagnostics;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem35 in __nunitItems2)
+    {
+        Assert.That(__nunitItem35.Span.End, Is.InRange(0, text.Length)); } });
+        }
     }
 
     [Test]

@@ -13,7 +13,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class GenericNominalIdentityTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class GenericNominalIdentityTests
 {
     [Test]
     public void BindsExactSelectedCoreTaskIdentityAndItsDeclaredVoidDefault()
@@ -71,7 +72,7 @@ public sealed class GenericNominalIdentityTests
         var writableArgument = writableInstance.Arguments.Single();
         Assert.That(writableArgument.Type, Is.Not.EqualTo(PrimitiveType.NativeRawPointer));
         Assert.That(writableArgument.TypeSpecReference, Is.EqualTo(0xF301_8C_00));
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program, [
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program, [
             new NativeImportBinding("ReadDefault", "Core.dll", "ReadDefault"),
             new NativeImportBinding("ReadInteger", "Core.dll", "ReadInteger"),
             new NativeImportBinding("ReadWritable", "Core.dll", "ReadWritable"),
@@ -93,6 +94,68 @@ public sealed class GenericNominalIdentityTests
             diagnostic.Code == "TRM3005"), Is.False);
         Assert.That(sourceUse.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3016"), Is.True);
+    }
+
+    [Test]
+    public void CoreTaskSelectionPreservesPrivateEnumOrigins()
+    {
+        var taskReference = TrRmExecutableCompiler.CreateReference(
+            CreateGenericTypeProvider("Terrum.Threading.Tasks", "Task", 3,
+                2, 0xF200_0000));
+        var taskDefinition = taskReference.GenericNominalTypeDefinitions
+            .Single(static definition => definition.Name == "Task");
+        var enumType = BoundEnumTypes.Type(
+            taskReference.EnumDefinitions.Length);
+        var enumOrigin = new BoundPrivateNominalTypeOrigin(enumType,
+            BoundPrivateNominalOriginKind.OwnedDefinition,
+            IsExported: true, UsingModuleIdentity: "EnumProvider",
+            LocalDeclarationKey: "types.color");
+        var enumDefinition = BoundEnumDefinition.CreatePrivate(enumOrigin,
+            "Color", PrimitiveType.Int32, [
+                new BoundPrivateEnumMemberSnapshot("Red", 1, true,
+                    "member.red"),
+            ], isPublic: true, isPrimary: true, isFlags: false,
+            blittableTargetRequirement: 0);
+        var reference = new CompilationReference(taskReference.Structures,
+            taskReference.Functions, taskReference.RuntimePolicy,
+            taskReference.RequiresSourceGrant,
+            taskReference.InvocationProfileId,
+            taskReference.NativeFunctionPointerSignatures,
+            taskReference.NativePointerTypes,
+            taskReference.NativeCoreRegistration,
+            enumDefinitions: [.. taskReference.EnumDefinitions,
+                enumDefinition],
+            checkedReferenceTypes: taskReference.CheckedReferenceTypes,
+            interfaces: taskReference.Interfaces,
+            genericNominalTypeDefinitions:
+                taskReference.GenericNominalTypeDefinitions,
+            genericNominalTypeInstances:
+                taskReference.GenericNominalTypeInstances,
+            coreTaskType: taskReference.CoreTaskType,
+            nativeFixedArrayTypes: taskReference.NativeFixedArrayTypes,
+            coreExceptionIdentitySelections:
+                taskReference.CoreExceptionIdentitySelections,
+            layoutCoreRegistration: taskReference.LayoutCoreRegistration,
+            privateNominalTypeOrigins: [
+                .. taskReference.PrivateNominalTypeOrigins, enumOrigin,
+            ],
+            classes: taskReference.Classes,
+            privateClassReferences:
+                taskReference.PrivateClassReferences);
+
+        var selected = reference.SelectCoreTaskType(
+            taskDefinition.Identity);
+        Assert.That(selected.CoreTaskType,
+            Is.EqualTo(new CoreTaskTypeIdentity(taskDefinition.Identity)));
+        Assert.That(selected.EnumDefinitions.Single().Identity,
+            Is.SameAs(enumDefinition.Identity));
+        Assert.That(selected.PrivateNominalTypeOrigins,
+            Is.EqualTo([enumOrigin]));
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public Color ReadColor() { return Color.Red; }"), selected);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -121,9 +184,9 @@ public sealed class GenericNominalIdentityTests
         var identity = reference.GenericNominalTypeDefinitions.Single(static item =>
             item.Name == "Task").Identity;
 
-        Assert.Throws<ArgumentException>(() => reference.SelectCoreTaskType(
+        _ = Assert.Throws<ArgumentException>(() => reference.SelectCoreTaskType(
             identity with { ProviderIdentity = "Other.Provider" }));
-        Assert.Throws<ArgumentException>(() => reference.SelectCoreTaskType(
+        _ = Assert.Throws<ArgumentException>(() => reference.SelectCoreTaskType(
             identity with { ModuleIdentity = "Other.Module" }));
     }
 
@@ -136,7 +199,7 @@ public sealed class GenericNominalIdentityTests
         var identity = reference.GenericNominalTypeDefinitions.Single(static item =>
             item.Name == "Task").Identity;
 
-        Assert.Throws<ArgumentException>(() => reference.SelectCoreTaskType(identity));
+        _ = Assert.Throws<ArgumentException>(() => reference.SelectCoreTaskType(identity));
     }
 
     [Test]
@@ -189,7 +252,7 @@ public sealed class GenericNominalIdentityTests
         var provider = CreateGenericTypeProvider("Terrum.Threading.Tasks",
             "Task", 3, 2, 0xF200_0000, taskInputTypeSpecRef: 0xF300_8B08);
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.CreateGenericNominalTypeReference(provider));
     }
 
@@ -246,7 +309,7 @@ public sealed class GenericNominalIdentityTests
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformed.AsSpan(genericParamOffset + 28), 6);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateGenericNominalTypeReference(malformed));
     }
 
@@ -415,10 +478,12 @@ public sealed class GenericNominalIdentityTests
         sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections);
 
-        ReadOnlyMemory<byte> ConstructedType(uint typeArgument) =>
-            includeConstantFormal
+        ReadOnlyMemory<byte> ConstructedType(uint typeArgument)
+        {
+            return includeConstantFormal
                 ? TrRmTypeSpecTableWriter.Constructed(1, [typeArgument, 1])
                 : TrRmTypeSpecTableWriter.Constructed(1, [typeArgument]);
+        }
     }
 
     private static int GetSectionOffset(byte[] artifact, ushort sectionKind)

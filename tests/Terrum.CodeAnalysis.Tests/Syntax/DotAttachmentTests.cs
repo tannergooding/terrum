@@ -18,9 +18,11 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class DotAttachmentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class DotAttachmentTests
 {
     private static readonly string[] Gaps = ["", " ", "\n", "\r\n", "/* gap */", "//** gap **//", "// gap\n", "/// gap\n"];
+    private static readonly bool[] s_qualifiers = [true, false];
     private static readonly string[] QualifiedForms = [
         "using N#Types;",
         "namespace N#Types;",
@@ -57,7 +59,7 @@ public sealed class DotAttachmentTests
     ];
 
     public static IEnumerable<object[]> Boundaries =>
-        from qualified in new[] { true, false }
+        from qualified in s_qualifiers
         from form in qualified ? QualifiedForms : MemberForms
         from pair in BoundaryPairs()
         select new object[] { form, pair.Left, pair.Right, qualified };
@@ -78,7 +80,7 @@ public sealed class DotAttachmentTests
     public void DotRoleUsesRawBoundariesBeforeBinding(string form, string left, string right, bool qualified)
     {
         var source = form.Replace("#", left + "." + right, StringComparison.Ordinal);
-        var dot = new TextSpan(form.IndexOf('#') + left.Length, 1);
+        var dot = new TextSpan(form.IndexOf('#', System.StringComparison.Ordinal) + left.Length, 1);
         var invalid = qualified ? left.Length != 0 || right.Length != 0 : left.Length != 0 && right.Length != 0;
         var lexed = Lexer.Lex(SourceText.From(source));
         Assert.That(lexed.Diagnostics, Is.Empty);
@@ -102,7 +104,7 @@ public sealed class DotAttachmentTests
     public async Task CompiledScannerAdapterPreservesEveryRoleAndBoundaryAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root).ConfigureAwait(false);
         var chunk = new StringBuilder();
         var chunks = new List<string>();
         var expectedFailures = 0;
@@ -120,9 +122,9 @@ public sealed class DotAttachmentTests
             if (chunk.Length + text.Length > ScannerHost.MaximumSourceLength)
             {
                 chunks.Add(chunk.ToString());
-                chunk.Clear();
+                _ = chunk.Clear();
             }
-            chunk.Append(text);
+            _ = chunk.Append(text);
         }
         chunks.Add(chunk.ToString());
         var actualFailures = 0;
@@ -130,10 +132,15 @@ public sealed class DotAttachmentTests
         {
             var source = SourceText.From(text);
             var buffers = ScannerHost.CreateBuffers(source);
-            var compilation = Compilation.Create(
-                SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"), buffers, (BoundRuntimePolicy)policy);
+            var compilation = ScannerTests.CreateScannerCompilation(
+                SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
+                buffers, (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy);
+            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(), policy);
             var raw = ScannerHost.ReadTokens(source, native.ExitCode, Buffer(3));
             Assert.That(raw, Is.EqualTo(Lexer.Lex(source).Tokens.Select(token => new ScannerToken(token.Kind, token.Span))));
             var adapted = ScannerHost.ReadLexResult(source, native.ExitCode, Buffer(3), Buffer(5), Buffer(4));
@@ -143,8 +150,10 @@ public sealed class DotAttachmentTests
             Assert.That(current.Diagnostics.ToArray(), Is.EqualTo(hosted.Diagnostics.ToArray()));
             actualFailures += current.Diagnostics.Count(diagnostic => diagnostic.Code == "TRM1007");
 
-            ReadOnlySpan<byte> Buffer(int index) =>
-                native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+            ReadOnlySpan<byte> Buffer(int index)
+            {
+                return native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+            }
         }
         Assert.That(actualFailures, Is.EqualTo(expectedFailures));
     }
@@ -214,7 +223,11 @@ public sealed class DotAttachmentTests
                     """ + "int32 Main() { " + body + " }";
                 var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = compilation.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))(), policy), Is.EqualTo(42));
             }
         }
     }
@@ -227,7 +240,11 @@ public sealed class DotAttachmentTests
             var compilation = Compilation.CreateLibrary(
                 SyntaxTree.Parse("namespace @namespace.N; public int32 @await() { " + body + " }"), (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            return ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+            return ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = compilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))();
         }
         var original = Producer("return 42;");
         var changed = Producer("return int32 .MaxValue - 2147483605;");
@@ -236,15 +253,23 @@ public sealed class DotAttachmentTests
         const string Client = "using @namespace.N; int32 Main() { return @namespace .N.@await(); }";
         var client = Compilation.Create(SyntaxTree.Parse(Client), ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = client.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = client.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy), Is.EqualTo(42));
         var nativeProducer = NativeModuleCompiler.CreateProducer(original, ["namespace.N.await"], "DotAttachment", policy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(changed, ["namespace.N.await"], "DotAttachment", policy);
         var nativeClient = Compilation.Create(SyntaxTree.Parse(Client),
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), (BoundRuntimePolicy)policy);
         Assert.That(nativeClient.HasErrors, Is.False, string.Join(Environment.NewLine, nativeClient.Diagnostics));
-        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = nativeClient.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), [nativeProducer], policy);
-        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement], TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = nativeClient.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(), [nativeProducer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement], TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
     }
     [TestCase("")]
     [TestCase(" ")]
@@ -267,13 +292,13 @@ public sealed class DotAttachmentTests
             var start = text.IndexOf("return", StringComparison.Ordinal) + 7;
             words[24] = text.Contains("MaxValue", StringComparison.Ordinal) ? int.MaxValue : 42;
             words[26] = start;
-            words[27] = text.IndexOf(';', start) - start;
+            words[27] = text.IndexOf(';', start, System.StringComparison.Ordinal) - start;
             var bytes = new byte[words.Length * 4];
             for (var index = 0; index < words.Length; index++)
             {
                 BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4), words[index]);
             }
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
         }
     }
 }

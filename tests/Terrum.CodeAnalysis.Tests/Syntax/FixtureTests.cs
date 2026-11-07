@@ -8,7 +8,8 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class FixtureTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FixtureTests
 {
     [TestCase("tests/Terrum.CodeAnalysis.Tests/Syntax/Fixtures/hello.terrum")]
     [TestCase("tests/Terrum.CodeAnalysis.Tests/Syntax/Fixtures/control-flow.terrum")]

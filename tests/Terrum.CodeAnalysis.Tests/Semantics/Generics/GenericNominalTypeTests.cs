@@ -1,14 +1,15 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class GenericNominalTypeTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class GenericNominalTypeTests
 {
     [Test]
     public void SpecializesInternalGenericStructsAcrossFieldsMethodsAndConstruction()
@@ -41,7 +42,7 @@ public sealed class GenericNominalTypeTests
         var nestedDefinition = program.SourceGenericTypeDefinitions.Single(
             static definition => definition.Name == "Nested");
         Assert.That(boxDefinition.Formals.Select(static formal => formal.Ordinal),
-            Is.EqualTo(new[] { 0 }));
+            Is.EqualTo([0]));
         Assert.That(boxDefinition.Formals.Single().HasTypeDefault, Is.False);
         Assert.That(program.Structures.Single(static structure
                 => structure.Name == "Box<int32>")
@@ -52,24 +53,24 @@ public sealed class GenericNominalTypeTests
         var int32BoxIndex = program.Structures.IndexOf(int32Box);
         Assert.That(program.SourceGenericTypeInstances.Single(instance
                 => instance.StructureIndex == int32BoxIndex).TypeArguments,
-            Is.EqualTo(new[] { PrimitiveType.Int32 }));
+            Is.EqualTo([PrimitiveType.Int32]));
         var uint32Box = program.Structures.Single(static structure
             => structure.Name == "Box<uint32>");
         var uint32BoxIndex = program.Structures.IndexOf(uint32Box);
         Assert.That(program.SourceGenericTypeInstances.Single(instance
                 => instance.StructureIndex == uint32BoxIndex).TypeArguments,
-            Is.EqualTo(new[] { PrimitiveType.UInt32 }));
+            Is.EqualTo([PrimitiveType.UInt32]));
         Assert.That(program.SourceGenericTypeInstances.Single(instance
                 => instance.DefinitionIndex == nestedDefinition.DefinitionIndex)
                 .TypeArguments,
-            Is.EqualTo(new[] { PrimitiveType.Int32 }));
+            Is.EqualTo([PrimitiveType.Int32]));
         var box = program.Structures.Single(static structure => structure.Name == "Box<int32>");
         Assert.That(box.Size, Is.EqualTo(4));
         Assert.That(box.Fields.Select(static field => field.Type),
-            Is.EqualTo(new[] { PrimitiveType.Int32 }));
+            Is.EqualTo([PrimitiveType.Int32]));
         var unsignedBox = program.Structures.Single(static structure => structure.Name == "Box<uint32>");
         Assert.That(unsignedBox.Fields.Select(static field => field.Type),
-            Is.EqualTo(new[] { PrimitiveType.UInt32 }));
+            Is.EqualTo([PrimitiveType.UInt32]));
         var nested = program.Structures.Single(static structure => structure.Name == "Nested<int32>");
         Assert.That(nested.Fields.Single().Type, Is.EqualTo((PrimitiveType)(100
             + program.Structures.IndexOf(box))));
@@ -105,21 +106,21 @@ public sealed class GenericNominalTypeTests
             static definition => definition.Name == "Cell");
         Assert.That(cellDefinition.Formals.Select(static formal
                 => formal.HasTypeDefault),
-            Is.EqualTo(new[] { true, true }));
+            Is.EqualTo([true, true]));
         var defaultCell = program.Structures.Single(static structure
             => structure.Name == "Cell<int32, int32>");
         Assert.That(defaultCell.Fields.Select(static field => field.Type),
-            Is.EqualTo(new[] {
+            Is.EqualTo([
                 PrimitiveType.Int32,
                 PrimitiveType.Int32,
-            }));
+            ]));
         var unsignedCell = program.Structures.Single(static structure
             => structure.Name == "Cell<uint32, uint32>");
         Assert.That(unsignedCell.Fields.Select(static field => field.Type),
-            Is.EqualTo(new[] {
+            Is.EqualTo([
                 PrimitiveType.UInt32,
                 PrimitiveType.UInt32,
-            }));
+            ]));
         Assert.That(program.Functions.Single(static function
             => function.Name == "ReadDefault").Variables[0].Type,
             Is.EqualTo((PrimitiveType)(100
@@ -197,7 +198,7 @@ public sealed class GenericNominalTypeTests
         var instance = program.SourceGenericTypeInstances.Single();
         var fieldType = program.Structures[instance.StructureIndex]
             .Fields.Single().Type;
-        Assert.That(instance.TypeArguments, Is.EqualTo(new[] { fieldType }));
+        Assert.That(instance.TypeArguments, Is.EqualTo([fieldType]));
         Assert.That(NativePointerTypeContract.IsValidType(fieldType,
             program.NativePointerTypes), Is.True);
     }

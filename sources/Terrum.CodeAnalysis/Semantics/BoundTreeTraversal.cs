@@ -74,6 +74,59 @@ internal static class BoundTreeTraversal
     internal static bool VisitExpressions(BoundBlock body, Action<BoundExpression> visitor)
         => VisitExpressionsCore(body, visitor, requireComplete: false);
 
+    internal static bool VisitExpressionTree(BoundExpression expression,
+        Action<BoundExpression> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(visitor);
+        var pending = new Stack<(BoundExpression Expression, int Depth)>();
+        pending.Push((expression, 0));
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            if (item.Depth > SemanticVerifier.MaximumDepth
+                || --remaining < 0
+                || !item.Expression.HasValidNestedExpressions)
+            {
+                return false;
+            }
+
+            visitor(item.Expression);
+            foreach (var child in item.Expression.NestedExpressions)
+            {
+                pending.Push((child, item.Depth + 1));
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool VisitContractExpressions(BoundFunction function,
+        Action<BoundExpression> visitor)
+    {
+        ArgumentNullException.ThrowIfNull(function);
+        ArgumentNullException.ThrowIfNull(visitor);
+        if (function.DeclarationContractClauses.IsDefault)
+        {
+            return false;
+        }
+
+        var statements = ImmutableArray.CreateBuilder<BoundStatement>(
+            function.DeclarationContractClauses.Length);
+        foreach (var clause in function.DeclarationContractClauses)
+        {
+            if (clause is null || clause.Predicate is null)
+            {
+                return false;
+            }
+            statements.Add(new BoundExpressionStatement(clause.Predicate,
+                clause.Span));
+        }
+
+        return VisitExpressionsCore(new BoundBlock(statements.ToImmutable(),
+            function.Span), visitor, requireComplete: true);
+    }
+
     internal static bool VisitStatements(BoundBlock body, Action<BoundStatement> visitor)
     {
         var pending = new Stack<(BoundStatement? Statement, int Depth)>();
@@ -179,6 +232,9 @@ internal static class BoundTreeTraversal
                     pending.Push((assignment.Value, depth));
                     break;
                 case BoundFieldAssignment assignment:
+                    pending.Push((assignment.Value, depth));
+                    break;
+                case BoundStaticFieldAssignment assignment:
                     pending.Push((assignment.Value, depth));
                     break;
                 case BoundBufferAssignment assignment:
@@ -329,11 +385,285 @@ internal static class BoundTreeTraversal
     }
 
     internal static BoundFunction RewriteCalls(BoundFunction function, Func<BoundCall, BoundCall> rewrite) =>
-        function with { Body = (BoundBlock)RewriteCalls(function.Body, rewrite) };
+        function with {
+            Body = (BoundBlock)RewriteCalls(function.Body, rewrite),
+            DeclarationContractClauses = RewriteDeclarationContractClauses(
+                function.DeclarationContractClauses,
+                predicate => RewriteCalls(predicate, rewrite)),
+        };
 
     internal static BoundFunction RewriteExpressions(BoundFunction function,
         Func<BoundExpression, BoundExpression> rewrite) =>
-        function with { Body = (BoundBlock)RewriteExpressions(function.Body, rewrite) };
+        function with {
+            Body = (BoundBlock)RewriteExpressions(function.Body, rewrite),
+            DeclarationContractClauses = RewriteDeclarationContractClauses(
+                function.DeclarationContractClauses,
+                predicate => RewriteExpressions(predicate, rewrite)),
+        };
+
+    internal static BoundFunction RewriteVariables(BoundFunction function,
+        ImmutableArray<BoundVariable> variables, Func<int, int> rewriteVariable)
+    {
+        ArgumentNullException.ThrowIfNull(rewriteVariable);
+        return function with {
+            Variables = variables,
+            Body = (BoundBlock)RewriteVariables(function.Body,
+                rewriteVariable),
+            DeclarationContractClauses = RewriteDeclarationContractClauses(
+                function.DeclarationContractClauses,
+                predicate => RewriteVariables(predicate,
+                    rewriteVariable)),
+            ConstructionHomeIndex = RewriteVariable(
+                function.ConstructionHomeIndex, rewriteVariable),
+        };
+    }
+
+    private static int RewriteVariable(int variable,
+        Func<int, int> rewriteVariable)
+        => variable < 0 ? variable : rewriteVariable(variable);
+
+    private static BoundStatement RewriteVariables(BoundStatement statement,
+        Func<int, int> rewriteVariable)
+    {
+        int Variable(int variable)
+        {
+            return RewriteVariable(variable, rewriteVariable);
+        }
+
+        BoundExpression Expression(BoundExpression expression)
+        {
+            return RewriteVariables(expression, rewriteVariable);
+        }
+
+        return statement switch {
+            BoundBlock block => block with {
+                Statements = [.. block.Statements.Select(child =>
+                    RewriteVariables(child, rewriteVariable))],
+                RetiredManagedLocals = block.RetiredManagedLocals.IsDefault
+                    ? default : [.. block.RetiredManagedLocals.Select(Variable)],
+            },
+            BoundLocal local => local with {
+                Variable = Variable(local.Variable),
+                Initializer = Expression(local.Initializer),
+            },
+            BoundVacantLocal local => local with {
+                Variable = Variable(local.Variable),
+            },
+            BoundLifetimeEnd lifetimeEnd => lifetimeEnd with {
+                Variable = Variable(lifetimeEnd.Variable),
+            },
+            BoundOwnerDeclaration owner => owner with {
+                Variable = Variable(owner.Variable),
+            },
+            BoundAssignment assignment => assignment with {
+                Variable = Variable(assignment.Variable),
+                Value = Expression(assignment.Value),
+            },
+            BoundOptionalAssignment assignment => assignment with {
+                Place = Expression(assignment.Place),
+                Value = Expression(assignment.Value),
+            },
+            BoundFieldAssignment assignment => assignment with {
+                Variable = Variable(assignment.Variable),
+                Value = Expression(assignment.Value),
+            },
+            BoundStaticFieldAssignment assignment => assignment with {
+                Value = Expression(assignment.Value),
+            },
+            BoundBufferAssignment assignment => assignment with {
+                Index = Expression(assignment.Index),
+                Value = Expression(assignment.Value),
+            },
+            BoundExpressionStatement expression => expression with {
+                Expression = Expression(expression.Expression),
+            },
+            BoundIf branch => branch with {
+                Condition = Expression(branch.Condition),
+                Then = RewriteVariables(branch.Then, rewriteVariable),
+                Else = branch.Else is null ? null
+                    : RewriteVariables(branch.Else, rewriteVariable),
+            },
+            BoundWhile loop => loop with {
+                Condition = Expression(loop.Condition),
+                Body = RewriteVariables(loop.Body, rewriteVariable),
+                Iterator = loop.Iterator is null ? null
+                    : RewriteVariables(loop.Iterator, rewriteVariable),
+                SwitchArmVariable = Variable(loop.SwitchArmVariable),
+            },
+            BoundTryFinally scope => scope with {
+                Body = (BoundBlock)RewriteVariables(scope.Body,
+                    rewriteVariable),
+                Finally = (BoundBlock)RewriteVariables(scope.Finally,
+                    rewriteVariable),
+            },
+            BoundTryCatch scope => scope with {
+                Body = (BoundBlock)RewriteVariables(scope.Body,
+                    rewriteVariable),
+                Catch = (BoundBlock)RewriteVariables(scope.Catch,
+                    rewriteVariable),
+                Finally = scope.Finally is null ? null
+                    : (BoundBlock)RewriteVariables(scope.Finally,
+                        rewriteVariable),
+            },
+            BoundViewScope view => view with {
+                Variable = Variable(view.Variable),
+                Owner = Expression(view.Owner),
+                Start = Expression(view.Start),
+                Length = Expression(view.Length),
+                Body = (BoundBlock)RewriteVariables(view.Body,
+                    rewriteVariable),
+                RangeEnd = view.RangeEnd is null ? null
+                    : Expression(view.RangeEnd),
+            },
+            BoundViewSet view => view with {
+                Variable = Variable(view.Variable),
+                Index = Expression(view.Index),
+                Value = Expression(view.Value),
+            },
+            BoundDrop drop => drop with {
+                Variable = Variable(drop.Variable),
+            },
+            BoundDropSpan drop => drop with {
+                Variable = Variable(drop.Variable),
+            },
+            BoundDropConstructedFields drop => drop with {
+                Variable = Variable(drop.Variable),
+            },
+            BoundUnsafe unsafeBlock => unsafeBlock with {
+                Body = (BoundBlock)RewriteVariables(unsafeBlock.Body,
+                    rewriteVariable),
+            },
+            BoundRequire require => require with {
+                Condition = Expression(require.Condition),
+            },
+            BoundReturn result => result with {
+                Value = result.Value is null ? null : Expression(result.Value),
+            },
+            _ => statement,
+        };
+    }
+
+    private static BoundExpression RewriteVariables(BoundExpression expression,
+        Func<int, int> rewriteVariable)
+    {
+        var rewritten = expression.RewriteNestedExpressions(child =>
+            RewriteVariables(child, rewriteVariable));
+        int Variable(int variable)
+        {
+            return RewriteVariable(variable, rewriteVariable);
+        }
+
+        return rewritten switch {
+            BoundNativePointerAddress address => address with {
+                Variable = Variable(address.Variable),
+            },
+            BoundNativeFixedArrayElement element => element with {
+                Variable = Variable(element.Variable),
+            },
+            BoundNativeFixedArrayPathElement element => element with {
+                Variable = Variable(element.Variable),
+            },
+            BoundNativeFixedArrayPointerAddress address => address with {
+                Variable = Variable(address.Variable),
+            },
+            BoundNativeFixedArrayWrite write => write with {
+                Variable = Variable(write.Variable),
+            },
+            BoundNativeFixedArrayPathWrite write => write with {
+                Variable = Variable(write.Variable),
+            },
+            BoundNativeStorageAddress address => address with {
+                Variable = Variable(address.Variable),
+            },
+            BoundPrivateReferenceForm formation => formation with {
+                Place = RewritePrivatePlaceVariables(formation.Place,
+                    rewriteVariable),
+            },
+            BoundPrivatePlaceRead read => read with {
+                Place = RewritePrivatePlaceVariables(read.Place,
+                    rewriteVariable),
+            },
+            BoundPrivatePlaceIsInitialized test => test with {
+                Place = RewritePrivatePlaceVariables(test.Place,
+                    rewriteVariable),
+            },
+            BoundPrivateCheckedStore store => store with {
+                Destination = RewritePrivatePlaceVariables(
+                    store.Destination, rewriteVariable),
+            },
+            BoundImplicitReferenceMaterialize materialize => materialize with {
+                BackingVariable = Variable(materialize.BackingVariable),
+            },
+            BoundNativeOutputReservation reservation => reservation with {
+                Variable = Variable(reservation.Variable),
+            },
+            BoundIsSome test => test with {
+                Variable = Variable(test.Variable),
+            },
+            BoundIsInitialized test => test with {
+                Variable = Variable(test.Variable),
+            },
+            BoundIsVariablePattern test => test with {
+                Variable = Variable(test.Variable),
+            },
+            BoundRead read => read with {
+                Variable = Variable(read.Variable),
+            },
+            BoundMove move => move with {
+                Variable = Variable(move.Variable),
+            },
+            BoundReceiverLoan loan => loan with {
+                Variable = Variable(loan.Variable),
+            },
+            BoundMutableReceiverLoan loan => loan with {
+                Variable = Variable(loan.Variable),
+            },
+            BoundViewLength length => length with {
+                Variable = Variable(length.Variable),
+            },
+            BoundViewRead read => read with {
+                Variable = Variable(read.Variable),
+            },
+            BoundSnapshotSpan snapshot => snapshot with {
+                Variable = Variable(snapshot.Variable),
+            },
+            BoundOutArgument argument => argument with {
+                Variable = Variable(argument.Variable),
+            },
+            _ => rewritten,
+        };
+    }
+
+    private static BoundPrivatePlace RewritePrivatePlaceVariables(
+        BoundPrivatePlace place, Func<int, int> rewriteVariable)
+    {
+        int Variable(int variable)
+        {
+            return RewriteVariable(variable, rewriteVariable);
+        }
+
+        return place switch {
+            BoundPrivateLocalPlace local => local with {
+                Variable = Variable(local.Variable),
+            },
+            BoundPrivateInlineFieldPlace field => field with {
+                Receiver = RewritePrivatePlaceVariables(field.Receiver,
+                    rewriteVariable),
+            },
+            BoundPrivateObjectFieldPlace field => field,
+            BoundPrivateReferentPlace referent => referent,
+            BoundPrivateFixedArrayElementPlace element => element with {
+                ArrayPlace = RewritePrivatePlaceVariables(
+                    element.ArrayPlace, rewriteVariable),
+            },
+            BoundPrivateInvocationBufferElementPlace buffer => buffer,
+            BoundPrivateLexicalViewElementPlace view => view with {
+                Variable = Variable(view.Variable),
+            },
+            _ => throw new InvalidOperationException(
+                "Unknown private place kind."),
+        };
+    }
 
     internal static BoundStruct RewriteTypes(BoundStruct structure,
         Func<PrimitiveType, PrimitiveType> rewriteType)
@@ -371,6 +701,47 @@ internal static class BoundTreeTraversal
             StandardTypeOrigin = origin,
         };
     }
+
+    internal static BoundStaticOwnerIdentity RewriteTypes(
+        BoundStaticOwnerIdentity owner,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+        => owner with {
+            TypeArguments = owner.TypeArguments.ToImmutableDictionary(
+                static argument => argument.Key,
+                argument => rewriteType(argument.Value),
+                StringComparer.Ordinal),
+        };
+
+    internal static BoundStaticFieldDefinition RewriteTypes(
+        BoundStaticFieldDefinition field,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+        => field with {
+            Owner = RewriteTypes(field.Owner, rewriteType),
+            OwnerType = rewriteType(field.OwnerType),
+            Type = rewriteType(field.Type),
+            FriendTargets = [.. field.FriendTargets.Select(target =>
+                RewriteTypes(target, rewriteType))],
+        };
+
+    internal static BoundFriendTarget RewriteTypes(
+        BoundFriendTarget target,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+        => target with {
+            Type = target.Type == PrimitiveType.Void
+                ? PrimitiveType.Void : rewriteType(target.Type),
+            TypeArguments = [.. target.TypeArguments.Select<
+                PrimitiveType?, PrimitiveType?>(
+                    argument => argument is PrimitiveType type
+                        ? rewriteType(type) : null)],
+        };
+
+    internal static BoundStaticInitializationGroup RewriteTypes(
+        BoundStaticInitializationGroup group,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+        => group with {
+            Owner = RewriteTypes(group.Owner, rewriteType),
+            OwnerType = rewriteType(group.OwnerType),
+        };
 
     private static ImmutableArray<BoundStructField> RewriteFields(
         ImmutableArray<BoundStructField> fields,
@@ -525,6 +896,8 @@ internal static class BoundTreeTraversal
             expression => RewriteExpressionTypes(expression, rewriteType));
         return remapped with {
             ReturnType = rewriteType(function.ReturnType),
+            FriendTargets = [.. function.FriendTargets.Select(target =>
+                RewriteTypes(target, rewriteType))],
             NativeFunctionPointerType = function.NativeFunctionPointerType is PrimitiveType functionPointerType
                 ? rewriteType(functionPointerType) : null,
             NativeOutputContracts = [.. function.NativeOutputContracts.Select(output => output with {
@@ -553,7 +926,39 @@ internal static class BoundTreeTraversal
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = rewriteType(variable.Type),
             })],
+            DeclarationContractClauses = RewriteDeclarationContractClauses(
+                function.DeclarationContractClauses, predicate =>
+                    RewriteExpressionTypes(predicate, rewriteType),
+                failureType => rewriteType(failureType)),
         };
+    }
+
+    private static ImmutableArray<BoundDeclarationContractClause>
+        RewriteDeclarationContractClauses(
+            ImmutableArray<BoundDeclarationContractClause> clauses,
+            Func<BoundExpression, BoundExpression> rewritePredicate,
+            Func<PrimitiveType, PrimitiveType>? rewriteType = null)
+    {
+        if (clauses.IsDefault)
+        {
+            return default;
+        }
+        if (clauses.Any(static clause => clause is null))
+        {
+            throw new ArgumentException(
+                "A declaration contract clause cannot be null.",
+                nameof(clauses));
+        }
+
+        return [
+            .. clauses.Select(clause => clause with {
+                Predicate = rewritePredicate(clause.Predicate),
+                ExplicitFailureType =
+                    clause.ExplicitFailureType is PrimitiveType failureType
+                        ? rewriteType?.Invoke(failureType) ?? failureType
+                        : null,
+            }),
+        ];
     }
 
     private static BoundExpression RewriteExpressionTypes(BoundExpression expression,
@@ -572,6 +977,10 @@ internal static class BoundTreeTraversal
             BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
                 Type = type,
                 Layout = RewriteLayout(fixedArray.Layout, rewriteType),
+            },
+            BoundNativeFixedArrayRepeatInitialization repeat => repeat with {
+                Type = type,
+                Layout = RewriteLayout(repeat.Layout, rewriteType),
             },
             BoundNativeFixedArrayElement fixedArrayElement => fixedArrayElement with {
                 Type = type,
@@ -596,6 +1005,9 @@ internal static class BoundTreeTraversal
                 Type = type,
                 Projections = RewriteArrayProjections(
                     pathWrite.Projections, rewriteType),
+                LeafFields = pathWrite.LeafFields.IsDefaultOrEmpty ? [] : [
+                    .. pathWrite.LeafFields.Select(field =>
+                        field with { OwnerType = rewriteType(field.OwnerType) })],
             },
             _ => expression with { Type = type },
         };
@@ -659,6 +1071,9 @@ internal static class BoundTreeTraversal
                 Value = RewriteExpressions(assignment.Value, rewrite),
             },
             BoundFieldAssignment assignment => assignment with { Value = RewriteExpressions(assignment.Value, rewrite) },
+            BoundStaticFieldAssignment assignment => assignment with {
+                Value = RewriteExpressions(assignment.Value, rewrite),
+            },
             BoundBufferAssignment assignment => assignment with {
                 Index = RewriteExpressions(assignment.Index, rewrite),
                 Value = RewriteExpressions(assignment.Value, rewrite),
@@ -722,6 +1137,9 @@ internal static class BoundTreeTraversal
                 Value = RewriteCalls(assignment.Value, rewrite),
             },
             BoundFieldAssignment assignment => assignment with { Value = RewriteCalls(assignment.Value, rewrite) },
+            BoundStaticFieldAssignment assignment => assignment with {
+                Value = RewriteCalls(assignment.Value, rewrite),
+            },
             BoundBufferAssignment assignment => assignment with {
                 Index = RewriteCalls(assignment.Index, rewrite),
                 Value = RewriteCalls(assignment.Value, rewrite),

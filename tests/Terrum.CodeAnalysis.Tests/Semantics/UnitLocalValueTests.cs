@@ -9,7 +9,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class UnitLocalValueTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class UnitLocalValueTests
 {
     [TestCase("void token = (); token;")]
     [TestCase("var token = (); token;")]

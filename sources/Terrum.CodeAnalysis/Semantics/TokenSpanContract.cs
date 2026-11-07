@@ -64,7 +64,7 @@ internal static class TokenSpanContract
     internal static bool IsSnapshot(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
     {
         var index = (int)type - 100;
-        return (uint)index < (uint)structures.Count
+        return index >= 0 && index < structures.Count
             && ValidSnapshot(structures[index]);
     }
 
@@ -276,32 +276,39 @@ internal static class TokenSpanContract
         var range = Find(structures, RangeName);
         return token >= 0 && range >= 0
             && !structures[token].IsUnique && !structures[range].IsUnique
-            && structures[token].Size == Stride && structures[range].Size == 8
+            && structures[token].Size == (ulong)Stride
+            && structures[range].Size == 8UL
             && structures[token].Fields is [var kind, var location]
-            && kind.Name == "Kind" && kind.Type == PrimitiveType.Int32 && kind.Offset == 0 && kind.Size == 4
+            && kind.Name == "Kind" && kind.Type == PrimitiveType.Int32
+            && kind.Offset == 0 && kind.Size == 4UL
             && location.Name == "Range" && location.Type == (PrimitiveType)(100 + range)
-            && location.Offset == 4 && location.Size == 8
+            && location.Offset == 4UL && location.Size == 8UL
             && structures[range].Fields is [var start, var length]
-            && start.Name == "Start" && start.Type == PrimitiveType.Int32 && start.Offset == 0 && start.Size == 4
-            && length.Name == "Length" && length.Type == PrimitiveType.Int32 && length.Offset == 4 && length.Size == 4
+            && start.Name == "Start" && start.Type == PrimitiveType.Int32
+            && start.Offset == 0 && start.Size == 4UL
+            && length.Name == "Length" && length.Type == PrimitiveType.Int32
+            && length.Offset == 4UL && length.Size == 4UL
             && ValueLayout.Alignment((PrimitiveType)(100 + token), structures) == 4;
     }
 
     internal static bool ValidSnapshot(BoundStruct structure) =>
-        RoleOf(structure) == TokenSpanTypeRole.Snapshot && structure.IsUnique && structure.Size == 16
+        RoleOf(structure) == TokenSpanTypeRole.Snapshot && structure.IsUnique
+        && structure.Size == 16UL
         && structure.Fields is [var records, var count]
         && records.Name == "_records" && records.Type == PrimitiveType.OwnedInt32Buffer
-        && records.Offset == 0 && records.Size == 8 && records.IsPrivate && !records.IsMutable
+        && records.Offset == 0 && records.Size == 8UL && records.IsPrivate && !records.IsMutable
         && !records.RequiresUnsafeCaller
         && count.Name == "_count" && count.Type == PrimitiveType.Int32
-        && count.Offset == 8 && count.Size == 4 && count.IsPrivate && !count.IsMutable
+        && count.Offset == 8UL && count.Size == 4UL && count.IsPrivate && !count.IsMutable
         && !count.RequiresUnsafeCaller;
 
     internal static bool ValidCursor(BoundStruct structure) =>
-        structure.Name == CursorName && structure.IsUnique && structure.Size == DescriptorSize
+        structure.Name == CursorName && structure.IsUnique
+        && structure.Size == (ulong)DescriptorSize
         && structure.CleanupMethod is null && !structure.IsSequential && !structure.IsTransparent
         && structure.Fields is [var tokens]
         && tokens.Name == "_tokens" && tokens.Type == PrimitiveType.TokenSpan
-        && tokens.Offset == 0 && tokens.Size == DescriptorSize && tokens.IsPrivate && tokens.IsMutable
+        && tokens.Offset == 0 && tokens.Size == (ulong)DescriptorSize
+        && tokens.IsPrivate && tokens.IsMutable
         && !tokens.RequiresUnsafeCaller;
 }

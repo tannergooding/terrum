@@ -2,19 +2,20 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class MutableOwningBufferFieldTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class MutableOwningBufferFieldTests
 {
     private const string Owner = """
         unique struct Owner {
             public mut OwnedInt32Buffer Words;
             public Owner(OwnedInt32Buffer words) { Words = move words; }
-            [NoThrow] [Cleanup] public void Close() {}
+             [Cleanup] public void Close() {}
         }
         """;
     [TestCase("Owner owner = new Owner(move raw); owner.Words.Clear();")]
@@ -51,7 +52,7 @@ public sealed class MutableOwningBufferFieldTests
                     Readonly = move first;
                     Hidden = move second;
                 }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(1, out var first);
@@ -74,7 +75,7 @@ public sealed class MutableOwningBufferFieldTests
                     Words.Clear();
                     Tail = 0;
                 }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             """));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
@@ -106,18 +107,34 @@ public sealed class MutableOwningBufferFieldTests
                 public Owner(OwnedInt32Buffer words) { Words = move words; }
                 public mut void Append() { Words.TryAppend(42); }
                 public int32 Read() { return Words.Read(0); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() { return 42; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var functionIndex = Array.FindIndex(program.Functions.ToArray(),
             static function => function.Name == "Owner.Append");
         var function = program.Functions[functionIndex];
-        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual1 = function.Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual1!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual2 = statement.Expression; Assert.That(__nunitActual2, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual2!; }))();
-        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual3 = call.Arguments[0]; Assert.That(__nunitActual3, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual3!; }))();
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => {
+            var __nunitActual1 = function.Body.Statements[0];
+            Assert.That(__nunitActual1, Is.TypeOf<BoundExpressionStatement>());
+            return (BoundExpressionStatement)__nunitActual1!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual2 = statement.Expression;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual2!;
+        }))();
+        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => {
+            var __nunitActual3 = call.Arguments[0];
+            Assert.That(__nunitActual3, Is.TypeOf<BoundMutableFieldLoan>());
+            return (BoundMutableFieldLoan)__nunitActual3!;
+        }))();
         var forgedCall = mutation switch {
             0 => call with {
                 Arguments = call.Arguments.SetItem(0, loan with { Place = loan.Place with { Field = 99 } }),

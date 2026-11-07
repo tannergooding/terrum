@@ -4,13 +4,14 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolCompositionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolCompositionTests
 {
     private const string Protocols = """
         interface Addition<A, B, C> { static C operator +(A left, B right); }
@@ -52,10 +53,18 @@ public sealed class StaticProtocolCompositionTests
             int32 Main() { return Forward(new Value(42)).Number; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var names = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions.Select(function => function.Name);
+        var names = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))().Functions.Select(function => function.Name);
         Assert.That(names, Does.Contain("Forward<Value>"));
         Assert.That(names, Does.Contain("Identity<Value>"));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().Functions,function => function.IsExternal || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))().Functions,function => function.IsExternal || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -68,7 +77,11 @@ public sealed class StaticProtocolCompositionTests
             }
             """ + Helper, instantiate);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(program.Functions.Count(function =>
             function.Name.Contains('<', StringComparison.Ordinal)), Is.EqualTo(instantiate ? 2 : 0));
         Assert.That(global::System.Linq.Enumerable.Any(program.Structures,structure => structure.Name.Contains('$', StringComparison.Ordinal)),Is.False);
@@ -111,30 +124,21 @@ public sealed class StaticProtocolCompositionTests
             """ + Helper.Replace("value + value", "value * value", StringComparison.Ordinal), instantiate: false);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
-    [TestCase(false)]
-    [TestCase(true)]
-    public void HelperEffectIsTakenFromItsDeclarationRatherThanItsBody(bool noThrow)
+    [Test]
+    public void GenericHelperCallsRemainOrdinaryWithoutNoThrowPromises()
     {
         var source = """
             interface Addition<A, B, C> {
-                [NoThrow] static C operator +(A left, B right);
+                 static C operator +(A left, B right);
             }
-            [NoThrow] T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
+             T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
                 return Identity<T>(value);
             }
-            """ + (noThrow ? "[NoThrow] " : "") + """
             U Identity<U>(U value) where U : [Copy] { return value; }
             int32 Main() { return 0; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        if (noThrow)
-        {
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        }
-        else
-        {
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        }
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -199,7 +203,11 @@ public sealed class StaticProtocolCompositionTests
                 """),
         ]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var names = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Functions.Select(function => function.Name);
+        var names = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))().Functions.Select(function => function.Name);
         Assert.That(names, Does.Contain("Callers.Compose<Contracts.Value>"));
         Assert.That(names, Does.Contain("Helpers.Double<Contracts.Value>"));
         Assert.That(names, Does.Contain("Leaves.Identity<Contracts.Value>"));
@@ -278,7 +286,11 @@ public sealed class StaticProtocolCompositionTests
                 where A : [Copy] where U : [Copy] { return second; }
             """ + entry));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         Assert.That(program.Functions.Count(function =>
             function.Name.Contains('<', StringComparison.Ordinal)), Is.EqualTo(instantiate ? scalar ? 3 : 2 : 0));
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
@@ -314,35 +326,39 @@ public sealed class StaticProtocolCompositionTests
             struct Inner {
                 public float32 Single;
                 public int32 Marker;
-                [NoThrow] public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
+                 public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
             }
             struct Pair {
                 public Inner Nested;
                 public float64 Wide;
-                [NoThrow] public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
-                [NoThrow] public float32 ReadSingle() { return Nested.Single; }
+                 public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
+                 public float32 ReadSingle() { return Nested.Single; }
             }
-            [NoThrow] bool TryCreatePair(init ref<Pair> result) {
+             bool TryCreatePair(init ref<Pair> result) {
                 result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
-            [NoThrow] bool TryCreatePairOut(out Pair result) {
+             bool TryCreatePairOut(out Pair result) {
                 result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
-            [NoThrow] float32 CopyFloat(float32 value) { return value; }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+             float32 CopyFloat(float32 value) { return value; }
+             T Forward<T>(T value) where T : [Copy] {
                 if (!TryCreatePair(init var pair)) { return value; }
                 if (!TryCreatePairOut(out var copiedPair)) { return value; }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)
                     || copiedPair.Wide != float64(2)) { return value; }
                 return Identity(value);
             }
-            [NoThrow] U Identity<U>(U value) where U : [Copy] { return value; }
+             U Identity<U>(U value) where U : [Copy] { return value; }
             int32 Main() { return Forward(int32(42)); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var functions = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))().Functions;
+        var functions = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))().Functions;
         Assert.That(global::System.Linq.Enumerable.Any(functions,static function =>
             function.Name == "TryCreatePair" && function.Variables[0].IsInit),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(functions,static function =>
@@ -443,32 +459,22 @@ public sealed class StaticProtocolCompositionTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase(false)]
-    [TestCase(true)]
-    public void ConcreteOperationsKeepTheirDeclaredEffectsInGenericDefinitions(bool constructorNoThrow)
+    [Test]
+    public void ConcreteOperationsRemainValidInOrdinaryGenericDefinitions()
     {
-        var declaration = constructorNoThrow ? "[NoThrow] " : "";
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             struct Value {
                 public int32 Number;
-                {{declaration}}public Value(int32 number) { Number = number; }
+                public Value(int32 number) { Number = number; }
             }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+             T Forward<T>(T value) where T : [Copy] {
                 return Second<Value, T>(new Value(1), value);
             }
-            [NoThrow] U Second<A, U>(A first, U second)
+             U Second<A, U>(A first, U second)
                 where A : [Copy] where U : [Copy] { return second; }
             int32 Main() { return 0; }
             """));
-        if (constructorNoThrow)
-        {
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        }
-        else
-        {
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-            Assert.That(compilation.Program, Is.Null);
-        }
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -503,7 +509,11 @@ public sealed class StaticProtocolCompositionTests
             """);
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions.Length, Is.EqualTo(1024));
+        Assert.That(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))().Functions.Length, Is.EqualTo(1024));
     }
     [TestCase("Create()","Value Create() { return new Value(1); }")]
     [TestCase("Value.Create()","")]
@@ -535,38 +545,32 @@ public sealed class StaticProtocolCompositionTests
             int32 Main() { return Forward(int32(42)); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var functions = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))().Functions;
+        var functions = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))().Functions;
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Second<Value, int32>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
     }
-    [TestCase(false)]
-    [TestCase(true)]
-    public void ConcreteFactoryCallsRetainTheirDeclaredEffectsInGenericProof(bool factoryNoThrow)
+    [Test]
+    public void ConcreteFactoryCallsRemainValidInOrdinaryGenericProof()
     {
-        var attribute = factoryNoThrow ? "[NoThrow] " : "";
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             struct Value {
                 public int32 Number;
-                [NoThrow] public Value(int32 number) { Number = number; }
+                 public Value(int32 number) { Number = number; }
             }
-            {{attribute}}Value Create() { return new Value(1); }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+            Value Create() { return new Value(1); }
+             T Forward<T>(T value) where T : [Copy] {
                 return Second(Create(), value);
             }
-            [NoThrow] U Second<A, U>(A first, U second)
+             U Second<A, U>(A first, U second)
                 where A : [Copy] where U : [Copy] { return second; }
             int32 Main() { return 0; }
             """));
-        if (factoryNoThrow)
-        {
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        }
-        else
-        {
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-            Assert.That(compilation.Program, Is.Null);
-        }
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase(false,false)]
     [TestCase(true,false)]
@@ -604,7 +608,11 @@ public sealed class StaticProtocolCompositionTests
             int32 Main() { return Forward(int32(42)); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var functions = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))().Functions;
+        var functions = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))().Functions;
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Second<Value, int32>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
@@ -689,7 +697,11 @@ public sealed class StaticProtocolCompositionTests
             }
             """ + entry));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         Assert.That(program.Classes.Length, Is.EqualTo(2));
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
@@ -725,7 +737,11 @@ public sealed class StaticProtocolCompositionTests
             {{entry}}
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         _ = global::System.Linq.Enumerable.Single(program.Classes);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
@@ -779,21 +795,16 @@ public sealed class StaticProtocolCompositionTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code is "TRM3007" or "TRM3011"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase(false,true)]
-    [TestCase(true,false)]
-    [TestCase(true,true)]
-    public void ConcreteManagedFactoryRetainsDeclaredEffectsInNoThrowProof(
-        bool constructorNoThrow, bool methodNoThrow)
+    [Test]
+    public void ConcreteManagedFactoryRemainsValidWithoutNoThrowPromises()
     {
-        var constructorAttribute = constructorNoThrow ? "[NoThrow] " : "";
-        var methodAttribute = methodNoThrow ? "[NoThrow] " : "";
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             class Cell {
                 public int32 Value;
-                {{constructorAttribute}}public Cell(int32 value) { Value = value; }
-                {{methodAttribute}}public int32 Read() { return Value; }
+                public Cell(int32 value) { Value = value; }
+                public int32 Read() { return Value; }
             }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+             T Forward<T>(T value) where T : [Copy] {
                 if (Cell.TryCreate(1, out var cell)) {
                     var read = cell.Read();
                 }
@@ -801,15 +812,7 @@ public sealed class StaticProtocolCompositionTests
             }
             int32 Main() { return 0; }
             """));
-        if (constructorNoThrow && methodNoThrow)
-        {
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        }
-        else
-        {
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-            Assert.That(compilation.Program, Is.Null);
-        }
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -835,7 +838,11 @@ public sealed class StaticProtocolCompositionTests
         }
         var compilation = Compile(source, instantiate: true);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))().Functions.Count(
+        Assert.That(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))().Functions.Count(
             function => function.Name.Contains('<', StringComparison.Ordinal)), Is.EqualTo(mutual ? 3 : 2));
     }
     [TestCase(16)]
@@ -864,7 +871,11 @@ public sealed class StaticProtocolCompositionTests
         if (templates == 16)
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))().Functions.Count(
+            Assert.That(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual12 = compilation.Program;
+                Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual12!;
+            }))().Functions.Count(
                 function => function.Name.Contains('<', StringComparison.Ordinal)), Is.EqualTo(32));
         }
         else

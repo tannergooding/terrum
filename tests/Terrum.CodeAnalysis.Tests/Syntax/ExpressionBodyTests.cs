@@ -2,14 +2,15 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class ExpressionBodyTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ExpressionBodyTests
 {
     internal const string Source = """
         interface Addition<TLeft, TRight, TResult> {
@@ -47,18 +48,28 @@ public sealed class ExpressionBodyTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         Assert.That(tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ExpressionBody), Is.EqualTo(10));
-        {var __nunitItems0 = tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ExpressionBody);        Assert.Multiple(() => {
+        {
+            var __nunitItems0 = tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ExpressionBody);
+            Assert.Multiple(() => {
             foreach (var __nunitItem1 in __nunitItems0)
             {
                 {
-                    Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual0 = __nunitItem1.Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual0!; }))().Token.Kind, Is.EqualTo(TokenKind.Arrow));
+                    Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+                        var __nunitActual0 = __nunitItem1.Children[0];
+                        Assert.That(__nunitActual0, Is.TypeOf<SyntaxTokenElement>());
+                        return (SyntaxTokenElement)__nunitActual0!; }))().Token.Kind, Is.EqualTo(TokenKind.Arrow));
                     Assert.That(__nunitItem1.DescendantTokens().Last().Kind, Is.EqualTo(TokenKind.Semicolon));
                 }
             }
-        });}
+        });
+        }
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Meter.#get:Y").NoFailureProof, Is.False);
         Assert.That(global::Terrum.CodeAnalysis.Native.NativeJit.Execute(
             program, global::Terrum.CodeAnalysis.Native.NativeRuntimePolicy.FailFast), Is.EqualTo(42));

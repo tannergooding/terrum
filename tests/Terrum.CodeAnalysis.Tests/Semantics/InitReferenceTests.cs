@@ -4,15 +4,16 @@ using System;
 using System.Buffers.Binary;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class InitReferenceTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class InitReferenceTests
 {
     internal const string ScalarSource = """
         bool Fill(bool publish, init ref<int32> value) {
@@ -51,7 +52,7 @@ public sealed class InitReferenceTests
         NativeRuntimePolicy policy, bool selectTrueArm)
     {
         var source = new StringBuilder("""
-            [NoThrow] bool Fill(bool publish, out int32 value) {
+             bool Fill(bool publish, out int32 value) {
                 if (publish) { value = 42; return true; }
                 return false;
             }
@@ -60,33 +61,37 @@ public sealed class InitReferenceTests
         for (var group = 0; group < 6; group++)
         {
             var live = $"live{group}";
-            source.Append("    mut int32 ").Append(live).AppendLine(" = 0;");
+            _ = source.Append("    mut int32 ").Append(live).AppendLine(" = 0;");
             var deadCalls = new StringBuilder();
             for (var index = 0; index < 24; index++)
             {
                 var dead = $"dead{group}_{index}";
-                source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
+                _ = source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
                 if (index != 0)
                 {
-                    deadCalls.Append(" && ");
+                    _ = deadCalls.Append(" && ");
                 }
-                deadCalls.Append("Fill(false, out ").Append(dead).Append(')');
+                _ = deadCalls.Append("Fill(false, out ").Append(dead).Append(')');
             }
 
             var selected = $"Fill(true, out {live})";
             var deadExpression = deadCalls.ToString();
-            source.Append("    if (").Append(selectTrueArm ? "true" : "false").Append(" ? ")
+            _ = source.Append("    if (").Append(selectTrueArm ? "true" : "false").Append(" ? ")
                 .Append(selectTrueArm ? selected : deadExpression)
                 .Append(" : ").Append(selectTrueArm ? deadExpression : selected)
                 .Append(") { return ").Append(live).AppendLine("; }");
         }
-        source.AppendLine("    return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("    return 0;");
+        _ = source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -95,7 +100,7 @@ public sealed class InitReferenceTests
     public void ConstantDisjunctionKeepsLeftOutputPublication(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
-            [NoThrow] bool Fill(bool publish, out int32 value) {
+             bool Fill(bool publish, out int32 value) {
                 if (publish) { value = 42; return true; }
                 return false;
             }
@@ -106,18 +111,22 @@ public sealed class InitReferenceTests
         for (var index = 0; index < 24; index++)
         {
             var dead = $"dead{index}";
-            source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
-            deadCalls.Append(" || Fill(false, out ").Append(dead).Append(')');
+            _ = source.Append("    mut int32 ").Append(dead).AppendLine(" = 0;");
+            _ = deadCalls.Append(" || Fill(false, out ").Append(dead).Append(')');
         }
-        source.Append("    if (Fill(true, out live) && (").Append(deadCalls)
+        _ = source.Append("    if (Fill(true, out live) && (").Append(deadCalls)
             .AppendLine(")) { return live; }");
-        source.AppendLine("    return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("    return 0;");
+        _ = source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -134,12 +143,12 @@ public sealed class InitReferenceTests
         bool conditionalInitializationTest)
     {
         var source = new StringBuilder("""
-            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
                 *value = 42;
                 return true;
             }
-            [NoThrow] bool Identity(bool value, init ref<int32> result) {
+             bool Identity(bool value, init ref<int32> result) {
                 if (!value) { return false; }
                 *result = 42;
                 return true;
@@ -149,11 +158,11 @@ public sealed class InitReferenceTests
             """);
         if (!negateInitializationTest)
         {
-            source.AppendLine("    require Fill(true, init ready);");
+            _ = source.AppendLine("    require Fill(true, init ready);");
         }
         for (var index = 0; index < 24; index++)
         {
-            source.Append("    init int32 dead").Append(index).AppendLine(";");
+            _ = source.Append("    init int32 dead").Append(index).AppendLine(";");
         }
         var initializationTest = negateInitializationTest ? "!(ready is init)" : "(ready is init)";
         if (compoundInitializationTest)
@@ -164,25 +173,29 @@ public sealed class InitReferenceTests
         {
             initializationTest = "(" + initializationTest + " ? true : false)";
         }
-        source.Append("    if (Identity(").Append(initializationTest).Append(" || (");
+        _ = source.Append("    if (Identity(").Append(initializationTest).Append(" || (");
         for (var index = 0; index < 24; index++)
         {
             if (index != 0)
             {
-                source.Append(" || ");
+                _ = source.Append(" || ");
             }
-            source.Append("Fill(false, init dead").Append(index).Append(')');
+            _ = source.Append("Fill(false, init dead").Append(index).Append(')');
         }
-        source.AppendLine("), init var live)) {");
-        source.AppendLine("        require Fill(true, init dead0);");
-        source.AppendLine("        return live + dead0;");
-        source.AppendLine("    }");
-        source.AppendLine("    return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("), init var live)) {");
+        _ = source.AppendLine("        require Fill(true, init dead0);");
+        _ = source.AppendLine("        return live + dead0;");
+        _ = source.AppendLine("    }");
+        _ = source.AppendLine("    return 0;");
+        _ = source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -191,12 +204,12 @@ public sealed class InitReferenceTests
     public void InfeasibleConditionalOutputsRemainVacant(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
-            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
                 *value = 42;
                 return true;
             }
-            [NoThrow] bool Identity(bool value, init ref<int32> result) {
+             bool Identity(bool value, init ref<int32> result) {
                 if (!value) { return false; }
                 *result = 42;
                 return true;
@@ -204,30 +217,34 @@ public sealed class InitReferenceTests
             int32 Main() {
                 init int32 ready;
             """);
-        source.AppendLine("    require Fill(true, init ready);");
+        _ = source.AppendLine("    require Fill(true, init ready);");
         for (var index = 0; index < 24; index++)
         {
-            source.Append("    init int32 dead").Append(index).AppendLine(";");
+            _ = source.Append("    init int32 dead").Append(index).AppendLine(";");
         }
-        source.Append("    if (Identity((ready is init) ? true : (");
+        _ = source.Append("    if (Identity((ready is init) ? true : (");
         for (var index = 0; index < 24; index++)
         {
             if (index != 0)
             {
-                source.Append(" || ");
+                _ = source.Append(" || ");
             }
-            source.Append("Fill(false, init dead").Append(index).Append(')');
+            _ = source.Append("Fill(false, init dead").Append(index).Append(')');
         }
-        source.AppendLine("), init var live)) {");
-        source.AppendLine("        require Fill(true, init dead0);");
-        source.AppendLine("        return live + dead0;");
-        source.AppendLine("    }");
-        source.AppendLine("    return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("), init var live)) {");
+        _ = source.AppendLine("        require Fill(true, init dead0);");
+        _ = source.AppendLine("        return live + dead0;");
+        _ = source.AppendLine("    }");
+        _ = source.AppendLine("    return 0;");
+        _ = source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -237,7 +254,11 @@ public sealed class InitReferenceTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ManagedSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill");
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.True);
@@ -265,7 +286,11 @@ public sealed class InitReferenceTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(ScalarSource));
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill");
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.True);
@@ -290,7 +315,11 @@ public sealed class InitReferenceTests
             "public bool Fill(", StringComparison.Ordinal).Replace("int32 Main()",
             "public int32 Read()", StringComparison.Ordinal)));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), ["Fill"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), ["Fill"]);
         Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions).Variables[1].IsInit, Is.True);
     }
 
@@ -298,7 +327,7 @@ public sealed class InitReferenceTests
     public void PrivateInitPreservesExplicitNoThrowProof()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ScalarSource.Replace("bool Fill(",
-            "[NoThrow] bool Fill(", StringComparison.Ordinal)));
+            " bool Fill(", StringComparison.Ordinal)));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase("int32 value = 1; require Fill(true, init value);")]
@@ -345,7 +374,11 @@ public sealed class InitReferenceTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(59));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -354,12 +387,12 @@ public sealed class InitReferenceTests
     public void InitReferenceSeparatesDescriptorDestinationAndForwarding(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] bool Write(init ref<int32> destination) {
+             bool Write(init ref<int32> destination) {
                 if (!(destination is init) || *destination is init) { return false; }
                 *destination = 42;
                 return true;
             }
-            [NoThrow] bool Forward(init ref<int32> destination) {
+             bool Forward(init ref<int32> destination) {
                 if (!(destination is init)) { return false; }
                 return Write(init *destination) && *destination is init && *destination == 42;
             }
@@ -370,7 +403,11 @@ public sealed class InitReferenceTests
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -379,7 +416,7 @@ public sealed class InitReferenceTests
     public void InitDestinationRemainsVacantWhenLaterArgumentEvaluationFails()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] void Fill(init ref<int32> value, int32 ignored) { *value = 42; }
+             void Fill(init ref<int32> value, int32 ignored) { *value = 42; }
             int32 Fail() { require false; return 0; }
             int32 Main() {
                 init int32 value;
@@ -396,7 +433,11 @@ public sealed class InitReferenceTests
             """), BoundRuntimePolicy.CheckedExceptions);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))(),
             NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
     [TestCase("1")]
@@ -429,7 +470,11 @@ public sealed class InitReferenceTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), policy), Is.EqualTo(0));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))(), policy), Is.EqualTo(0));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -445,7 +490,11 @@ public sealed class InitReferenceTests
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), policy), Is.EqualTo(0));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))(), policy), Is.EqualTo(0));
     }
 
     [Test]
@@ -500,7 +549,11 @@ public sealed class InitReferenceTests
             var compilation = Compilation.Create(SyntaxTree.Parse(source),
                 runtimePolicy: (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual12 = compilation.Program;
+                Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual12!;
+            }))();
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(expected));
             Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
         }
@@ -532,7 +585,11 @@ public sealed class InitReferenceTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(49));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -557,13 +614,21 @@ public sealed class InitReferenceTests
         const string Consumer = "int32 Main() { return Read(); }";
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(Library), runtimePolicy: sourcePolicy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = library.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = library.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var compilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), runtimePolicy: sourcePolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Single(linked.Functions, function => function.Name == "$producer.Fill")
             .Variables[1].IsInit, Is.True);
@@ -575,7 +640,11 @@ public sealed class InitReferenceTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: sourcePolicy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = nativeCompilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual16 = nativeCompilation.Program;
+                Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual16!;
+            }))(), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -584,11 +653,11 @@ public sealed class InitReferenceTests
     public async Task ManagedInitStaysPrivateBehindAnUnchangedScalarConsumerAsync(NativeRuntimePolicy policy)
     {
         const string Library = """
-            [NoThrow] bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
+             bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
                 *result = value;
                 return true;
             }
-            [NoThrow] int32 Publish<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
+             int32 Publish<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
                 *result = value;
                 return status;
             }
@@ -612,7 +681,11 @@ public sealed class InitReferenceTests
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), runtimePolicy: runtime);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            return ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))();
+            return ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual17 = compilation.Program;
+                Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual17!;
+            }))();
         }
         var producerProgram = Compile(Library, sourcePolicy);
         var updatedProgram = Compile(Library.Replace("TryCreate(41", "TryCreate(42", StringComparison.Ordinal),
@@ -629,7 +702,11 @@ public sealed class InitReferenceTests
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             reference, runtimePolicy: sourcePolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = consumerCompilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(),
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = consumerCompilation.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))(),
             producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name.StartsWith("$producer.Copy<",
@@ -646,7 +723,11 @@ public sealed class InitReferenceTests
             graphReference, runtimePolicy: sourcePolicy);
         Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = graphCompilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual19 = graphCompilation.Program;
+                Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual19!;
+            }))(), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         NativeModuleCompiler.ValidateGraph(graphConsumer, [nativeUpdated]);
@@ -662,8 +743,12 @@ public sealed class InitReferenceTests
             public int32 Read() { require Fill(out var value); return value; }
             """));
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = library.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual20 = library.Program;
+            Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual20!;
+        }))(), ["Read"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
     }
 
     [Test]
@@ -684,8 +769,12 @@ public sealed class InitReferenceTests
             }
             """));
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = library.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual21 = library.Program;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual21!;
+        }))(), ["Read"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), 48);
         _ = Assert.Throws<ModuleFormatException>(() => _ = ModuleCompiler.CreateReference(producer))!;
     }
@@ -694,7 +783,7 @@ public sealed class InitReferenceTests
     public void PrivateGenericInitKeepsManagedOutputRooted(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
+             bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
                 *result = value;
                 return true;
             }
@@ -707,10 +796,13 @@ public sealed class InitReferenceTests
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = compilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual22 = compilation.Program;
+            Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual22!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name.StartsWith("Copy<", StringComparison.Ordinal)
             && function.Variables[1].IsInit),Is.True);
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
     }
-
 }

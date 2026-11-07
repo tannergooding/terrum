@@ -2,13 +2,14 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class FloatingLiteralProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FloatingLiteralProjectionTests
 {
     [TestCase(false,7,unchecked((int)0x3DCCCCCD),0)]
     [TestCase(true,8,unchecked((int)0x9999999A),0x3FB99999)]
@@ -49,12 +50,12 @@ public sealed class FloatingLiteralProjectionTests
         Assert.That(ScalarFrontendHost.ReadResult(source, Encode(words)).IsValid, Is.True);
         var lowIndex = tree ? 48 : 24;
         words[lowIndex] ^= 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
         words[lowIndex] ^= 1;
 
         var highIndex = tree ? 49 : 25;
         words[highIndex] = type == 7 ? 1 : high ^ 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
 
         void Node(int offset, int operation, int nodeType, int start, int length,
             int left, int right, int nodeLow, int nodeHigh)

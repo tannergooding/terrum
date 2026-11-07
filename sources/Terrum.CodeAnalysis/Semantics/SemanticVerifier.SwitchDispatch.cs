@@ -10,7 +10,7 @@ public static partial class SemanticVerifier
     private readonly record struct CleanupSwitchTransfer(bool IsContinue, int Depth, int Arm = -1);
 
     private sealed record CleanupCountedLoop(BoundWhile Loop, BoundBlock Body, BoundAssignment Iterator,
-        BoundBinary Step, bool InitiallyEnters);
+        BoundBinary Step, bool? InitiallyEnters);
 
     private static CleanupCountedLoop? RecognizeCleanupCountedLoop(BoundBlock block, BoundFunction function,
         BoundProgram program, ref int remaining, int depth)
@@ -43,15 +43,25 @@ public static partial class SemanticVerifier
                 Type: PrimitiveType.Int32, IsMutable: true,
                 IsOut: false, IsInit: false, IsInitializationLocal: false,
             }
-            || initialValue is not BoundConstant {
-                Type: PrimitiveType.Int32, Value: >= int.MinValue and <= int.MaxValue,
-            } initial
+            || initialValue is not { Type: PrimitiveType.Int32 }
             || loop.Condition is not BoundBinary {
                 Operator: TokenKind.Less or TokenKind.Greater, Type: PrimitiveType.Bool,
                 Left: BoundRead { Type: PrimitiveType.Int32 } counter,
                 Right: BoundConstant { Type: PrimitiveType.Int32, Value: >= int.MinValue and <= int.MaxValue } bound,
             } condition
             || counter.Variable != variable)
+        {
+            return null;
+        }
+        bool? initiallyEnters = null;
+        if (initialValue is BoundConstant {
+            Value: >= int.MinValue and <= int.MaxValue,
+        } initial)
+        {
+            initiallyEnters = condition.Operator == TokenKind.Less
+                ? initial.Value < bound.Value : initial.Value > bound.Value;
+        }
+        else if (initialValue is BoundConstant)
         {
             return null;
         }
@@ -81,7 +91,7 @@ public static partial class SemanticVerifier
                 Right: BoundConstant { Type: PrimitiveType.Int32, Value: 1 },
             } step
             || stepCounter.Variable != variable
-            || (condition.Operator == TokenKind.Less) != (step.Operator == TokenKind.Plus)
+            || condition.Operator == TokenKind.Less != (step.Operator == TokenKind.Plus)
             || !CleanupSwitchStateIsPrivate(body, variable, program, ref remaining, depth + 1, allowRead: true))
         {
             return null;
@@ -91,7 +101,7 @@ public static partial class SemanticVerifier
         // The mathematical distance to the bound decreases by one, without
         // computing that distance in int32 or enumerating iterations.
         return new CleanupCountedLoop(loop, body, assignment, step,
-            condition.Operator == TokenKind.Less ? initial.Value < bound.Value : initial.Value > bound.Value);
+            initiallyEnters);
     }
 
     private sealed class CleanupSwitchFlow(bool canComplete)
@@ -378,8 +388,10 @@ public static partial class SemanticVerifier
         {
             return null;
         }
-        var mayEnter = counted?.InitiallyEnters ?? CanBe(loop.Condition, true, ref remaining, canBeFacts);
-        var mayExit = counted is not null ? !counted.InitiallyEnters
+        var mayEnter = counted?.InitiallyEnters
+            ?? CanBe(loop.Condition, true, ref remaining, canBeFacts);
+        var mayExit = counted?.InitiallyEnters is bool initiallyEnters
+            ? !initiallyEnters
             : CanBe(loop.Condition, false, ref remaining, canBeFacts);
         if (!loop.IsPostTested && !mayEnter)
         {

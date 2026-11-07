@@ -17,7 +17,8 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class ContextualPunctuationTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ContextualPunctuationTests
 {
     private static readonly string[] Gaps = ["", " ", "\n", "\r\n", "/* gap */", "//** gap **//", "// gap\n", "/// gap\n"];
 
@@ -55,7 +56,7 @@ public sealed class ContextualPunctuationTests
             {
                 foreach (var gap in Gaps)
                 {
-                    var lineBreakAfterColon = gap.Contains('\r') || gap.Contains('\n');
+                    var lineBreakAfterColon = gap.Contains('\r', System.StringComparison.Ordinal) || gap.Contains('\n', System.StringComparison.Ordinal);
                     var afterColonCode = loopLabel && lineBreakAfterColon ? "TRM1012" : "";
                     yield return [form, ":", "", gap, afterColonCode];
                     if (gap.Length != 0)
@@ -91,7 +92,7 @@ public sealed class ContextualPunctuationTests
         string form, string punctuation, string left, string right, string code)
     {
         var source = form.Replace("#", left + punctuation + right, StringComparison.Ordinal);
-        var span = new TextSpan(form.IndexOf('#') + left.Length, punctuation.Length);
+        var span = new TextSpan(form.IndexOf('#', System.StringComparison.Ordinal) + left.Length, punctuation.Length);
         var lexed = Lexer.Lex(SourceText.From(source));
         Assert.That(lexed.Diagnostics, Is.Empty);
         foreach (var tree in new[] { SyntaxTree.Parse(source), SyntaxTree.Parse(lexed) })
@@ -105,7 +106,13 @@ public sealed class ContextualPunctuationTests
             {
                 var codes = code.Split('|');
                 Assert.That(tree.Diagnostics.Select(static diagnostic => diagnostic.Code), Is.EqualTo(codes));
-                {var __nunitItems0 = tree.Diagnostics;                Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0.Span, Is.EqualTo(span)); } });}
+                {
+                    var __nunitItems0 = tree.Diagnostics;
+                    Assert.Multiple(() => {
+    foreach (var __nunitItem0 in __nunitItems0)
+    {
+        Assert.That(__nunitItem0.Span, Is.EqualTo(span)); } });
+                }
             }
         }
     }
@@ -142,10 +149,17 @@ public sealed class ContextualPunctuationTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
     [TestCase("enum E : int32 { A = 1 }")]
-    [TestCase("[param(value): Policy] void F(int32 value) { }")]
     [TestCase("void F() { var pair = (name: 1, other: 2); }")]
     public void UnsupportedColonRolesDoNotBecomeImplemented(string source) =>
         Assert.That(SyntaxTree.Parse(source).HasErrors, Is.True);
+
+    [Test]
+    public void AttributeTargetSyntaxDoesNotRegisterAnAttributeSchema()
+    {
+        const string source = "[param(value): Policy] void F(int32 value) { }";
+        var tree = SyntaxTree.Parse(source);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+    }
 
     [Test]
     public void InterfaceBaseListUsesTheDeclaredInterfaceCompositionSyntax()
@@ -176,12 +190,20 @@ public sealed class ContextualPunctuationTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
         var argument = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.Argument);
-        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual1 = argument.Children[1]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual1!; }))().Token.Kind, Is.EqualTo(TokenKind.Colon));
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => {
+            var __nunitActual1 = argument.Children[1];
+            Assert.That(__nunitActual1, Is.TypeOf<SyntaxTokenElement>());
+            return (SyntaxTokenElement)__nunitActual1!;
+        }))().Token.Kind, Is.EqualTo(TokenKind.Colon));
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var compilation = Compilation.Create(tree, (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), policy), Is.EqualTo(42));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = compilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), policy), Is.EqualTo(42));
         }
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -208,7 +230,11 @@ public sealed class ContextualPunctuationTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(), policy), Is.EqualTo(42));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -242,7 +268,11 @@ public sealed class ContextualPunctuationTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(), policy), Is.EqualTo(42));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -261,7 +291,11 @@ public sealed class ContextualPunctuationTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(), policy), Is.EqualTo(42));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -284,7 +318,11 @@ public sealed class ContextualPunctuationTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), policy), Is.EqualTo(42));
     }
     [TestCase("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(unknown: 1, second: 2); }")]
     [TestCase("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1, first: 2); }")]
@@ -305,7 +343,11 @@ public sealed class ContextualPunctuationTests
         {
             var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), policy), Is.EqualTo(42));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual7 = compilation.Program;
+                Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual7!;
+            }))(), policy), Is.EqualTo(42));
         }
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -313,7 +355,7 @@ public sealed class ContextualPunctuationTests
     public async Task CompiledScannerPreservesAllCurrentPunctuationRolesAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root).ConfigureAwait(false);
         var chunks = new List<string>();
         var chunk = new StringBuilder();
         foreach (var row in Boundaries)
@@ -322,9 +364,9 @@ public sealed class ContextualPunctuationTests
             if (chunk.Length + text.Length > ScannerHost.MaximumSourceLength)
             {
                 chunks.Add(chunk.ToString());
-                chunk.Clear();
+                _ = chunk.Clear();
             }
-            chunk.Append(text);
+            _ = chunk.Append(text);
         }
         chunks.Add(chunk.ToString());
         var failures = 0;
@@ -332,10 +374,15 @@ public sealed class ContextualPunctuationTests
         {
             var source = SourceText.From(text);
             var buffers = ScannerHost.CreateBuffers(source);
-            var compilation = Compilation.Create(SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
+            var compilation = ScannerTests.CreateScannerCompilation(
+                SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
                 buffers, (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), policy);
+            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual8 = compilation.Program;
+                Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual8!;
+            }))(), policy);
             Assert.That(ScannerHost.ReadTokens(source, native.ExitCode, Buffer(3)), Is.EqualTo(Lexer.Lex(source).Tokens.Select(token => new ScannerToken(token.Kind, token.Span))));
             var adapted = ScannerHost.ReadLexResult(source, native.ExitCode, Buffer(3), Buffer(5), Buffer(4));
             var current = SyntaxTree.Parse(adapted);
@@ -344,8 +391,10 @@ public sealed class ContextualPunctuationTests
             failures += current.Diagnostics.Count(diagnostic =>
                 diagnostic.Code is "TRM1008" or "TRM1010" or "TRM1011" or "TRM1012");
 
-            ReadOnlySpan<byte> Buffer(int index) =>
-                native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+            ReadOnlySpan<byte> Buffer(int index)
+            {
+                return native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+            }
         }
         var expectedFailures = Boundaries.Sum(row =>
             ((string)row[4]).Split('|', StringSplitOptions.RemoveEmptyEntries).Length);
@@ -413,13 +462,13 @@ public sealed class ContextualPunctuationTests
                 }
                 else
                 {
-                    Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
+                    _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
                 }
 
                 void Node(int index, int operation, int type, int begin, int end, int left, int right, int low)
                 {
                     int[] node = [operation, type, begin, end - begin, left, right, low, 0];
-                    node.CopyTo(words, 42 + index * 8);
+                    node.CopyTo(words, 42 + (index * 8));
                 }
             }
         }

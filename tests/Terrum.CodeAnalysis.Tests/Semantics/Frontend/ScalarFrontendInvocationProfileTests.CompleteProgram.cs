@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -13,7 +12,7 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed partial class ScalarFrontendInvocationProfileTests
+internal sealed partial class ScalarFrontendInvocationProfileTests
 {
     private const string FrontendProvider = """
         namespace Terrum.CodeAnalysis;
@@ -45,54 +44,53 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         $"void {name}() {{ {new string(';', semicolonCount)} }}";
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task CompleteFrontendModuleRebindsFreshSourcesAndAuditsPublicationAsync(BoundRuntimePolicy policy)
+    public async Task CompleteFrontendInMemoryProfileRebindsFreshSourcesAndAuditsPublicationAsync(
+        BoundRuntimePolicy policy)
     {
-        var trees = await ReadComponentsAsync(s_frontendComponents, FrontendProvider).ConfigureAwait(true);
+        var providerSource = FrontendProvider.Replace("int32 Main() { return 0; }",
+            "int32 Main() { return PublishAndSummarize(); }", StringComparison.Ordinal);
+        var trees = await ReadComponentsAsync(s_frontendComponents, providerSource).ConfigureAwait(true);
         var seed = SourceText.From("seed");
         var buffers = ScalarFrontendHost.CreateInvocationProfileBuffers(seed);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CreateWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
-            ["Terrum.CodeAnalysis.PublishAndSummarize"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(89));
-        var alternateCompilation = Compilation.Create(trees,
-            ScalarFrontendHost.CreateInvocationProfileBuffers(SourceText.From("different seed 123")), policy);
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+            program, ["Terrum.CodeAnalysis.PublishAndSummarize"]));
+        var alternateCompilation = CreateWithLayoutCore(trees,
+            ScalarFrontendHost.CreateInvocationProfileBuffers(
+                SourceText.From("different seed 123")), policy);
         Assert.That(alternateCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
-        Assert.That(ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = alternateCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
-            ["Terrum.CodeAnalysis.PublishAndSummarize"]), Is.EqualTo(producer));
-        var reference = ModuleCompiler.CreateReference(producer);
-        Assert.That(reference.InvocationProfileId, Is.EqualTo(ScalarFrontendHost.InvocationProfileIdentity));
-        Assert.That(reference.InvocationProfileId, Is.Not.EqualTo(ScannerHost.InvocationProfileIdentity));
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
-            namespace Terrum.CodeAnalysis;
-            int32 Main() { return PublishAndSummarize(); }
-            """), reference, policy);
-        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = consumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
-        var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.That(linked.Buffers.Length, Is.EqualTo(12));
-        {var __nunitItems0 = linked.Buffers;        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems0) { Assert.That(__nunitItem3.Values, Is.Empty); } });}
+        var alternateProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = alternateCompilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+            alternateProgram, ["Terrum.CodeAnalysis.PublishAndSummarize"]));
         foreach (var index in new[] { ScalarFrontendHost.BufferIndex, ScalarFrontendHost.ProgramBufferIndex })
         {
-            var truncated = linked with {
-                Buffers = linked.Buffers.SetItem(index, linked.Buffers[index] with { Values = [0] }),
+            var truncated = program with {
+                Buffers = program.Buffers.SetItem(index, program.Buffers[index] with { Values = [0] }),
             };
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
                 truncated, seed, (NativeRuntimePolicy)policy));
-            var wrongAccess = linked with {
-                Buffers = linked.Buffers.SetItem(index, linked.Buffers[index] with { IsWritable = false }),
+            var wrongAccess = program with {
+                Buffers = program.Buffers.SetItem(index, program.Buffers[index] with { IsWritable = false }),
             };
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
                 wrongAccess, seed, (NativeRuntimePolicy)policy));
         }
-        var wrongIdentity = linked with {
-            Buffers = linked.Buffers.SetItem(0, linked.Buffers[0] with {
+        var wrongIdentity = program with {
+            Buffers = program.Buffers.SetItem(0, program.Buffers[0] with {
                 InvocationProfileId = ScannerHost.InvocationProfileIdentity,
             }),
         };
-        Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
+        _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
             wrongIdentity, seed, (NativeRuntimePolicy)policy));
         ScalarFrontendInvocationResult? retained = null;
         var maximumSource = new string(' ', ScannerHost.MaximumSourceLength - TenFunctions.Length) + TenFunctions;
@@ -123,7 +121,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             var source = SourceText.From(text);
             var expected = Lexer.Lex(source);
             Assert.That(expected.Tokens.Length, Is.InRange(1, ScalarFrontendHost.MaximumInvocationTokens));
-            var actual = NativeJit.ExecuteWithScalarFrontendProfile(linked, source, (NativeRuntimePolicy)policy);
+            var actual = NativeJit.ExecuteWithScalarFrontendProfile(program, source, (NativeRuntimePolicy)policy);
             Assert.That(actual.Frontend.Projection.IsValid, Is.True);
             TestAssertions.NotNull(actual.Frontend.Program);
             Assert.That(actual.Scanner.TokenCount, Is.EqualTo(expected.Tokens.Length));
@@ -146,31 +144,50 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(retained.Frontend.Projection.Functions.Length, Is.EqualTo(10));
         Assert.That(retained.Scanner.TokenCount, Is.EqualTo(61));
         Assert.That(retained.Summary[66], Is.EqualTo(60));
-        var replacementTrees = await ReadComponentsAsync(s_frontendComponents.Reverse().ToArray(),
-            FrontendProvider.Replace("return count + 1;", "return 1 + count;", StringComparison.Ordinal))
+        var replacementSource = FrontendProvider.Replace("int32 Main() { return 0; }",
+                "int32 Main() { return PublishAndSummarize(); }", StringComparison.Ordinal)
+            .Replace("return count + 1;", "return 1 + count;", StringComparison.Ordinal);
+        var replacementTrees = await ReadComponentsAsync([.. s_frontendComponents.Reverse()],
+            replacementSource)
             .ConfigureAwait(true);
-        var replacementCompilation = Compilation.Create(replacementTrees,
-            ScalarFrontendHost.CreateInvocationProfileBuffers(SourceText.From("replacement seed")), policy);
+        var replacementCompilation = CreateWithLayoutCore(replacementTrees,
+            ScalarFrontendHost.CreateInvocationProfileBuffers(
+                SourceText.From("replacement seed")), policy);
         Assert.That(replacementCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
-        var replacement = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = replacementCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(),
-            ["Terrum.CodeAnalysis.PublishAndSummarize"]);
+        var replacementProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = replacementCompilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+            replacementProgram, ["Terrum.CodeAnalysis.PublishAndSummarize"]));
         var replacementResult = NativeJit.ExecuteWithScalarFrontendProfile(
-            ModuleCompiler.Link(consumer, replacement), SourceText.From(TenFunctions), (NativeRuntimePolicy)policy);
+            replacementProgram, SourceText.From(TenFunctions), (NativeRuntimePolicy)policy);
         Assert.That(replacementResult.Summary.AsEnumerable(), Is.EqualTo(retained.Summary.AsEnumerable()));
         Assert.That(replacementResult.Frontend.Projection.Functions.Length, Is.EqualTo(10));
-        {var __nunitItems2 = buffers.Where(static buffer => buffer.IsWritable);        Assert.Multiple(() => { foreach (var __nunitItem6 in __nunitItems2) { {var __nunitItems1 = __nunitItem6.Values;Assert.Multiple(() => { foreach (var __nunitItem5 in __nunitItems1) { Assert.That(__nunitItem5, Is.EqualTo(0)); } });} } });}
-        Assert.Throws<ArgumentException>(() =>
-            NativeJit.ExecuteWithScannerProfile(linked, seed, (NativeRuntimePolicy)policy));
-        Assert.Throws<ArgumentException>(() =>
-            NativeJit.ExecuteWithScalarFrontendProfile(linked, seed,
+        {
+            var __nunitItems2 = buffers.Where(static buffer => buffer.IsWritable);
+            Assert.Multiple(() => {
+    foreach (var __nunitItem6 in __nunitItems2)
+    {
+        {
+            var __nunitItems1 = __nunitItem6.Values;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem5 in __nunitItems1)
+    {
+        Assert.That(__nunitItem5, Is.EqualTo(0)); } });} } });
+        }
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeJit.ExecuteWithScannerProfile(program, seed, (NativeRuntimePolicy)policy));
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeJit.ExecuteWithScalarFrontendProfile(program, seed,
                 policy == BoundRuntimePolicy.FailFast
                     ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast));
         var excessiveTokenSource = "int32 Main() => " + string.Join(" + ", Enumerable.Repeat("1", 26))
             + "; int32 Other() => 1;";
         var excessiveSource = SourceText.From(excessiveTokenSource);
         Assert.That(Lexer.Lex(excessiveSource).Tokens.Length, Is.EqualTo(65));
-        var excessiveExecution = NativeJit.ExecuteWithData(linked with {
+        var excessiveExecution = NativeJit.ExecuteWithData(program with {
             Buffers = ScalarFrontendHost.CreateInvocationProfileBuffers(excessiveSource),
             IsInvocationSourceBound = true,
         }, (NativeRuntimePolicy)policy);
@@ -190,8 +207,8 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             new string(' ', ScannerHost.MaximumSourceLength + 1),
         })
         {
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
-                linked, SourceText.From(text), (NativeRuntimePolicy)policy));
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
+                program, SourceText.From(text), (NativeRuntimePolicy)policy));
         }
     }
 
@@ -199,23 +216,18 @@ public sealed partial class ScalarFrontendInvocationProfileTests
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task FrontendOptionsReachScalarInvocationBindingAsync(BoundRuntimePolicy policy)
     {
-        var trees = await ReadComponentsAsync(s_frontendComponents, FrontendProvider).ConfigureAwait(true);
+        var providerSource = FrontendProvider.Replace("int32 Main() { return 0; }",
+            "int32 Main() { return PublishAndSummarize(); }", StringComparison.Ordinal);
+        var trees = await ReadComponentsAsync(s_frontendComponents, providerSource).ConfigureAwait(true);
         var seed = SourceText.From("seed");
-        var providerCompilation = Compilation.Create(trees,
+        var providerCompilation = CreateWithLayoutCore(trees,
             ScalarFrontendHost.CreateInvocationProfileBuffers(seed), policy);
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = ModuleCompiler.CreateProducer(providerCompilation.Program!,
-            ["Terrum.CodeAnalysis.PublishAndSummarize"]);
-        var reference = ModuleCompiler.CreateReference(provider);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
-            namespace Terrum.CodeAnalysis;
-            int32 Main() { return PublishAndSummarize(); }
-            """), reference, policy);
-        Assert.That(consumerCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, provider);
-        var linked = ModuleCompiler.Link(consumer, provider);
+        var program = providerCompilation.Program
+            ?? throw new InvalidOperationException("Successful frontend compilation has no bound program.");
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+            program, ["Terrum.CodeAnalysis.PublishAndSummarize"]));
         var source = SourceText.From("""
             namespace Demo.Tools { int32 Main() { return Add(20, 22); } }
             namespace Demo.Tools {
@@ -226,7 +238,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             SourceArithmeticProfile = SourceArithmeticProfile.Release,
             RuntimePolicy = policy,
         };
-        var invocation = NativeJit.ExecuteWithScalarFrontendProfile(linked, source, options);
+        var invocation = NativeJit.ExecuteWithScalarFrontendProfile(program, source, options);
         var subject = invocation.Frontend.Program
             ?? throw new InvalidOperationException("Successful frontend audit has no bound subject program.");
         var releaseFunction = subject.Functions.Single(static function => function.Name == "Demo.Tools.Add");
@@ -236,7 +248,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             ?? throw new InvalidOperationException("Scalar frontend did not retain the Add expression.");
         Assert.That(releaseAddition.OverflowBehavior, Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
         var defaultInvocation = NativeJit.ExecuteWithScalarFrontendProfile(
-            linked, source, (NativeRuntimePolicy)policy);
+            program, source, (NativeRuntimePolicy)policy);
         var defaultSubject = defaultInvocation.Frontend.Program
             ?? throw new InvalidOperationException("Successful frontend audit has no bound subject program.");
         var defaultFunction = defaultSubject.Functions.Single(static function => function.Name == "Demo.Tools.Add");
@@ -259,36 +271,30 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(ScalarFrontendHost.ProgramWordCount, Is.EqualTo(25_025));
 
         var expandedProvider = FrontendProvider
+            .Replace("int32 Main() { return 0; }",
+                "int32 Main() { return PublishAndSummarize(); }", StringComparison.Ordinal)
             .Replace("count < 64 && ", "", StringComparison.Ordinal)
             .Replace("TryDecodeScalarFrontendProgram(Host.FrontendProgram.Length, 63)",
                 "TryDecodeScalarFrontendProgram(Host.FrontendProgram.Length, Host.Tokens.Length / 3 - 1)",
                 StringComparison.Ordinal);
         var trees = await ReadComponentsAsync(s_frontendComponents, expandedProvider).ConfigureAwait(true);
         var seed = SourceText.From("seed");
-        var compilation = Compilation.Create(trees,
-            ScalarFrontendHost.CreateExpandedInvocationProfileBuffers(seed), policy);
+        var compilation = CreateWithLayoutCore(trees,
+            ScalarFrontendHost.CreateExpandedInvocationProfileBuffers(seed),
+            policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(),
-            ["Terrum.CodeAnalysis.PublishAndSummarize"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(89));
-
-        var reference = ModuleCompiler.CreateReference(producer);
-        Assert.That(reference.InvocationProfileId, Is.EqualTo(ScalarFrontendHost.ExpandedInvocationProfileIdentity));
-        Assert.That(reference.InvocationProfileId, Is.Not.EqualTo(ScalarFrontendHost.InvocationProfileIdentity));
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
-            namespace Terrum.CodeAnalysis;
-            int32 Main() { return PublishAndSummarize(); }
-            """), reference, policy);
-        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = consumerCompilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), producer);
-        var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.That(linked.Buffers.Length, Is.EqualTo(12));
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+            program, ["Terrum.CodeAnalysis.PublishAndSummarize"]));
 
         var expression = string.Join(" + ", Enumerable.Repeat("1", 32));
         var sixtyFourNodeSource = SourceText.From("int32 Main() { int32 first = 0; return "
             + expression + "; } void Other() { }");
-        var sixtyFourNodeResult = NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        var sixtyFourNodeResult = NativeJit.ExecuteWithScalarFrontendProfile(program,
             sixtyFourNodeSource, (NativeRuntimePolicy)policy);
         Assert.That(sixtyFourNodeResult.Frontend.Projection.IsValid, Is.True);
         Assert.That(sixtyFourNodeResult.Frontend.Projection.Functions.Length, Is.EqualTo(2));
@@ -296,25 +302,25 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(function.Nodes.Length, Is.EqualTo(64));
         var sixtyFiveNodeSource = SourceText.From("int32 Main() { int32 first = 0; "
             + "int32 second = 0; return " + expression + "; } void Other() { }");
-        Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(program,
             sixtyFiveNodeSource, (NativeRuntimePolicy)policy));
 
         var exactly64Tokens = CreateEmptyFunctionWithSemicolons("F0", 57);
         Assert.That(Lexer.Lex(SourceText.From(exactly64Tokens)).Tokens.Length, Is.EqualTo(64));
         var exactWindowSource = SourceText.From($"{exactly64Tokens} void F1() {{ }}");
-        Assert.That(NativeJit.ExecuteWithScalarFrontendProfile(linked, exactWindowSource,
+        Assert.That(NativeJit.ExecuteWithScalarFrontendProfile(program, exactWindowSource,
             (NativeRuntimePolicy)policy).Frontend.Projection.IsValid, Is.True);
 
         var over64Tokens = CreateEmptyFunctionWithSemicolons("F0", 58);
         Assert.That(Lexer.Lex(SourceText.From(over64Tokens)).Tokens.Length, Is.EqualTo(65));
-        Assert.That(NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        Assert.That(NativeJit.ExecuteWithScalarFrontendProfile(program,
             SourceText.From($"{over64Tokens} void F1() {{ }}"),
             (NativeRuntimePolicy)policy).Frontend.Projection.IsValid, Is.True);
 
         var overflowCallSource = SourceText.From("int32 F0() { int32 local = 0; return "
             + string.Join(" + ", Enumerable.Repeat("1", 20))
             + " + F1(); } int32 F1() => 0;");
-        var overflowCallResult = NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        var overflowCallResult = NativeJit.ExecuteWithScalarFrontendProfile(program,
             overflowCallSource, (NativeRuntimePolicy)policy);
         var overflowCaller = overflowCallResult.Frontend.Projection.Functions[0];
         var overflowCallIndex = overflowCaller.Nodes.IndexOf(
@@ -339,7 +345,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             Assert.That(source.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
             Assert.That(expected.Tokens.Length > ScalarFrontendHost.MaximumInvocationTokens, Is.True);
 
-            var actual = NativeJit.ExecuteWithScalarFrontendProfile(linked, source,
+            var actual = NativeJit.ExecuteWithScalarFrontendProfile(program, source,
                 (NativeRuntimePolicy)policy);
             Assert.That(actual.Scanner.TokenCount, Is.EqualTo(expected.Tokens.Length));
             Assert.That(actual.Scanner.LexResult.Tokens.Select(static token => (token.Kind, token.Span)), Is.EqualTo(expected.Tokens.Select(static token => (token.Kind, token.Span))));
@@ -361,13 +367,13 @@ public sealed partial class ScalarFrontendInvocationProfileTests
 
         var excessiveFunctionSource = string.Join(" ", Enumerable.Range(0,
             ScalarFrontendHost.MaximumFunctions + 1).Select(index => $"void F{index}() {{ }}"));
-        Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(program,
             SourceText.From(excessiveFunctionSource), (NativeRuntimePolicy)policy));
 
         var longFunction = CreateLongFunction("F0", "F1");
         Assert.That(Lexer.Lex(SourceText.From(longFunction)).Tokens.Length
             > ScalarFrontendHost.MaximumInvocationTokens, Is.True);
-        Assert.That(NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        Assert.That(NativeJit.ExecuteWithScalarFrontendProfile(program,
             SourceText.From($"{longFunction} int32 F1() => 0;"),
             (NativeRuntimePolicy)policy).Frontend.Projection.IsValid, Is.True);
 
@@ -386,7 +392,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var maximumFunctionLex = Lexer.Lex(maximumFunctionSource);
         Assert.That(maximumFunctionSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         Assert.That(maximumFunctionLex.Tokens.Length > ScalarFrontendHost.MaximumInvocationTokens, Is.True);
-        var maximumFunctionResult = NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        var maximumFunctionResult = NativeJit.ExecuteWithScalarFrontendProfile(program,
             maximumFunctionSource, (NativeRuntimePolicy)policy);
         Assert.That(maximumFunctionResult.Scanner.TokenCount, Is.EqualTo(maximumFunctionLex.Tokens.Length));
         Assert.That(maximumFunctionResult.Frontend.Projection.IsValid, Is.True);
@@ -396,13 +402,14 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(maximumFunctionResult.Frontend.Projection.Functions[0].Nodes.Length, Is.InRange(33, 64));
         Assert.That(global::System.Linq.Enumerable.Any(maximumFunctionResult.Frontend.Projection.Functions[0].Nodes,static node => node.Operation == 105),Is.True);
 
-        Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(linked,
+        _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(program,
             SourceText.From(new string(' ', ScannerHost.MaximumSourceLength + 1)),
             (NativeRuntimePolicy)policy));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task CompleteFrontendModuleRejectsCorruptedProgramAndSummaryAsync(BoundRuntimePolicy policy)
+    public async Task CompleteFrontendInMemoryProfileRejectsCorruptedProgramAndSummaryAsync(
+        BoundRuntimePolicy policy)
     {
         const string source = "int32 Main() => Next(); int32 Next() => 42; int32 Other() => 43;";
         foreach (var mutation in new[] {
@@ -413,24 +420,25 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             "Host.FrontendProgram[720] = 2; Host.Frontend[226] = 3;",
         })
         {
-            var trees = await ReadComponentsAsync(s_frontendComponents, FrontendProvider.Replace(
-                "return count + 1;", mutation + " return count + 1;", StringComparison.Ordinal))
+            var mutatedProvider = FrontendProvider
+                .Replace("int32 Main() { return 0; }",
+                    "int32 Main() { return PublishAndSummarize(); }", StringComparison.Ordinal)
+                .Replace("return count + 1;", mutation + " return count + 1;", StringComparison.Ordinal);
+            var trees = await ReadComponentsAsync(s_frontendComponents, mutatedProvider)
                 .ConfigureAwait(true);
-            var compilation = Compilation.Create(trees,
-                ScalarFrontendHost.CreateInvocationProfileBuffers(SourceText.From("seed")), policy);
+            var compilation = CreateWithLayoutCore(trees,
+                ScalarFrontendHost.CreateInvocationProfileBuffers(
+                    SourceText.From("seed")), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(),
-                ["Terrum.CodeAnalysis.PublishAndSummarize"]);
-            var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
-                namespace Terrum.CodeAnalysis;
-                int32 Main() { return PublishAndSummarize(); }
-                """), ModuleCompiler.CreateReference(producer), policy);
-            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-            var consumer = ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = consumerCompilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), producer);
-            var linked = ModuleCompiler.Link(consumer, producer);
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
-                linked, SourceText.From(source), (NativeRuntimePolicy)policy));
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = compilation.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))();
+            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(
+                program, ["Terrum.CodeAnalysis.PublishAndSummarize"]));
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScalarFrontendProfile(
+                program, SourceText.From(source), (NativeRuntimePolicy)policy));
         }
     }
 }

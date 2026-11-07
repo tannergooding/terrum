@@ -9,11 +9,11 @@ namespace Terrum.CodeAnalysis.Semantics;
 internal static class ValueLayout
 {
     internal const int MaximumSize = 16;
-    // Address-based storage can exceed the value profile while remaining bounded to sixteen 64-bit fields.
-    internal const int MaximumStructureSize = 16 * sizeof(ulong);
+    internal const int MaximumStructureSize = 8192;
+    internal const int MaximumAddressStorageSize = 16 * sizeof(ulong);
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported values have no executable layout.")]
-    internal static int Size(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+    internal static ulong Size(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
         string? nativeLoweringAgreement = null)
     {
@@ -34,15 +34,18 @@ internal static class ValueLayout
         PrimitiveType.Float16 or PrimitiveType.BFloat16 => 2,
         PrimitiveType.Decimal32 => 4,
         _ when ManagedClassTypes.IsManaged(type) => 8,
-        _ when NativePointerTypes.IsType(type) => NativeTargetProfile.PointerSize,
+        _ when NativePointerTypes.IsType(type)
+            => checked((ulong)NativeTargetProfile.PointerSize),
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
-        PrimitiveType.TokenSpan => TokenSpanContract.DescriptorSize,
+        PrimitiveType.TokenSpan
+            => checked((ulong)TokenSpanContract.DescriptorSize),
         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
-                    => NativeTargetProfile.PointerSize,
-                _ when NativeFunctionPointerTypes.IsType(type) => NativeTargetProfile.PointerSize,
-        _ when CheckedReferenceTypes.IsType(type) => CheckedReferenceSize(
-            type, checkedReferenceTypes, nativeLoweringAgreement),
+                    => checked((ulong)NativeTargetProfile.PointerSize),
+                _ when NativeFunctionPointerTypes.IsType(type)
+                    => checked((ulong)NativeTargetProfile.PointerSize),
+        _ when CheckedReferenceTypes.IsType(type) => checked((ulong)CheckedReferenceSize(
+            type, checkedReferenceTypes, nativeLoweringAgreement)),
         PrimitiveType.Void => 0,
         _ when BoundEnumTypes.IsType(type) => sizeof(int),
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
@@ -90,8 +93,8 @@ internal static class ValueLayout
                 return NativeTargetProfile.PointerSize;
             }
             return type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-                ? 8 : Size(type, structures, checkedReferenceTypes,
-                    nativeLoweringAgreement);
+                ? 8 : checked((int)Size(type, structures,
+                    checkedReferenceTypes, nativeLoweringAgreement));
         }
         if (NativeFixedArrayTypes.IsType(type))
         {
@@ -106,15 +109,44 @@ internal static class ValueLayout
 
             return (int)arrayLayout.Alignment;
         }
-        var structure = structures[(int)type - 100];
-        var alignment = 1;
-        foreach (var field in structure.Fields)
+        var structureIndex = (int)type - 100;
+        if ((uint)structureIndex >= (uint)structures.Count)
         {
-            alignment = Math.Max(alignment, Alignment(field.Type, structures,
-                checkedReferenceTypes, nativeLoweringAgreement,
-                fixedArrayTypes));
+            return 0;
         }
-        return alignment;
+        return structures[structureIndex].Alignment;
+    }
+
+    internal static int RequiredAlignment(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null)
+    {
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            if (fixedArrayTypes is null
+                || !NativeFixedArrayContract.TryGetLayout(type, structures,
+                    fixedArrayTypes, out var arrayLayout)
+                || arrayLayout.RequiredAlignment > int.MaxValue)
+            {
+                throw new NotSupportedException(
+                    "Fixed-array required alignment requires its validated type table.");
+            }
+
+            return (int)arrayLayout.RequiredAlignment;
+        }
+        if ((int)type < 100 || (int)type >= ManagedClassTypes.First
+            || BoundEnumTypes.IsType(type)
+            || NativePointerTypes.IsType(type)
+            || NativeFunctionPointerTypes.IsType(type)
+            || CheckedReferenceTypes.IsType(type)
+            || BoundGenericNominalTypeTypes.IsType(type))
+        {
+            return 1;
+        }
+        var structureIndex = (int)type - 100;
+        return (uint)structureIndex < (uint)structures.Count
+            ? structures[structureIndex].RequiredAlignment
+            : 1;
     }
 
     private static int CheckedReferenceSize(PrimitiveType type,
@@ -122,7 +154,8 @@ internal static class ValueLayout
         string? nativeLoweringAgreement)
     {
         if (nativeLoweringAgreement is not
-            (null or CompilationOptions.WindowsX64NormalBackingAgreement))
+            (null or CompilationOptions.WindowsX64NormalBackingAgreement
+                or CompilationOptions.WindowsX64RootlessReferencesAgreement))
         {
             throw new NotSupportedException(
                 "The selected native lowering agreement has no value layout.");
@@ -140,8 +173,9 @@ internal static class ValueLayout
         var referenceType = checkedReferenceTypes[index];
         return referenceType is not null && !referenceType.IsGarbageCollected
             && !referenceType.IsInitialization
-            ? nativeLoweringAgreement is null
-                ? NativeTargetProfile.PointerSize : 2 * sizeof(ulong)
+            ? nativeLoweringAgreement
+                == CompilationOptions.WindowsX64NormalBackingAgreement
+                    ? 2 * sizeof(ulong) : NativeTargetProfile.PointerSize
             : 0;
     }
 }

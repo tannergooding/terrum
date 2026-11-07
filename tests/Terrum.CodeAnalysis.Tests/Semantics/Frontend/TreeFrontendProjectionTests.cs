@@ -2,14 +2,15 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class TreeFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TreeFrontendProjectionTests
 {
     [Test]
     public void ReadResultRejectsInventedIntegerComparisonContext()
@@ -40,7 +41,7 @@ public sealed class TreeFrontendProjectionTests
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4, 4), words[index]);
         }
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
     }
 
@@ -80,29 +81,29 @@ public sealed class TreeFrontendProjectionTests
         Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).IsValid, Is.True);
         Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length, Is.EqualTo(6));
 
-        var child = 42 + 5 * 8 + 5;
+        var child = 42 + (5 * 8) + 5;
         words[child] = 5;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
         words[child] = 4;
 
-        words[42 + 3 * 8 + 1] = 5;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
-        words[42 + 3 * 8 + 1] = 1;
+        words[42 + (3 * 8) + 1] = 5;
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+        words[42 + (3 * 8) + 1] = 1;
 
-        words[42 + 4 * 8 + 2] = open + 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
-        words[42 + 4 * 8 + 2] = open;
+        words[42 + (4 * 8) + 2] = open + 1;
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+        words[42 + (4 * 8) + 2] = open;
 
         words[39] = 4;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
         words[39] = 5;
 
-        words[42 + 2 * 8 + 6] = 3;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+        words[42 + (2 * 8) + 6] = 3;
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
 
         void Node(int index, int operation, int start, int stop, int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = 1;
             words[offset + 2] = start;

@@ -3,16 +3,17 @@
 using System;
 using System.Buffers.Binary;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class FunctionEffectsFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FunctionEffectsFrontendProjectionTests
 {
     [TestCase("","void","{}",false,0)]
     [TestCase("","void","{ require true; }",false,0)]
@@ -31,7 +32,11 @@ public sealed class FunctionEffectsFrontendProjectionTests
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var expected = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var expected = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var first = expected.Functions[0];
             var second = actual.Functions[0];
@@ -79,7 +84,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
         const string text = "public void @await() { require true; }";
         var words = Projection(text, true, false, 0);
         words[index] = value;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
     [Test]
     public void RetiredNoThrowSourceAndProjectionFlagsAreRejected()
@@ -90,13 +95,13 @@ public sealed class FunctionEffectsFrontendProjectionTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var words = Projection(text, true, false, 0);
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
 
         const string plainText = "public void @await() {}";
         words = Projection(plainText, true, false, 0);
         words[2] |= 2;
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(plainText), Bytes(words)));
     }
     [TestCase("[nothrow]")]
@@ -112,7 +117,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
     public void IndependentFunctionEffectsRejectSpellingDuplicateArgumentUnknownAndAttachmentClaims(string prefix)
     {
         var text = $"{prefix} public void @await() {{ require true; }}";
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text), Bytes(Projection(text, true, false, 2))));
     }
 
@@ -125,7 +130,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
         for (var version = 1; version <= 58; version++)
         {
             words[0] = version;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
 
@@ -146,7 +151,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
     [TestCase("[NoThrow] public void @await() { require false; }",true,2)]
     public void IndependentEffectsUseSharedCompletionAndFailureProof(string text, bool isVoid, int effects)
     {
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text), Bytes(Projection(text, isVoid, false, effects))));
     }
     [TestCase("[DoesNotReturn]")]
@@ -170,7 +175,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
         words[332] = 3;
         words[333] = 1;
         words[335] = text.IndexOf("while", StringComparison.Ordinal);
-        words[336] = text.IndexOf('}', words[335]) + 1 - words[335];
+        words[336] = text.IndexOf('}', words[335], System.StringComparison.Ordinal) + 1 - words[335];
         words[337] = 22;
         words[339] = -1;
         words[340] = text.IndexOf("return", StringComparison.Ordinal);
@@ -179,7 +184,11 @@ public sealed class FunctionEffectsFrontendProjectionTests
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))();
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var function = actual.Functions[0];
             Assert.That(function.NoFailureProof, Is.False);
@@ -191,7 +200,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
         for (var version = 1; version <= 58; version++)
         {
             words[0] = version;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
 
@@ -226,7 +235,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
             words[332] = requirement >= 0 ? 21 : isVoid ? 22 : 8;
             words[334] = isVoid && returned >= 0 ? -1 : 0;
             words[335] = requirement >= 0 ? requirement : returned;
-            words[336] = text.IndexOf(';', words[335]) + 1 - words[335];
+            words[336] = text.IndexOf(';', words[335], System.StringComparison.Ordinal) + 1 - words[335];
         }
         else if (!isVoid)
         {

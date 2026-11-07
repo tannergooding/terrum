@@ -2,13 +2,14 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class WhileFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class WhileFrontendProjectionTests
 {
     [Test]
     public void ReaderChecksNestedBodyExtentsConditionsAndSourceAnchors()
@@ -73,23 +74,23 @@ public sealed class WhileFrontendProjectionTests
         Reject(336 + 10, words[336 + 10] + 1);
         Reject(337 + 15, 1);
         Reject(301, 0);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("while (x < 1)", "while (x + 1)", StringComparison.Ordinal)), Bytes()));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("x = x + 1;", "x = x - 1;", StringComparison.Ordinal)), Bytes()));
 
         void Reject(int index, int value)
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = old;
         }
 
         void Node(int index, int operation, int type, int start, int length,
             int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -101,7 +102,7 @@ public sealed class WhileFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;

@@ -7,7 +7,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class CoreExceptionIdentitySelectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CoreExceptionIdentitySelectionTests
 {
     [Test]
     public void CompilationReferencePreservesCoreExceptionIdentitySelections()
@@ -27,7 +28,7 @@ public sealed class CoreExceptionIdentitySelectionTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Not.Null);
         Assert.That(compilation.Program!.CoreExceptionIdentitySelections,
-            Is.EqualTo(new[] { selection }));
+            Is.EqualTo([selection]));
     }
 
     [Test]
@@ -46,7 +47,7 @@ public sealed class CoreExceptionIdentitySelectionTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Not.Null);
         Assert.That(compilation.Program!.CoreExceptionIdentitySelections,
-            Is.EqualTo(new[] { selection }));
+            Is.EqualTo([selection]));
     }
 
     [Test]
@@ -62,7 +63,7 @@ public sealed class CoreExceptionIdentitySelectionTests
             BoundRuntimePolicy.FailFast,
             coreExceptionIdentitySelections: [referenceSelection]);
 
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             Compilation.CreateLibrary(
                 SyntaxTree.Parse("public int32 Value() { return 1; }"),
                 reference,
@@ -78,7 +79,7 @@ public sealed class CoreExceptionIdentitySelectionTests
             "consumer", "core", "exception-interface",
             "core", "unreachable-payload");
 
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             new CompilationReference([], [], BoundRuntimePolicy.FailFast,
                 coreExceptionIdentitySelections: [selection, selection]));
     }
@@ -90,7 +91,7 @@ public sealed class CoreExceptionIdentitySelectionTests
             "consumer", "core", "exception-interface\uD800",
             "core", "unreachable-payload");
 
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             new CompilationReference([], [], BoundRuntimePolicy.FailFast,
                 coreExceptionIdentitySelections: [selection]));
     }

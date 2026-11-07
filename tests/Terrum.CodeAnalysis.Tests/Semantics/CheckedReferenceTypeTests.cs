@@ -1,11 +1,14 @@
 using System;
+using System.Buffers.Binary;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class CheckedReferenceTypeTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CheckedReferenceTypeTests
 {
     [TestCase("ref<int32>")]
     [TestCase("ref<ref<int32>>")]
@@ -34,6 +37,114 @@ public sealed class CheckedReferenceTypeTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("void Accept(gc int32 value) {}"));
 
         Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void PrivateRevision106RoundTripsCheckedReferenceTypesAndRejectsMalformedRows()
+    {
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void Accept(ref<int32> value) {}
+                public unsafe void AcceptPointer(ref<ptr<int32>> value) {}
+                public void AcceptNested(ref<ref<int32>> value) {}
+                public void AcceptOptional(ref<int32>? value) {}
+                public void AcceptNestedOptional(ref<ref<int32>?>? value) {}
+                """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var producer = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["Accept", "AcceptPointer", "AcceptNested", "AcceptOptional",
+                "AcceptNestedOptional"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(106));
+
+        var reference = ModuleCompiler.CreateReference(producer);
+        var declarations = reference.Functions;
+        var scalarParameter = global::System.Linq.Enumerable.Single(
+            declarations, static function => function.Name == "Accept")
+            .Variables[0].Type;
+        var pointerParameter = global::System.Linq.Enumerable.Single(
+            declarations, static function => function.Name == "AcceptPointer")
+            .Variables[0].Type;
+        var nestedParameter = global::System.Linq.Enumerable.Single(
+            declarations, static function => function.Name == "AcceptNested")
+            .Variables[0].Type;
+        var optionalParameter = global::System.Linq.Enumerable.Single(
+            declarations, static function => function.Name == "AcceptOptional")
+            .Variables[0].Type;
+        var nestedOptionalParameter = global::System.Linq.Enumerable.Single(
+            declarations,
+            static function => function.Name == "AcceptNestedOptional")
+            .Variables[0].Type;
+        Assert.That((int)scalarParameter, Is.LessThan(0));
+        Assert.That((int)pointerParameter, Is.LessThan(0));
+        Assert.That((int)nestedParameter, Is.LessThan(0));
+        Assert.That((int)optionalParameter, Is.LessThan(0));
+        Assert.That((int)nestedOptionalParameter, Is.LessThan(0));
+        Assert.That(pointerParameter, Is.Not.EqualTo(scalarParameter));
+        Assert.That(nestedParameter, Is.Not.EqualTo(scalarParameter));
+        Assert.That(optionalParameter, Is.Not.EqualTo(scalarParameter));
+        Assert.That(nestedOptionalParameter,
+            Is.Not.EqualTo(optionalParameter));
+
+        var malformed = (byte[])producer.Clone();
+        var typeRowOffset = FindPrivate106CheckedReferenceTypeRowOffset(
+            malformed);
+        var expectedScalarRow = new byte[8];
+        expectedScalarRow[0] = 1;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            expectedScalarRow.AsSpan(4), (int)PrimitiveType.Int32);
+        Assert.That(producer.AsSpan(typeRowOffset, expectedScalarRow.Length)
+            .SequenceEqual(expectedScalarRow), Is.True);
+        malformed[typeRowOffset + sizeof(byte) + sizeof(byte)] = 1;
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(malformed));
+
+        malformed = (byte[])producer.Clone();
+        typeRowOffset = FindPrivate106CheckedReferenceTypeRowOffset(
+            malformed);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(typeRowOffset + 4, sizeof(int)), -5);
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(malformed));
+    }
+
+    private static int FindPrivate106CheckedReferenceTypeRowOffset(
+        byte[] module)
+    {
+        var offset = 2 * sizeof(int);
+        SkipPrivateString(module, ref offset);
+        offset += 3 * sizeof(byte);
+        SkipPrivateString(module, ref offset);
+        Assert.That(ReadInt32(module, ref offset), Is.Zero);
+        offset += sizeof(int);
+
+        for (var tableIndex = 0; tableIndex < 4; tableIndex++)
+        {
+            Assert.That(ReadInt32(module, ref offset), Is.Zero);
+        }
+
+        var pointerTypeCount = ReadInt32(module, ref offset);
+        offset = checked(offset + (pointerTypeCount
+            * (sizeof(int) + sizeof(byte))));
+        Assert.That(ReadInt32(module, ref offset), Is.Zero);
+        Assert.That(ReadInt32(module, ref offset), Is.EqualTo(6));
+        return offset;
+    }
+
+    private static int ReadInt32(byte[] data, ref int offset)
+    {
+        var value = BinaryPrimitives.ReadInt32LittleEndian(
+            data.AsSpan(offset, sizeof(int)));
+        offset += sizeof(int);
+        return value;
+    }
+
+    private static void SkipPrivateString(byte[] data, ref int offset)
+    {
+        var length = ReadInt32(data, ref offset);
+        offset = checked(offset + length);
     }
 
     [Test]
@@ -170,10 +281,10 @@ public sealed class CheckedReferenceTypeTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
-                mut InlineArray<uint32, 3> outer = [1, 2, 3];
+                mut [uint32; 3] outer = [1, 2, 3];
                 mut ref<uint32> escaped = ref outer[0];
                 {
-                    mut InlineArray<uint32, 3> inner = [4, 5, 6];
+                    mut [uint32; 3] inner = [4, 5, 6];
                     escaped = ref inner[1];
                 }
                 return int32(*escaped);

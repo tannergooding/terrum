@@ -1,15 +1,16 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class NoReturnTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NoReturnTests
 {
     [TestCase("require false;")]
     [TestCase("while (true) { }")]
@@ -25,7 +26,11 @@ public sealed class NoReturnTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[DoesNotReturn] void Stop(bool value) { " + body + " }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(program.Functions[0].DoesNotReturn, Is.True);
         Assert.That(program.Functions[0].NoFailureProof, Is.False);
         SemanticVerifier.VerifyLibrary(program);
@@ -56,14 +61,22 @@ public sealed class NoReturnTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var stop = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Stop");
         Assert.That(stop.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(stop.DoesNotReturn, Is.True);
         SemanticVerifier.VerifyLibrary(program);
         var bodyOnly = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[DoesNotReturn] int32 Stop(bool value) { require false; }"));
-        var bodyOnlyProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = bodyOnly.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var bodyOnlyProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = bodyOnly.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var loaded = TrRmExecutableCompiler.Load(
             TrRmExecutableCompiler.Emit(bodyOnlyProgram, "nonunit-no-return"));
         var persistedStop = global::System.Linq.Enumerable.Single(loaded.Functions,
@@ -88,7 +101,11 @@ public sealed class NoReturnTests
             "struct S { public int32 Value; [DoesNotReturn] public S() { Value = 0; require false; } }";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         var constructor = global::System.Linq.Enumerable.Single(program.Functions,
             static function => function.IsConstructor);
         Assert.That(constructor.DoesNotReturn, Is.True);
@@ -115,7 +132,11 @@ public sealed class NoReturnTests
             "class C { public int32 Value; [DoesNotReturn] public C() { require false; } }";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         var constructor = global::System.Linq.Enumerable.Single(program.Functions,
             static function => function.IsClassConstructor);
         Assert.That(constructor.DoesNotReturn, Is.True);
@@ -167,7 +188,11 @@ public sealed class NoReturnTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         SemanticVerifier.VerifyLibrary(program);
 
         var unpublishedOutput = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -205,7 +230,11 @@ public sealed class NoReturnTests
         var valid = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[DoesNotReturn]  void Spin() { for (;;) { } }"));
         Assert.That(valid.HasErrors, Is.False, string.Join(Environment.NewLine, valid.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = valid.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = valid.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(program.Functions[0].DoesNotReturn, Is.True);
         Assert.That(program.Functions[0].NoFailureProof, Is.False);
         var bothPromises = BoundProgramTestHelpers.MarkNoFailureProof(program, "Spin");
@@ -227,7 +256,11 @@ public sealed class NoReturnTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source + " int32 Main() { return 0; }"));
         Assert.That(compilation.HasErrors, Is.False);
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var forged = program with {
             Functions = program.Functions.SetItem(0, program.Functions[0] with { DoesNotReturn = true }),
         };
@@ -244,7 +277,11 @@ public sealed class NoReturnTests
         Assert.That(global::System.Linq.Enumerable.Any(missing.Diagnostics,static diagnostic => diagnostic.Code == "TRM3012"),Is.True);
         var declared = Compilation.Create(SyntaxTree.Parse("[DoesNotReturn] " + Source));
         Assert.That(declared.HasErrors, Is.False, string.Join(Environment.NewLine, declared.Diagnostics));
-        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = declared.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))());
+        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = declared.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))());
     }
 
     [Test]
@@ -281,7 +318,11 @@ public sealed class NoReturnTests
         Assert.That(compilation.HasErrors, Is.EqualTo(!valid));
         if (valid)
         {
-            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))());
+            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = compilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))());
         }
         else
         {

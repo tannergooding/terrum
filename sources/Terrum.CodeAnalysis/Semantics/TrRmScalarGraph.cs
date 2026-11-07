@@ -64,15 +64,19 @@ internal static class TrRmOptionalScalar
         foreach (var payloadType in s_payloadTypes)
         {
             var payloadSize = ValueLayout.Size(payloadType, []);
-            var alignment = payloadSize;
-            var size = (payloadSize + 1 + alignment - 1) & -alignment;
+            var alignmentValue = ValueLayout.Alignment(payloadType, []);
+            var alignment = checked((ulong)alignmentValue);
+            var size = checked((payloadSize + 1UL + alignment - 1)
+                & ~(alignment - 1));
             structures.Add(new BoundStruct($"$trrm.Optional<{payloadType}>",
                 [
                     new BoundStructField("Payload", payloadType, 0, payloadSize),
-                    new BoundStructField("Present", PrimitiveType.Bool, payloadSize, 1),
-                ], size)
-            {
+                    new BoundStructField("Present", PrimitiveType.Bool,
+                        payloadSize, 1),
+                ], size) {
                 IsInternal = true,
+                Alignment = alignmentValue,
+                RequiredAlignment = 1,
             });
         }
         return structures.MoveToImmutable();
@@ -146,21 +150,18 @@ internal sealed class TrRmScalarGraph
             {
                 var operation = block.Operations[operationIndex];
                 Visit(ref remaining);
-                var call = operation switch
-                {
+                var call = operation switch {
                     BoundLocal { Initializer: BoundCall value } => value,
                     BoundExpressionStatement { Expression: BoundCall value } => value,
                     _ => null,
                 };
-                if (operation is BoundLocal
-                    { Initializer: BoundBinary { OverflowBehavior: BoundIntegerOverflowBehavior.Wrapping } wrapping }
+                if (operation is BoundLocal { Initializer: BoundBinary { OverflowBehavior: BoundIntegerOverflowBehavior.Wrapping } wrapping }
                     local
                     && !WrappingBinaryMatches(wrapping, local.Variable, Types))
                 {
                     throw new ArgumentException("Indexed wrapping Binary result or operand contract does not match.");
                 }
-                if (operation is BoundExpressionStatement
-                    { Expression: BoundBinary { OverflowBehavior: BoundIntegerOverflowBehavior.Wrapping } wrappingExpression }
+                if (operation is BoundExpressionStatement { Expression: BoundBinary { OverflowBehavior: BoundIntegerOverflowBehavior.Wrapping } wrappingExpression }
                     && !WrappingBinaryMatches(wrappingExpression, null, Types))
                 {
                     throw new ArgumentException("Indexed wrapping Binary operand contract does not match.");
@@ -168,8 +169,8 @@ internal sealed class TrRmScalarGraph
                 if (operation is BoundLocal { Initializer: var initializer } optionalLocal
                     && (initializer is TrRmScalarOptionalNone or TrRmScalarOptionalLift
                         or TrRmScalarOptionalPresence or TrRmScalarOptionalEquality
-                        || initializer is BoundConditional conditional
-                            && TrRmOptionalScalar.IsOptionalType(conditional.Type))
+                        || (initializer is BoundConditional conditional
+                            && TrRmOptionalScalar.IsOptionalType(conditional.Type)))
                     && (optionalLocal.Variable < ParameterCount || optionalLocal.Variable >= Types.Length
                         || Types[optionalLocal.Variable] != initializer.Type
                         || !ValidOptionalExpression(initializer, Types)))
@@ -190,8 +191,7 @@ internal sealed class TrRmScalarGraph
                 {
                     throw new ArgumentException("Indexed CheckedDivRem result or operand contract does not match.");
                 }
-                var nativeAddress = operation switch
-                {
+                var nativeAddress = operation switch {
                     BoundLocal { Initializer: BoundNativeFunctionAddress value } => value,
                     BoundExpressionStatement { Expression: BoundNativeFunctionAddress value } => value,
                     _ => null,
@@ -211,8 +211,7 @@ internal sealed class TrRmScalarGraph
                         throw new ArgumentException("Indexed native function address violates its callable or unsafe-scope contract.");
                     }
                 }
-                var indirectCall = operation switch
-                {
+                var indirectCall = operation switch {
                     BoundLocal { Initializer: BoundIndirectCall value } => value,
                     BoundExpressionStatement { Expression: BoundIndirectCall value } => value,
                     _ => null,
@@ -290,7 +289,7 @@ internal sealed class TrRmScalarGraph
                         && (target.Intrinsic != BoundIntrinsic.NativeVTableCall
                             || target.NativeVTableMethod is null))
                     || target.RequiresUnsafeCaller != call.IsUnsafeAuthorized
-                    || target.RequiresUnsafeCaller && !block.IsCallerUnsafeScope
+                    || (target.RequiresUnsafeCaller && !block.IsCallerUnsafeScope)
                     || target.ReturnType != call.Type
                     || target.ParameterCount != call.Arguments.Length
                     || (requiresNoFailureProof
@@ -354,7 +353,7 @@ internal sealed class TrRmScalarGraph
                     Visit(ref remaining);
                     var switchCase = block.SwitchCases[caseIndex];
                     if (!FitsSwitchBits(selectorType, switchCase.Bits)
-                        || caseIndex != 0 && switchCase.Bits <= previous)
+                        || (caseIndex != 0 && switchCase.Bits <= previous))
                     {
                         throw new ArgumentException("Indexed switch cases are not canonical for their selector.");
                     }
@@ -565,8 +564,7 @@ internal sealed class TrRmScalarGraph
     private static bool ValidOptionalExpression(BoundExpression expression,
         ImmutableArray<PrimitiveType> types)
     {
-        return expression switch
-        {
+        return expression switch {
             TrRmScalarOptionalNone none => TrRmOptionalScalar.IsOptionalType(none.Type),
             TrRmScalarOptionalLift lift => TrRmOptionalScalar.IsOptionalType(lift.Type)
                 && IsReadOfType(lift.Value, TrRmOptionalScalar.PayloadType(lift.Type), types),
@@ -587,16 +585,16 @@ internal sealed class TrRmScalarGraph
 
     private static bool IsOptionalValue(BoundExpression expression,
         ImmutableArray<PrimitiveType> types)
-        => expression is BoundRead read && TrRmOptionalScalar.IsOptionalType(read.Type)
+        => (expression is BoundRead read && TrRmOptionalScalar.IsOptionalType(read.Type)
                 && IsOptionalRead(read,
-                TrRmOptionalScalar.PayloadType(read.Type), types)
-            || expression is TrRmScalarOptionalNone none
-                && TrRmOptionalScalar.IsOptionalType(none.Type)
-            || expression is TrRmScalarOptionalLift lift
+                TrRmOptionalScalar.PayloadType(read.Type), types))
+            || (expression is TrRmScalarOptionalNone none
+                && TrRmOptionalScalar.IsOptionalType(none.Type))
+            || (expression is TrRmScalarOptionalLift lift
                 && TrRmOptionalScalar.IsOptionalType(lift.Type)
-                && IsReadOfType(lift.Value, TrRmOptionalScalar.PayloadType(lift.Type), types)
-            || expression is BoundConditional conditional
-                && ValidOptionalExpression(conditional, types);
+                && IsReadOfType(lift.Value, TrRmOptionalScalar.PayloadType(lift.Type), types))
+            || (expression is BoundConditional conditional
+                && ValidOptionalExpression(conditional, types));
 
     private static bool IsReadOfType(BoundExpression expression, PrimitiveType type,
         ImmutableArray<PrimitiveType> types)
@@ -615,8 +613,7 @@ internal sealed class TrRmScalarGraph
         => type is PrimitiveType.Bool or PrimitiveType.Char16 || IsInteger(type);
 
     private static bool FitsSwitchBits(PrimitiveType type, ulong bits)
-        => type switch
-        {
+        => type switch {
             PrimitiveType.Bool => bits <= 1,
             PrimitiveType.Char16 => bits <= ushort.MaxValue,
             PrimitiveType.Int32 or PrimitiveType.UInt32 => bits <= uint.MaxValue,

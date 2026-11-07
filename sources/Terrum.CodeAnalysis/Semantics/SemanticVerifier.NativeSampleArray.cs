@@ -149,7 +149,8 @@ public static partial class SemanticVerifier
                         initialization.Layout, (ulong)index,
                         InitializedPayloadBytesOfExpression(
                             element, initialization.Layout.ElementType,
-                            initialized, function, program));
+                            initialized, function, program, ref remaining,
+                            depth + 1));
                 }
                 if (evaluationContinues
                     && element is not (BoundNativeFixedArrayInitialization
@@ -285,7 +286,7 @@ public static partial class SemanticVerifier
                         destinationPrefix, layout, (ulong)index,
                         InitializedPayloadBytesOfExpression(element,
                             layout.ElementType, initialized, function,
-                            program));
+                            program, ref remaining, depth + 1));
                 }
                 if (evaluationContinues
                     && trackPointerFacts
@@ -398,11 +399,12 @@ public static partial class SemanticVerifier
             return true;
         }
 
-        if (CarriesRawUnionPayloadFacts(program, layout.ElementType))
+        if (CarriesRawUnionPayloadFacts(program, layout.ElementType)
+            && !NativeFixedArrayTypes.IsType(layout.ElementType))
         {
             var initializedBytes = InitializedPayloadBytesOfExpression(
                 initialization.Seed, layout.ElementType, initialized,
-                function, program);
+                function, program, ref remaining, depth + 1);
             initialized.ClearRawUnionArrayFacts(variable,
                 destinationPrefix);
             initialized.SetRawUnionArrayTemplateBytes(variable,
@@ -1497,7 +1499,7 @@ public static partial class SemanticVerifier
                 arrayPrefix, write.Layout, selectedIndex,
                 InitializedPayloadBytesOfExpression(write.Value,
                     write.Layout.ElementType, initialized, function,
-                    program));
+                    program, ref remaining, depth + 1));
         }
         if (valueCompletes
             && CarriesNativePointer(write.Layout.ElementType, program)
@@ -1635,7 +1637,8 @@ public static partial class SemanticVerifier
             if (hasLeafFields)
             {
                 var initializedBytes = InitializedPayloadBytesOfExpression(
-                    write.Value, targetType, initialized, function, program);
+                    write.Value, targetType, initialized, function, program,
+                    ref remaining, depth + 1);
                 if ((ulong)initializedBytes.Length != fieldSize)
                 {
                     throw Invalid(write.Span);
@@ -1650,7 +1653,7 @@ public static partial class SemanticVerifier
                     arrayPrefix, leafLayout, selectedIndex,
                     InitializedPayloadBytesOfExpression(write.Value,
                         leafLayout.ElementType, initialized, function,
-                        program));
+                        program, ref remaining, depth + 1));
             }
         }
         if (valueCompletes

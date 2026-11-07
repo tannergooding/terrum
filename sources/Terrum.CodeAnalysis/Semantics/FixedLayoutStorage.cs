@@ -112,6 +112,13 @@ public static class FixedLayoutStorage
             if (structure.BlittableTargetRequirement != WindowsX64TargetRequirement
                 || structure.LayoutKind is not (1 or 2 or 3)
                 || (structure.IsTransparent && structure.Fields.Length != 1)
+                || (structure.IsSequential || structure.IsUnion
+                    ? structure.Packing is not (1 or 2 or 4 or 8 or 16)
+                    : structure.Packing != 0)
+                || (structure.DeclaredAlignment is int declaredAlignment
+                    && ((!structure.IsSequential && !structure.IsUnion)
+                        || declaredAlignment is < 1 or > 8192
+                        || (declaredAlignment & (declaredAlignment - 1)) != 0))
                 || (structure.CleanupMethod is not null && !structure.IsUnique)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty)
@@ -120,8 +127,9 @@ public static class FixedLayoutStorage
             }
             states[index] = 1;
             var fieldNames = new HashSet<string>(StringComparer.Ordinal);
-            var size = 0L;
-            var alignment = 1;
+            ulong size = 0;
+            var alignment = structure.IsTransparent ? 0 : 1;
+            var requiredAlignment = 1;
             var height = 1;
             var computedFields = ImmutableArray.CreateBuilder<BoundStructField>(
                 structure.Fields.Length);
@@ -136,8 +144,9 @@ public static class FixedLayoutStorage
                 {
                     throw Invalid();
                 }
-                int width;
+                ulong width;
                 int fieldAlignment;
+                int fieldRequiredAlignment;
                 if (NativeFixedArrayTypes.IsType(field.Type))
                 {
                     var arrayIndex = NativeFixedArrayTypes.Index(field.Type);
@@ -150,14 +159,15 @@ public static class FixedLayoutStorage
                     if (!NativeFixedArrayContract.TryGetLayout(field.Type,
                             array.ElementType, array.ElementCount, structures,
                             fixedArrays, out var layout)
-                        || layout.ByteExtent > int.MaxValue
-                        || layout.Alignment > int.MaxValue)
+                        || layout.Alignment > int.MaxValue
+                        || layout.RequiredAlignment > int.MaxValue)
                     {
                         throw Invalid();
                     }
 
-                    width = (int)layout.ByteExtent;
+                    width = layout.ByteExtent;
                     fieldAlignment = (int)layout.Alignment;
+                    fieldRequiredAlignment = (int)layout.RequiredAlignment;
                 }
                 else if (PrimitiveTypeFacts.ScalarWidth(field.Type) > 0
                     || field.Type is PrimitiveType.NativeUtf16ZPointer
@@ -168,6 +178,7 @@ public static class FixedLayoutStorage
                 {
                     width = ValueLayout.Size(field.Type, computedStructures);
                     fieldAlignment = ValueLayout.Alignment(field.Type, computedStructures);
+                    fieldRequiredAlignment = 1;
                 }
                 else
                 {
@@ -187,6 +198,8 @@ public static class FixedLayoutStorage
                     }
                     width = computedStructures[nested].Size;
                     fieldAlignment = alignments[nested];
+                    fieldRequiredAlignment = computedStructures[nested]
+                        .RequiredAlignment;
                     height = Math.Max(height, heights[nested] + 1);
                 }
                 if (structure.IsUnion
@@ -195,25 +208,70 @@ public static class FixedLayoutStorage
                 {
                     throw Invalid();
                 }
+                var fieldPlacementAlignment = fieldAlignment;
+                if ((structure.IsSequential || structure.IsUnion)
+                    && width != 0)
+                {
+                    fieldPlacementAlignment = Math.Max(
+                        Math.Min(fieldAlignment, structure.Packing),
+                        fieldRequiredAlignment);
+                }
                 var offset = structure.IsTransparent || structure.IsUnion
-                    ? 0 : Align(size, fieldAlignment);
-                if (offset > int.MaxValue - width
-                    || (validateRecordedLayout
-                        && (field.Offset != offset || field.Size != width)))
+                    ? 0UL : width == 0 ? size : Align(size,
+                        fieldPlacementAlignment);
+                ulong end;
+                try
+                {
+                    end = checked(offset + width);
+                }
+                catch (OverflowException)
+                {
+                    throw Invalid();
+                }
+                if (validateRecordedLayout
+                    && (field.Offset != offset || field.Size != width))
                 {
                     throw Invalid();
                 }
                 computedFields.Add(field with {
-                    Offset = (int)offset,
+                    Offset = offset,
                     Size = width,
                 });
                 size = structure.IsUnion
-                    ? Math.Max(size, width) : offset + width;
-                alignment = Math.Max(alignment, fieldAlignment);
+                    ? Math.Max(size, width) : end;
+                if (structure.IsTransparent)
+                {
+                    alignment = fieldAlignment;
+                }
+                else if (width != 0)
+                {
+                    alignment = Math.Max(alignment,
+                        fieldPlacementAlignment);
+                }
+                requiredAlignment = Math.Max(requiredAlignment,
+                    fieldRequiredAlignment);
             }
-            var computedSize = structure.IsTransparent ? size : Align(size, alignment);
-            if (computedSize is < 1 or > int.MaxValue
-                || (validateRecordedLayout && structure.Size != computedSize))
+            if (structure.DeclaredAlignment is int explicitAlignment)
+            {
+                if (explicitAlignment < alignment)
+                {
+                    throw Invalid();
+                }
+                alignment = explicitAlignment;
+                requiredAlignment = Math.Max(requiredAlignment,
+                    explicitAlignment);
+            }
+            if (!structure.IsTransparent && size == 0)
+            {
+                size = 1;
+            }
+            var computedSize = structure.IsTransparent ? size
+                : Align(size, alignment);
+            if (computedSize < (structure.IsTransparent ? 0UL : 1UL)
+                || (validateRecordedLayout
+                    && (structure.Size != computedSize
+                        || structure.Alignment != alignment
+                        || structure.RequiredAlignment != requiredAlignment)))
             {
                 throw Invalid();
             }
@@ -221,13 +279,37 @@ public static class FixedLayoutStorage
             heights[index] = height;
             computedStructures[index] = structure with {
                 Fields = computedFields.MoveToImmutable(),
-                Size = (int)computedSize,
+                Size = computedSize,
+                Alignment = alignment,
+                RequiredAlignment = requiredAlignment,
             };
             states[index] = 2;
         }
     }
 
-    private static long Align(long size, int alignment) => (size + alignment - 1) & -(long)alignment;
+    private static ulong Align(ulong size, int alignment)
+    {
+        if (alignment <= 0 || (alignment & (alignment - 1)) != 0)
+        {
+            throw Invalid();
+        }
+
+        var wideAlignment = checked((ulong)alignment);
+        var remainder = size & (wideAlignment - 1);
+        if (remainder == 0)
+        {
+            return size;
+        }
+
+        try
+        {
+            return checked(size + wideAlignment - remainder);
+        }
+        catch (OverflowException)
+        {
+            throw Invalid();
+        }
+    }
 
     private static ArgumentException Invalid() =>
         new("Invalid explicit Windows x64 Blittable fixed-storage commitment.");

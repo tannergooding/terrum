@@ -83,17 +83,151 @@ internal static class NativeFixedArrayContract
         return true;
     }
 
+    internal static bool TryCreateTypeIdentityIndex(
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        out Dictionary<(PrimitiveType ElementType, ulong ElementCount), int>
+            indexes)
+    {
+        ArgumentNullException.ThrowIfNull(fixedArrays);
+        indexes = [];
+        if (fixedArrays.Count is > SemanticVerifier.MaximumAnalysisVisits
+            or > NativeFixedArrayTypes.MaximumCount)
+        {
+            return false;
+        }
+
+        indexes = new Dictionary<(
+            PrimitiveType ElementType, ulong ElementCount), int>(
+                fixedArrays.Count);
+        for (var index = 0; index < fixedArrays.Count; index++)
+        {
+            var fixedArray = fixedArrays[index];
+            if (!indexes.TryAdd((fixedArray.ElementType,
+                    fixedArray.ElementCount), index))
+            {
+                indexes.Clear();
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     internal static bool IsSupportedElementType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
         => IsSupportedElement(type, structures, fixedArrays, [],
-            allowEnums: false);
+            allowEnums: true);
 
     internal static bool IsRootlessCopyFieldType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
         => IsSupportedElement(type, structures, fixedArrays, [],
             allowEnums: true);
+
+    internal static bool IsRootlessCopyAggregateWithFixedArrayFields(
+        PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointers)
+        => !NativeFixedArrayTypes.IsType(type)
+            && HasInlineFixedArrayFieldStorage(type, structures, fixedArrays)
+            && IsRootlessCopyFieldType(type, structures, fixedArrays)
+            && !HasUnsupportedFixedArraySignatureType(type, structures,
+                fixedArrays, pointerTypes, functionPointers);
+
+    private static bool HasUnsupportedFixedArraySignatureType(
+        PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointers)
+        => HasUnsupportedFixedArraySignatureType(type, structures,
+            fixedArrays, pointerTypes, functionPointers, [], 0,
+            SemanticVerifier.MaximumAnalysisVisits, allowInlineArrays: false);
+
+    private static bool HasUnsupportedFixedArraySignatureType(
+        PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointers,
+        HashSet<PrimitiveType> visiting,
+        int depth,
+        int remaining,
+        bool allowInlineArrays)
+    {
+        if (depth > SemanticVerifier.MaximumDepth || remaining <= 0)
+        {
+            return true;
+        }
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            var arrayIndex = NativeFixedArrayTypes.Index(type);
+            if (!allowInlineArrays
+                || (uint)arrayIndex >= (uint)fixedArrays.Count
+                || !visiting.Add(type))
+            {
+                return true;
+            }
+            try
+            {
+                return HasUnsupportedFixedArraySignatureType(
+                    fixedArrays[arrayIndex].ElementType, structures,
+                    fixedArrays, pointerTypes, functionPointers, visiting,
+                    depth + 1, remaining - 1, allowInlineArrays: true);
+            }
+            finally
+            {
+                _ = visiting.Remove(type);
+            }
+        }
+        if (NativePointerTypes.IsType(type)
+            || NativeFunctionPointerTypes.IsType(type))
+        {
+            return HasMetadataOnlyArrayType(type, structures, fixedArrays,
+                pointerTypes, functionPointers);
+        }
+
+        var structureIndex = (int)type - 100;
+        if (BoundEnumTypes.IsType(type) || structureIndex < 0
+            || structureIndex >= structures.Count)
+        {
+            return false;
+        }
+        if (!visiting.Add(type))
+        {
+            return true;
+        }
+        try
+        {
+            var structure = structures[structureIndex];
+            if (structure.Fields.IsDefault)
+            {
+                return true;
+            }
+            foreach (var field in structure.Fields)
+            {
+                if (field is null
+                    || HasUnsupportedFixedArraySignatureType(field.Type,
+                        structures, fixedArrays, pointerTypes,
+                        functionPointers, visiting, depth + 1,
+                        remaining - 1, allowInlineArrays: true))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        finally
+        {
+            _ = visiting.Remove(type);
+        }
+    }
 
     internal static bool HasInlineFixedArrayFieldStorage(
         PrimitiveType type, IReadOnlyList<BoundStruct> structures,
@@ -147,6 +281,24 @@ internal static class NativeFixedArrayContract
         ulong elementCount, IReadOnlyList<BoundStruct> structures,
         List<BoundNativeFixedArrayType> fixedArrays,
         out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout)
+        => TryCreateTypeCore(elementType, elementCount, structures,
+            fixedArrays, null, out arrayType, out layout);
+
+    internal static bool TryCreateType(PrimitiveType elementType,
+        ulong elementCount, IReadOnlyList<BoundStruct> structures,
+        List<BoundNativeFixedArrayType> fixedArrays,
+        Dictionary<(PrimitiveType ElementType, ulong ElementCount), int>
+            indexes,
+        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout)
+        => TryCreateTypeCore(elementType, elementCount, structures,
+            fixedArrays, indexes, out arrayType, out layout);
+
+    private static bool TryCreateTypeCore(PrimitiveType elementType,
+        ulong elementCount, IReadOnlyList<BoundStruct> structures,
+        List<BoundNativeFixedArrayType> fixedArrays,
+        Dictionary<(PrimitiveType ElementType, ulong ElementCount), int>?
+            indexes,
+        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout)
     {
         arrayType = PrimitiveType.Int32;
         layout = default;
@@ -156,16 +308,24 @@ internal static class NativeFixedArrayContract
             return false;
         }
 
-        for (var index = 0; index < fixedArrays.Count; index++)
+        var identity = (ElementType: elementType,
+            ElementCount: elementCount);
+        if (indexes is not null
+            && indexes.TryGetValue(identity, out var indexedType))
         {
-            var existing = fixedArrays[index];
+            if ((uint)indexedType >= (uint)fixedArrays.Count)
+            {
+                return false;
+            }
+
+            var existing = fixedArrays[indexedType];
             if (existing.ElementType != elementType
                 || existing.ElementCount != elementCount)
             {
-                continue;
+                return false;
             }
 
-            arrayType = NativeFixedArrayTypes.Type(index);
+            arrayType = NativeFixedArrayTypes.Type(indexedType);
             layout = CreateLayout(arrayType, elementType, elementCount,
                 geometry);
             return existing.ElementStride == geometry.ElementStride
@@ -175,6 +335,28 @@ internal static class NativeFixedArrayContract
                     == geometry.RequiredAlignment;
         }
 
+        if (indexes is null)
+        {
+            for (var index = 0; index < fixedArrays.Count; index++)
+            {
+                var existing = fixedArrays[index];
+                if (existing.ElementType != elementType
+                    || existing.ElementCount != elementCount)
+                {
+                    continue;
+                }
+
+                arrayType = NativeFixedArrayTypes.Type(index);
+                layout = CreateLayout(arrayType, elementType, elementCount,
+                    geometry);
+                return existing.ElementStride == geometry.ElementStride
+                    && existing.ByteExtent == geometry.ByteExtent
+                    && existing.Alignment == geometry.Alignment
+                    && existing.RequiredAlignment
+                        == geometry.RequiredAlignment;
+            }
+        }
+
         if (fixedArrays.Count is >= SemanticVerifier.MaximumAnalysisVisits
             or >= NativeFixedArrayTypes.MaximumCount)
         {
@@ -182,9 +364,17 @@ internal static class NativeFixedArrayContract
         }
 
         arrayType = NativeFixedArrayTypes.Type(fixedArrays.Count);
+        var newIndex = fixedArrays.Count;
         fixedArrays.Add(new BoundNativeFixedArrayType(elementType,
             elementCount, geometry.ElementStride, geometry.ByteExtent,
             geometry.Alignment, geometry.RequiredAlignment));
+        if (indexes is not null
+            && !indexes.TryAdd(identity, newIndex))
+        {
+            fixedArrays.RemoveAt(newIndex);
+            arrayType = PrimitiveType.Int32;
+            return false;
+        }
         layout = CreateLayout(arrayType, elementType, elementCount, geometry);
         return true;
     }
@@ -297,7 +487,6 @@ internal static class NativeFixedArrayContract
         rootLayout = default;
         leafLayout = default;
         if (projections.IsDefaultOrEmpty
-            || projections.Length < 2
             || projections.Length > SemanticVerifier.MaximumDepth
             || !IsValidTable(structures, fixedArrays)
             || !TryGetLayout(rootType, structures, fixedArrays,
@@ -772,6 +961,12 @@ internal static class NativeFixedArrayContract
             return true;
         }
 
+        if (BoundEnumTypes.IsType(type))
+        {
+            layout = new TypeLayout(sizeof(int), sizeof(int), 1);
+            return true;
+        }
+
         if (NativePointerTypes.IsType(type)
             || NativeFunctionPointerTypes.IsType(type)
             || type is PrimitiveType.NativeUtf16ZPointer
@@ -824,47 +1019,99 @@ internal static class NativeFixedArrayContract
         layout = default;
         if (structure.Fields.IsDefaultOrEmpty
             || structure.LayoutKind is not (1 or 2 or 3)
+            || (structure.IsSequential || structure.IsUnion
+                ? structure.Packing is not (1 or 2 or 4 or 8 or 16)
+                : structure.Packing != 0)
+            || (structure.DeclaredAlignment is int declaredAlignment
+                && ((!structure.IsSequential && !structure.IsUnion)
+                    || declaredAlignment is < 1 or > 8192
+                    || (declaredAlignment & (declaredAlignment - 1)) != 0))
             || (structure.IsTransparent && structure.Fields.Length != 1))
         {
             return false;
         }
 
         ulong offset = 0;
-        ulong alignment = 1;
+        var alignment = structure.IsTransparent ? 0UL : 1UL;
         ulong requiredAlignment = 1;
         foreach (var field in structure.Fields)
         {
             if (!TryGetTypeLayout(field.Type, structures, fixedArrays,
-                    out var fieldLayout)
-                || fieldLayout.Size
-                    > (ulong)ValueLayout.MaximumStructureSize)
+                    out var fieldLayout))
             {
                 return false;
             }
 
-            var fieldAlignment = Math.Max(1UL, fieldLayout.Alignment);
-            var fieldOffset = structure.IsTransparent || structure.IsUnion
-                ? 0 : RoundUp(offset, fieldAlignment);
-            if (fieldOffset > (ulong)ValueLayout.MaximumStructureSize
-                    - fieldLayout.Size
-                || field.Offset != (int)fieldOffset
-                || field.Size != (int)fieldLayout.Size)
+            var fieldAlignment = fieldLayout.Alignment;
+            var fieldPlacementAlignment = fieldAlignment;
+            if ((structure.IsSequential || structure.IsUnion)
+                && fieldLayout.Size != 0)
+            {
+                fieldPlacementAlignment = Math.Max(
+                    Math.Min(fieldAlignment, (ulong)structure.Packing),
+                    fieldLayout.RequiredAlignment);
+            }
+            ulong fieldOffset;
+            ulong fieldEnd;
+            try
+            {
+                fieldOffset = structure.IsTransparent || structure.IsUnion
+                    ? 0 : fieldLayout.Size == 0 ? offset
+                    : RoundUp(offset, fieldPlacementAlignment);
+                fieldEnd = checked(fieldOffset + fieldLayout.Size);
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+            if (field.Offset != fieldOffset
+                || field.Size != fieldLayout.Size)
             {
                 return false;
             }
 
             offset = structure.IsUnion
                 ? Math.Max(offset, fieldLayout.Size)
-                : fieldOffset + fieldLayout.Size;
-            alignment = Math.Max(alignment, fieldAlignment);
+                : fieldEnd;
+            if (structure.IsTransparent)
+            {
+                alignment = fieldAlignment;
+            }
+            else if (fieldLayout.Size != 0)
+            {
+                alignment = Math.Max(alignment, fieldPlacementAlignment);
+            }
             requiredAlignment = Math.Max(requiredAlignment,
                 fieldLayout.RequiredAlignment);
         }
 
-        var size = structure.IsTransparent
-            ? offset : RoundUp(offset, alignment);
-        if (size != (ulong)structure.Size
-            || size > (ulong)ValueLayout.MaximumStructureSize)
+        if (structure.DeclaredAlignment is int explicitAlignment)
+        {
+            if ((ulong)explicitAlignment < alignment)
+            {
+                return false;
+            }
+            alignment = (ulong)explicitAlignment;
+            requiredAlignment = Math.Max(requiredAlignment,
+                (ulong)explicitAlignment);
+        }
+        if (!structure.IsTransparent && offset == 0)
+        {
+            offset = 1;
+        }
+        ulong size;
+        try
+        {
+            size = structure.IsTransparent ? offset
+                : RoundUp(offset, alignment);
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+        if (size != structure.Size
+            || alignment != (ulong)structure.Alignment
+            || requiredAlignment != (ulong)structure.RequiredAlignment)
         {
             return false;
         }

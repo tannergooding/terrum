@@ -7,7 +7,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class RawTextLiteralBindingTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class RawTextLiteralBindingTests
 {
     [Test]
     public void RawTextLiteralBindsThroughNativeUtf8Z()
@@ -26,6 +27,6 @@ public sealed class RawTextLiteralBindingTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(compilation.Program!.NativeUtf8ZLiterals, Is.EqualTo(new[] { "raw" }));
+        Assert.That(compilation.Program!.NativeUtf8ZLiterals, Is.EqualTo(["raw"]));
     }
 }

@@ -15,7 +15,8 @@ using Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class NominalUpdateTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NominalUpdateTests
 {
     private const string Operators = """
         struct Value {
@@ -176,7 +177,11 @@ public sealed class NominalUpdateTests
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
     [TestCase(false,NativeRuntimePolicy.FailFast)]
@@ -285,7 +290,7 @@ public sealed class NominalUpdateTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Next");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -367,8 +372,8 @@ public sealed class NominalUpdateTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3008"
-            || diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code is "TRM3008"
+            or "TRM3007"),Is.True);
     }
 
     [Test]
@@ -400,8 +405,16 @@ public sealed class NominalUpdateTests
         var index = Enumerable.Range(0, program.Functions.Length)
             .Single(i => program.Functions[i].Name == "Next");
         var function = program.Functions[index];
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = function.Body.Statements[^1]; Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))();
-        var update = ((global::System.Func<BoundNominalUpdate>)(() => { var __nunitActual2 = result.Value; Assert.That(__nunitActual2, Is.TypeOf<BoundNominalUpdate>()); return (BoundNominalUpdate)__nunitActual2!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual1 = function.Body.Statements[^1];
+            Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual1!;
+        }))();
+        var update = ((global::System.Func<BoundNominalUpdate>)(() => {
+            var __nunitActual2 = result.Value;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundNominalUpdate>());
+            return (BoundNominalUpdate)__nunitActual2!;
+        }))();
         foreach (var forged in new[] {
             update with { Function = program.EntryPoint },
             update with { Operator = TokenKind.MinusMinus },
@@ -415,16 +428,16 @@ public sealed class NominalUpdateTests
                     result with { Value = forged }),
                 }
             };
-            Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
                 Functions = program.Functions.SetItem(index, changed),
             }));
         }
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(index, function with { NoFailureProof = true }),
         }));
         var operatorIndex = Enumerable.Range(0, program.Functions.Length)
             .Single(i => program.Functions[i].Name == "Value.op_Increment");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(operatorIndex,
                 program.Functions[operatorIndex] with { IsOperator = false }),
         }));
@@ -438,7 +451,7 @@ public sealed class NominalUpdateTests
             """, NativeRuntimePolicy.FailFast);
         var ordinaryOperatorIndex = Enumerable.Range(0, ordinary.Functions.Length)
             .Single(i => ordinary.Functions[i].Name == "Value.op_Increment");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(ordinary with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(ordinary with {
             Functions = ordinary.Functions.SetItem(ordinaryOperatorIndex,
                 ordinary.Functions[ordinaryOperatorIndex] with { IsOperator = true }),
         }));
@@ -500,7 +513,7 @@ public sealed class NominalUpdateTests
         malformedContractBytes.CopyTo(malformed.AsSpan(lengthOffset + sizeof(int)));
         consumer.AsSpan(contractOffset + originalLength).CopyTo(
             malformed.AsSpan(lengthOffset + sizeof(int) + malformedContractBytes.Length));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(malformed, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(malformed, producer));
     }
     [TestCase(false,false,NativeRuntimePolicy.FailFast)]
     [TestCase(false,false,NativeRuntimePolicy.CheckedExceptions)]
@@ -534,10 +547,10 @@ public sealed class NominalUpdateTests
         }
         string[] exports = exportOperator ? ["Next", "Value.op_Increment"] : ["Next"];
         var original = ModuleCompiler.CreateProducer(CompileLibrary(library, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(104));
         var stale = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 63);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));
         var client = CompileClient("int32 Main() { return Next(); }",
             ModuleCompiler.CreateReference(original), policy);
         var consumer = ModuleCompiler.CreateConsumer(client, original);
@@ -569,20 +582,36 @@ public sealed class NominalUpdateTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
     }
 
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
     }
 
     private static BoundProgram CompileClient(string source, CompilationReference reference, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
     }
 }

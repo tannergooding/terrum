@@ -1,13 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolControlFlowTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolControlFlowTests
 {
     private const string Declarations = """
         interface Multiplication<A, B, C> {
@@ -38,9 +39,9 @@ public sealed class StaticProtocolControlFlowTests
         return result;
         """;
 
-    private const string NoThrowDeclarations = """
+    private const string MultiplicationDeclarations = """
         interface Multiplication<A, B, C> {
-            [NoThrow] static C operator *(A left, B right);
+             static C operator *(A left, B right);
         }
         """;
 
@@ -49,7 +50,11 @@ public sealed class StaticProtocolControlFlowTests
     {
         var compilation = Compile(PowerBody, instantiate: true);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var specialization = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name.StartsWith("Power<", StringComparison.Ordinal));
         Assert.That(global::System.Linq.Enumerable.Any(specialization.Body.Statements,statement => statement is BoundWhile),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Structures,structure => structure.Name == "$T"),Is.False);
@@ -61,7 +66,11 @@ public sealed class StaticProtocolControlFlowTests
     {
         var compilation = Compile(PowerBody, instantiate: false);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().Functions,function => function.Name.StartsWith("Power<", StringComparison.Ordinal)),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))().Functions,function => function.Name.StartsWith("Power<", StringComparison.Ordinal)),Is.False);
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -118,22 +127,21 @@ public sealed class StaticProtocolControlFlowTests
     }
 
     [Test]
-    public void NoThrowStructuredDefinitionRejectsScalarFailuresWithoutInstantiation()
+    public void StructuredDefinitionRetainsScalarFailureOperationsWithoutInstantiation()
     {
-        var source = NoThrowDeclarations + "[NoThrow] " + Generic("""
+        var source = MultiplicationDeclarations + " " + Generic("""
             mut uint32 half = exponent / 2;
             if (half == 0) { return one; }
             return value * one;
             """) + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(compilation.HasErrors, Is.True);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
-    public void NoThrowStructuredDefinitionAcceptsOnlyConstrainedNoThrowCalls()
+    public void StructuredDefinitionSupportsConstrainedOrdinaryCalls()
     {
-        var source = NoThrowDeclarations + "[NoThrow] " + Generic("""
+        var source = MultiplicationDeclarations + " " + Generic("""
             if (exponent == 0) { return one; }
             return value * one;
             """) + "int32 Main() { return 0; }";

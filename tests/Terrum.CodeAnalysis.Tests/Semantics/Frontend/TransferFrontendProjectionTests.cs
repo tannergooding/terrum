@@ -2,13 +2,14 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class TransferFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TransferFrontendProjectionTests
 {
     [Test]
     public void ReaderRequiresNearestLoopAndSourceBoundTransfersAcrossBranches()
@@ -66,21 +67,21 @@ public sealed class TransferFrontendProjectionTests
         Reject(355, next + 1);
         Reject(356, 8);
         Reject(352, 6);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("continue;", "break;   ", StringComparison.Ordinal)), Bytes()));
 
         void Reject(int index, int changed)
         {
             var original = words[index];
             words[index] = changed;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int type, int start, int length,
             int left, int right, int low = 0)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -92,7 +93,7 @@ public sealed class TransferFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;
@@ -168,19 +169,19 @@ public sealed class TransferFrontendProjectionTests
         Statement(0, 6, 0, -1, outsideBreak, outsideBreak + 6);
         Statement(1, 3, 3, 0, outsideLoop, outside.IndexOf("} return", StringComparison.Ordinal) + 1);
         Statement(2, 6, 1, -1, insideBreak, insideBreak + 6);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(outside), Bytes()));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(outside), Bytes()));
 
         void Reject(int index, int changed)
         {
             var original = words[index];
             words[index] = changed;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int start)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = operation == 20 ? 5 : 1;
             words[offset + 2] = start + (operation == 20 ? 7 : 0);
@@ -188,12 +189,14 @@ public sealed class TransferFrontendProjectionTests
             words[offset + 4] = -1;
             words[offset + 5] = -1;
             if (operation == 3)
-            { words[offset + 6] = 42; }
+            {
+                words[offset + 6] = 42;
+            }
         }
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;

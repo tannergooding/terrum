@@ -3,15 +3,16 @@
 using System;
 using System.Buffers.Binary;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class CoreLibraryTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CoreLibraryTests
 {
     private const string Core = """
         public struct int32 {
@@ -31,11 +32,15 @@ public sealed class CoreLibraryTests
     {
         var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(Core)]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(program.Structures, Is.Empty);
         var producer = ModuleCompiler.CreateProducer(program,
             ["int32.TryParse", "int32.TryFormat", "int32.Identity", "int32.ReadBacking"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(104));
         var consumer = Compilation.Create(SyntaxTree.Parse(
             """
             int32 Main() {
@@ -48,25 +53,33 @@ public sealed class CoreLibraryTests
             ModuleCompiler.CreateReference(producer));
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
         var consumerBytes = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumer.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)), Is.EqualTo(101));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumer.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)), Is.EqualTo(104));
         var linked = ModuleCompiler.Link(consumerBytes, producer);
         Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var oldVersion = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldVersion.AsSpan(4), 36);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldVersion));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldVersion));
         var oldConsumer = (byte[])consumerBytes.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldConsumer.AsSpan(4), 33);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer));
 
         var ordinary = Compilation.CreateLibrary(
             SyntaxTree.Parse("public int32 Value() { return 42; }"));
         Assert.That(ordinary.HasErrors, Is.False);
         var ordinaryProducer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = ordinary.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Value"]);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = ordinary.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), ["Value"]);
         BinaryPrimitives.WriteInt32LittleEndian(ordinaryProducer.AsSpan(4), 37);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(ordinaryProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(ordinaryProducer));
     }
     [TestCase("bool")]
     [TestCase("char16")]
@@ -80,7 +93,11 @@ public sealed class CoreLibraryTests
         var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)],
             BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Structures, Is.Empty);
+        Assert.That(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))().Structures, Is.Empty);
     }
     [TestCase("bool",BoundRuntimePolicy.FailFast)]
     [TestCase("bool",BoundRuntimePolicy.CheckedExceptions)]
@@ -101,8 +118,8 @@ public sealed class CoreLibraryTests
             public struct {{name}} {
                 private {{name}} value;
                 public static {{name}} Identity({{name}} input) { return input.value; }
-                public {{name}} Value { [NoThrow] get { return value; } }
-                private {{name}} PrivateValue { [NoThrow] get { return value; } }
+                public {{name}} Value {  get { return value; } }
+                private {{name}} PrivateValue {  get { return value; } }
                 public {{name}} ReadPrivate() { return PrivateValue; }
                 public {{name}} get_Value() { return value; }
             }
@@ -112,19 +129,27 @@ public sealed class CoreLibraryTests
             : $"int32 Main() {{ {name} value = {name}.Identity({name}(7)); return int32(value.Value) + int32(value.ReadPrivate()) - 7; }}";
         var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(library)], runtimePolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         Assert.That(program.Structures, Is.Empty);
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.PropertyName == "Value").Name, Is.EqualTo($"{name}.#get:Value"));
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == $"{name}.get_Value").PropertyName, Is.Null);
         var exports = new[] { $"{name}.Identity", $"{name}.#get:Value", $"{name}.ReadPrivate" };
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(104));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(source),
             ModuleCompiler.CreateReference(producer), runtimePolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)), Is.EqualTo(101));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual5 = consumerCompilation.Program;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual5!;
+            }))(), producer);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)), Is.EqualTo(104));
         var linked = ModuleCompiler.Link(consumer, producer);
         var policy = (NativeRuntimePolicy)runtimePolicy;
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(7));
@@ -132,10 +157,10 @@ public sealed class CoreLibraryTests
 
         var oldProducer = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldProducer.AsSpan(4), 37);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldProducer));
         var oldConsumer = (byte[])consumer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldConsumer.AsSpan(4), 37);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -146,7 +171,7 @@ public sealed class CoreLibraryTests
             public struct int32 {
                 private int32 value;
                 public static int32 Identity(int32 input) { return input.value; }
-                public int32 Value { [NoThrow] get { return value; } }
+                public int32 Value {  get { return value; } }
             }
             """;
         var replacement = Original.Replace("get { return value; }", "get { return 8; }",
@@ -157,8 +182,16 @@ public sealed class CoreLibraryTests
         Assert.That(original.HasErrors, Is.False, string.Join(Environment.NewLine, original.Diagnostics));
         Assert.That(revised.HasErrors, Is.False, string.Join(Environment.NewLine, revised.Diagnostics));
         string[] exports = ["int32.Identity", "int32.#get:Value"];
-        var firstProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = original.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
-        var secondProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = revised.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var firstProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = original.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
+        var secondProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = revised.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
         var first = ModuleCompiler.CreateProducer(firstProgram, exports);
         var second = ModuleCompiler.CreateProducer(secondProgram, exports);
         var source = SyntaxTree.Parse("int32 Main() { return int32.Identity(7).Value; }");
@@ -166,7 +199,11 @@ public sealed class CoreLibraryTests
             ModuleCompiler.CreateReference(first), runtimePolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = consumerCompilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), first);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual8 = consumerCompilation.Program;
+                Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual8!;
+            }))(), first);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, second), policy), Is.EqualTo(8));
 
         var nativeFirst = NativeModuleCompiler.CreateProducer(firstProgram, exports, "Core", policy);
@@ -175,7 +212,11 @@ public sealed class CoreLibraryTests
             NativeModuleCompiler.CreateGraphReference([nativeFirst]), runtimePolicy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = nativeCompilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), [nativeFirst], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = nativeCompilation.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))(), [nativeFirst], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeFirst],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(7));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeSecond],
@@ -228,7 +269,11 @@ public sealed class CoreLibraryTests
             """;
         var core = Compilation.CreateCoreLibrary([SyntaxTree.Parse(Source)]);
         Assert.That(core.HasErrors, Is.False, string.Join(Environment.NewLine, core.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = core.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = core.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))(),
             ["int32.get_Hidden"]);
         var consumer = Compilation.Create(
             SyntaxTree.Parse("int32 Main() { return int32(7).Hidden; }"),
@@ -253,14 +298,22 @@ public sealed class CoreLibraryTests
         var source = $"public struct {name} {{ private {name} value; public static {name} Identity({name} input) {{ return input.value; }} public {name} Read() {{ return value; }} }}";
         var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)], runtimePolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))(),
             [$"{name}.Identity", $"{name}.Read"]);
         var body = name == "bool" ? "if (bool.Identity(true).Read()) { return 7; } return 0;"
             : $"return int32({name}.Identity({name}(7)).Read());";
         var consumer = Compilation.Create(SyntaxTree.Parse($"int32 Main() {{ {body} }}"),
             ModuleCompiler.CreateReference(producer), runtimePolicy);
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
-        var consumerBytes = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = consumer.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), producer);
+        var consumerBytes = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = consumer.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumerBytes, producer),
             runtimePolicy == BoundRuntimePolicy.FailFast
                 ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(7));
@@ -274,7 +327,11 @@ public sealed class CoreLibraryTests
             SyntaxTree.Parse("public struct uint32 { private uint32 value; public uint32 Self() { return value; } }"),
         ], BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))().Functions.Length, Is.EqualTo(2));
+        Assert.That(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))().Functions.Length, Is.EqualTo(2));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -288,14 +345,22 @@ public sealed class CoreLibraryTests
                 "public struct uint32 { private uint32 value; public static uint32 Next(uint32 input) { return input.value + 1; } }"),
         ], runtimePolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))(),
             ["int32.Next", "uint32.Next"]);
         var consumer = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return int32.Next(39) + int32(uint32.Next(uint32(1))); }"),
             ModuleCompiler.CreateReference(producer), runtimePolicy);
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
         var consumerBytes = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = consumer.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual15 = consumer.Program;
+                Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual15!;
+            }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumerBytes, producer),
             runtimePolicy == BoundRuntimePolicy.FailFast
                 ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
@@ -310,7 +375,11 @@ public sealed class CoreLibraryTests
         ], BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), ["int32.Next"]);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual16 = compilation.Program;
+                Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual16!;
+            }))(), ["int32.Next"]);
         var consumer = Compilation.Create(SyntaxTree.Parse(
             """
             int32 Main() {
@@ -323,7 +392,11 @@ public sealed class CoreLibraryTests
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
         var consumerBytes = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = consumer.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual17 = consumer.Program;
+                Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual17!;
+            }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumerBytes, producer),
             NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
@@ -332,9 +405,16 @@ public sealed class CoreLibraryTests
     public void PrimitiveOwnerVerificationDoesNotReinterpretHistoricalNominalLayouts()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public int32 Value; public int32 Read() { return Value; } }"));
+            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public int32 Value; public int32 Read() { return Value; } }"),
+            new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = compilation.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))();
         var function = global::System.Linq.Enumerable.Single(program.Functions);
         var nominal = program with {
             Structures = program.Structures.SetItem(0, program.Structures[0] with { Name = "int32" }),
@@ -352,7 +432,11 @@ public sealed class CoreLibraryTests
         var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(Core)],
             BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False);
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual19 = compilation.Program;
+            Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual19!;
+        }))();
         var index = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "int32.TryFormat"));
         var function = program.Functions[index];
         var forged = program with {
@@ -361,7 +445,7 @@ public sealed class CoreLibraryTests
                     function.Variables[0] with { IsMutable = true }),
             }),
         };
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged));
     }
     [TestCase("struct int32 { private int32 value; }")]
     [TestCase("namespace Example; struct int32 { private int32 value; }")]

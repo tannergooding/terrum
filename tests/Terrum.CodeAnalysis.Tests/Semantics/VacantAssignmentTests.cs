@@ -4,15 +4,16 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class VacantAssignmentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class VacantAssignmentTests
 {
     [TestCase("init int32 value; value = 42; return value;")]
     [TestCase("init var value; value = int32(42); return value;")]
@@ -25,7 +26,11 @@ public sealed class VacantAssignmentTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             $"bool Pick() {{ return false; }} int32 Main() {{ {body} }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         SemanticVerifier.Verify(program);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -56,7 +61,7 @@ public sealed class VacantAssignmentTests
             unique struct Owner {
                 public int32 Value;
                 public Owner() { Value = 42; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             int32 Main() {
                 Owner owner = new Owner();
@@ -76,19 +81,27 @@ public sealed class VacantAssignmentTests
             "public int32 Read() { init var value; value = int32(42); return value; }"),
             runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         foreach (var version in new[] { 40, 41, 42, 43, 44, 45 })
         {
             var historical = (byte[])producer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(historical.AsSpan(4, 4), version);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(historical));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(historical));
         }
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = consumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = consumerCompilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
@@ -98,7 +111,11 @@ public sealed class VacantAssignmentTests
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(nativeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = nativeConsumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual3 = nativeConsumerCompilation.Program;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual3!;
+            }))(), [nativeProducer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -109,17 +126,25 @@ public sealed class VacantAssignmentTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { init int32 value; value = 42; return value; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var function = program.Functions[0];
         var slot = global::System.Linq.Enumerable.Single(function.Variables.Select((variable, index) => (variable, index))).index;
-        var vacant = ((global::System.Func<BoundVacantLocal>)(() => { var __nunitActual5 = function.Body.Statements[0]; Assert.That(__nunitActual5, Is.TypeOf<BoundVacantLocal>()); return (BoundVacantLocal)__nunitActual5!; }))();
+        var vacant = ((global::System.Func<BoundVacantLocal>)(() => {
+            var __nunitActual5 = function.Body.Statements[0];
+            Assert.That(__nunitActual5, Is.TypeOf<BoundVacantLocal>());
+            return (BoundVacantLocal)__nunitActual5!;
+        }))();
         var forged = function with {
             Body = function.Body with {
                 Statements = function.Body.Statements.SetItem(0,
                     new BoundLocal(slot, new BoundConstant(0, PrimitiveType.Int32, vacant.Span), vacant.Span)),
             },
         };
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(0, forged),
         }));
         var noAuthority = function with {
@@ -127,7 +152,7 @@ public sealed class VacantAssignmentTests
                 IsInitializationLocal = false,
             }),
         };
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(0, noAuthority),
         }));
     }
@@ -140,7 +165,11 @@ public sealed class VacantAssignmentTests
             int32 Main() { if (Fill(init var value)) { return value; } return 0; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         var functionIndex = program.Functions.Select((function, index) => (function, index))
             .Single(item => item.function.Name == "Main").index;
         var function = program.Functions[functionIndex];
@@ -150,7 +179,7 @@ public sealed class VacantAssignmentTests
                 IsInitializationLocal = true,
             }),
         };
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(functionIndex, forged),
         }));
     }

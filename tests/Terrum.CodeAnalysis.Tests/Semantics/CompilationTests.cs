@@ -11,7 +11,8 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class CompilationTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CompilationTests
 {
     [TestCase("int32 Main() { return 1 + 2 * 3; }")]
     [TestCase("void Main() { return (); }")]
@@ -49,7 +50,11 @@ public sealed class CompilationTests
             }
             """));
         Assert.That(valid.HasErrors, Is.False, string.Join(Environment.NewLine, valid.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = valid.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = valid.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         SemanticVerifier.Verify(program);
         Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
@@ -127,12 +132,22 @@ public sealed class CompilationTests
         SemanticVerifier.Verify(compilation.Program);
     }
     [TestCase("private alias Count = int32;")]
-    [TestCase("[NoThrow] alias Count = int32;")]
+    [TestCase("static alias Count = int32;")]
     public void RejectsUnsupportedAliasDeclarationModifiers(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             declaration + " int32 Main() { return 0; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3001"),Is.True);
+    }
+
+    [Test]
+    public void AttributeTargetDoesNotGrantAnUnregisteredContract()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "[param(value): Policy] void F(int32 value) { } int32 Main() { return 0; }"));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3001"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -149,7 +164,9 @@ public sealed class CompilationTests
                 var value = new NumberAlias(42);
                 return value.Value;
             }
-            """));
+            """), new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         TestAssertions.NotNull(compilation.Program);
         SemanticVerifier.Verify(compilation.Program);
@@ -325,6 +342,7 @@ public sealed class CompilationTests
         Assert.That(internalLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, internalLibrary.Diagnostics));
         TestAssertions.NotNull(internalLibrary.Program);
     }
+
     [TestCase("int32 F() { return 1; }")]
     [TestCase("int32 Main(int32 value) { return value; }")]
     [TestCase("bool Main() { return true; }")]
@@ -352,7 +370,9 @@ public sealed class CompilationTests
     [TestCase("int32 Main() { return F(true); } int32 F(int32 x) { return x; }")]
     [TestCase("int32 Main() { return F(out var x); } int32 F(int32 value) { return value; }")]
     [TestCase("int32 Main() { int32? x = 1; return 0; }")]
-    [TestCase("int32 Main() { int128 x = 1; return 0; }")]
+    [TestCase("int32 Main() { return -0xFFFFFFFF; }")]
+    [TestCase("int32 Main() { return +0xFFFFFFFF; }")]
+    [TestCase("int64 Main() { return -0xFFFFFFFFFFFFFFFF; }")]
     [TestCase("int32 Main() { var x = \"text\"; return 0; }")]
     [TestCase("int32 Main() { 1 + 2; return 0; }")]
     [TestCase("int32 Main() { return true + false; }")]
@@ -369,7 +389,9 @@ public sealed class CompilationTests
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
         Assert.That(compilation.Diagnostics, Is.Not.Empty);
-        {var __nunitItems0 = compilation.Diagnostics;        Assert.Multiple(() => {
+        {
+            var __nunitItems0 = compilation.Diagnostics;
+            Assert.Multiple(() => {
             foreach (var __nunitItem1 in __nunitItems0)
             {
                 {
@@ -377,9 +399,21 @@ public sealed class CompilationTests
                     Assert.That(__nunitItem1.Span.End, Is.InRange(__nunitItem1.Span.Start, source.Length));
                 }
             }
-        });}
+        });
+        }
         var repeated = Compilation.Create(tree);
         Assert.That(repeated.Diagnostics.ToArray(), Is.EqualTo(compilation.Diagnostics.ToArray()));
+    }
+
+    [Test]
+    public void Int128IsSupportedBySemanticBinding()
+    {
+        const string source = "int32 Main() { int128 value = 1; return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Not.Null);
     }
 
     [Test]

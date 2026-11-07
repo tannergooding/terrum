@@ -2,43 +2,44 @@
 
 using System;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticUnaryProtocolTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticUnaryProtocolTests
 {
     internal const string Source = """
-        interface UnaryPlus<T, R> { [NoThrow] static R operator +(T value); }
-        interface UnaryMinus<T, R> { [NoThrow] static R operator -(T value); }
-        interface UnaryNot<T, R> { [NoThrow] static R operator !(T value); }
-        interface UnaryComplement<T, R> { [NoThrow] static R operator ~(T value); }
-        interface BinaryPlus<L, R, O> { [NoThrow] static O operator +(L left, R right); }
-        interface BinaryMinus<L, R, O> { [NoThrow] static O operator -(L left, R right); }
+        interface UnaryPlus<T, R> {  static R operator +(T value); }
+        interface UnaryMinus<T, R> {  static R operator -(T value); }
+        interface UnaryNot<T, R> {  static R operator !(T value); }
+        interface UnaryComplement<T, R> {  static R operator ~(T value); }
+        interface BinaryPlus<L, R, O> {  static O operator +(L left, R right); }
+        interface BinaryMinus<L, R, O> {  static O operator -(L left, R right); }
         struct Value : UnaryPlus<Value, Value>, UnaryMinus<Value, Value>,
             UnaryNot<Value, int32>, UnaryComplement<Value, bool>,
             BinaryPlus<Value, Value, Value>, BinaryMinus<Value, Value, Value> {
             public int32 Number;
-            [NoThrow] public Value(int32 number) { Number = number; }
-            [NoThrow] public static Value operator +(Value value) { return value; }
-            [NoThrow] public static Value operator -(Value value) { return value; }
-            [NoThrow] public static int32 operator !(Value value) { return value.Number; }
-            [NoThrow] public static bool operator ~(Value value) { return value.Number == 42; }
-            [NoThrow] public static Value operator +(Value left, Value right) {
+             public Value(int32 number) { Number = number; }
+             public static Value operator +(Value value) { return value; }
+             public static Value operator -(Value value) { return value; }
+             public static int32 operator !(Value value) { return value.Number; }
+             public static bool operator ~(Value value) { return value.Number == 42; }
+             public static Value operator +(Value left, Value right) {
                 return new Value(left.Number);
             }
-            [NoThrow] public static Value operator -(Value left, Value right) {
+             public static Value operator -(Value left, Value right) {
                 return new Value(left.Number);
             }
         }
         R Negate<T, R>(T value) where T : UnaryNot<T, R>, [Copy] where R : [Copy] {
             return !value;
         }
-        [NoThrow] T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] {
+         T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] {
             return +value;
         }
         T Compose<T>(T value) where T : UnaryPlus<T, T>, [Copy] {
@@ -86,7 +87,11 @@ public sealed class StaticUnaryProtocolTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Negate<Value, int32>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Plus<Value>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Compose<Value>"),Is.True);
@@ -110,10 +115,10 @@ public sealed class StaticUnaryProtocolTests
     public void ResultOnlyOverloadIsRejectedRatherThanSelectedByContext()
     {
         var source = Source.Replace(
-            "[NoThrow] public static int32 operator !(Value value) { return value.Number; }",
+            " public static int32 operator !(Value value) { return value.Number; }",
             """
-            [NoThrow] public static int32 operator !(Value value) { return value.Number; }
-            [NoThrow] public static bool operator !(Value value) { return true; }
+             public static int32 operator !(Value value) { return value.Number; }
+             public static bool operator !(Value value) { return true; }
             """, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source + "int32 Main() { return 42; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3003"),Is.True);
@@ -140,17 +145,12 @@ public sealed class StaticUnaryProtocolTests
     }
 
     [Test]
-    public void NoThrowUnaryProtocolRequiresNoThrowImplementationAndPreservesEffects()
+    public void RetiredNoThrowUnaryProtocolUseIsDiagnosed()
     {
-        var missing = Source.Replace("[NoThrow] public static int32 operator !(Value value)",
-            "public static int32 operator !(Value value)", StringComparison.Ordinal);
-        var compilation = Compilation.Create(SyntaxTree.Parse(missing + "int32 Main() { return 42; }"));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3007"),Is.True);
-        var nonNoThrow = Source.Replace("[NoThrow] static R operator !(T value)",
-            "static R operator !(T value)", StringComparison.Ordinal);
-        nonNoThrow += "[NoThrow] int32 Check(Value value) { return Negate<Value, int32>(value); } int32 Main() { return 42; }";
-        var checkedCompilation = Compilation.Create(SyntaxTree.Parse(nonNoThrow));
-        Assert.That(global::System.Linq.Enumerable.Any(checkedCompilation.Diagnostics,item => item.Code == "TRM3017"),Is.True);
+        var source = Source.Replace("interface UnaryNot<T, R> {",
+            "interface UnaryNot<T, R> { [NoThrow]", StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3017"),Is.True);
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -164,12 +164,20 @@ public sealed class StaticUnaryProtocolTests
             }
             """), runtimePolicy: sourcePolicy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = library.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Read"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = library.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), ["Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(42); }"),
             reference, runtimePolicy: sourcePolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function =>
             function.Name.EndsWith(".Negate<Value, int32>", StringComparison.Ordinal)),Is.True);
@@ -192,13 +200,21 @@ public sealed class StaticUnaryProtocolTests
             """), runtimePolicy: sourcePolicy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = library.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), ["Read"], "NodeB", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual3 = library.Program;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual3!;
+            }))(), ["Read"], "NodeB", policy);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Read(42); }"),
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: sourcePolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = consumerCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), [producer], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = consumerCompilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))(), [producer], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -238,8 +254,20 @@ public sealed class StaticUnaryProtocolTests
         }
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))().Functions,function => function.Name == "Apply<Input, Result>"),Is.True);
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions,function => function.Name == "Fixed<Input>"),Is.True);
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), policy), Is.EqualTo(42));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))().Functions,function => function.Name == "Apply<Input, Result>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))().Functions,function => function.Name == "Fixed<Input>"),Is.True);
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))(), policy), Is.EqualTo(42));
     }
 }

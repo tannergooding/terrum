@@ -19,6 +19,8 @@ internal sealed partial class Binder
     private const int ConstEvalWorkLimit = 4096;
     private bool _hasRequiredExpression;
     private bool _hasStaticProof;
+    private bool _isBindingConstEvalBody;
+    private BoundFunction?[]? _boundConstEvalFunctions;
     private ImmutableArray<BoundVariable> _staticProofVariables;
     private HashSet<(PrimitiveType Type, ScalarBits Bits)> _staticProofJoinConstants = [];
 
@@ -341,9 +343,15 @@ internal sealed partial class Binder
 
         var sourceFunctionPointers = _nativeFunctionPointerSignatures.ToArray();
         var sourcePointers = _nativePointerTypes.ToArray();
-        if (!NativeFunctionPointerContract.IsValidTable([.. sourceFunctionPointers])
+        var sourceReferenceTypes = _checkedReferenceTypes.ToArray();
+        var sourceFixedArrays = _nativeFixedArrayTypes.ToArray();
+        if (!NativeFunctionPointerContract.IsValidTable(
+                [.. sourceFunctionPointers],
+                type => DirectNativeImportContract.IsInputPointee(type,
+                    _structs))
             || !NativePointerTypeContract.IsValidTable([.. sourcePointers], [.. _structs],
-                [.. sourceFunctionPointers]))
+                [.. sourceFunctionPointers])
+            || !CheckedReferenceTypeContract.IsValidTable([.. sourceReferenceTypes]))
         {
             Report("TRM3005", "Native type identities are invalid before convention normalization.",
                 _trees[0].Root.Span);
@@ -352,11 +360,22 @@ internal sealed partial class Binder
 
         var functionPointerMap = new PrimitiveType[sourceFunctionPointers.Length];
         var pointerMap = new PrimitiveType[sourcePointers.Length];
+        var referenceTypeMap = new PrimitiveType[sourceReferenceTypes.Length];
+        var fixedArrayMap = new PrimitiveType[sourceFixedArrays.Length];
         var functionPointerStates = new byte[sourceFunctionPointers.Length];
         var pointerStates = new byte[sourcePointers.Length];
+        var referenceTypeStates = new byte[sourceReferenceTypes.Length];
+        var fixedArrayStates = new byte[sourceFixedArrays.Length];
         var normalizedFunctionPointers =
             new List<NativeFunctionPointerSignatureDefinition>(sourceFunctionPointers.Length);
         var normalizedPointers = new List<NativePointerTypeDefinition>(sourcePointers.Length);
+        var normalizedReferenceTypes =
+            new List<CheckedReferenceTypeDefinition>(sourceReferenceTypes.Length);
+        var normalizedFixedArrays =
+            new List<BoundNativeFixedArrayType>(sourceFixedArrays.Length);
+        var normalizedFixedArrayTypeIndexes =
+            new Dictionary<(PrimitiveType ElementType, ulong ElementCount), int>(
+                sourceFixedArrays.Length);
         var invalidTypeReference = false;
 
         bool TryMapType(PrimitiveType type, out PrimitiveType mapped)
@@ -381,6 +400,28 @@ internal sealed partial class Binder
                     return false;
                 }
                 mapped = pointerMap[index];
+                return true;
+            }
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                var index = NativeFixedArrayTypes.Index(type);
+                if (!TryNormalizeFixedArray(index))
+                {
+                    mapped = default;
+                    return false;
+                }
+                mapped = fixedArrayMap[index];
+                return true;
+            }
+            if (CheckedReferenceTypes.IsType(type))
+            {
+                var index = CheckedReferenceTypes.Index(type);
+                if (!TryNormalizeReferenceType(index))
+                {
+                    mapped = default;
+                    return false;
+                }
+                mapped = referenceTypeMap[index];
                 return true;
             }
 
@@ -509,6 +550,85 @@ internal sealed partial class Binder
             return true;
         }
 
+        bool TryNormalizeReferenceType(int index)
+        {
+            if ((uint)index >= (uint)sourceReferenceTypes.Length)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            if (referenceTypeStates[index] == 2)
+            {
+                return true;
+            }
+            if (referenceTypeStates[index] == 1)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+
+            referenceTypeStates[index] = 1;
+            var source = sourceReferenceTypes[index];
+            if (source is null || !TryMapType(source.ReferentType, out var referentType))
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            var normalized = source with { ReferentType = referentType };
+            var normalizedIndex = normalizedReferenceTypes.FindIndex(existing => existing == normalized);
+            if (normalizedIndex < 0)
+            {
+                if (normalizedReferenceTypes.Count >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    invalidTypeReference = true;
+                    return false;
+                }
+                normalizedIndex = normalizedReferenceTypes.Count;
+                normalizedReferenceTypes.Add(normalized);
+            }
+            referenceTypeMap[index] = CheckedReferenceTypes.Type(normalizedIndex);
+            referenceTypeStates[index] = 2;
+            return true;
+        }
+
+        bool TryNormalizeFixedArray(int index)
+        {
+            if ((uint)index >= (uint)sourceFixedArrays.Length)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            if (fixedArrayStates[index] == 2)
+            {
+                return true;
+            }
+            if (fixedArrayStates[index] == 1)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+
+            fixedArrayStates[index] = 1;
+            var source = sourceFixedArrays[index];
+            if (!TryMapType(source.ElementType, out var elementType)
+                || !NativeFixedArrayContract.TryCreateType(elementType,
+                    source.ElementCount, _structs, normalizedFixedArrays,
+                    normalizedFixedArrayTypeIndexes,
+                    out var normalizedType, out var layout)
+                || source.ElementStride != layout.ElementStride
+                || source.ByteExtent != layout.ByteExtent
+                || source.Alignment != layout.Alignment
+                || source.RequiredAlignment != layout.RequiredAlignment)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+
+            fixedArrayMap[index] = normalizedType;
+            fixedArrayStates[index] = 2;
+            return true;
+        }
+
         for (var index = 0; index < sourceFunctionPointers.Length; index++)
         {
             if (!TryNormalizeFunctionPointer(index))
@@ -524,9 +644,24 @@ internal sealed partial class Binder
                 invalidTypeReference = true;
             }
         }
+        for (var index = 0; !invalidTypeReference && index < sourceReferenceTypes.Length; index++)
+        {
+            if (!TryNormalizeReferenceType(index))
+            {
+                invalidTypeReference = true;
+            }
+        }
+        for (var index = 0; !invalidTypeReference
+            && index < sourceFixedArrays.Length; index++)
+        {
+            if (!TryNormalizeFixedArray(index))
+            {
+                invalidTypeReference = true;
+            }
+        }
         if (invalidTypeReference)
         {
-            Report("TRM3005", "Native function-pointer or pointer type remapping failed.",
+            Report("TRM3005", "Native or checked-reference type remapping failed.",
                 _trees[0].Root.Span);
             return false;
         }
@@ -545,6 +680,18 @@ internal sealed partial class Binder
                 return (uint)index < (uint)pointerMap.Length
                     ? pointerMap[index] : PrimitiveType.Int32;
             }
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                var index = NativeFixedArrayTypes.Index(type);
+                return (uint)index < (uint)fixedArrayMap.Length
+                    ? fixedArrayMap[index] : PrimitiveType.Int32;
+            }
+            if (CheckedReferenceTypes.IsType(type))
+            {
+                var index = CheckedReferenceTypes.Index(type);
+                return (uint)index < (uint)referenceTypeMap.Length
+                    ? referenceTypeMap[index] : PrimitiveType.Int32;
+            }
             return type;
         }
 
@@ -552,11 +699,44 @@ internal sealed partial class Binder
             .Select(structure => BoundTreeTraversal.RewriteTypes(structure, RewriteType)).ToArray();
         var normalizedClasses = _classes
             .Select(@class => BoundTreeTraversal.RewriteTypes(@class, RewriteType)).ToArray();
+        var normalizedInterfaces = _interfaces
+            .Select(@interface => BoundTreeTraversal.RewriteTypes(@interface, RewriteType)).ToArray();
         var normalizedPointerDefinitions = _nativePointerTypes
             .Select(pointer => pointer with { PointeeType = RewriteType(pointer.PointeeType) }).ToArray();
-        if (!NativeFunctionPointerContract.IsValidTable([.. normalizedFunctionPointers])
+        var rewrittenFixedArrays = normalizedFixedArrays
+            .Select(fixedArray => BoundTreeTraversal.RewriteTypes(fixedArray,
+                RewriteType)).ToArray();
+        var normalizedReferenceTypeDefinitions = _checkedReferenceTypes
+            .Select(referenceType => BoundTreeTraversal.RewriteTypes(referenceType, RewriteType)).ToArray();
+        var fixedArrayIdentities = new HashSet<(PrimitiveType ElementType,
+            ulong ElementCount)>();
+        var normalizedStructuresImmutable = normalizedStructures.ToImmutableArray();
+        for (var index = 0; index < rewrittenFixedArrays.Length; index++)
+        {
+            var fixedArray = rewrittenFixedArrays[index];
+            if (!fixedArrayIdentities.Add((fixedArray.ElementType,
+                    fixedArray.ElementCount))
+                || !NativeFixedArrayContract.TryGetLayout(
+                    NativeFixedArrayTypes.Type(index), fixedArray.ElementType,
+                    fixedArray.ElementCount, normalizedStructuresImmutable,
+                    rewrittenFixedArrays, out var layout)
+                || fixedArray.ElementStride != layout.ElementStride
+                || fixedArray.ByteExtent != layout.ByteExtent
+                || fixedArray.Alignment != layout.Alignment
+                || fixedArray.RequiredAlignment != layout.RequiredAlignment)
+            {
+                Report("TRM3005", "Normalized fixed-array identities or layouts are invalid.",
+                    _trees[0].Root.Span);
+                return false;
+            }
+        }
+        if (!NativeFunctionPointerContract.IsValidTable(
+                [.. normalizedFunctionPointers],
+                type => DirectNativeImportContract.IsInputPointee(type,
+                    normalizedStructures))
             || !NativePointerTypeContract.IsValidTable([.. normalizedPointerDefinitions],
-                [.. normalizedStructures], [.. normalizedFunctionPointers]))
+                [.. normalizedStructures], [.. normalizedFunctionPointers])
+            || !CheckedReferenceTypeContract.IsValidTable([.. normalizedReferenceTypeDefinitions]))
         {
             Report("TRM3005", "Normalized native type identities are invalid.",
                 _trees[0].Root.Span);
@@ -571,10 +751,18 @@ internal sealed partial class Binder
         {
             _classes[index] = normalizedClasses[index];
         }
+        for (var index = 0; index < normalizedInterfaces.Length; index++)
+        {
+            _interfaces[index] = normalizedInterfaces[index];
+        }
         _nativeFunctionPointerSignatures.Clear();
         _nativeFunctionPointerSignatures.AddRange(normalizedFunctionPointers);
         _nativePointerTypes.Clear();
         _nativePointerTypes.AddRange(normalizedPointerDefinitions);
+        _nativeFixedArrayTypes.Clear();
+        _nativeFixedArrayTypes.AddRange(rewrittenFixedArrays);
+        _checkedReferenceTypes.Clear();
+        _checkedReferenceTypes.AddRange(normalizedReferenceTypeDefinitions);
 
         for (var index = 0; index < _signatures.Count; index++)
         {
@@ -663,7 +851,9 @@ internal sealed partial class Binder
     {
         for (var index = 0; index < _enumDefinitions.Count; index++)
         {
-            if (_enumDefinitions[index].Identity == definition.Identity)
+            if (_enumDefinitions[index].Identity
+                == new BoundEnumDeclarationIdentity.Core(
+                    definition.Identity))
             {
                 type = BoundEnumTypes.Type(index);
                 return true;
@@ -1413,7 +1603,7 @@ internal sealed partial class Binder
         }
         foreach (var predicate in invalidated)
         {
-            facts.Remove(predicate);
+            _ = facts.Remove(predicate);
         }
     }
 
@@ -1431,7 +1621,7 @@ internal sealed partial class Binder
         }
         foreach (var savedVariable in invalidated)
         {
-            savedPredicates.Remove(savedVariable);
+            _ = savedPredicates.Remove(savedVariable);
         }
     }
 
@@ -3251,8 +3441,36 @@ internal sealed partial class Binder
                 return fixedArrayElement with {
                     Index = ResolveConstExpression(fixedArrayElement.Index, locals, functions, variableCount),
                 };
+            case BoundNativeFixedArrayPathElement pathElement:
+                return pathElement with {
+                    Projections = [.. pathElement.Projections.Select(projection =>
+                        projection with {
+                            Index = ResolveConstExpression(projection.Index,
+                                locals, functions, variableCount),
+                        })],
+                };
+            case BoundNativeFixedArrayPathWrite pathWrite:
+                return pathWrite with {
+                    Projections = [.. pathWrite.Projections.Select(projection =>
+                        projection with {
+                            Index = ResolveConstExpression(projection.Index,
+                                locals, functions, variableCount),
+                        })],
+                    Value = ResolveConstExpression(pathWrite.Value, locals,
+                        functions, variableCount),
+                };
             case BoundNativeStorageAddress address:
-                return address with { Index = ResolveConstExpression(address.Index, locals, functions, variableCount) };
+                return address with {
+                    Index = ResolveConstExpression(address.Index, locals,
+                        functions, variableCount),
+                    Projections = address.Projections.IsDefaultOrEmpty ? [] : [
+                        .. address.Projections.Select(projection =>
+                            projection with {
+                                Index = ResolveConstExpression(
+                                    projection.Index, locals, functions,
+                                    variableCount),
+                            })],
+                };
             case BoundSpanAdvance advance:
                 return advance with { View = ResolveConstExpression(advance.View, locals, functions, variableCount) };
             case BoundOptionalLift lift:
@@ -3283,7 +3501,7 @@ internal sealed partial class Binder
     }
 
     private BoundConstant EvaluateConstExpression(BoundExpression expression, BoundConstant?[] slots,
-        IReadOnlyList<BoundFunction> functions, int depth, ConstEvalState state)
+        IReadOnlyList<BoundFunction?> functions, int depth, ConstEvalState state)
     {
         state.Step();
         switch (expression)
@@ -3355,7 +3573,9 @@ internal sealed partial class Binder
                 {
                     throw new ConstEvalFailure("ConstEval call depth limit exceeded.");
                 }
-                var callee = functions[call.Function];
+                var callee = functions[call.Function]
+                    ?? throw new ConstEvalFailure(
+                        "ConstEval function body is unavailable in this type context.");
                 var arguments = new BoundConstant?[callee.Variables.Length];
                 for (var index = 0; index < call.Arguments.Length; index++)
                 {
@@ -3396,7 +3616,7 @@ internal sealed partial class Binder
     }
 
     private ConstResult EvaluateConstStatement(BoundStatement statement, BoundConstant?[] slots,
-        IReadOnlyList<BoundFunction> functions, int depth, ConstEvalState state)
+        IReadOnlyList<BoundFunction?> functions, int depth, ConstEvalState state)
     {
         state.Step();
         switch (statement)

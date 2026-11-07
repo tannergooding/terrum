@@ -7,17 +7,17 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed partial class GenericControlFlowModuleTests
+internal sealed partial class GenericControlFlowModuleTests
 {
     private const string Stub = "public int32 PowerProbe() { return 40; }";
     private const string Middle = "public int32 Middle() { return PowerProbe() + 1; }";
@@ -40,15 +40,15 @@ public sealed partial class GenericControlFlowModuleTests
             public int64 Second;
             public Pair(int64 first, int64 second) { First = first; Second = second; }
         }
-        [NoThrow] bool Copy<T>(bool publish, T value, init ref<T> result) where T : [Copy] {
+         bool Copy<T>(bool publish, T value, init ref<T> result) where T : [Copy] {
             if (!publish) { return false; }
             result = value;
             return true;
         }
-        [NoThrow] bool Forward<T>(T value, init ref<T> result) where T : [Copy] {
+         bool Forward<T>(T value, init ref<T> result) where T : [Copy] {
             return Copy(true, value, init result);
         }
-        [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+         bool None<T>(init ref<T> result) where T : [Copy] { return false; }
         public int32 Read() {
             if (Copy(false, new Pair(1, 2), init var pair)) { return 1; }
             if (None(init pair)) { return 3; }
@@ -92,11 +92,11 @@ public sealed partial class GenericControlFlowModuleTests
                 require false;
                 return true;
             }
-            [NoThrow] bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
+             bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
                 result = value;
                 return true;
             }
-            [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+             bool None<T>(init ref<T> result) where T : [Copy] { return false; }
             public int32 PowerProbe() {
                 if (None<int32>(init var target)) { return 1; }
                 unsafe {
@@ -240,11 +240,11 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """, policy, ModuleCompiler.CreateReference(stub), library: false), stub);
         var consumerHash = SHA256.HashData(consumer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
 
         var replacement = ModuleCompiler.CreateProducer(Compile(await PowerSourceAsync().ConfigureAwait(true), policy),
             ["PowerProbe"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(replacement, false), Is.EqualTo(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11"));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.That(reference.Structures, Is.Empty);
@@ -332,12 +332,22 @@ public sealed partial class GenericControlFlowModuleTests
     {
         var syntax = SyntaxTree.Parse(source);
         var boundPolicy = (BoundRuntimePolicy)policy;
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(boundPolicy);
         var compilation = library
-            ? reference is null ? Compilation.CreateLibrary(syntax, boundPolicy)
-                : Compilation.CreateLibrary(syntax, reference, boundPolicy)
-            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), boundPolicy);
+            ? reference is null ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.CreateLibrary(syntax, reference, options)
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => {
+                var __nunitActual0 = reference;
+                Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>());
+                return (CompilationReference)__nunitActual0!;
+            }))(), options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static async Task<int> ExecuteAsync(byte[] image)

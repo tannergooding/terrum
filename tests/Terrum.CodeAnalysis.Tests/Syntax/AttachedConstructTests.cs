@@ -4,15 +4,17 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class AttachedConstructTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class AttachedConstructTests
 {
+    private static readonly string[] s_boundaryGaps = ["", " ", "\n", "/* boundary */", "/// boundary\n"];
     private static readonly string[] Forms = [
         "int32 Main#() { return 42; }",
         "int32 @await#(int32 value) { return value; }",
@@ -50,12 +52,12 @@ public sealed class AttachedConstructTests
 
     public static IEnumerable<object[]> Boundaries =>
         from form in Forms
-        from gap in new[] { "", " ", "\n", "/* boundary */", "/// boundary\n" }
+        from gap in s_boundaryGaps
         select new object[] { form, gap };
     [TestCaseSource(nameof(Boundaries))]
     public void EverySupportedBoundaryUsesRawTokenExtents(string form, string gap)
     {
-        var start = form.IndexOf('#');
+        var start = form.IndexOf('#', System.StringComparison.Ordinal);
         var source = form.Replace("#", gap, StringComparison.Ordinal);
         var lexed = Lexer.Lex(SourceText.From(source));
         Assert.That(lexed.Diagnostics, Is.Empty);
@@ -142,7 +144,7 @@ public sealed class AttachedConstructTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         }
     }
     [TestCase("")]
@@ -187,12 +189,12 @@ public sealed class AttachedConstructTests
             }
             else
             {
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
             }
 
             void Node(int index, int operation, int type, int start, int end, int left, int low)
             {
-                var offset = 42 + index * 8;
+                var offset = 42 + (index * 8);
                 words[offset] = operation;
                 words[offset + 1] = type;
                 words[offset + 2] = start;

@@ -193,42 +193,60 @@ internal sealed partial class Binder
         }
 
         if (target.Kind == SyntaxKind.IndexExpression
-            && TryFindNativeFixedArrayLocal((SyntaxNode)target.Children[0], out var arrayVariable)
-            && TryGetNativeFixedArrayLayout(_variables[arrayVariable].Type,
-                out var layout)
-            && NativeFixedArrayContract.MatchesLayout(layout, _structs,
-                _nativeFixedArrayTypes))
+            && TryBindNativeFixedArrayAccessPath(target,
+                out var arrayVariable, out var arrayFieldPlace,
+                out var projections))
         {
-            var index = BindNativeFixedArrayIndex((SyntaxNode)target.Children[2], layout);
+            var rootLayout = projections[0].Layout;
+            var leaf = projections[^1];
+            var layout = leaf.Layout;
             var requiredElementCount = extent == 0 ? 1UL : extent;
             var hasAvailableSuffix
                 = requiredElementCount <= layout.ElementCount;
             var hasInvalidConstantIndex = hasAvailableSuffix
-                && index is BoundConstant
-                && !NativeFixedArrayContract.IsConstantIndexInRange(index,
+                && leaf.Index is BoundConstant
+                && !NativeFixedArrayContract.IsConstantIndexInRange(leaf.Index,
                     layout.ElementCount - requiredElementCount + 1);
-            if ((pointeeType != PrimitiveType.Void && pointeeType != layout.ElementType)
+            if ((pointeeType != PrimitiveType.Void
+                    && pointeeType != layout.ElementType)
                 || !hasAvailableSuffix
                 || layout.ElementStride == 0 || layout.ByteExtent == 0
-                || !NativeFixedArrayContract.IsIndexType(index.Type)
                 || hasInvalidConstantIndex
-                || _variables[arrayVariable].IsInitializationLocal
-                || _unresolvedVacantLocals.Contains(arrayVariable)
+                || (arrayFieldPlace is null
+                    && _variables[arrayVariable].Type
+                        != rootLayout.CarrierType)
+                || (arrayFieldPlace is not null
+                    && arrayFieldPlace.Type != rootLayout.CarrierType)
                 || (access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
-                    && (!_variables[arrayVariable].IsMutable
-                        || !NativeFixedArrayContract.AllowsMutableLocal(layout))))
+                    && ((arrayFieldPlace is null
+                            && !_variables[arrayVariable].IsMutable)
+                        || !NativeFixedArrayContract.AllowsMutableLocal(
+                            rootLayout)))
+                || (pointeeType == PrimitiveType.Void
+                    && !DirectNativeImportContract.IsInputPointee(
+                        layout.ElementType, _structs)))
             {
                 Report("TRM3030",
                     "A NativeParameter address requires a matching initialized fixed array and access mode.",
                     span);
                 return ErrorExpression(span);
             }
+            if ((access is NativeParameterAccess.Write
+                    or NativeParameterAccess.ReadWrite)
+                && arrayFieldPlace is BoundFieldRead writableField)
+            {
+                CheckUpdateFieldPlace(writableField);
+            }
 
-            return new BoundNativeStorageAddress(arrayVariable, index, layout.CarrierType,
+            return new BoundNativeStorageAddress(arrayVariable, leaf.Index,
+                rootLayout.CarrierType,
                 layout.ElementType, PrimitiveType.NativeStorageAddress, layout.ElementCount,
                 layout.ElementStride,
                 checked(requiredElementCount * layout.ElementStride),
-                IsReadonly: access == NativeParameterAccess.Read, Span: span);
+                IsReadonly: access == NativeParameterAccess.Read, Span: span) {
+                    Projections = projections.Length > 1 ? projections : [],
+                    FieldPlace = arrayFieldPlace,
+                };
         }
 
         if (target.Kind != SyntaxKind.NameExpression

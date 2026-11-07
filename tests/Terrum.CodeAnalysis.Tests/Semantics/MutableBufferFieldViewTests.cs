@@ -2,14 +2,15 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class MutableBufferFieldViewTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class MutableBufferFieldViewTests
 {
     private const string Owner = """
         unique struct Owner {
@@ -160,11 +161,23 @@ public sealed class MutableBufferFieldViewTests
             int32 Main() { return 42; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var index = Array.FindIndex(program.Functions.ToArray(), static function => function.Name == "Owner.Update");
         var function = program.Functions[index];
-        var scope = ((global::System.Func<BoundViewScope>)(() => { var __nunitActual1 = function.Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundViewScope>()); return (BoundViewScope)__nunitActual1!; }))();
-        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual2 = scope.Owner; Assert.That(__nunitActual2, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual2!; }))();
+        var scope = ((global::System.Func<BoundViewScope>)(() => {
+            var __nunitActual1 = function.Body.Statements[0];
+            Assert.That(__nunitActual1, Is.TypeOf<BoundViewScope>());
+            return (BoundViewScope)__nunitActual1!;
+        }))();
+        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => {
+            var __nunitActual2 = scope.Owner;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundMutableFieldLoan>());
+            return (BoundMutableFieldLoan)__nunitActual2!;
+        }))();
         var forgedOwner = mutation switch {
             0 => (BoundExpression)new BoundFieldLoan(loan.Place, loan.Type, loan.Span),
             1 => loan with { Place = loan.Place with { Field = 99 } },

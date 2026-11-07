@@ -21,6 +21,118 @@ internal static class CheckedReferenceTypes
     internal static PrimitiveType Type(int index) => (PrimitiveType)checked(-index - 1);
 }
 
+internal static class SourceOptionalTypes
+{
+    internal static bool IsOptional(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        if (ManagedClassTypes.IsOptional(type))
+        {
+            return true;
+        }
+        return IsOptionalReference(type, referenceTypes);
+    }
+
+    internal static bool IsOptionalReference(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes) =>
+        CheckedReferenceTypeContract.IsValidType(type, referenceTypes)
+        && referenceTypes[CheckedReferenceTypes.Index(type)].IsOptional;
+
+    internal static bool IsSupported(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundClass> classes,
+        int enumDefinitionCount,
+        string? nativeLoweringAgreement)
+    {
+        if (ManagedClassTypes.IsOptional(type))
+        {
+            return true;
+        }
+        if (nativeLoweringAgreement is not (
+                CompilationOptions.WindowsX64NormalBackingAgreement
+                or CompilationOptions.WindowsX64RootlessReferencesAgreement)
+            || !TryGetRequired(type, referenceTypes, out var requiredType)
+            || !CheckedReferenceTypes.IsType(requiredType))
+        {
+            return false;
+        }
+
+        var requiredReference = referenceTypes[CheckedReferenceTypes.Index(requiredType)];
+        return !requiredReference.IsGarbageCollected && !requiredReference.IsInitialization
+            && !requiredReference.IsOptional
+            && CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                requiredType, structures, classes, enumDefinitionCount,
+                [.. referenceTypes]);
+    }
+
+    internal static bool TryGetRequired(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes,
+        out PrimitiveType requiredType)
+    {
+        if (ManagedClassTypes.IsOptional(type))
+        {
+            requiredType = ManagedClassTypes.Required(type);
+            return true;
+        }
+        if (!IsOptionalReference(type, referenceTypes))
+        {
+            requiredType = default;
+            return false;
+        }
+
+        var requiredDefinition = referenceTypes[CheckedReferenceTypes.Index(type)] with
+        {
+            IsOptional = false,
+        };
+        for (var index = 0; index < referenceTypes.Count; index++)
+        {
+            if (referenceTypes[index] == requiredDefinition)
+            {
+                requiredType = CheckedReferenceTypes.Type(index);
+                return true;
+            }
+        }
+
+        requiredType = default;
+        return false;
+    }
+
+    internal static bool IsReadonlyProjection(
+        PrimitiveType source,
+        PrimitiveType target,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        if (ManagedClassTypes.IsWritable(source))
+        {
+            return ManagedClassTypes.Readonly(source) == target;
+        }
+        if (!CheckedReferenceTypeContract.IsValidType(source, referenceTypes))
+        {
+            return false;
+        }
+
+        var sourceReference = referenceTypes[CheckedReferenceTypes.Index(source)];
+        if (!sourceReference.IsWritable)
+        {
+            return false;
+        }
+        var readonlyDefinition = sourceReference with { IsWritable = false };
+        for (var index = 0; index < referenceTypes.Count; index++)
+        {
+            if (referenceTypes[index] == readonlyDefinition)
+            {
+                return CheckedReferenceTypes.Type(index) == target;
+            }
+        }
+        return false;
+    }
+}
+
 internal static class CheckedReferenceTypeContract
 {
     internal static bool IsValidTable(ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
@@ -43,9 +155,51 @@ internal static class CheckedReferenceTypeContract
 
     internal static bool IsValidType(
         PrimitiveType type,
-        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes) =>
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes) =>
         CheckedReferenceTypes.IsType(type)
-        && (uint)CheckedReferenceTypes.Index(type) < (uint)referenceTypes.Length;
+        && (uint)CheckedReferenceTypes.Index(type) < (uint)referenceTypes.Count;
+
+    internal static bool IsImplicitReferenceValueType(
+        PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        if (DirectNativeImportContract.IsScalar(type)
+            || NativeFunctionPointerTypes.IsType(type))
+        {
+            return true;
+        }
+        if (IsValidType(type, referenceTypes))
+        {
+            var reference = referenceTypes[CheckedReferenceTypes.Index(type)];
+            return !reference.IsGarbageCollected
+                && !reference.IsInitialization
+                && !reference.IsOptional;
+        }
+
+        var typeValue = (int)type;
+        var structureIndex = typeValue >= 100 ? typeValue - 100 : -1;
+        return structureIndex >= 0
+            && (uint)structureIndex < (uint)structures.Count
+            && !structures[structureIndex].IsUnique;
+    }
+
+    internal static bool IsCanonicalImplicitReferenceType(
+        PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes)
+    {
+        if (!IsValidType(type, referenceTypes))
+        {
+            return false;
+        }
+
+        var reference = referenceTypes[CheckedReferenceTypes.Index(type)];
+        return !reference.IsWritable
+            && !reference.IsGarbageCollected
+            && !reference.IsInitialization
+            && !reference.IsOptional
+            && IsImplicitReferenceValueType(reference.ReferentType,
+                structures, referenceTypes);
+    }
 
     internal static bool IsSupportedWriteValueType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, int enumDefinitionCount)
@@ -68,6 +222,16 @@ internal static class CheckedReferenceTypeContract
         IReadOnlyList<BoundClass> classes, int enumDefinitionCount,
         ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
     {
+        if (SourceOptionalTypes.IsOptionalReference(type, referenceTypes))
+        {
+            if (!SourceOptionalTypes.TryGetRequired(
+                type, referenceTypes, out var requiredType))
+            {
+                return false;
+            }
+            type = requiredType;
+        }
+
         if (IsSupportedWriteValueType(type, structures, enumDefinitionCount,
                 referenceTypes)
             || type == PrimitiveType.OwnedInt32Buffer)
@@ -163,7 +327,6 @@ internal static class CheckedReferenceTypeContract
 
         var reference = referenceTypes[CheckedReferenceTypes.Index(type)];
         return !reference.IsGarbageCollected && !reference.IsInitialization
-            && !reference.IsOptional
             && (!CheckedReferenceTypes.IsType(reference.ReferentType)
                 || IsSupportedReferenceDescriptorType(
                     reference.ReferentType, referenceTypes, depth + 1));

@@ -2,16 +2,17 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class OutParameterFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class OutParameterFrontendProjectionTests
 {
     [Test]
     public void OutParameterProjectionMatchesHostedBindingAndEmission()
@@ -27,7 +28,11 @@ public sealed class OutParameterFrontendProjectionTests
             var actual = ScalarFrontendHost.BindLibrary(source, Bytes(words), policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             var actualFunction = global::System.Linq.Enumerable.Single(actual.Functions);
             var hostedFunction = global::System.Linq.Enumerable.Single(hosted.Functions);
             Assert.That(actualFunction.Variables[0].IsOut, Is.True);
@@ -45,7 +50,7 @@ public sealed class OutParameterFrontendProjectionTests
         {
             var original = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = original;
         }
     }
@@ -74,7 +79,11 @@ public sealed class OutParameterFrontendProjectionTests
             var actual = ScalarFrontendHost.BindLibrary(source, Bytes(words), policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))();
             var actualFunction = global::System.Linq.Enumerable.Single(actual.Functions);
             var hostedFunction = global::System.Linq.Enumerable.Single(hosted.Functions);
             Assert.That(actualFunction.Variables[0].IsOut, Is.False);
@@ -112,7 +121,7 @@ public sealed class OutParameterFrontendProjectionTests
         words[332] = 8;
         words[334] = 0;
         words[335] = text.IndexOf("return", StringComparison.Ordinal);
-        words[336] = text.IndexOf(';', words[335]) + 1 - words[335];
+        words[336] = text.IndexOf(';', words[335], System.StringComparison.Ordinal) + 1 - words[335];
         return words;
     }
 

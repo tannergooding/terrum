@@ -2,16 +2,17 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class LocalFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class LocalFrontendProjectionTests
 {
     [Test]
     public void ReadResultRejectsForgedLocalDeclarationsAndAnchors()
@@ -36,14 +37,14 @@ public sealed class LocalFrontendProjectionTests
         Reject(42 + 8 + 4, 3);
         Reject(391, 1);
         var altered = text.Replace("mut var y", "mut var z", StringComparison.Ordinal);
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));
 
         void Reject(int index, int value)
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -69,7 +70,7 @@ public sealed class LocalFrontendProjectionTests
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -89,14 +90,14 @@ public sealed class LocalFrontendProjectionTests
         Reject(301, 3);
         Reject(334, 0);
         var altered = text.Replace("init int32 y", "init int32 z", StringComparison.Ordinal);
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));
 
         void Reject(int index, int value)
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -115,14 +116,14 @@ public sealed class LocalFrontendProjectionTests
         Reject(0, 61);
         Reject(300, 2);
         var altered = text.Replace("init var y", "init int32 y", StringComparison.Ordinal);
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));
 
         void Reject(int index, int value)
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -144,14 +145,14 @@ public sealed class LocalFrontendProjectionTests
         Reject(332, 28);
         Reject(0, 64);
         var altered = text.Replace("const int32 value", "const uint32 value", StringComparison.Ordinal);
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(altered), Bytes(words)));
 
         void Reject(int index, int value)
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -175,7 +176,7 @@ public sealed class LocalFrontendProjectionTests
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -188,7 +189,7 @@ public sealed class LocalFrontendProjectionTests
         var source = SourceText.From(text);
         Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words),
             BoundRuntimePolicy.CheckedExceptions).IsValid, Is.True);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
 
         Reject(0, 65);
         Reject(333, 4);
@@ -199,7 +200,7 @@ public sealed class LocalFrontendProjectionTests
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words),
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words),
                 BoundRuntimePolicy.CheckedExceptions));
             words[index] = old;
         }
@@ -222,7 +223,7 @@ public sealed class LocalFrontendProjectionTests
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words),
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words),
                 BoundRuntimePolicy.CheckedExceptions));
             words[index] = old;
         }
@@ -246,7 +247,11 @@ public sealed class LocalFrontendProjectionTests
             var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
             Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"],
-                    (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = hosted.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Value"],
+                    (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => {
+                        var __nunitActual0 = hosted.Program;
+                        Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                        return (BoundProgram)__nunitActual0!;
+                    }))(), ["Value"],
                 (NativeRuntimePolicy)policy)));
         }
 
@@ -260,7 +265,7 @@ public sealed class LocalFrontendProjectionTests
         {
             var old = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = old;
         }
     }
@@ -314,7 +319,7 @@ public sealed class LocalFrontendProjectionTests
 
         void Node(int index, int start, int slot)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = 0;
             words[offset + 1] = 1;
             words[offset + 2] = start;
@@ -372,7 +377,7 @@ public sealed class LocalFrontendProjectionTests
 
         void Node(int index, int start, int slot)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = 0;
             words[offset + 1] = 1;
             words[offset + 2] = start;
@@ -419,7 +424,7 @@ public sealed class LocalFrontendProjectionTests
 
         void Node(int index, int operation, int start, int left, int right)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = 1;
             words[offset + 2] = start;
@@ -491,10 +496,10 @@ public sealed class LocalFrontendProjectionTests
         var unsafeStart = text.IndexOf("unsafe", StringComparison.Ordinal);
         var tryStart = text.IndexOf("try", StringComparison.Ordinal);
         var catchStart = text.IndexOf("catch", StringComparison.Ordinal);
-        var catchEnd = text.IndexOf('}', catchStart) + 1;
+        var catchEnd = text.IndexOf('}', catchStart, System.StringComparison.Ordinal) + 1;
         var finallyStart = includeFinally ? text.IndexOf("finally", catchEnd, StringComparison.Ordinal) : -1;
-        var finallyEnd = includeFinally ? text.IndexOf('}', finallyStart) + 1 : catchEnd;
-        var unsafeEnd = text.IndexOf('}', finallyEnd) + 1;
+        var finallyEnd = includeFinally ? text.IndexOf('}', finallyStart, System.StringComparison.Ordinal) + 1 : catchEnd;
+        var unsafeEnd = text.IndexOf('}', finallyEnd, System.StringComparison.Ordinal) + 1;
         var firstReturn = text.IndexOf("return", tryStart, StringComparison.Ordinal);
         var secondReturn = text.IndexOf("return", catchStart, StringComparison.Ordinal);
         words[332] = 31;
@@ -531,7 +536,7 @@ public sealed class LocalFrontendProjectionTests
             words[361] = finallyEnd - finallyStart;
         }
         var firstLiteral = text.IndexOf("42", firstReturn, StringComparison.Ordinal);
-        var secondLiteral = text.IndexOf("0", secondReturn, StringComparison.Ordinal);
+        var secondLiteral = text.IndexOf('0', secondReturn, System.StringComparison.Ordinal);
         words[42] = 3;
         words[43] = 1;
         words[44] = firstLiteral;
@@ -559,7 +564,7 @@ public sealed class LocalFrontendProjectionTests
         words[38] = words[39] = words[40] = -1;
         words[298] = 2;
         var proofStart = text.IndexOf("static", StringComparison.Ordinal);
-        var proofEnd = text.IndexOf(';', proofStart) + 1;
+        var proofEnd = text.IndexOf(';', proofStart, System.StringComparison.Ordinal) + 1;
         words[332] = 35;
         words[333] = 0;
         words[334] = 0;
@@ -570,7 +575,7 @@ public sealed class LocalFrontendProjectionTests
         words[338] = 0;
         words[339] = 1;
         words[340] = returnStart;
-        words[341] = text.IndexOf(';', returnStart) + 1 - returnStart;
+        words[341] = text.IndexOf(';', returnStart, System.StringComparison.Ordinal) + 1 - returnStart;
         var literal = text.IndexOf("true", proofStart, StringComparison.Ordinal);
         words[42] = 20;
         words[43] = 5;

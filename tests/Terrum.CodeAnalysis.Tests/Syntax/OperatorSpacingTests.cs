@@ -17,12 +17,18 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class OperatorSpacingTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class OperatorSpacingTests
 {
     private const string ReturnPrefix = "int32 Main() { return ";
     private static readonly string[] Gaps = [" ", "\n", "\r\n", "/* gap */", "//** gap **//", "// gap\n", "/// gap\n"];
     private static readonly string[] Binary = ["+", "-", "*", "/", "%", "<<", ">>", ">>>", "==", "!=", "<", "<=", ">", ">=", "&", "|", "^", "&&", "||", "??"];
     private static readonly string[] Assignments = ["=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", ">>>=", "??="];
+    private static readonly string[] s_unaryOperators = ["+", "-", "!", "~", "++", "--"];
+    private static readonly string[] s_unaryOperands = ["@await", "( /* interior */ value)", "values[0]", "\U00010400"];
+    private static readonly string[] s_postfixOperators = ["++", "--"];
+    private static readonly string[] s_postfixOperands = ["@await", "(value)", "values[0]", "Get()", "\U00010400"];
+    private static readonly string[] s_emptyGap = [""];
 
     public static IEnumerable<object[]> SeparatedOperators
     {
@@ -84,18 +90,18 @@ public sealed class OperatorSpacingTests
     [TestCaseSource(nameof(SeparatedOperators))]
     public void BinaryBindingAndArrowRolesRequireBothSeparators(string form, string op, string left, string right, bool invalid)
     {
-        if (op == "/" && right.StartsWith("/", StringComparison.Ordinal))
+        if (op == "/" && right.StartsWith('/', System.StringComparison.Ordinal))
         {
             right = " " + right;
         }
         var source = form.Replace("#", left + op + right, StringComparison.Ordinal);
-        Check(source, invalid ? "TRM1008" : null, new TextSpan(form.IndexOf('#') + left.Length, op.Length));
+        Check(source, invalid ? "TRM1008" : null, new TextSpan(form.IndexOf('#', System.StringComparison.Ordinal) + left.Length, op.Length));
     }
 
     public static IEnumerable<object[]> UnaryOperators =>
-        from op in new[] { "+", "-", "!", "~", "++", "--" }
-        from operand in new[] { "@await", "( /* interior */ value)", "values[0]", "\U00010400" }
-        from gap in new[] { "" }.Concat(Gaps)
+        from op in s_unaryOperators
+        from operand in s_unaryOperands
+        from gap in s_emptyGap.Concat(Gaps)
         select new object[] { op, operand, gap };
     [TestCaseSource(nameof(UnaryOperators))]
     public void PrefixAttachesToTheImmediateOperandToken(string op, string operand, string gap)
@@ -105,9 +111,9 @@ public sealed class OperatorSpacingTests
     }
 
     public static IEnumerable<object[]> PostfixOperators =>
-        from op in new[] { "++", "--" }
-        from operand in new[] { "@await", "(value)", "values[0]", "Get()", "\U00010400" }
-        from gap in new[] { "" }.Concat(Gaps)
+        from op in s_postfixOperators
+        from operand in s_postfixOperands
+        from gap in s_emptyGap.Concat(Gaps)
         select new object[] { op, operand, gap };
     [TestCaseSource(nameof(PostfixOperators))]
     public void PostfixAttachesToTheReceiversFinalToken(string op, string operand, string gap)
@@ -163,8 +169,8 @@ public sealed class OperatorSpacingTests
         words[23] = (int)TokenKind.Plus;
         words[24] = 1;
         words[25] = 2;
-        words[26] = text.IndexOf("x", text.IndexOf("return", StringComparison.Ordinal), StringComparison.Ordinal);
-        words[27] = text.IndexOf(';', words[26]) - words[26];
+        words[26] = text.IndexOf('x', text.IndexOf("return", StringComparison.Ordinal), System.StringComparison.Ordinal);
+        words[27] = text.IndexOf(';', words[26], System.StringComparison.Ordinal) - words[26];
         var bytes = Words(words);
         if (left.Length != 0 && right.Length != 0)
         {
@@ -172,7 +178,7 @@ public sealed class OperatorSpacingTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
         }
     }
 
@@ -190,13 +196,13 @@ public sealed class OperatorSpacingTests
     public async Task CompiledScannerPreservesEveryOperatorRoleAndBoundaryAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await ScannerTests.ReadScannerSourceAsync(root);
+        var scanner = await ScannerTests.ReadScannerSourceAsync(root).ConfigureAwait(false);
         var inputs = new List<string>();
         foreach (var row in SeparatedOperators)
         {
             var op = (string)row[1];
             var right = (string)row[3];
-            if (op == "/" && right.StartsWith("/", StringComparison.Ordinal))
+            if (op == "/" && right.StartsWith('/', System.StringComparison.Ordinal))
             {
                 right = " " + right;
             }
@@ -211,9 +217,9 @@ public sealed class OperatorSpacingTests
             if (chunk.Length + input.Length + 1 > ScannerHost.MaximumSourceLength)
             {
                 chunks.Add(chunk.ToString());
-                chunk.Clear();
+                _ = chunk.Clear();
             }
-            chunk.AppendLine(input);
+            _ = chunk.AppendLine(input);
         }
         chunks.Add(chunk.ToString());
         var failures = 0;
@@ -221,10 +227,15 @@ public sealed class OperatorSpacingTests
         {
             var source = SourceText.From(text);
             var buffers = ScannerHost.CreateBuffers(source);
-            var compilation = Compilation.Create(SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
+            var compilation = ScannerTests.CreateScannerCompilation(
+                SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
                 buffers, (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy);
+            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(), policy);
             var adapted = ScannerHost.ReadLexResult(source, native.ExitCode, Buffer(3), Buffer(5), Buffer(4));
             Assert.That(ScannerHost.ReadTokens(source, native.ExitCode, Buffer(3)), Is.EqualTo(Lexer.Lex(source).Tokens.Select(token => new ScannerToken(token.Kind, token.Span))));
             var current = SyntaxTree.Parse(adapted);
@@ -232,8 +243,10 @@ public sealed class OperatorSpacingTests
             Assert.That(current.Diagnostics.ToArray(), Is.EqualTo(SyntaxTree.Parse(source).Diagnostics.ToArray()));
             failures += current.Diagnostics.Count(diagnostic => diagnostic.Code is "TRM1008" or "TRM1009");
 
-            ReadOnlySpan<byte> Buffer(int index) =>
-                native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+            ReadOnlySpan<byte> Buffer(int index)
+            {
+                return native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
+            }
         }
         Assert.That(failures, Is.EqualTo(SeparatedOperators.Count(row => (bool)row[4])
             + UnaryOperators.Count(row => ((string)row[2]).Length != 0)
@@ -277,7 +290,7 @@ public sealed class OperatorSpacingTests
             }
             else
             {
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)));
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)));
             }
         }
     }
@@ -310,9 +323,9 @@ public sealed class OperatorSpacingTests
             var declaration = text.IndexOf("mut int32", StringComparison.Ordinal);
             var assignment = text.IndexOf("; x", StringComparison.Ordinal) + 2;
             var result = text.IndexOf("return", StringComparison.Ordinal);
-            var firstEnd = text.IndexOf(';', declaration) + 1;
-            var secondEnd = text.IndexOf(';', assignment) + 1;
-            var lastEnd = text.LastIndexOf(';') + 1;
+            var firstEnd = text.IndexOf(';', declaration, System.StringComparison.Ordinal) + 1;
+            var secondEnd = text.IndexOf(';', assignment, System.StringComparison.Ordinal) + 1;
+            var lastEnd = text.LastIndexOf(';', System.StringComparison.Ordinal) + 1;
             Node(0, 3, firstEnd - 2, firstEnd - 1, -1, -1, 4);
             Node(1, 3, secondEnd - 2, secondEnd - 1, -1, -1, 2);
             Node(2, 0, assignment, assignment + 1, 1, -1, 0);
@@ -328,18 +341,18 @@ public sealed class OperatorSpacingTests
             }
             else
             {
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)));
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)));
             }
 
             void Node(int index, int operation, int start, int end, int left, int right, int low)
             {
                 int[] node = [operation, 1, start, end - start, left, right, low, 0];
-                node.CopyTo(words, 42 + index * 8);
+                node.CopyTo(words, 42 + (index * 8));
             }
             void Statement(int index, int kind, int slot, int node, int start, int end)
             {
                 int[] statement = [kind, slot, node, start, end - start];
-                statement.CopyTo(words, 332 + index * 5);
+                statement.CopyTo(words, 332 + (index * 5));
             }
         }
     }
@@ -347,7 +360,7 @@ public sealed class OperatorSpacingTests
     [Test]
     public void HandAuthoredLatestLoopProjectionRejectsSeparatedPrefix()
     {
-        foreach (var gap in new[] { "" }.Concat(Gaps))
+        foreach (var gap in s_emptyGap.Concat(Gaps))
         {
             var text = "public int32 Value() { do { return +" + gap + "42; } while (false); }";
             var words = new int[ScalarFrontendHost.WordCount];
@@ -385,7 +398,7 @@ public sealed class OperatorSpacingTests
             }
             else
             {
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)));
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)));
             }
         }
     }

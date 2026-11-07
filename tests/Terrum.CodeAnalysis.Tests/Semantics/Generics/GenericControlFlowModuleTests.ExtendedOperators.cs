@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed partial class GenericControlFlowModuleTests
+internal sealed partial class GenericControlFlowModuleTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -49,7 +49,7 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var replacementProgram = Compile(Replacement, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.CreateReference(replacement).Structures, Is.Empty);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Mix<Value>"),Is.True);

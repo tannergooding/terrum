@@ -7,6 +7,33 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 public static partial class SemanticVerifier
 {
+    private static void VerifyNativeFixedArrayConstruction(
+        BoundExpression construction, int variable,
+        InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth,
+        FailureEdges? failures)
+    {
+        switch (construction)
+        {
+            case BoundNativeFixedArrayInitialization initialization:
+                VerifyNativeFixedArrayInitialization(initialization,
+                    variable, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth, failures);
+                break;
+            case BoundNativeFixedArrayRepeatInitialization repeat:
+                VerifyNativeFixedArrayRepeatInitialization(repeat, variable,
+                    initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth, failures);
+                break;
+            default:
+                VerifyNativeFixedArrayInitialization(construction,
+                    variable, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth, failures);
+                break;
+        }
+    }
+
     private static void VerifyNativeFixedArrayInitialization(BoundNativeFixedArrayInitialization initialization,
         int variable, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
@@ -44,8 +71,9 @@ public static partial class SemanticVerifier
                 var elementProjection = StorageProjection.ForArrayIndex(
                     (ulong)index);
                 evaluationContinues = element
-                    is BoundNativeFixedArrayInitialization nested
-                        ? EvaluateNestedNativeFixedArrayInitialization(nested,
+                    is BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization
+                    ? EvaluateNestedNativeFixedArrayConstruction(element,
                             variable, elementProjection, initialized,
                             fieldMasks, declarations, function, program, true,
                             ref remaining, depth + 1, failures)
@@ -53,7 +81,8 @@ public static partial class SemanticVerifier
                             declarations, function, program, ref remaining,
                             depth + 1, failures);
                 if (evaluationContinues
-                    && element is not BoundNativeFixedArrayInitialization
+                    && element is not (BoundNativeFixedArrayInitialization
+                        or BoundNativeFixedArrayRepeatInitialization)
                     && CarriesRawUnionPayloadFacts(program,
                         layout.ElementType))
                 {
@@ -62,16 +91,17 @@ public static partial class SemanticVerifier
                         (ulong)index,
                         InitializedPayloadBytesOfExpression(element,
                             layout.ElementType, initialized, function,
-                            program));
+                            program, ref remaining, depth + 1));
                 }
             }
             else
             {
                 var unreachableState = initialized.Clone();
                 var unreachableMasks = (uint[])fieldMasks.Clone();
-                if (element is BoundNativeFixedArrayInitialization nested)
+                if (element is BoundNativeFixedArrayInitialization
+                    or BoundNativeFixedArrayRepeatInitialization)
                 {
-                    _ = EvaluateNestedNativeFixedArrayInitialization(nested,
+                    _ = EvaluateNestedNativeFixedArrayConstruction(element,
                         variable, StorageProjection.ForArrayIndex(
                             (ulong)index), unreachableState,
                         unreachableMasks, declarations, function, program,
@@ -85,6 +115,49 @@ public static partial class SemanticVerifier
                 }
             }
         }
+    }
+
+    private static void VerifyNativeFixedArrayRepeatInitialization(
+        BoundNativeFixedArrayRepeatInitialization initialization,
+        int variable, InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth,
+        FailureEdges? failures)
+    {
+        Count(ref remaining, depth);
+        var layout = initialization.Layout;
+        if (!NativeFixedArrayContract.MatchesProgram(program)
+            || (uint)variable >= (uint)function.Variables.Length
+            || variable < function.ParameterCount
+                + (function.IsConstructor ? 1 : 0)
+            || function.Variables[variable].Type != layout.CarrierType
+            || initialization.Type != layout.CarrierType
+            || initialization.Seed is null
+            || initialization.Seed.Type != layout.ElementType
+            || !NativeFixedArrayContract.MatchesType(
+                function.Variables[variable].Type, layout, program)
+            || !NativeFixedArrayContract.MatchesLayout(layout, program)
+            || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                layout.ElementType, program.Structures,
+                program.NativeFixedArrayTypes)
+            || (function.Variables[variable].IsMutable
+                && !NativeFixedArrayContract.AllowsMutableLocal(layout)))
+        {
+            throw InvalidEffect(initialization.Span, "NativeImport");
+        }
+
+        var staged = initialized.Clone();
+        var stagedMasks = (uint[])fieldMasks.Clone();
+        if (!EvaluateNestedNativeFixedArrayRepeatInitialization(
+                initialization, variable, StorageProjection.WholeObject,
+                staged, stagedMasks, declarations, function, program, true,
+                ref remaining, depth + 1, failures))
+        {
+            return;
+        }
+
+        staged.CopyTo(initialized);
+        stagedMasks.CopyTo(fieldMasks, 0);
     }
 
     private static void ApplyNativeFixedArrayWriteProvenance(
@@ -119,7 +192,7 @@ public static partial class SemanticVerifier
         ref int remaining, int depth)
     {
         var newValues = NativePointerFieldValueSnapshotOfExpression(
-            write.Value, leafLayout.ElementType, facts, function, program,
+            write.Value, write.Value.Type, facts, function, program,
             ref remaining, depth + 1);
         if (!TryGetNativeFixedArrayArrayPrefix(write.Variable,
                 write.FieldPlace, write.Projections[0].Layout, function,
@@ -135,7 +208,19 @@ public static partial class SemanticVerifier
             Count(ref workRemaining, depth + 1);
             if (pathIndex == write.Projections.Length)
             {
-                ApplyNativeFixedArrayWriteValues(write.Variable, prefix,
+                var destinationPrefix = prefix;
+                foreach (var field in write.LeafFields)
+                {
+                    destinationPrefix = destinationPrefix.AppendField(
+                        field.OwnerType, field.Field);
+                }
+                if (!write.LeafFields.IsEmpty)
+                {
+                    InvalidateNativeFixedArrayPathWriteUnionOverlaps(write,
+                        leafLayout.ElementType, prefix, facts, program);
+                }
+                ApplyNativeFixedArrayWriteValues(write.Variable,
+                    destinationPrefix,
                     maySelect, newValues, facts, write.Span);
                 return;
             }
@@ -156,6 +241,232 @@ public static partial class SemanticVerifier
                     StorageProjection.ForArrayRange(0,
                         projection.Layout.ElementCount)),
                 true, ref workRemaining);
+        }
+    }
+
+    private static void ApplyNativeFixedArrayPathCopyOrigin(
+        BoundNativeFixedArrayPathWrite write,
+        BackingDependencies facts, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth)
+    {
+        var newValues = CopyOriginFieldValueSnapshotOfExpression(
+            write.Value, write.Value.Type, facts, function, program,
+            ref remaining, depth + 1);
+        if (!TryGetNativeFixedArrayArrayPrefix(write.Variable,
+                write.FieldPlace, write.Projections[0].Layout, function,
+                program, out var arrayPrefix))
+        {
+            throw Invalid(write.Span);
+        }
+        ApplyPath(0, arrayPrefix, false, ref remaining);
+
+        void ApplyPath(int pathIndex, StorageProjection prefix, bool maySelect,
+            ref int workRemaining)
+        {
+            Count(ref workRemaining, depth + 1);
+            if (pathIndex == write.Projections.Length)
+            {
+                var destinationPrefix = prefix;
+                foreach (var field in write.LeafFields)
+                {
+                    destinationPrefix = destinationPrefix.AppendField(
+                        field.OwnerType, field.Field);
+                }
+                if (!write.LeafFields.IsEmpty)
+                {
+                    InvalidateNativeFixedArrayPathWriteUnionOverlaps(write,
+                        write.Projections[^1].Layout.ElementType, prefix,
+                        facts, program);
+                }
+                ApplyNativeFixedArrayCopyOriginWriteValues(write.Variable,
+                    destinationPrefix, maySelect, newValues, facts,
+                    write.Span, ref workRemaining);
+                return;
+            }
+
+            var projection = write.Projections[pathIndex];
+            if (NativeFixedArrayContract.TryGetUnsignedIndex(
+                    projection.Index, out var selectedIndex))
+            {
+                ApplyPath(pathIndex + 1,
+                    StorageProjection.Combine(prefix,
+                        StorageProjection.ForArrayIndex(selectedIndex)),
+                    maySelect, ref workRemaining);
+                return;
+            }
+
+            ApplyPath(pathIndex + 1,
+                StorageProjection.Combine(prefix,
+                    StorageProjection.ForArrayRange(0,
+                        projection.Layout.ElementCount)),
+                true, ref workRemaining);
+        }
+    }
+
+    private static void ApplyNativeFixedArrayCopyOriginWriteValues(
+        int variable, StorageProjection destinationPrefix, bool maySelect,
+        IReadOnlyDictionary<StorageProjection, CopyOriginFact> newValues,
+        BackingDependencies facts, TextSpan span, ref int remaining)
+    {
+        foreach (var (relativeProjection, newValue) in newValues)
+        {
+            Count(ref remaining, 0);
+            var projection = StorageProjection.Combine(
+                destinationPrefix, relativeProjection);
+            if (!IsCopyOriginFieldProjection(projection))
+            {
+                throw Invalid(span);
+            }
+
+            if (!projection.ProjectionPath.IsConcrete)
+            {
+                if (maySelect)
+                {
+                    facts.MergeCopyOriginFieldValueUnknown(variable,
+                        projection, newValue, ref remaining);
+                }
+                else
+                {
+                    facts.SetCopyOriginFieldValueTemplate(variable,
+                        projection, newValue, ref remaining);
+                }
+                continue;
+            }
+
+            if (!maySelect)
+            {
+                facts.SetCopyOriginFieldValue(variable, projection, newValue);
+                continue;
+            }
+
+            _ = facts.TryGetCopyOriginFieldValue(variable, projection,
+                out var previousValue);
+            _ = previousValue.Merge(newValue);
+            facts.SetCopyOriginFieldValue(variable, projection, previousValue);
+        }
+    }
+
+    private static void InvalidateNativeFixedArrayPathWriteUnionOverlaps(
+        BoundNativeFixedArrayPathWrite write, PrimitiveType elementType,
+        StorageProjection elementProjection, BackingDependencies facts,
+        BoundProgram program)
+    {
+        var fieldPath = default(FieldProjectionPath);
+        var ownerType = elementType;
+        ulong writeSize = 0;
+        foreach (var field in write.LeafFields)
+        {
+            if (field.OwnerType != ownerType
+                || !HasFields(program, ownerType)
+                || (uint)field.Field >= (uint)Fields(program,
+                        ownerType).Length)
+            {
+                throw Invalid(write.Span);
+            }
+            var declaration = Fields(program, ownerType)[field.Field];
+            fieldPath = fieldPath.Append(ownerType, field.Field);
+            ownerType = declaration.Type;
+            writeSize = declaration.Size;
+        }
+
+        if (writeSize == 0
+            || !TryGetFieldPathByteOffset(elementType, fieldPath, program,
+                out var writeOffset))
+        {
+            return;
+        }
+
+        var segments = fieldPath.Segments;
+        for (var unionOwnerIndex = 0;
+            unionOwnerIndex < segments.Length;
+            unionOwnerIndex++)
+        {
+            var unionType = segments[unionOwnerIndex].OwnerType;
+            if (!IsRawUnionType(program, unionType))
+            {
+                continue;
+            }
+
+            var unionOwnerPath = default(FieldProjectionPath);
+            var unionProjection = elementProjection;
+            for (var index = 0; index < unionOwnerIndex; index++)
+            {
+                var segment = segments[index];
+                unionOwnerPath = unionOwnerPath.Append(segment.OwnerType,
+                        segment.Field);
+                unionProjection = unionProjection.AppendField(
+                        segment.OwnerType, segment.Field);
+            }
+            var unionOffset = 0;
+            if (!unionOwnerPath.Segments.IsEmpty
+                && !TryGetFieldPathByteOffset(elementType,
+                        unionOwnerPath, program, out unionOffset))
+            {
+                throw Invalid(write.Span);
+            }
+            if (unionOffset > writeOffset)
+            {
+                throw Invalid(write.Span);
+            }
+
+            var unionWriteOffset
+                = checked((ulong)(writeOffset - unionOffset));
+            var writeEnd = checked(unionWriteOffset + writeSize);
+            var unionSize = program.Structures[
+                (int)unionType - 100].Size;
+            var unionFields = Fields(program, unionType);
+            if ((uint)segments[unionOwnerIndex].Field
+                        >= (uint)unionFields.Length
+                || unionWriteOffset > unionSize
+                || writeSize > unionSize - unionWriteOffset)
+            {
+                throw Invalid(write.Span);
+            }
+
+            var writtenAlternative = segments[unionOwnerIndex].Field;
+            var wholeAlternativeWrite = unionOwnerIndex
+                        == segments.Length - 1
+                && unionWriteOffset
+                        == unionFields[writtenAlternative].Offset
+                && writeSize == unionFields[writtenAlternative].Size;
+            for (var field = 0; field < unionFields.Length; field++)
+            {
+                if (wholeAlternativeWrite && field == writtenAlternative)
+                {
+                        continue;
+                }
+
+                var candidate = unionFields[field];
+                var candidateEnd = checked(candidate.Offset
+                        + candidate.Size);
+                if (candidate.Size == 0
+                        || candidate.Offset >= writeEnd
+                        || unionWriteOffset >= candidateEnd)
+                {
+                        continue;
+                }
+
+                var projection = unionProjection.AppendField(unionType,
+                        field);
+                facts.ClearCopyOriginFieldValues(write.Variable,
+                        projection);
+                var inlineFieldOnlyProjection
+                    = projection.Kind
+                        == StorageProjectionKind.InlineFieldPath;
+                foreach (var segment in projection.ProjectionPath.Segments)
+                {
+                    inlineFieldOnlyProjection &= segment.Kind
+                        == StorageProjectionSegmentKind.Field;
+                }
+                if (inlineFieldOnlyProjection)
+                {
+                    facts.ClearBackingFieldValues(write.Variable, projection);
+                    facts.ClearReferenceFieldValues(write.Variable,
+                        projection);
+                }
+                facts.InvalidateNativePointerFieldValues(write.Variable,
+                        projection);
+            }
         }
     }
 

@@ -5,15 +5,16 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class PrelexedSyntaxTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class PrelexedSyntaxTests
 {
     [TestCase("")]
     [TestCase(" // trailing\r\n")]
@@ -184,6 +185,10 @@ public sealed class PrelexedSyntaxTests
     private static SyntaxToken ForgeToken(TokenKind kind, string text, TextSpan span, ImmutableArray<SyntaxTrivia> leadingTrivia)
     {
         var constructor = global::System.Linq.Enumerable.Single(typeof(SyntaxToken).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic));
-        return ((global::System.Func<SyntaxToken>)(() => { var __nunitActual0 = constructor.Invoke([kind, text, span, leadingTrivia, false]); Assert.That(__nunitActual0, Is.TypeOf<SyntaxToken>()); return (SyntaxToken)__nunitActual0!; }))();
+        return ((global::System.Func<SyntaxToken>)(() => {
+            var __nunitActual0 = constructor.Invoke([kind, text, span, leadingTrivia, false]);
+            Assert.That(__nunitActual0, Is.TypeOf<SyntaxToken>());
+            return (SyntaxToken)__nunitActual0!;
+        }))();
     }
 }

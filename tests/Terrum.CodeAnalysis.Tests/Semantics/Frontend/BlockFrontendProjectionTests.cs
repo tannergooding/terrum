@@ -2,14 +2,15 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class BlockFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class BlockFrontendProjectionTests
 {
     [Test]
     public void IndependentSiblingBlocksRequireExactScopeAndDeclarationIdentity()
@@ -41,14 +42,18 @@ public sealed class BlockFrontendProjectionTests
         var maximumLengthSource = SourceText.From(text + new string(' ',
             ScannerHost.MaximumSourceLength - text.Length));
         Assert.That(ScalarFrontendHost.ReadResult(maximumLengthSource, Bytes(words)).IsValid, Is.True);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(maximumLengthSource.Text + " "), Bytes(words)));
         Assert.That(result.Statements[0].BodySpan, Is.EqualTo(result.Statements[0].Span));
         Assert.That(result.Statements[3].BodySpan, Is.EqualTo(result.Statements[3].Span));
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var function = global::System.Linq.Enumerable.Single(ScalarFrontendHost.BindLibrary(source, Bytes(words), policy).Functions);
-            Assert.That(((global::System.Func<BoundBlock>)(() => { var __nunitActual0 = function.Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual0!; }))().IsManagedLexicalScope, Is.True);
+            Assert.That(((global::System.Func<BoundBlock>)(() => {
+                var __nunitActual0 = function.Body.Statements[0];
+                Assert.That(__nunitActual0, Is.TypeOf<BoundBlock>());
+                return (BoundBlock)__nunitActual0!;
+            }))().IsManagedLexicalScope, Is.True);
         }
         foreach (var version in new[] { 1, 20, 48, 49, 50, 51, 53 })
         {
@@ -72,15 +77,15 @@ public sealed class BlockFrontendProjectionTests
         Reject(299, 9);
         Reject(298, 13);
         Reject(391, 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)[..^1]));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words).AsSpan()[..^1]));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("x++;", "++x;", StringComparison.Ordinal)), Bytes(words)));
 
         void Reject(int index, int value)
         {
             var previous = words[index];
             words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
             words[index] = previous;
         }
     }
@@ -100,10 +105,10 @@ public sealed class BlockFrontendProjectionTests
         Statement(words, 0, 14, 2, -1, block, declaration + 15);
         Statement(words, 1, 1, 1, 0, declaration, declaration + 13);
         Statement(words, 2, 8, 0, 1, returnAt, returnAt + 9);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
         words[333] = 3;
         words[336] = returnAt + 9 - block;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
     }
 
     [Test]
@@ -117,7 +122,7 @@ public sealed class BlockFrontendProjectionTests
         words[0] = 87;
         Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[0] = 52;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
     [TestCase(6,true)]
     [TestCase(7,false)]
@@ -126,9 +131,9 @@ public sealed class BlockFrontendProjectionTests
         var text = "public int32 Value() { " + new string('{', depth)
             + " return 42; " + new string('}', depth) + " }";
         var words = Header(text, 1, depth + 1, 0);
-        var block = text.IndexOf('{') + 2;
+        var block = text.IndexOf('{', System.StringComparison.Ordinal) + 2;
         var returnAt = text.IndexOf("return", StringComparison.Ordinal);
-        var closing = text.IndexOf('}', returnAt);
+        var closing = text.IndexOf('}', returnAt, System.StringComparison.Ordinal);
         Node(words, 0, 3, returnAt + 7, 2, -1, 42);
         for (var index = 0; index < depth; index++)
         {
@@ -141,7 +146,7 @@ public sealed class BlockFrontendProjectionTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
 
@@ -163,7 +168,7 @@ public sealed class BlockFrontendProjectionTests
         Statement(words, 3, 8, 0, 1, returnAt, returnAt + 10);
         Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[343] = 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
     [Test]
@@ -173,7 +178,7 @@ public sealed class BlockFrontendProjectionTests
         var words = Header(text, 0, 1, 0);
         var block = text.IndexOf("{}", StringComparison.Ordinal);
         Statement(words, 0, 14, 1, -1, block, block + 2);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
     private static int[] Header(string text, int nodes, int statements, int locals)
@@ -192,7 +197,7 @@ public sealed class BlockFrontendProjectionTests
 
     private static void Local(int[] words, int index, bool mutable, int start)
     {
-        var offset = 300 + index * 4;
+        var offset = 300 + (index * 4);
         words[offset] = 1;
         words[offset + 1] = mutable ? 1 : 0;
         words[offset + 2] = start;
@@ -201,7 +206,7 @@ public sealed class BlockFrontendProjectionTests
 
     private static void Node(int[] words, int index, int operation, int start, int length, int left, int low)
     {
-        var offset = 42 + index * 8;
+        var offset = 42 + (index * 8);
         words[offset] = operation;
         words[offset + 1] = 1;
         words[offset + 2] = start;
@@ -213,7 +218,7 @@ public sealed class BlockFrontendProjectionTests
 
     private static void Statement(int[] words, int index, int kind, int slot, int root, int start, int end)
     {
-        var offset = 332 + index * 5;
+        var offset = 332 + (index * 5);
         words[offset] = kind;
         words[offset + 1] = slot;
         words[offset + 2] = root;

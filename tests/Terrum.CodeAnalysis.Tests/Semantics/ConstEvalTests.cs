@@ -2,13 +2,14 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class ConstEvalTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ConstEvalTests
 {
     [Test]
     public void CallerUnsafeConstEvalUsesExpressionScope()
@@ -19,8 +20,19 @@ public sealed class ConstEvalTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions, function => function.Name == "Main");
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual2 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = main.Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))().Value; Assert.That(__nunitActual2, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual2!; }))().Value, Is.EqualTo(42));
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))().Functions, function => function.Name == "Main");
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual2 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual1 = main.Body.Statements[0];
+    Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual1!; }))().Value;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual2!;
+        }))().Value, Is.EqualTo(42));
     }
 
     [Test]
@@ -32,8 +44,19 @@ public sealed class ConstEvalTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Functions, function => function.Name == "Main");
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual4 = main.Body.Statements[0]; Assert.That(__nunitActual4, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual4!; }))().Initializer; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))().Value, Is.EqualTo(42));
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))().Functions, function => function.Name == "Main");
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual5 = ((global::System.Func<BoundLocal>)(() => {
+    var __nunitActual4 = main.Body.Statements[0];
+    Assert.That(__nunitActual4, Is.TypeOf<BoundLocal>());
+    return (BoundLocal)__nunitActual4!; }))().Initializer;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual5!;
+        }))().Value, Is.EqualTo(42));
     }
 
     [Test]
@@ -55,8 +78,19 @@ public sealed class ConstEvalTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions, function => function.Name == "Main");
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual8 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual7 = main.Body.Statements[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual7!; }))().Initializer; Assert.That(__nunitActual8, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual8!; }))().Value, Is.EqualTo(42));
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))().Functions, function => function.Name == "Main");
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual8 = ((global::System.Func<BoundLocal>)(() => {
+    var __nunitActual7 = main.Body.Statements[0];
+    Assert.That(__nunitActual7, Is.TypeOf<BoundLocal>());
+    return (BoundLocal)__nunitActual7!; }))().Initializer;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual8!;
+        }))().Value, Is.EqualTo(42));
     }
 
     private const string Source = """
@@ -83,10 +117,22 @@ public sealed class ConstEvalTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         var main = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Main");
-        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual10 = main.Body.Statements[0]; Assert.That(__nunitActual10, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual10!; }))();
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual11 = local.Initializer; Assert.That(__nunitActual11, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual11!; }))().Value, Is.EqualTo(10));
+        var local = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual10 = main.Body.Statements[0];
+            Assert.That(__nunitActual10, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual10!;
+        }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual11 = local.Initializer;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual11!;
+        }))().Value, Is.EqualTo(10));
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Sum"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(main.Body.Statements.OfType<BoundReturn>(),statement => statement.Value is BoundBinary { Right: BoundCall }),Is.True);
     }
@@ -110,9 +156,17 @@ public sealed class ConstEvalTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Program));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))().Functions, function => function.Name == "Main");
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))().Functions, function => function.Name == "Main");
         Assert.That(main.Body.Statements.OfType<BoundLocal>()
-            .Select(local => ((global::System.Func<BoundConstant>)(() => { var __nunitActual13 = local.Initializer; Assert.That(__nunitActual13, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual13!; }))().Value), Is.EqualTo([0L, -1L, 42L]));
+            .Select(local => ((global::System.Func<BoundConstant>)(() => {
+                var __nunitActual13 = local.Initializer;
+                Assert.That(__nunitActual13, Is.TypeOf<BoundConstant>());
+                return (BoundConstant)__nunitActual13!;
+            }))().Value), Is.EqualTo([0L, -1L, 42L]));
     }
     [TestCase("const int32 value = Divide(1, 0);","ConstEval checked arithmetic")]
     [TestCase("const int32 value = Add(2147483647, 1);","ConstEval checked arithmetic")]
@@ -154,8 +208,19 @@ public sealed class ConstEvalTests
         if (succeeds)
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))().Functions, function => function.Name == "Main");
-            Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual16 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual15 = main.Body.Statements[0]; Assert.That(__nunitActual15, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual15!; }))().Initializer; Assert.That(__nunitActual16, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual16!; }))().Value, Is.EqualTo(count));
+            var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual14 = compilation.Program;
+                Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual14!;
+            }))().Functions, function => function.Name == "Main");
+            Assert.That(((global::System.Func<BoundConstant>)(() => {
+                var __nunitActual16 = ((global::System.Func<BoundLocal>)(() => {
+    var __nunitActual15 = main.Body.Statements[0];
+    Assert.That(__nunitActual15, Is.TypeOf<BoundLocal>());
+    return (BoundLocal)__nunitActual15!; }))().Initializer;
+                Assert.That(__nunitActual16, Is.TypeOf<BoundConstant>());
+                return (BoundConstant)__nunitActual16!;
+            }))().Value, Is.EqualTo(count));
         }
         else
         {

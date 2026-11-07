@@ -149,7 +149,7 @@ public sealed class SyntaxTree
         ImmutableArray<Diagnostic> diagnostics;
         if (diagnosticCount == 0)
         {
-            diagnostics = ImmutableArray<Diagnostic>.Empty;
+            diagnostics = [];
         }
         else
         {
@@ -184,7 +184,8 @@ public sealed class SyntaxTree
             if (token is null || token.IsMissing || !Enum.IsDefined(token.Kind) || token.LeadingTrivia.IsDefault
                 || token.Text is null
                 || (token.Kind == TokenKind.Identifier && (token.Text == "_"
-                    || (token.Text.Contains('@') && !IdentifierName.IsEscape(token.Text))))
+                    || (token.Text.Contains('@', StringComparison.Ordinal)
+                        && !IdentifierName.IsEscape(token.Text))))
                 || (token.Kind == TokenKind.Underscore && token.Text != "_"))
             {
                 throw new ArgumentException("Invalid lexical token.", nameof(lexResult));
@@ -213,7 +214,7 @@ public sealed class SyntaxTree
                 throw new ArgumentException("Invalid lexical token or source coverage.", nameof(lexResult));
             }
 
-            if (token.Text.StartsWith('@')
+            if (token.Text.StartsWith('@', StringComparison.Ordinal)
                 && (token.Span.Length != IdentifierName.EscapeLength(source.Text.AsSpan(position))
                     || token.Kind != (IdentifierName.IsEscape(token.Text) ? TokenKind.Identifier : TokenKind.Bad)))
             {

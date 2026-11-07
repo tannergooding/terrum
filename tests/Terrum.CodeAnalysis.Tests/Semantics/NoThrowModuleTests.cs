@@ -7,18 +7,19 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class NoThrowModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NoThrowModuleTests
 {
     private static BoundProgram MarkNoFailureProof(BoundProgram program, params string[] functionNames)
     {
@@ -35,9 +36,15 @@ public sealed class NoThrowModuleTests
 
     private static BoundProgram CompileLibrary(string source)
     {
-        var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions();
+        var result = Compilation.CreateLibrary(SyntaxTree.Parse(source), options);
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = result.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = result.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static byte[] Producer(string source) =>
@@ -45,9 +52,15 @@ public sealed class NoThrowModuleTests
 
     private static BoundProgram CompileConsumer(string source, byte[] producer)
     {
-        var result = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer));
+        var result = Compilation.Create(SyntaxTree.Parse(source),
+            ModuleCompiler.CreateReference(producer),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = result.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = result.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     [Test]
@@ -63,7 +76,9 @@ public sealed class NoThrowModuleTests
         var original = CompileLibrary(Source);
         var producer = ModuleCompiler.CreateProducer(original, ["Value.#ctor", "Value.Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
-        {var __nunitItems0 = reference.Functions;        Assert.Multiple(() => {
+        {
+            var __nunitItems0 = reference.Functions;
+            Assert.Multiple(() => {
             foreach (var __nunitItem2 in __nunitItems0)
             {
                 {
@@ -71,7 +86,8 @@ public sealed class NoThrowModuleTests
                     Assert.That(__nunitItem2.NoFailureProof, Is.False);
                 }
             }
-        });}
+        });
+        }
         var consumerSource = """
             int32 Main() {
                 Value value = new Value(42);
@@ -81,7 +97,13 @@ public sealed class NoThrowModuleTests
         var consumer = CompileConsumer(consumerSource, producer);
         var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
         var linked = ModuleCompiler.Link(artifact, producer);
-        {var __nunitItems1 = linked.Functions.Where(static function => function.Name is "Value.#ctor" or "Value.Read");        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems1) { Assert.That(__nunitItem3.NoFailureProof, Is.False); } });}
+        {
+            var __nunitItems1 = linked.Functions.Where(static function => function.Name is "Value.#ctor" or "Value.Read");
+            Assert.Multiple(() => {
+    foreach (var __nunitItem3 in __nunitItems1)
+    {
+        Assert.That(__nunitItem3.NoFailureProof, Is.False); } });
+        }
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(42));
     }
 
@@ -163,7 +185,7 @@ public sealed class NoThrowModuleTests
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast))!;
         var artifact = Producer("public int32 Compute() { return 42; }");
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(sizeof(int))),
-            Is.EqualTo(101));
+            Is.EqualTo(104));
         var serialized = Encoding.UTF8.GetString(artifact);
         Assert.That(serialized, Does.Not.Contain("|NoThrow"));
         Assert.That(serialized, Does.Not.Contain("|MayThrow"));
@@ -199,7 +221,7 @@ public sealed class NoThrowModuleTests
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(contractLengthOffset),
             forgedContractBytes.Length);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
     }
 
     [TestCase("|NoThrow")]
@@ -211,7 +233,7 @@ public sealed class NoThrowModuleTests
             CompileConsumer("int32 Main() { return Compute(); }", producer), producer);
         var forged = InsertRetiredContractToken(consumer, "Compute", retiredToken);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer));
     }
 
     [Test]
@@ -233,8 +255,16 @@ public sealed class NoThrowModuleTests
     {
         var folded = MarkNoFailureProof(CompileLibrary("public int32 Compute() { return 1 + 2; }"), "Compute");
         var function = global::System.Linq.Enumerable.Single(folded.Functions);
-        var statement = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
-        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = statement.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))();
+        var statement = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements);
+            Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual4!;
+        }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual5 = statement.Value;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual5!;
+        }))();
         var arithmetic = new BoundBinary(TokenKind.Plus,
             new BoundConstant(1, PrimitiveType.Int32, constant.Span),
             new BoundConstant(2, PrimitiveType.Int32, constant.Span),

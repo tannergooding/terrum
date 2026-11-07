@@ -2,17 +2,18 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class MutationFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class MutationFrontendProjectionTests
 {
     [Test]
     public void ReaderRequiresInt32ShiftCountAndExactExpressionBodySource()
@@ -46,26 +47,26 @@ public sealed class MutationFrontendProjectionTests
         Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length, Is.EqualTo(3));
         Reject(0, 48);
         Reject(37, 33);
-        Reject(42 + 1 * 8 + 1, 3);
-        Reject(42 + 2 * 8 + 1, 1);
-        Reject(42 + 2 * 8, 91);
-        Reject(42 + 2 * 8 + 5, 0);
+        Reject(42 + (1 * 8) + 1, 3);
+        Reject(42 + (2 * 8) + 1, 1);
+        Reject(42 + (2 * 8), 91);
+        Reject(42 + (2 * 8) + 5, 0);
         Reject(41, 0);
         Reject(299, 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace(">>>", ">>", StringComparison.Ordinal)), Bytes()));
 
         void Reject(int index, int replacement)
         {
             var original = words[index];
             words[index] = replacement;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int type, int start, int length, int left, int right)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = type;
             words[offset + 2] = start;
@@ -119,21 +120,36 @@ public sealed class MutationFrontendProjectionTests
         Node(5, 86, result + 7, 3, 4, -1, 0);
         Statement(0, 1, 1, 0, declaration, compound - 1);
         Statement(1, 9, 1, 3, compound, result - 1);
-        Statement(2, 8, 0, 5, result, text.LastIndexOf(';') + 1);
+        Statement(2, 8, 0, 5, result, text.LastIndexOf(';', System.StringComparison.Ordinal) + 1);
 
         var accepted = ScalarFrontendHost.ReadResult(source, Bytes());
         Assert.That(accepted.Statements.Length, Is.EqualTo(3));
         var program = ScalarFrontendHost.BindLibrary(source, Bytes(), BoundRuntimePolicy.FailFast);
         var statements = program.Functions[0].Body.Statements;
-        Assert.That(((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual0 = statements[1]; Assert.That(__nunitActual0, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual0!; }))().Expression, Is.TypeOf<BoundCompoundAssignment>());
-        var update = ((global::System.Func<BoundUpdate>)(() => { var __nunitActual2 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = statements[2]; Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))().Value; Assert.That(__nunitActual2, Is.TypeOf<BoundUpdate>()); return (BoundUpdate)__nunitActual2!; }))();
+        Assert.That(((global::System.Func<BoundExpressionStatement>)(() => {
+            var __nunitActual0 = statements[1];
+            Assert.That(__nunitActual0, Is.TypeOf<BoundExpressionStatement>());
+            return (BoundExpressionStatement)__nunitActual0!;
+        }))().Expression, Is.TypeOf<BoundCompoundAssignment>());
+        var update = ((global::System.Func<BoundUpdate>)(() => {
+            var __nunitActual2 = ((global::System.Func<BoundReturn>)(() => {
+    var __nunitActual1 = statements[2];
+    Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
+    return (BoundReturn)__nunitActual1!; }))().Value;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundUpdate>());
+            return (BoundUpdate)__nunitActual2!;
+        }))();
         Assert.That(update.IsPrefix, Is.False);
         var producer = ModuleCompiler.CreateProducer(program, ["Value"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Value(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = client.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = client.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(),
             producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer),
             NativeRuntimePolicy.FailFast), Is.EqualTo(6));
@@ -148,33 +164,33 @@ public sealed class MutationFrontendProjectionTests
         Reject(300, 5);
         Reject(332 + 5 + 1, 2);
         Reject(332 + 5 + 2, 1);
-        Reject(42 + 3 * 8, 92);
-        Reject(42 + 3 * 8 + 1, 2);
-        Reject(42 + 3 * 8 + 4, 3);
-        Reject(42 + 3 * 8 + 5, 4);
-        Reject(42 + 3 * 8 + 2, compound + 1);
-        Reject(42 + 5 * 8, 87);
-        Reject(42 + 5 * 8 + 4, 5);
-        Reject(42 + 5 * 8 + 6, 2);
-        Reject(42 + 5 * 8 + 7, 1);
+        Reject(42 + (3 * 8), 92);
+        Reject(42 + (3 * 8) + 1, 2);
+        Reject(42 + (3 * 8) + 4, 3);
+        Reject(42 + (3 * 8) + 5, 4);
+        Reject(42 + (3 * 8) + 2, compound + 1);
+        Reject(42 + (5 * 8), 87);
+        Reject(42 + (5 * 8) + 4, 5);
+        Reject(42 + (5 * 8) + 6, 2);
+        Reject(42 + (5 * 8) + 7, 1);
         Reject(41, 1);
         Reject(38, 0);
         Reject(300 + 4, 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("x += 2", "x -= 2", StringComparison.Ordinal)), Bytes()));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()[..^1]));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes().AsSpan()[..^1]));
 
         void Reject(int index, int replacement)
         {
             var original = words[index];
             words[index] = replacement;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes()));
             words[index] = original;
         }
 
         void Node(int index, int operation, int start, int length, int left, int right, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = operation;
             words[offset + 1] = 1;
             words[offset + 2] = start;
@@ -186,7 +202,7 @@ public sealed class MutationFrontendProjectionTests
 
         void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             words[offset] = kind;
             words[offset + 1] = slot;
             words[offset + 2] = root;

@@ -2,16 +2,17 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class VoidFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class VoidFrontendProjectionTests
 {
     [TestCase("")]
     [TestCase("return;")]
@@ -30,14 +31,26 @@ public sealed class VoidFrontendProjectionTests
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(actual.Functions[0].ReturnType, Is.EqualTo(PrimitiveType.Void));
             Assert.That(actual.Functions[0].Name, Is.EqualTo("await"));
             Assert.That(actual.Functions[0].Body.Statements.Length, Is.EqualTo(hosted.Functions[0].Body.Statements.Length));
             for (var i = 0; i < actual.Functions[0].Body.Statements.Length; i++)
             {
-                var expected = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = hosted.Functions[0].Body.Statements[i]; Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))();
-                var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual2 = actual.Functions[0].Body.Statements[i]; Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual2!; }))();
+                var expected = ((global::System.Func<BoundReturn>)(() => {
+                    var __nunitActual1 = hosted.Functions[0].Body.Statements[i];
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>());
+                    return (BoundReturn)__nunitActual1!;
+                }))();
+                var returned = ((global::System.Func<BoundReturn>)(() => {
+                    var __nunitActual2 = actual.Functions[0].Body.Statements[i];
+                    Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>());
+                    return (BoundReturn)__nunitActual2!;
+                }))();
                 Assert.That(returned.Value, Is.Null);
                 Assert.That(returned.Span, Is.EqualTo(expected.Span));
             }
@@ -54,7 +67,7 @@ public sealed class VoidFrontendProjectionTests
         for (var version = 1; version <= 55; version++)
         {
             words[0] = version;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
         const string scalar = "public int32 @await() { return 42; }";
         words = Projection(scalar);
@@ -62,7 +75,7 @@ public sealed class VoidFrontendProjectionTests
         for (var version = 1; version <= 56; version++)
         {
             words[0] = version;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(scalar), Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(scalar), Bytes(words)));
         }
     }
     [TestCase(0,57)]
@@ -91,7 +104,7 @@ public sealed class VoidFrontendProjectionTests
         const string text = "public void @await() { return (); }";
         var words = Projection(text);
         words[offset] = value;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
     [TestCase("void","@void")]
     [TestCase("void","int32")]
@@ -105,7 +118,7 @@ public sealed class VoidFrontendProjectionTests
     {
         const string text = "public void @await() { return (); }";
         var words = Projection(text);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace(before, after, StringComparison.Ordinal)), Bytes(words)));
     }
     [TestCase(16,true)]
@@ -120,7 +133,7 @@ public sealed class VoidFrontendProjectionTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
     [TestCase(true)]
@@ -139,17 +152,17 @@ public sealed class VoidFrontendProjectionTests
         words[303] = 1;
         Node(words, 0, 20, text.IndexOf("true", StringComparison.Ordinal), 4, -1);
         Node(words, 1, 0, text.IndexOf("x;", StringComparison.Ordinal), 1, 1);
-        var block = text.IndexOf('{', text.IndexOf('{') + 1);
-        Statement(words, 0, 14, visible ? 3 : 2, -1, block, text.IndexOf('}', block) + 1);
-        Statement(words, 1, 1, 1, 0, text.IndexOf("bool x", StringComparison.Ordinal), text.IndexOf(';') + 1);
+        var block = text.IndexOf('{', text.IndexOf('{', System.StringComparison.Ordinal) + 1, System.StringComparison.Ordinal);
+        Statement(words, 0, 14, visible ? 3 : 2, -1, block, text.IndexOf('}', block, System.StringComparison.Ordinal) + 1);
+        Statement(words, 1, 1, 1, 0, text.IndexOf("bool x", StringComparison.Ordinal), text.IndexOf(';', System.StringComparison.Ordinal) + 1);
         var require = text.IndexOf("require", StringComparison.Ordinal);
-        Statement(words, 2, 21, 0, 1, require, text.IndexOf(';', require) + 1);
+        Statement(words, 2, 21, 0, 1, require, text.IndexOf(';', require, System.StringComparison.Ordinal) + 1);
         if (visible)
         {
             Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
             words[300] = 0;
         }
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
     [Test]
@@ -163,9 +176,9 @@ public sealed class VoidFrontendProjectionTests
         words[12] = 1;
         Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[7] = 0;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         words[7] = 5;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("bool a", "void a", StringComparison.Ordinal)), Bytes(words)));
     }
 
@@ -181,14 +194,14 @@ public sealed class VoidFrontendProjectionTests
         if (returned >= 0)
         {
             words[298] = 1;
-            Statement(words, 0, 22, 0, -1, returned, text.IndexOf(';', returned) + 1);
+            Statement(words, 0, 22, 0, -1, returned, text.IndexOf(';', returned, System.StringComparison.Ordinal) + 1);
         }
         return words;
     }
 
     private static void Statement(int[] words, int index, int kind, int slot, int root, int start, int end)
     {
-        var offset = 332 + index * 5;
+        var offset = 332 + (index * 5);
         words[offset] = kind;
         words[offset + 1] = slot;
         words[offset + 2] = root;
@@ -198,7 +211,7 @@ public sealed class VoidFrontendProjectionTests
 
     private static void Node(int[] words, int index, int operation, int start, int length, int slot)
     {
-        var offset = 42 + index * 8;
+        var offset = 42 + (index * 8);
         words[offset] = operation;
         words[offset + 1] = 5;
         words[offset + 2] = start;

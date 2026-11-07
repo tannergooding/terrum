@@ -2,13 +2,14 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolExtendedTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolExtendedTests
 {
     private const string Source = """
         interface BitMask<A, B, C> { static C operator &(A left, B right); }
@@ -34,13 +35,13 @@ public sealed class StaticProtocolExtendedTests
     [TestCase("public static Value operator &(Value left, Value right)","public static Value operator &(Value left, Other right)","TRM3007")]
     [TestCase("public static Value operator &(Value left, Value right)","private static Value operator &(Value left, Value right)","TRM3007")]
     [TestCase("static C operator &(A left, B right)","static B operator &(A left, B right)","TRM3001")]
-    [TestCase("static C operator &(A left, B right)","[NoThrow] static C operator &(A left, B right)","TRM3007")]
+    [TestCase("static C operator &(A left, B right)","[NoThrow] static C operator &(A left, B right)","TRM3017")]
     [TestCase("where T : BitMask<T, T, T>, [Copy]","where T : [Copy]","TRM3007")]
     [TestCase("where T : BitMask<T, T, T>, [Copy]","where T : BitMask<T, T, T>, OtherBitMask<T, T, T>, [Copy]","TRM3007")]
     [TestCase("return left & right;","return left ^ right;","TRM3007")]
     [TestCase("return Apply(new Value(40), new Value(2)).Number;","Apply(new Value(40), new Other(2)); return 0;","TRM3007")]
     [TestCase("return Apply(new Value(40), new Value(2)).Number;","Apply<int32>(40, 2); return 0;","TRM3007")]
-    [TestCase("T Apply<T>","[NoThrow] T Apply<T>","TRM3007")]
+    [TestCase("T Apply<T>","[NoThrow] T Apply<T>","TRM3017")]
     public void FalseExtendedOperatorContractsDoNotBorrowConcreteCapabilities(
         string before, string after, string expected)
     {
@@ -68,7 +69,11 @@ public sealed class StaticProtocolExtendedTests
         }
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(program.Functions.Count(function =>
             function.Name.Contains('<', StringComparison.Ordinal)), Is.EqualTo(instantiate ? 2 : 0));
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
@@ -93,24 +98,11 @@ public sealed class StaticProtocolExtendedTests
     }
 
     [Test]
-    public void NoThrowWitnessCannotClaimCheckedDivisionIsInfallible()
+    public void RetiredNoThrowOperatorRequirementIsDiagnosed()
     {
-        var source = """
-            interface Divide<A, B, C> {
-                [NoThrow] static C operator /(A left, B right);
-            }
-            struct Value : Divide<Value, Value, Value> {
-                public int32 Number;
-                [NoThrow] public Value(int32 number) { Number = number; }
-                [NoThrow] public static Value operator /(Value left, Value right) {
-                    return new Value(left.Number / right.Number);
-                }
-            }
-            [NoThrow] T Apply<T>(T left, T right) where T : Divide<T, T, T>, [Copy] {
-                return left / right;
-            }
-            int32 Main() { return Apply(new Value(40), new Value(2)).Number; }
-            """;
+        var source = Source.Replace("interface BitMask<A, B, C> { static C operator &(A left, B right); }",
+            "interface BitMask<A, B, C> { [NoThrow] static C operator &(A left, B right); }",
+            StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
         Assert.That(compilation.Program, Is.Null);

@@ -118,7 +118,7 @@ internal sealed partial class Binder
         {
             return sourceType is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
                 or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                || (allowFloatingScalar && sourceType is (PrimitiveType.Float32 or PrimitiveType.Float64))
+                || (allowFloatingScalar && sourceType is PrimitiveType.Float32 or PrimitiveType.Float64)
                 ? sourceType : null;
         }
         var structure = source._structs[(int)sourceType - 100];
@@ -332,8 +332,7 @@ internal sealed partial class Binder
         _ => null,
     };
 
-    private bool IsCopyGenericType(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Char16
-        or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+    private bool IsCopyGenericType(PrimitiveType type) => PrimitiveTypeFacts.ScalarWidth(type) > 0
         || NativePointerTypes.IsType(type)
         || NativeFunctionPointerTypes.IsType(type)
         || IsStruct(type)
@@ -354,14 +353,11 @@ internal sealed partial class Binder
         foreach (var tree in _trees)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            SetContext(tree);
-            foreach (var node in tree.Root.Children.OfType<SyntaxNode>())
+            foreach (var (sourceTree, node) in _scopedDeclarations.Where(item =>
+                item.Tree == tree && item.Declaration.Kind == SyntaxKind.InterfaceDeclaration))
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                if (node.Kind != SyntaxKind.InterfaceDeclaration)
-                {
-                    continue;
-                }
+                SetContext(sourceTree, node);
                 SyntaxToken? nameToken = null;
                 SyntaxNode? parameters = null;
                 SyntaxNode? operatorMember = null;
@@ -395,6 +391,11 @@ internal sealed partial class Binder
                     }
                 }
                 var name = nameToken?.Name ?? throw new InvalidOperationException();
+                if (!node.Children.OfType<SyntaxNode>()
+                    .Any(static child => child.Kind == SyntaxKind.OperatorDeclaration))
+                {
+                    continue;
+                }
                 if (TryPrimitiveType(name, out _))
                 {
                     Report("TRM3003", $"The primitive type '{name}' cannot be declared as an interface.", node.Span);
@@ -547,7 +548,9 @@ internal sealed partial class Binder
                     || !((arity == 1 && IsStaticUnaryOperator(operation))
                         || (arity == 2 && IsStaticBinaryOperator(operation)))
                     || variableCount != arity + 1 || signatureCount != 2
-                    || firstSignature is not SyntaxNode { Kind: SyntaxKind.TypeName } resultType
+                    || firstSignature is not SyntaxNode {
+                        Kind: SyntaxKind.TypeName or SyntaxKind.ReferenceTypeName
+                    } resultType
                     || NameText(resultType) != variables[variableCount - 1]
                     || firstArgument is not { Children: [SyntaxNode first, SyntaxTokenElement] }
                     || NameText(first) != variables[0]
@@ -579,14 +582,14 @@ internal sealed partial class Binder
         {
             if (_structNames.ContainsKey(protocol.Name))
             {
-                SetContext(protocol.Tree);
+                SetContext(protocol.Tree, protocol.Declaration);
                 Report("TRM3003", $"Protocol and struct cannot share '{protocol.Name}'.", protocol.Declaration.Span);
             }
         }
         foreach (var (index, (tree, declaration)) in _structDeclarations)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            SetContext(tree);
+            SetContext(tree, declaration);
             var typeName = _structs[index].Name;
             var list = declaration.Children.OfType<SyntaxNode>()
                 .FirstOrDefault(static child => child.Kind == SyntaxKind.ConformanceList);
@@ -638,7 +641,7 @@ internal sealed partial class Binder
                 var operation = name + "." + OperatorName(protocol.Key);
                 if (!_functions.TryGetValue(operation, out var index))
                 {
-                    SetContext(protocol.Tree);
+                    SetContext(protocol.Tree, protocol.Declaration);
                     Report("TRM3007", $"'{name}' promises '{protocolName}' but has no matching operator.", protocol.Declaration.Span);
                     continue;
                 }
@@ -665,7 +668,7 @@ internal sealed partial class Binder
             .Select(static child => child.Token.Name).ToArray();
         var hasPrimitiveTypeParameter = false;
         var hasDuplicateTypeParameter = false;
-        Dictionary<string, int>? typeParameterIndices = typeNames.Length is >= 2 and <= 8
+        var typeParameterIndices = typeNames.Length is >= 2 and <= 8
             ? new Dictionary<string, int>(StringComparer.Ordinal) : null;
         for (var index = 0; index < typeNames.Length; index++)
         {
@@ -878,8 +881,8 @@ internal sealed partial class Binder
         if (!_templates.TryAdd(qualified, new GenericTemplate(qualified,
             [.. typeNames.Select((name, index) => new GenericTypeParameter(name, operations[index].ToImmutable()))],
             scalarReturn, returnIndex, templateParameters.ToImmutable(), body!, declaration, _tree) {
-                RequiresUnsafeCaller = requiresUnsafeCaller,
-            }))
+            RequiresUnsafeCaller = requiresUnsafeCaller,
+        }))
         {
             Report("TRM3003", $"Duplicate generic function '{qualified}'.", declaration.Span);
         }
@@ -976,7 +979,7 @@ internal sealed partial class Binder
             var index = template.ReturnTypeParameterIndex;
             if (inferred[index] is PrimitiveType established)
             {
-                if (!CanImplicitlyConvert(established, result))
+                if (!CanImplicitlyConvert(established, result, arguments.Span))
                 {
                     conflictingArguments = true;
                     return null;
@@ -993,11 +996,10 @@ internal sealed partial class Binder
 
     private GenericTemplate? FindGenericTemplate(string name)
     {
-        GenericTemplate? candidate = null;
         var candidateName = string.Empty;
         var hasCandidate = false;
         var qualifiedName = Qualify(name);
-        if (_templates.TryGetValue(qualifiedName, out candidate))
+        if (_templates.TryGetValue(qualifiedName, out var candidate))
         {
             candidateName = qualifiedName;
             hasCandidate = true;
@@ -1173,16 +1175,14 @@ internal sealed partial class Binder
         foreach (var template in _templates.Values)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            SetContext(template.Tree);
+            SetContext(template.Tree, template.Declaration);
             var proofBinder = new Binder([template.Tree], [], _cancellationToken,
                 isLibrary: true, runtimePolicy: _runtimePolicy,
                 sourceArithmeticProfile: _sourceArithmeticProfile,
                 nativeCoreRegistration: _nativeCoreRegistration,
+                layoutCoreRegistration: _layoutCoreRegistration,
                 coreExceptionIdentitySelections:
                     _coreExceptionIdentitySelections);
-            foreach (var (tree, context) in _contexts)
-            {
-                proofBinder._contexts.Add(tree, context);
             proofBinder._enumDefinitions.AddRange(_enumDefinitions);
             for (var enumIndex = 0; enumIndex < proofBinder._enumDefinitions.Count;
                 enumIndex++)
@@ -1190,12 +1190,19 @@ internal sealed partial class Binder
                 proofBinder._enumNames.Add(proofBinder._enumDefinitions[enumIndex].Name,
                     BoundEnumTypes.Type(enumIndex));
             }
+            foreach (var (tree, context) in _contexts)
+            {
+                proofBinder._contexts.Add(tree, context);
+            }
+            foreach (var (node, context) in _nodeContexts)
+            {
+                proofBinder._nodeContexts.Add(node, context);
             }
             foreach (var (name, alias) in _aliases)
             {
                 proofBinder._aliases.Add(name, alias);
             }
-            proofBinder.SetContext(template.Tree);
+            proofBinder.SetContext(template.Tree, template.Declaration);
             var functions = ImmutableArray.CreateBuilder<BoundFunction>();
             var probeTypes = ImmutableArray.CreateBuilder<PrimitiveType>(template.TypeParameters.Length);
             proofBinder._genericProofFunctions = functions;
@@ -1216,6 +1223,8 @@ internal sealed partial class Binder
                 proofBinder._structs.Add(new BoundStruct(probeName,
                     [new BoundStructField("$opaque", PrimitiveType.Int32, 0, 4) { IsPrivate = true }], 4) {
                     IsInternal = true,
+                    Alignment = sizeof(int),
+                    RequiredAlignment = 1,
                 });
             }
             var symbolicTypes = probeTypes.MoveToImmutable();
@@ -1325,8 +1334,15 @@ internal sealed partial class Binder
             functions[symbolicIndex] = function;
             var proof = new BoundProgram(functions.ToImmutable(), -1) {
                 Structures = [.. proofBinder._structs],
+                EnumDefinitions = [.. proofBinder._enumDefinitions],
+                NativeCoreRegistration = proofBinder._nativeCoreRegistration,
+                LayoutCoreRegistration = proofBinder._layoutCoreRegistration,
                 CoreExceptionIdentitySelections =
                     proofBinder._coreExceptionIdentitySelections,
+                NativeFunctionPointerSignatures = [.. proofBinder._nativeFunctionPointerSignatures],
+                NativePointerTypes = [.. proofBinder._nativePointerTypes],
+                NativeFixedArrayTypes = [.. proofBinder._nativeFixedArrayTypes],
+                CheckedReferenceTypes = [.. proofBinder._checkedReferenceTypes],
                 Classes = [.. proofBinder._classes],
                 RuntimePolicy = _runtimePolicy,
             };
@@ -1334,12 +1350,6 @@ internal sealed partial class Binder
                 allowGenericProofDependencies: true))
             {
                 var code = effect switch {
-                EnumDefinitions = [.. proofBinder._enumDefinitions],
-                NativeCoreRegistration = proofBinder._nativeCoreRegistration,
-                NativeFunctionPointerSignatures = [.. proofBinder._nativeFunctionPointerSignatures],
-                NativePointerTypes = [.. proofBinder._nativePointerTypes],
-                NativeFixedArrayTypes = [.. proofBinder._nativeFixedArrayTypes],
-                CheckedReferenceTypes = [.. proofBinder._checkedReferenceTypes],
                     "NoThrow" => "TRM3017",
                     "NormalReturn" => "TRM3012",
                     "FinallyReturn" => "TRM3019",
@@ -1350,6 +1360,7 @@ internal sealed partial class Binder
                 Report(code, "Generic definition violates its declared type, control-flow, or effect contract.", span);
                 return false;
             }
+            _layoutKindsUsedInSource |= proofBinder._layoutKindsUsedInSource;
         }
         return true;
     }

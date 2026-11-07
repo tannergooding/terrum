@@ -7,7 +7,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Syntax;
 
-public sealed class SwitchPatternSyntaxTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class SwitchPatternSyntaxTests
 {
     [Test]
     public void StatementSwitchParsesPatternCombinatorsBindingsAndGuards()

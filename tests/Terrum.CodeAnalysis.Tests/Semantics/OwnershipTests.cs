@@ -7,18 +7,41 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class OwnershipTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class OwnershipTests
 {
+    private static Compilation CreateLayoutLibrary(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
+        => Compilation.CreateLibrary(tree, new CompilationOptions {
+            RuntimePolicy = runtimePolicy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+
+    private static Compilation CreateLayoutLibrary(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
+        => Compilation.CreateLibrary(tree, reference, new CompilationOptions {
+            RuntimePolicy = runtimePolicy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+
+    private static Compilation CreateLayoutConsumer(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
+        => Compilation.Create(tree, reference, new CompilationOptions {
+            RuntimePolicy = runtimePolicy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task LifetimeEndDropsEachValueExactlyOnceAtTheStatementAsync(BoundRuntimePolicy policy)
@@ -27,7 +50,7 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Id;
                 public Owner(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else if (Host.Trace[0] == 1) { Host.Trace[0] = 2; }
                     else if (Host.Trace[0] == 2) { Host.Trace[0] = 3; }
@@ -60,7 +83,11 @@ public sealed class OwnershipTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             (NativeRuntimePolicy)policy), Is.EqualTo(42));
         Assert.That(await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -72,7 +99,7 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Id;
                 public Owner(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else { Host.Trace[0] = 2; }
                     Host.Trace[1] = Host.Trace[1] ^ Id;
@@ -99,7 +126,11 @@ public sealed class OwnershipTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(),
             NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
         Assert.That(await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions, [0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -111,7 +142,7 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Number;
                 public Owner(int32 number) { Number = number; }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else { Host.Trace[0] = 2; }
                     Host.Trace[1] = Number;
@@ -144,7 +175,7 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Number;
                 public Owner(int32 number) { Number = number; }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else { Host.Trace[0] = 2; }
                     Host.Trace[1] = Number;
@@ -175,7 +206,7 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Id;
                 public Owner(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else if (Host.Trace[0] == 1) { Host.Trace[0] = 2; }
                     else { Host.Trace[0] = 3; }
@@ -209,7 +240,7 @@ public sealed class OwnershipTests
                     Words.Set(0, 42);
                     Latest = 42;
                 }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else { Host.Trace[0] = 2; }
                     Host.Trace[1] = Latest;
@@ -241,7 +272,7 @@ public sealed class OwnershipTests
                 public mut int32 Value;
                 public Child(int32 value) { Value = value; }
                 public mut void Fail() { Value = 42; require false; }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else { Host.Trace[0] = 2; }
                     Host.Trace[2] = Value;
@@ -250,7 +281,7 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public mut Child Nested;
                 public Owner(int32 value) { Nested = new Child(value); }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[1] == 0) { Host.Trace[1] = 1; }
                     else { Host.Trace[1] = 2; }
                     Host.Trace[3] = Nested.Value;
@@ -282,7 +313,7 @@ public sealed class OwnershipTests
                 public mut int32 Value;
                 public Owner(int32 value) { Value = value; }
                 public mut void Add(int32 amount) { Value = Value + amount; }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
                     else { Host.Trace[0] = 2; }
                     Host.Trace[1] = Value;
@@ -305,11 +336,11 @@ public sealed class OwnershipTests
         unique struct Owner {
             public int32 Id;
             public Owner(int32 id) { Id = id; }
-            [NoThrow] [Cleanup] public void Close() {
+             [Cleanup] public void Close() {
                 Host.Trace[0] = Host.Trace[0] ^ Id;
                 Host.Trace[1] = Id;
             }
-            [NoThrow] public int32 Peek() { return Id; }
+             public int32 Peek() { return Id; }
         }
         """;
     [TestCase("Owner copy = value;","TRM3023")]
@@ -323,10 +354,13 @@ public sealed class OwnershipTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner
             + " int32 Main() { bool flag = true; Owner value = new Owner(42); " + body + " return 0; }"),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == code), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase("struct Copy { public int32 Id; public Copy() { Id = 1; } [NoThrow] [Cleanup] public void Close() {} }","TRM3023")]
+
+    [TestCase("struct Copy { public int32 Id; public Copy() { Id = 1; }  [Cleanup] public void Close() {} }","TRM3023")]
     [TestCase("unique struct U { public int32 Id; public U() { Id = 1; } } struct Copy { public U Value; public Copy() { Value = new U(); } }","TRM3023")]
     [TestCase("unique struct U { public int32 Id; public U() { Id = 1; U duplicate = this; } }","TRM3023")]
     public void UnsupportedOwnershipContractsAreDiagnosed(string declarations, string code)
@@ -396,7 +430,7 @@ public sealed class OwnershipTests
                     Second = value + 1;
                     Third = value + 2;
                 }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     Host.Trace[0] = Host.Trace[0] ^ First;
                     Host.Trace[1] = Third;
                 }
@@ -494,7 +528,7 @@ public sealed class OwnershipTests
                     require id != 2;
                     Id = id;
                 }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     Host.Trace[0] = Host.Trace[0] ^ Id;
                     Host.Trace[1] = Id;
                 }
@@ -596,7 +630,9 @@ public sealed class OwnershipTests
             StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(modified),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
     }
 
@@ -604,18 +640,18 @@ public sealed class OwnershipTests
         unique struct Leaf {
             public int32 Id;
             public Leaf() { Id = 42; }
-            [NoThrow] [Cleanup] public void Close() {}
+             [Cleanup] public void Close() {}
             public int32 Read(int32 offset) { return Id + offset; }
         }
         unique struct Branch {
             public Leaf Leaf;
             public Branch() { Leaf = new Leaf(); }
-            [NoThrow] [Cleanup] public void Close() {}
+             [Cleanup] public void Close() {}
         }
         unique struct Root {
             public Branch Branch;
             public Root() { Branch = new Branch(); }
-            [NoThrow] [Cleanup] public void Close() {}
+             [Cleanup] public void Close() {}
         }
         bool Replace(out Root replacement) { replacement = new Root(); return true; }
         bool ReplaceMoved(Root old, out Root replacement) {
@@ -642,14 +678,42 @@ public sealed class OwnershipTests
         var compilation = Compilation.Create(SyntaxTree.Parse(NestedReceiver
             + " int32 Main() { mut Root root = new Root(); return root.Branch.Leaf.Read(Observe(true)); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var entry = program.Functions[program.EntryPoint];
-        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual3 = entry.Body.Statements[0]; Assert.That(__nunitActual3, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual3!; }))();
-        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual4 = entry.Body.Statements[1]; Assert.That(__nunitActual4, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual4!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual5 = global::System.Linq.Enumerable.Single(region.Body.Statements); Assert.That(__nunitActual5, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual5!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual6 = result.Value; Assert.That(__nunitActual6, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual6!; }))();
-        _ = ((global::System.Func<BoundFieldLoan>)(() => { var __nunitActual7 = call.Arguments[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundFieldLoan>()); return (BoundFieldLoan)__nunitActual7!; }))();
-        var scalar = ((global::System.Func<BoundCall>)(() => { var __nunitActual8 = call.Arguments[1]; Assert.That(__nunitActual8, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual8!; }))();
+        var local = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual3 = entry.Body.Statements[0];
+            Assert.That(__nunitActual3, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual3!;
+        }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual4 = entry.Body.Statements[1];
+            Assert.That(__nunitActual4, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual4!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual5 = global::System.Linq.Enumerable.Single(region.Body.Statements);
+            Assert.That(__nunitActual5, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual5!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual6 = result.Value;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual6!;
+        }))();
+        _ = ((global::System.Func<BoundFieldLoan>)(() => {
+            var __nunitActual7 = call.Arguments[0];
+            Assert.That(__nunitActual7, Is.TypeOf<BoundFieldLoan>());
+            return (BoundFieldLoan)__nunitActual7!;
+        }))();
+        var scalar = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual8 = call.Arguments[1];
+            Assert.That(__nunitActual8, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual8!;
+        }))();
         var replacement = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == (moveFirst ? "ReplaceMoved" : "Replace")));
         ImmutableArray<BoundExpression> arguments = [new BoundOutArgument(
             local.Variable, false, local.Initializer.Type, scalar.Span)];
@@ -868,7 +932,7 @@ public sealed class OwnershipTests
                     Second = value + 1;
                     Third = value + 2;
                 }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     Host.Trace[0] = Third;
                 }
             }
@@ -909,8 +973,8 @@ public sealed class OwnershipTests
                     Second = value + 1;
                     Third = value + 2;
                 }
-                [NoThrow] [Cleanup] public void Close() {}
-                [NoThrow] public int32 Peek() { return Third; }
+                 [Cleanup] public void Close() {}
+                 public int32 Peek() { return Third; }
             }
             bool Fill(out Token output) {
                 output = new Token(40);
@@ -953,7 +1017,7 @@ public sealed class OwnershipTests
                     Second = value + 1;
                     Third = value + 2;
                 }
-                [NoThrow] [Cleanup] public void Close() {
+                 [Cleanup] public void Close() {
                     Host.Trace[0] = Host.Trace[0] ^ First;
                 }
             }
@@ -982,7 +1046,7 @@ public sealed class OwnershipTests
             unique struct Token {
                 public int32 Id;
                 public Token() { Id = 42; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             bool Try(out Token value) { value = new Token(); return false; }
             int32 Main() {
@@ -1001,7 +1065,7 @@ public sealed class OwnershipTests
             unique struct Ticket {
                 public int32 Id;
                 public Ticket() { Id = 42; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             bool Next(out Ticket ticket) { ticket = new Ticket(); return true; }
             int32 Main() {
@@ -1020,12 +1084,16 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Id;
                 public Owner(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() { Owner owner = new Owner(42); return owner.Id; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         var entry = program.Functions[program.EntryPoint];
         var truncated = entry with { Body = entry.Body with { Statements = entry.Body.Statements.RemoveAt(1) } };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
@@ -1064,16 +1132,32 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Id;
                 public Owner(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() { Owner owner = new Owner(42); return owner.Id; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         var entry = program.Functions[program.EntryPoint];
-        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual11 = entry.Body.Statements[0]; Assert.That(__nunitActual11, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual11!; }))();
-        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual12 = entry.Body.Statements[1]; Assert.That(__nunitActual12, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual12!; }))();
-        var result = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => { var __nunitActual13 = region.Body; Assert.That(__nunitActual13, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual13!; }))().Statements);
+        var local = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual11 = entry.Body.Statements[0];
+            Assert.That(__nunitActual11, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual11!;
+        }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual12 = entry.Body.Statements[1];
+            Assert.That(__nunitActual12, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual12!;
+        }))();
+        var result = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => {
+            var __nunitActual13 = region.Body;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundBlock>());
+            return (BoundBlock)__nunitActual13!;
+        }))().Statements);
         BoundStatement bare = placement switch {
             "then" => new BoundIf(new BoundConstant(1, PrimitiveType.Bool, default), local, null, default),
             "else" => new BoundIf(new BoundConstant(0, PrimitiveType.Bool, default),
@@ -1096,17 +1180,21 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public int32 Id;
                 public Owner(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Other {
                 public int32 Id;
                 public Other(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() { return 0; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))();
         var ownerIndex = -1;
         for (var index = 0; index < program.Structures.Length; index++)
         {
@@ -1131,14 +1219,18 @@ public sealed class OwnershipTests
             unique struct Owner {
                 public mut int32 Id;
                 public Owner(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
                 public int32 Peek() { return Id; }
                 public bool Ready() { return false; }
             }
             int32 Main() { Owner owner = new Owner(42); return owner.Peek(); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
         var index = -1;
         for (var i = 0; i < program.Functions.Length; i++)
         {
@@ -1175,7 +1267,11 @@ public sealed class OwnershipTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual16 = compilation.Program;
+            Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual16!;
+        }))();
         var index = -1;
         for (var i = 0; i < program.Functions.Length; i++)
         {
@@ -1187,14 +1283,22 @@ public sealed class OwnershipTests
         }
         Assert.That(index >= 0, Is.True);
         var function = program.Functions[index];
-        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual17 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual17, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual17!; }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual17 = global::System.Linq.Enumerable.Single(function.Body.Statements);
+            Assert.That(__nunitActual17, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual17!;
+        }))();
         var unscoped = program with {
             Functions = program.Functions.SetItem(index, function with { Body = region.Body }),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(unscoped))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(unscoped, NativeRuntimePolicy.FailFast))!;
 
-        var drop = ((global::System.Func<BoundDrop>)(() => { var __nunitActual18 = global::System.Linq.Enumerable.Single(region.Finally.Statements); Assert.That(__nunitActual18, Is.TypeOf<BoundDrop>()); return (BoundDrop)__nunitActual18!; }))();
+        var drop = ((global::System.Func<BoundDrop>)(() => {
+            var __nunitActual18 = global::System.Linq.Enumerable.Single(region.Finally.Statements);
+            Assert.That(__nunitActual18, Is.TypeOf<BoundDrop>());
+            return (BoundDrop)__nunitActual18!;
+        }))();
         var invalid = region with {
             Finally = region.Finally with {
                 Statements = [drop with { IsOutput = !drop.IsOutput }],
@@ -1215,29 +1319,44 @@ public sealed class OwnershipTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public Token Make(int32 id) { return new Token(id); }
             public int32 Take(Token token) { return token.Id; }
             """;
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource));
+        var providerCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(providerSource));
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = providerCompilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(),
+        var provider = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual19 = providerCompilation.Program;
+            Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual19!;
+        }))(),
             ["Make", "Take", "Token.Close"], "owned_param", NativeRuntimePolicy.FailFast);
         var reference = NativeModuleCompiler.CreateReference(provider);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Token token = Make(42); return Take(move token); }"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = consumerCompilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(),
+        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual20 = consumerCompilation.Program;
+            Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual20!;
+        }))(),
             provider, NativeRuntimePolicy.FailFast);
         Assert.That(NativeModuleCompiler.Inspect(consumer).NativeProfileVersion, Is.EqualTo("native-13"));
         Assert.That(await NativeModuleCompiler.RunAsync(consumer, provider, TimeSpan.FromSeconds(10),
             NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
 
-        var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource.Replace(
-            "return token.Id;", "return token.Id + 1;", StringComparison.Ordinal)));
+        var changedCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(providerSource.Replace(
+                "return token.Id;", "return token.Id + 1;",
+                StringComparison.Ordinal)));
         Assert.That(changedCompilation.HasErrors, Is.False);
-        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = changedCompilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(),
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual21 = changedCompilation.Program;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual21!;
+        }))(),
             ["Make", "Take", "Token.Close"], "owned_param", NativeRuntimePolicy.FailFast);
         Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10),
             NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(43));
@@ -1250,19 +1369,28 @@ public sealed class OwnershipTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public bool Make(out Token token) { token = new Token(42); return true; }
             """;
-        var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource));
+        var firstCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(ProviderSource));
         Assert.That(firstCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, firstCompilation.Diagnostics));
-        var first = ((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = firstCompilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))();
+        var first = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual22 = firstCompilation.Program;
+            Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual22!;
+        }))();
         var semanticProducer = ModuleCompiler.CreateProducer(first, ["Make", "Token.Close"]);
         var semanticConsumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { require Make(out var ticket); return ticket.Id; }"),
             ModuleCompiler.CreateReference(semanticProducer));
         Assert.That(semanticConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, semanticConsumerCompilation.Diagnostics));
-        var client = ((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = semanticConsumerCompilation.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))();
+        var client = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual23 = semanticConsumerCompilation.Program;
+            Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual23!;
+        }))();
         var semanticConsumer = ModuleCompiler.CreateConsumer(client, semanticProducer);
         Assert.That(ModuleCompiler.GetNativeProfileVersion(semanticConsumer, true), Is.EqualTo("native-13"));
         var nativeProducer = NativeModuleCompiler.CreateProducer(first,
@@ -1272,10 +1400,15 @@ public sealed class OwnershipTests
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
 
-        var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            ProviderSource.Replace("new Token(42)", "new Token(43)", StringComparison.Ordinal)));
+        var changedCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
+            ProviderSource.Replace("new Token(42)", "new Token(43)",
+                StringComparison.Ordinal)));
         Assert.That(changedCompilation.HasErrors, Is.False);
-        var changed = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = changedCompilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
+        var changed = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual24 = changedCompilation.Program;
+            Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual24!;
+        }))();
         _ = ModuleCompiler.Link(semanticConsumer, ModuleCompiler.CreateProducer(changed,
             ["Make", "Token.Close"]));
         var replacement = NativeModuleCompiler.CreateProducer(changed,
@@ -1283,11 +1416,16 @@ public sealed class OwnershipTests
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, replacement,
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(43));
 
-        var incompatibleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            ProviderSource.Replace("out Token token) { token = new Token(42); return true;",
+        var incompatibleCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(ProviderSource.Replace(
+                "out Token token) { token = new Token(42); return true;",
                 "Token token) { return true;", StringComparison.Ordinal)));
         Assert.That(incompatibleCompilation.HasErrors, Is.False);
-        var incompatible = ((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = incompatibleCompilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))();
+        var incompatible = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual25 = incompatibleCompilation.Program;
+            Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual25!;
+        }))();
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semanticConsumer,
             ModuleCompiler.CreateProducer(incompatible, ["Make", "Token.Close"])))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(nativeConsumer,
@@ -1342,7 +1480,7 @@ public sealed class OwnershipTests
     [Test]
     public void MalformedUnexportedParameterTypeProducesModuleFormatError()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Box {
                 public int32 Id;
                 public Box(int32 id) { Id = id; }
@@ -1351,7 +1489,11 @@ public sealed class OwnershipTests
             public int32 Value() { Box box = new Box(42); return Use(box); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var artifact = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(), ["Value"]);
+        var artifact = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual26 = compilation.Program;
+            Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual26!;
+        }))(), ["Value"]);
         var forged = (byte[])artifact.Clone();
         var contractType = forged.AsSpan().IndexOf("in:Box:E"u8);
         Assert.That(contractType >= 0, Is.True);
@@ -1372,20 +1514,29 @@ public sealed class OwnershipTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public Token Make(int32 id) { return new Token(id); }
             public int32 Take(Token token) { return token.Id; }
             """;
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource));
+        var providerCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(ProviderSource));
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = providerCompilation.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))(),
+        var provider = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual27 = providerCompilation.Program;
+            Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual27!;
+        }))(),
             ["Make", "Take", "Token.Close"]);
         var client = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Token token = Make(42); return Take(move token); }"),
             ModuleCompiler.CreateReference(provider));
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = client.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))(), provider);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual28 = client.Program;
+            Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual28!;
+        }))(), provider);
         Assert.That(ModuleCompiler.GetNativeProfileVersion(consumer, true), Is.EqualTo("native-13"));
         var forged = (byte[])consumer.Clone();
         var importName = forged.AsSpan().IndexOf("Take"u8);
@@ -1408,28 +1559,42 @@ public sealed class OwnershipTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public Token Make(int32 id) { return new Token(id); }
             """;
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
-        var library = Compilation.CreateLibrary(SyntaxTree.Parse(ProducerSource), policy);
+        var library = CreateLayoutLibrary(
+            SyntaxTree.Parse(ProducerSource), policy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual29 = library.Program; Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual29!; }))(),
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual29 = library.Program;
+            Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual29!;
+        }))(),
             ["Make", "Token.Close"], "external_cleanup", nativePolicy);
         var client = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateReference(producer), policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual30 = client.Program; Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual30!; }))(),
+        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual30 = client.Program;
+            Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual30!;
+        }))(),
             producer, nativePolicy);
         Assert.That(await NativeModuleCompiler.RunAsync(consumer, producer,
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(41));
 
-        var changed = Compilation.CreateLibrary(SyntaxTree.Parse(
-            ProducerSource.Replace("new Token(id)", "new Token(id + 1)", StringComparison.Ordinal)), policy);
+        var changed = CreateLayoutLibrary(SyntaxTree.Parse(
+            ProducerSource.Replace("new Token(id)", "new Token(id + 1)",
+                StringComparison.Ordinal)), policy);
         Assert.That(changed.HasErrors, Is.False, string.Join(Environment.NewLine, changed.Diagnostics));
-        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual31 = changed.Program; Assert.That(__nunitActual31, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual31!; }))(),
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual31 = changed.Program;
+            Assert.That(__nunitActual31, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual31!;
+        }))(),
             ["Make", "Token.Close"], "external_cleanup", nativePolicy);
         Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement,
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(42));
@@ -1442,33 +1607,52 @@ public sealed class OwnershipTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public Token Make(int32 id) { return new Token(id); }
             """;
-        var producerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource));
+        var producerCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(ProviderSource));
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual32 = producerCompilation.Program; Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual32!; }))(),
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual32 = producerCompilation.Program;
+            Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual32!;
+        }))(),
             ["Make", "Token.Close"], "unique_owner", NativeRuntimePolicy.FailFast);
         var reference = NativeModuleCompiler.CreateReference(producer);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { Token token = Make(42); return token.Id; }"), reference);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual33 = client.Program; Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual33!; }))(), producer,
+        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual33 = client.Program;
+            Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual33!;
+        }))(), producer,
             NativeRuntimePolicy.FailFast);
         Assert.That(await NativeModuleCompiler.RunAsync(consumer, producer, TimeSpan.FromSeconds(10),
             NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
-        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            ProviderSource.Replace("new Token(id);", "new Token(id + 1);", StringComparison.Ordinal)));
+        var replacementCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
+            ProviderSource.Replace("new Token(id);", "new Token(id + 1);",
+                StringComparison.Ordinal)));
         Assert.That(replacementCompilation.HasErrors, Is.False);
-        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual34 = replacementCompilation.Program; Assert.That(__nunitActual34, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual34!; }))(),
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual34 = replacementCompilation.Program;
+            Assert.That(__nunitActual34, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual34!;
+        }))(),
             ["Make", "Token.Close"], "unique_owner", NativeRuntimePolicy.FailFast);
         Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10),
             NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(43));
 
-        var incompatibleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            ProviderSource.Replace("Close()", "Release()", StringComparison.Ordinal)));
+        var incompatibleCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
+            ProviderSource.Replace("Close()", "Release()",
+                StringComparison.Ordinal)));
         Assert.That(incompatibleCompilation.HasErrors, Is.False);
-        var incompatible = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual35 = incompatibleCompilation.Program; Assert.That(__nunitActual35, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual35!; }))(),
+        var incompatible = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual35 = incompatibleCompilation.Program;
+            Assert.That(__nunitActual35, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual35!;
+        }))(),
             ["Make", "Token.Release"], "unique_owner", NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, incompatible))!;
     }
@@ -1477,11 +1661,11 @@ public sealed class OwnershipTests
         unique struct Token {
             public int32 Id;
             public Token(int32 id) { Id = id; }
-            [NoThrow] [Cleanup] public void Close() {
+             [Cleanup] public void Close() {
                 Host.Trace[1] = Host.Trace[0];
                 Host.Trace[0] = Id;
             }
-            [NoThrow] public int32 Read() { return Id; }
+             public int32 Read() { return Id; }
         }
         unique struct Pair {
             public Token First;
@@ -1492,10 +1676,10 @@ public sealed class OwnershipTests
                 First = new Token(1);
                 require First.Read() == 1;
             }
-            [NoThrow] [Cleanup] public void Close() {
+             [Cleanup] public void Close() {
                 Host.Trace[2] = First.Read();
             }
-            [NoThrow] public int32 Read() { return First.Read(); }
+             public int32 Read() { return First.Read(); }
         }
         """;
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -1532,9 +1716,9 @@ public sealed class OwnershipTests
         var source = """
             unique struct Ticket {
                 public int32 Id;
-                [NoThrow] public Ticket(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
-                [NoThrow] public int32 Read() { return Id; }
+                 public Ticket(int32 id) { Id = id; }
+                 [Cleanup] public void Close() {}
+                 public int32 Read() { return Id; }
             }
             unique struct Bundle {
                 public Ticket Child;
@@ -1542,7 +1726,7 @@ public sealed class OwnershipTests
                 public Bundle(int32 id) {
             """ + constructor + """
                 }
-                [NoThrow] public int32 ReadChild() { return Child.Read(); }
+                 public int32 ReadChild() { return Child.Read(); }
             }
             int32 Main() {
                 Bundle value = new Bundle(42);
@@ -1564,7 +1748,7 @@ public sealed class OwnershipTests
             unique struct Child {
                 public int32 Id;
                 public Child(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ Id; }
+                 [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ Id; }
             }
             unique struct Parent {
                 public Child First;
@@ -1575,7 +1759,7 @@ public sealed class OwnershipTests
                     First = new Child(Mask);
                     Second = new Child(Mask * 2);
                 }
-                [NoThrow] [Cleanup] public void Close() { Host.Trace[1] = Host.Trace[1] ^ Mask; }
+                 [Cleanup] public void Close() { Host.Trace[1] = Host.Trace[1] ^ Mask; }
             }
             int32 Main() {
                 mut int32 iteration = 0;
@@ -1691,7 +1875,7 @@ public sealed class OwnershipTests
             unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = 1; }
+                 [Cleanup] public void Close() { Host.Trace[0] = 1; }
             }
             unique struct Parent {
                 public Token First;
@@ -1703,7 +1887,7 @@ public sealed class OwnershipTests
                     First = new Token(1);
                     Second = new Token(2);
                 }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 unsafe {
@@ -1725,7 +1909,7 @@ public sealed class OwnershipTests
             unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             """ + declaration + " int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -1740,7 +1924,11 @@ public sealed class OwnershipTests
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0, 0], true)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual36 = compilation.Program; Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual36!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual36 = compilation.Program;
+            Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual36!;
+        }))();
         var index = -1;
         for (var i = 0; i < program.Functions.Length; i++)
         {
@@ -1752,13 +1940,21 @@ public sealed class OwnershipTests
         }
         Assert.That(index >= 0, Is.True);
         var constructor = program.Functions[index];
-        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual37 = global::System.Linq.Enumerable.Single(constructor.Body.Statements); Assert.That(__nunitActual37, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual37!; }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual37 = global::System.Linq.Enumerable.Single(constructor.Body.Statements);
+            Assert.That(__nunitActual37, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual37!;
+        }))();
         var erased = program with {
             Functions = program.Functions.SetItem(index, constructor with { Body = region.Body }),
         };
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(erased, NativeRuntimePolicy.CheckedExceptions))!;
 
-        var partial = ((global::System.Func<BoundDropConstructedFields>)(() => { var __nunitActual38 = global::System.Linq.Enumerable.Single(region.Finally.Statements); Assert.That(__nunitActual38, Is.TypeOf<BoundDropConstructedFields>()); return (BoundDropConstructedFields)__nunitActual38!; }))();
+        var partial = ((global::System.Func<BoundDropConstructedFields>)(() => {
+            var __nunitActual38 = global::System.Linq.Enumerable.Single(region.Finally.Statements);
+            Assert.That(__nunitActual38, Is.TypeOf<BoundDropConstructedFields>());
+            return (BoundDropConstructedFields)__nunitActual38!;
+        }))();
         var reordered = region with {
             Finally = region.Finally with {
                 Statements = [partial with { AcquisitionOrder = [0, 1] }],
@@ -1780,7 +1976,11 @@ public sealed class OwnershipTests
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0, 0], true)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual39 = compilation.Program; Assert.That(__nunitActual39, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual39!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual39 = compilation.Program;
+            Assert.That(__nunitActual39, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual39!;
+        }))();
         var constructorIndex = -1;
         var methodIndex = -1;
         for (var index = 0; index < program.Functions.Length; index++)
@@ -1796,7 +1996,11 @@ public sealed class OwnershipTests
         }
         Assert.That(constructorIndex >= 0 && methodIndex >= 0, Is.True);
         var constructor = program.Functions[constructorIndex];
-        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual40 = global::System.Linq.Enumerable.Single(constructor.Body.Statements); Assert.That(__nunitActual40, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual40!; }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual40 = global::System.Linq.Enumerable.Single(constructor.Body.Statements);
+            Assert.That(__nunitActual40, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual40!;
+        }))();
         Reject(constructorIndex, constructor with {
             Body = constructor.Body with { Statements = [region with { Body = null! }] },
         });
@@ -1809,9 +2013,21 @@ public sealed class OwnershipTests
         });
 
         var method = program.Functions[methodIndex];
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual41 = global::System.Linq.Enumerable.Single(method.Body.Statements); Assert.That(__nunitActual41, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual41!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual42 = result.Value; Assert.That(__nunitActual42, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual42!; }))();
-        var loan = ((global::System.Func<BoundFieldLoan>)(() => { var __nunitActual43 = call.Arguments[0]; Assert.That(__nunitActual43, Is.TypeOf<BoundFieldLoan>()); return (BoundFieldLoan)__nunitActual43!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual41 = global::System.Linq.Enumerable.Single(method.Body.Statements);
+            Assert.That(__nunitActual41, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual41!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual42 = result.Value;
+            Assert.That(__nunitActual42, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual42!;
+        }))();
+        var loan = ((global::System.Func<BoundFieldLoan>)(() => {
+            var __nunitActual43 = call.Arguments[0];
+            Assert.That(__nunitActual43, Is.TypeOf<BoundFieldLoan>());
+            return (BoundFieldLoan)__nunitActual43!;
+        }))();
         Reject(methodIndex, method with {
             Body = method.Body with {
                 Statements = [result with {
@@ -1843,8 +2059,8 @@ public sealed class OwnershipTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
-                [NoThrow] [Cleanup] public void Close() {}
-                [NoThrow] public int32 Read() { return Id; }
+                 [Cleanup] public void Close() {}
+                 public int32 Read() { return Id; }
             }
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Pair {
                 public Token Child;
@@ -1854,19 +2070,24 @@ public sealed class OwnershipTests
                     Tail = 2;
                     require Child.Read() == id;
                 }
-                [NoThrow] [Cleanup] public void Close() {}
-                [NoThrow] public int32 Read() { return Child.Read(); }
+                 [Cleanup] public void Close() {}
+                 public int32 Read() { return Child.Read(); }
             }
             public Pair Make(int32 id) { return new Pair(id); }
             public int32 Take(Pair pair) { return pair.Read() + pair.Tail; }
             """;
         var boundPolicy = (BoundRuntimePolicy)policy;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Provider), boundPolicy);
+        var compilation = CreateLayoutLibrary(SyntaxTree.Parse(Provider),
+            boundPolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual44 = compilation.Program; Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual44!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual44 = compilation.Program;
+            Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual44!;
+        }))();
         var exports = new[] { "Token.Close", "Token.Read", "Pair.Close", "Pair.Read", "Make", "Take" };
         var semanticProducer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)), Is.EqualTo(104));
         var staleVersion = (byte[])semanticProducer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(staleVersion.AsSpan(4, 4), 13);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion))!;
@@ -1875,7 +2096,11 @@ public sealed class OwnershipTests
             int32 Main() { Pair pair = Make(40); return Take(move pair); }
             """), reference, boundPolicy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual45 = client.Program; Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual45!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual45 = client.Program;
+            Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual45!;
+        }))();
         var semanticConsumer = ModuleCompiler.CreateConsumer(consumerProgram, semanticProducer);
         Assert.That(ModuleCompiler.GetNativeProfileVersion(semanticProducer, false), Is.EqualTo("native-14"));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(semanticConsumer, true), Is.EqualTo("native-14"));
@@ -1886,9 +2111,14 @@ public sealed class OwnershipTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
 
         var replacementSource = Provider.Replace("new Pair(id)", "new Pair(id + 1)", StringComparison.Ordinal);
-        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(replacementSource), boundPolicy);
+        var replacementCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(replacementSource), boundPolicy);
         Assert.That(replacementCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
-        var replacement = ((global::System.Func<BoundProgram>)(() => { var __nunitActual46 = replacementCompilation.Program; Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual46!; }))();
+        var replacement = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual46 = replacementCompilation.Program;
+            Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual46!;
+        }))();
         _ = ModuleCompiler.Link(semanticConsumer, ModuleCompiler.CreateProducer(replacement, exports));
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacement, exports, "composite_pair", policy);
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
@@ -1902,8 +2132,8 @@ public sealed class OwnershipTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
-                [NoThrow] public int32 Read() { return Value; }
+                 [Cleanup] public void Close() {}
+                 public int32 Read() { return Value; }
             }
             public Ticket Make(int32 value) { return new Ticket(value); }
             """;
@@ -1912,33 +2142,53 @@ public sealed class OwnershipTests
                 public Ticket Child;
                 public int32 Tail;
                 public Pair(int32 value) { Child = Make(value); Tail = 2; }
-                [NoThrow] public int32 Read() { return Child.Read(); }
+                 public int32 Read() { return Child.Read(); }
             }
             public Pair Forward() { return new Pair(40); }
             """;
         var boundPolicy = (BoundRuntimePolicy)policy;
-        var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(Leaf), boundPolicy);
+        var leafCompilation = CreateLayoutLibrary(SyntaxTree.Parse(Leaf),
+            boundPolicy);
         Assert.That(leafCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, leafCompilation.Diagnostics));
-        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual47 = leafCompilation.Program; Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual47!; }))(),
+        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual47 = leafCompilation.Program;
+            Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual47!;
+        }))(),
             ["Make", "Ticket.Close", "Ticket.Read"], "CompositeLeaf", policy);
-        var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(Middle),
+        var middleCompilation = CreateLayoutLibrary(
+            SyntaxTree.Parse(Middle),
             NativeModuleCompiler.CreateGraphReference([leaf]), boundPolicy);
         Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
-        var middle = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual48 = middleCompilation.Program; Assert.That(__nunitActual48, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual48!; }))(),
+        var middle = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual48 = middleCompilation.Program;
+            Assert.That(__nunitActual48, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual48!;
+        }))(),
             ["Forward", "Pair.Read"], "CompositeMiddle", [leaf], policy);
-        var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var rootCompilation = CreateLayoutConsumer(SyntaxTree.Parse("""
             int32 Main() { Pair value = Forward(); return value.Read() + value.Tail; }
-            """), NativeModuleCompiler.CreateGraphReference([leaf, middle]), boundPolicy);
+            """), NativeModuleCompiler.CreateGraphReference([leaf, middle]),
+            boundPolicy);
         Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual49 = rootCompilation.Program; Assert.That(__nunitActual49, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual49!; }))(),
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual49 = rootCompilation.Program;
+            Assert.That(__nunitActual49, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual49!;
+        }))(),
             [leaf, middle], policy);
         Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion, Is.EqualTo("native-14"));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
-        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            Leaf.Replace("new Ticket(value)", "new Ticket(value + 1)", StringComparison.Ordinal)), boundPolicy);
+        var replacementCompilation = CreateLayoutLibrary(SyntaxTree.Parse(
+            Leaf.Replace("new Ticket(value)", "new Ticket(value + 1)",
+                StringComparison.Ordinal)), boundPolicy);
         Assert.That(replacementCompilation.HasErrors, Is.False);
-        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual50 = replacementCompilation.Program; Assert.That(__nunitActual50, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual50!; }))(),
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual50 = replacementCompilation.Program;
+            Assert.That(__nunitActual50, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual50!;
+        }))(),
             ["Make", "Ticket.Close", "Ticket.Read"], "CompositeLeaf", policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
@@ -1951,26 +2201,34 @@ public sealed class OwnershipTests
             internal unique struct Child {
                 public int32 Value;
                 public Child(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
-                [NoThrow] public int32 Read() { return Value; }
+                 [Cleanup] public void Close() {}
+                 public int32 Read() { return Value; }
             }
             internal unique struct Shell {
                 public Child Value;
                 public Shell(int32 value) { Value = new Child(value); }
-                [NoThrow] public int32 Read() { return Value.Read(); }
+                 public int32 Read() { return Value.Read(); }
             }
             public int32 Count() { Shell local = new Shell(42); return local.Read(); }
             """;
         var compiled = Compilation.CreateLibrary(SyntaxTree.Parse(Provider), (BoundRuntimePolicy)policy);
         Assert.That(compiled.HasErrors, Is.False, string.Join(Environment.NewLine, compiled.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual51 = compiled.Program; Assert.That(__nunitActual51, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual51!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual51 = compiled.Program;
+            Assert.That(__nunitActual51, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual51!;
+        }))();
         var semantic = ModuleCompiler.CreateProducer(program, ["Count"]);
         Assert.That(ModuleCompiler.GetNativeProfileVersion(semantic, false), Is.EqualTo("native-14"));
         var reference = ModuleCompiler.CreateReference(semantic);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Count(); }"),
             reference, (BoundRuntimePolicy)policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual52 = client.Program; Assert.That(__nunitActual52, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual52!; }))();
+        var consumer = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual52 = client.Program;
+            Assert.That(__nunitActual52, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual52!;
+        }))();
         _ = ModuleCompiler.Link(ModuleCompiler.CreateConsumer(consumer, semantic), semantic);
         var producer = NativeModuleCompiler.CreateProducer(program, ["Count"], "private_shell", policy);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, producer, policy);
@@ -1986,7 +2244,11 @@ public sealed class OwnershipTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
-        var image = NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => { var __nunitActual53 = compilation.Program; Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual53!; }))(), nativePolicy);
+        var image = NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual53 = compilation.Program;
+            Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual53!;
+        }))(), nativePolicy);
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-owner-{Guid.NewGuid():N}.exe");
         try
         {

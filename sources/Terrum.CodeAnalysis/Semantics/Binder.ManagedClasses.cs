@@ -16,6 +16,548 @@ internal sealed partial class Binder
     private readonly Dictionary<string, PrimitiveType> _classNames = new(StringComparer.Ordinal);
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Declaration)> _classDeclarations = [];
 
+    private sealed record PrivateClassSnapshotMaps(
+        ImmutableArray<int> Structures, ImmutableArray<int> Classes,
+        ImmutableArray<int> ExpectedClasses,
+        ImmutableArray<bool> AddedStructures,
+        ImmutableArray<int> CheckedReferences,
+        ImmutableArray<int> FunctionPointers,
+        ImmutableArray<int> NativePointers,
+        ImmutableArray<int> FixedArrays,
+        ImmutableArray<int> Enums);
+
+    private void ImportPrivateClassReferences()
+    {
+        if (_reference is null)
+        {
+            return;
+        }
+
+        _classes.AddRange(_reference.Classes);
+        var sourceLookupRootClasses = _reference.PrivateClassReferences
+            .Where(static reference => reference.IsSourceLookupRoot)
+            .Select(static reference =>
+                ManagedClassTypes.ClassIndex(reference.ClassType))
+            .ToHashSet();
+        var snapshotMaps = new Dictionary<BoundPrivateClassSnapshot,
+            PrivateClassSnapshotMaps>(ReferenceEqualityComparer.Instance);
+        var snapshotOrdinal = 0;
+        foreach (var reference in _reference.PrivateClassReferences)
+        {
+            var snapshot = reference.ExpectedSnapshot;
+            if (!snapshotMaps.TryGetValue(snapshot, out var maps))
+            {
+                var structureMap = new int[snapshot.Structures.Length];
+                var addedStructures = new bool[snapshot.Structures.Length];
+                var checkedReferenceMap
+                    = reference.ExpectedCheckedReferenceMapping;
+                var functionPointerMap
+                    = reference.ExpectedNativeFunctionPointerMapping;
+                var nativePointerMap
+                    = reference.ExpectedNativePointerMapping;
+                var fixedArrayMap
+                    = reference.ExpectedNativeFixedArrayMapping;
+                var enumMap = reference.ExpectedEnumMapping;
+                if (checkedReferenceMap.IsDefault
+                    || checkedReferenceMap.Length
+                        != snapshot.CheckedReferenceTypes.Length
+                    || functionPointerMap.IsDefault
+                    || functionPointerMap.Length
+                        != snapshot.NativeFunctionPointerSignatures.Length
+                    || nativePointerMap.IsDefault
+                    || nativePointerMap.Length
+                        != snapshot.NativePointerTypes.Length
+                    || fixedArrayMap.IsDefault
+                    || fixedArrayMap.Length
+                        != snapshot.NativeFixedArrayTypes.Length
+                    || enumMap.IsDefault
+                    || enumMap.Length != snapshot.EnumDefinitions.Length
+                    || enumMap.Any(index => index < -1
+                        || (index >= 0
+                            && (uint)index
+                                >= (uint)_reference.EnumDefinitions.Length)))
+                {
+                    Report("TRM3005",
+                        "Private class reference has an invalid snapshot type-family map.",
+                        _trees[0].Root.Span);
+                    return;
+                }
+                var projectedStructures = _reference.Structures;
+                for (var index = 0; index < snapshot.Structures.Length;
+                    index++)
+                {
+                    var source = snapshot.Structures[index];
+                    var existingIndex = FindEquivalentReferenceStructure(
+                        source, projectedStructures);
+                    if (existingIndex >= 0)
+                    {
+                        structureMap[index] = existingIndex;
+                        continue;
+                    }
+
+                    if (_structs.Count >= SemanticVerifier.MaximumVariables)
+                    {
+                        Report("TRM3005",
+                            "Private class reference closure exceeds the supported structure limit.",
+                            _trees[0].Root.Span);
+                        return;
+                    }
+                    var hiddenName = _structs.Any(structure =>
+                            structure.Name == source.Name)
+                        ? PrivateClassTypeName(snapshotOrdinal, index,
+                            source.Name) : source.Name;
+                    structureMap[index] = _structs.Count;
+                    addedStructures[index] = true;
+                    _structs.Add(source with {
+                        Name = hiddenName,
+                        Fields = [],
+                    });
+                    _ = _laidOut.Add(_structs.Count - 1);
+                }
+
+                var classMap = new int[snapshot.Classes.Length];
+                Array.Fill(classMap, -1);
+                var expectedClassMap = reference.ExpectedClassMapping;
+                if (expectedClassMap.IsDefault
+                    || expectedClassMap.Length != snapshot.Classes.Length
+                    || expectedClassMap.Any(index => index < -1
+                        || (index >= 0
+                            && (uint)index
+                                >= (uint)_reference.Classes.Length)))
+                {
+                    Report("TRM3005",
+                        "Private class reference has an invalid expected class mapping.",
+                        _trees[0].Root.Span);
+                    return;
+                }
+                for (var index = 0; index < expectedClassMap.Length; index++)
+                {
+                    classMap[index] = expectedClassMap[index];
+                }
+                foreach (var rootReference in _reference
+                    .PrivateClassReferences.Where(candidate =>
+                        ReferenceEquals(candidate.ExpectedSnapshot,
+                            snapshot)))
+                {
+                    var expectedIndex = ManagedClassTypes.ClassIndex(
+                        rootReference.ExpectedClassType);
+                    var currentIndex = ManagedClassTypes.ClassIndex(
+                        rootReference.ClassType);
+                    if ((uint)expectedIndex >= (uint)classMap.Length
+                        || (uint)currentIndex >= (uint)_reference.Classes.Length
+                        || (classMap[expectedIndex] >= 0
+                            && classMap[expectedIndex] != currentIndex))
+                    {
+                        Report("TRM3005",
+                            "Private class reference has an inconsistent class selector.",
+                            _trees[0].Root.Span);
+                        return;
+                    }
+                    classMap[expectedIndex] = currentIndex;
+                }
+                for (var index = 0; index < classMap.Length; index++)
+                {
+                    if (classMap[index] >= 0)
+                    {
+                        continue;
+                    }
+                    if (_classes.Count
+                        >= ManagedClassTypes.OptionalFirst
+                            - ManagedClassTypes.First)
+                    {
+                        Report("TRM3005",
+                            "Private class reference closure exceeds the supported class limit.",
+                            _trees[0].Root.Span);
+                        return;
+                    }
+                    classMap[index] = _classes.Count;
+                    var sourceClassName
+                        = snapshot.Classes[index].Name;
+                    _classes.Add(new BoundClass(
+                        _classes.Any(@class =>
+                            @class.Name == sourceClassName)
+                            ? PrivateClassTypeName(snapshotOrdinal, index,
+                                sourceClassName)
+                            : sourceClassName, [], 0) {
+                        IsInternal = true,
+                        IsMutable = snapshot.Classes[index].IsMutable,
+                    });
+                }
+
+                for (var index = 0; index < snapshot.Structures.Length;
+                    index++)
+                {
+                    if (!addedStructures[index])
+                    {
+                        continue;
+                    }
+                    var source = snapshot.Structures[index];
+                    _structs[structureMap[index]] = source with {
+                        Name = _structs[structureMap[index]].Name,
+                        Fields = [.. source.Fields.Select(field =>
+                            field with {
+                                Type = RemapPrivateClassSnapshotType(
+                                    field.Type, structureMap,
+                                    classMap, checkedReferenceMap,
+                                    functionPointerMap, nativePointerMap,
+                                    fixedArrayMap, enumMap),
+                            })],
+                    };
+                }
+                for (var index = 0; index < snapshot.Classes.Length;
+                    index++)
+                {
+                    var source = snapshot.Classes[index];
+                    var targetIndex = classMap[index];
+                    var isRoot
+                        = sourceLookupRootClasses.Contains(targetIndex);
+                    _classes[targetIndex] = source with {
+                        Name = isRoot ? source.Name
+                            : PrivateClassTypeName(snapshotOrdinal, index,
+                                source.Name),
+                        IsInternal = !isRoot || source.IsInternal,
+                        Fields = [.. source.Fields.Select(field =>
+                            field with {
+                                Type = RemapPrivateClassSnapshotType(
+                                    field.Type, structureMap,
+                                    classMap, checkedReferenceMap,
+                                    functionPointerMap, nativePointerMap,
+                                    fixedArrayMap, enumMap),
+                            })],
+                    };
+                }
+
+                maps = new PrivateClassSnapshotMaps(
+                    [.. structureMap], [.. classMap],
+                    reference.ExpectedClassMapping,
+                    [.. addedStructures], checkedReferenceMap,
+                    functionPointerMap, nativePointerMap, fixedArrayMap,
+                    enumMap);
+                snapshotMaps.Add(snapshot, maps);
+                AddPrivateClassSnapshotOrigins(snapshot, maps,
+                    _reference.EnumDefinitions);
+                snapshotOrdinal++;
+            }
+            else if (!maps.CheckedReferences.SequenceEqual(
+                    reference.ExpectedCheckedReferenceMapping)
+                || !maps.ExpectedClasses.SequenceEqual(
+                    reference.ExpectedClassMapping)
+                || !maps.FunctionPointers.SequenceEqual(
+                    reference.ExpectedNativeFunctionPointerMapping)
+                || !maps.NativePointers.SequenceEqual(
+                    reference.ExpectedNativePointerMapping)
+                || !maps.FixedArrays.SequenceEqual(
+                    reference.ExpectedNativeFixedArrayMapping)
+                || !maps.Enums.SequenceEqual(
+                    reference.ExpectedEnumMapping))
+            {
+                Report("TRM3005",
+                    "Private class references contain inconsistent type-family maps for one snapshot.",
+                    _trees[0].Root.Span);
+                return;
+            }
+
+            var expectedClassIndex = ManagedClassTypes.ClassIndex(
+                reference.ExpectedClassType);
+            if ((uint)expectedClassIndex >= (uint)maps.Classes.Length)
+            {
+                Report("TRM3005",
+                    "Private class reference has an absent expected class.",
+                    _trees[0].Root.Span);
+                return;
+            }
+            var classType = (PrimitiveType)(ManagedClassTypes.First
+                + maps.Classes[expectedClassIndex]);
+            var origin = reference.Origin with {
+                PrivateType = classType,
+            };
+            _privateClassReferences.Add(reference with {
+                ClassType = classType,
+                Origin = origin,
+                ExpectedStructureMapping = maps.Structures,
+                ExpectedClassMapping = maps.Classes,
+                ExpectedCheckedReferenceMapping = maps.CheckedReferences,
+                ExpectedNativeFunctionPointerMapping
+                    = maps.FunctionPointers,
+                ExpectedNativePointerMapping = maps.NativePointers,
+                ExpectedNativeFixedArrayMapping = maps.FixedArrays,
+                ExpectedEnumMapping = maps.Enums,
+            });
+        }
+
+        foreach (var reference in _privateClassReferences)
+        {
+            if (!reference.IsSourceLookupRoot)
+            {
+                continue;
+            }
+            var index = ManagedClassTypes.ClassIndex(reference.ClassType);
+            if ((uint)index >= (uint)_classes.Count)
+            {
+                Report("TRM3005",
+                    "Private class reference has an absent source lookup root.",
+                    _trees[0].Root.Span);
+                return;
+            }
+            var @class = _classes[index];
+            if (_structNames.ContainsKey(@class.Name))
+            {
+                Report("TRM3003",
+                    $"Referenced nominal type '{@class.Name}' is ambiguous.",
+                    _trees[0].Root.Span);
+                continue;
+            }
+            if (_classNames.TryGetValue(@class.Name,
+                    out var existingClassType))
+            {
+                if (existingClassType != reference.ClassType)
+                {
+                    Report("TRM3003",
+                        $"Referenced nominal type '{@class.Name}' is ambiguous.",
+                        _trees[0].Root.Span);
+                }
+                continue;
+            }
+            _classNames.Add(@class.Name, reference.ClassType);
+        }
+    }
+
+    private void AddPrivateClassSnapshotOrigins(
+        BoundPrivateClassSnapshot snapshot,
+        PrivateClassSnapshotMaps maps,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions)
+    {
+        foreach (var origin in snapshot.NominalTypeOrigins)
+        {
+            var type = origin.PrivateType;
+            if (ManagedClassTypes.IsClass(type)
+                || (ManagedClassTypes.IsOptional(type)
+                    && ManagedClassTypes.IsClass(
+                        ManagedClassTypes.Required(type))))
+            {
+                var index = ManagedClassTypes.ClassIndex(type);
+                if ((uint)index >= (uint)maps.Classes.Length)
+                {
+                    Report("TRM3005",
+                        "Private class snapshot has an invalid class origin.",
+                        _trees[0].Root.Span);
+                    return;
+                }
+                type = (PrimitiveType)(ManagedClassTypes.First
+                    + maps.Classes[index]);
+            }
+            else
+            {
+                if (BoundEnumTypes.IsType(type))
+                {
+                    var enumIndex = BoundEnumTypes.Index(type);
+                    if ((uint)enumIndex >= (uint)maps.Enums.Length
+                        || maps.Enums[enumIndex] < 0
+                        || (uint)maps.Enums[enumIndex]
+                            >= (uint)enumDefinitions.Length)
+                    {
+                        Report("TRM3005",
+                            "Private class snapshot has an invalid enum origin.",
+                            _trees[0].Root.Span);
+                        return;
+                    }
+                    var destinationEnumIndex = maps.Enums[enumIndex];
+                    var expectedDefinition
+                        = snapshot.EnumDefinitions[enumIndex];
+                    var actualDefinition
+                        = enumDefinitions[destinationEnumIndex];
+                    if (origin.OriginKind
+                            == BoundPrivateNominalOriginKind
+                                .ImportedExpectation
+                        && actualDefinition.Identity
+                            is BoundEnumDeclarationIdentity.Private
+                                actualPrivate
+                        && actualPrivate.Value.Origin.OriginKind
+                            == BoundPrivateNominalOriginKind.OwnedDefinition
+                        && origin.SelectedModuleIdentity
+                            == actualPrivate.Value.Origin.UsingModuleIdentity
+                        && origin.SelectedExportKey
+                            == actualPrivate.Value.Origin.LocalDeclarationKey
+                        && BoundEnumTypes.HasSameContractShape(
+                            expectedDefinition, actualDefinition))
+                    {
+                        continue;
+                    }
+                    type = BoundEnumTypes.Type(destinationEnumIndex);
+                }
+                else
+                {
+                    var structureIndex = (int)type - 100;
+                    if (structureIndex is >= 0
+                        and < BoundEnumTypes.First - 100)
+                    {
+                        if ((uint)structureIndex
+                            >= (uint)maps.Structures.Length)
+                        {
+                            Report("TRM3005",
+                                "Private class snapshot has an invalid structure origin.",
+                                _trees[0].Root.Span);
+                            return;
+                        }
+                        type = (PrimitiveType)(100
+                            + maps.Structures[structureIndex]);
+                    }
+                }
+            }
+            var remapped = origin with { PrivateType = type };
+            var existing = _privateNominalTypeOrigins.FirstOrDefault(
+                candidate => candidate.UsingModuleIdentity
+                    == remapped.UsingModuleIdentity
+                    && candidate.LocalDeclarationKey
+                        == remapped.LocalDeclarationKey);
+            if (existing is not null)
+            {
+                if (existing != remapped)
+                {
+                    Report("TRM3005",
+                        "Private class snapshots contain conflicting original nominal origins.",
+                        _trees[0].Root.Span);
+                    return;
+                }
+                continue;
+            }
+            _privateNominalTypeOrigins.Add(remapped);
+        }
+    }
+
+    private static PrimitiveType RemapPrivateClassSnapshotType(
+        PrimitiveType type, int[] structureMap, int[] classMap,
+        ImmutableArray<int> checkedReferenceMap,
+        ImmutableArray<int> functionPointerMap,
+        ImmutableArray<int> nativePointerMap,
+        ImmutableArray<int> fixedArrayMap,
+        ImmutableArray<int> enumMap)
+    {
+        if (ManagedClassTypes.IsClass(type)
+            || (ManagedClassTypes.IsOptional(type)
+                && ManagedClassTypes.IsClass(
+                    ManagedClassTypes.Required(type))))
+        {
+            var classIndex = ManagedClassTypes.ClassIndex(type);
+            if ((uint)classIndex >= (uint)classMap.Length)
+            {
+                throw new ArgumentException(
+                    "Private class snapshot contains an invalid nested class type.");
+            }
+            var mapped = (PrimitiveType)(ManagedClassTypes.First
+                + classMap[classIndex]);
+            if (ManagedClassTypes.IsWritable(type))
+            {
+                mapped = ManagedClassTypes.Writable(mapped);
+            }
+            if (ManagedClassTypes.IsOptional(type))
+            {
+                mapped = ManagedClassTypes.Optional(mapped);
+            }
+            return mapped;
+        }
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            var referenceIndex = CheckedReferenceTypes.Index(type);
+            if ((uint)referenceIndex >= (uint)checkedReferenceMap.Length
+                || checkedReferenceMap[referenceIndex] < 0)
+            {
+                throw new ArgumentException(
+                    "Private class snapshot contains an unavailable checked-reference type.");
+            }
+            return CheckedReferenceTypes.Type(
+                checkedReferenceMap[referenceIndex]);
+        }
+        var structureIndex = (int)type - 100;
+        if (structureIndex is >= 0
+            and < BoundEnumTypes.First - 100)
+        {
+            if ((uint)structureIndex >= (uint)structureMap.Length)
+            {
+                throw new ArgumentException(
+                    "Private class snapshot contains an invalid nested structure type.");
+            }
+            return (PrimitiveType)(100 + structureMap[structureIndex]);
+        }
+        if (NativePointerTypes.IsType(type))
+        {
+            var pointerIndex = NativePointerTypes.Index(type);
+            if ((uint)pointerIndex >= (uint)nativePointerMap.Length
+                || nativePointerMap[pointerIndex] < 0)
+            {
+                throw new ArgumentException(
+                    "Private class snapshot contains an unavailable native-pointer type.");
+            }
+            return NativePointerTypes.Type(nativePointerMap[pointerIndex]);
+        }
+        if (NativeFunctionPointerTypes.IsType(type))
+        {
+            var functionPointerIndex
+                = NativeFunctionPointerTypes.Index(type);
+            if ((uint)functionPointerIndex
+                    >= (uint)functionPointerMap.Length
+                || functionPointerMap[functionPointerIndex] < 0)
+            {
+                throw new ArgumentException(
+                    "Private class snapshot contains an unavailable function-pointer type.");
+            }
+            return NativeFunctionPointerTypes.Type(
+                functionPointerMap[functionPointerIndex]);
+        }
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            var fixedArrayIndex = NativeFixedArrayTypes.Index(type);
+            if ((uint)fixedArrayIndex >= (uint)fixedArrayMap.Length
+                || fixedArrayMap[fixedArrayIndex] < 0)
+            {
+                throw new ArgumentException(
+                    "Private class snapshot contains an unavailable fixed-array type.");
+            }
+            return NativeFixedArrayTypes.Type(
+                fixedArrayMap[fixedArrayIndex]);
+        }
+        if (BoundEnumTypes.IsType(type))
+        {
+            var enumIndex = BoundEnumTypes.Index(type);
+            if ((uint)enumIndex >= (uint)enumMap.Length
+                || enumMap[enumIndex] < 0)
+            {
+                throw new ArgumentException(
+                    "Private class snapshot contains an unavailable enum type.");
+            }
+            return BoundEnumTypes.Type(enumMap[enumIndex]);
+        }
+        return type;
+    }
+
+    private static int FindEquivalentReferenceStructure(
+        BoundStruct expected, ImmutableArray<BoundStruct> structures)
+    {
+        for (var index = 0; index < structures.Length; index++)
+        {
+            if (structures[index].Name == expected.Name
+                && structures[index].Size == expected.Size
+                && structures[index].Fields.Length
+                    == expected.Fields.Length
+                && structures[index].Fields.SequenceEqual(expected.Fields))
+            {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static string PrivateClassTypeName(int snapshotIndex,
+        int typeIndex, string name) =>
+        "$privateclass."
+        + snapshotIndex.ToString(
+            System.Globalization.CultureInfo.InvariantCulture)
+        + "."
+        + typeIndex.ToString(
+            System.Globalization.CultureInfo.InvariantCulture)
+        + "."
+        + name;
+
     private bool IsClass(PrimitiveType type) => ManagedClassTypes.IsClass(type)
         && ManagedClassTypes.ClassIndex(type) < _classes.Count;
 
@@ -190,6 +732,11 @@ internal sealed partial class Binder
             {
                 AddTypeCandidate(@class);
             }
+            if (typeArguments is null
+                && _ambiguousEnumNames.Contains(qualified))
+            {
+                ambiguous = true;
+            }
             if (typeArguments is null && _enumNames.TryGetValue(qualified, out var enumType))
             {
                 AddTypeCandidate(enumType);
@@ -197,7 +744,7 @@ internal sealed partial class Binder
             if (_genericStructTemplates.TryGetValue(qualified, out var genericStruct))
             {
                 var arguments = typeArguments
-                    ?? ImmutableArray<PrimitiveType>.Empty;
+                    ?? [];
                 if (arguments.Length <= genericStruct.TypeParameters.Length
                     && genericStruct.TypeDefaults.Skip(arguments.Length)
                         .All(static defaultType => defaultType is not null))
@@ -377,7 +924,27 @@ internal sealed partial class Binder
     private DeclaredTypeResolution ResolveStaticMember(SyntaxNode receiver, string member, out string name)
     {
         var receiverName = NameText(receiver);
-        var resolution = ResolveTypeName(receiverName, out var type);
+        DeclaredTypeResolution resolution;
+        PrimitiveType type;
+        if (receiver.Kind == SyntaxKind.GenericNameExpression
+            && receiver.Children[0] is SyntaxTokenElement genericName
+            && receiver.Children[1] is SyntaxNode typeArgumentsNode)
+        {
+            var typeArguments = ImmutableArray.CreateBuilder<PrimitiveType>();
+            foreach (var typeArgument in typeArgumentsNode.Children
+                         .OfType<SyntaxNode>())
+            {
+                typeArguments.Add(BindType(typeArgument,
+                    allowVoid: false));
+            }
+            receiverName = genericName.Token.Name;
+            resolution = ResolveTypeName(receiverName,
+                typeArguments.ToImmutable(), receiver.Span, out type);
+        }
+        else
+        {
+            resolution = ResolveTypeName(receiverName, out type);
+        }
         name = resolution == DeclaredTypeResolution.Unique
             ? IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name + "." + member
                 : IsStruct(type) ? _structs[(int)type - 100].Name + "." + member
@@ -420,11 +987,24 @@ internal sealed partial class Binder
         foreach (var child in declaration.Children)
         {
             if (child is SyntaxNode {
-                Kind: SyntaxKind.Attribute or SyntaxKind.ConformanceList
-                or SyntaxKind.OperatorDeclaration
-            })
+                    Kind: SyntaxKind.Attribute,
+                } attribute)
             {
-                Report("TRM3001", "Managed classes do not support attributes, inheritance, or operators.", child.Span);
+                if (!IsRegisteredLazyFieldSelector(attribute))
+                {
+                    Report("TRM3001",
+                        "Managed classes do not support this attribute or its target.",
+                        child.Span);
+                }
+            }
+            else if (child is SyntaxNode {
+                    Kind: SyntaxKind.ConformanceList
+                        or SyntaxKind.OperatorDeclaration,
+                })
+            {
+                Report("TRM3001",
+                    "Managed classes do not support inheritance or operators.",
+                    child.Span);
             }
             if (child is SyntaxTokenElement token)
             {
@@ -443,6 +1023,12 @@ internal sealed partial class Binder
         foreach (var child in declaration.Children.OfType<SyntaxNode>())
         {
             if (child.Kind != SyntaxKind.FieldDeclaration)
+            {
+                continue;
+            }
+            if (child.Children.OfType<SyntaxTokenElement>().Any(
+                static token => token.Token.Kind
+                    == Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword))
             {
                 continue;
             }
@@ -469,13 +1055,20 @@ internal sealed partial class Binder
             if (type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                 or PrimitiveType.MutableInt32BufferView or PrimitiveType.TokenSpan || IsUnique(type))
             {
-                Report("TRM3023", "Class fields require scalars, managed handles, or handle-free Copy values.", child.Span);
+                Report("TRM3023",
+                    "Class fields cannot contain unique, buffer, or non-value runtime storage.",
+                    child.Span);
             }
             var width = ValueLayout.Size(type, _structs,
                 [.. _checkedReferenceTypes], _nativeLoweringAgreement);
             var alignment = width == 0 ? 1 : ValueAlignment(type);
             offset = (offset + alignment - 1) & -alignment;
-            if (width is < 1 or > ValueLayout.MaximumSize || offset + width > ManagedClassTypes.MaximumPayload
+            var maximumFieldSize = _nativeLoweringAgreement
+                == CompilationOptions.WindowsX64NormalBackingAgreement
+                ? ValueLayout.MaximumAddressStorageSize : ValueLayout.MaximumSize;
+            if (width is < 1 || width > (ulong)maximumFieldSize
+                || (ulong)offset + width
+                    > (ulong)ManagedClassTypes.MaximumPayload
                 || !names.Add(fieldToken.Token.Name))
             {
                 Report("TRM3005", "Managed fields must have distinct names and fit the bounded payload.", child.Span);
@@ -510,13 +1103,14 @@ internal sealed partial class Binder
             {
                 Report("TRM3008", "Mutable fields require a mut class declaration.", child.Span);
             }
-            fields.Add(new BoundStructField(fieldToken.Token.Name, type, offset, width) {
+            fields.Add(new BoundStructField(fieldToken.Token.Name, type,
+                checked((ulong)offset), width) {
                 IsMutable = mutable,
                 IsPrivate = !isPublic && !isInternal,
                 IsInternal = isInternal,
                 RequiresUnsafeCaller = unsafeModifiers != 0,
             });
-            offset += width;
+            offset = checked(offset + (int)width);
         }
         if (fields.Count == 0)
         {

@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Immutable;
+using System.Linq;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -20,12 +21,100 @@ public sealed class CompilationReference
         ImmutableArray<BoundGenericNominalTypeInstance> genericNominalTypeInstances = default,
         CoreTaskTypeIdentity? coreTaskType = null,
         ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default,
-        ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default)
+        ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default,
+        LayoutCoreRegistrationSet? layoutCoreRegistration = null,
+        ImmutableArray<BoundPrivateNominalTypeOrigin>
+            privateNominalTypeOrigins = default,
+        ImmutableArray<BoundClass> classes = default,
+        ImmutableArray<BoundPrivateClassReference>
+            privateClassReferences = default,
+        StaticInitializationCoreRegistrationSet?
+            staticInitializationCoreRegistration = null,
+        ImmutableArray<CoreContractFailureIdentitySelection>
+            coreContractFailureIdentitySelections = default,
+        LazyInitializationCoreRegistrationSet?
+            lazyInitializationCoreRegistration = null)
     {
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
             throw new ArgumentException("The selected Core native registration is invalid.",
                 nameof(nativeCoreRegistration));
+        }
+        if (!classes.IsDefault
+            && classes.Length > ManagedClassTypes.OptionalFirst
+                - ManagedClassTypes.First)
+        {
+            throw new ArgumentException(
+                "The selected managed class table exceeds its type identity range.",
+                nameof(classes));
+        }
+        if (!privateClassReferences.IsDefault)
+        {
+            foreach (var reference in privateClassReferences)
+            {
+                if (!IsValidPrivateClassReference(reference,
+                        privateNominalTypeOrigins, classes,
+                        checkedReferenceTypes.IsDefault
+                            ? [] : checkedReferenceTypes,
+                        nativeFunctionPointerSignatures.IsDefault
+                            ? [] : nativeFunctionPointerSignatures,
+                        nativePointerTypes.IsDefault
+                            ? [] : nativePointerTypes,
+                        nativeFixedArrayTypes.IsDefault
+                            ? [] : nativeFixedArrayTypes,
+                        enumDefinitions.IsDefault
+                            ? [] : enumDefinitions))
+                {
+                    throw new ArgumentException(
+                        "The selected private class reference is invalid.",
+                        nameof(privateClassReferences));
+                }
+            }
+        }
+        if (layoutCoreRegistration is not null && !layoutCoreRegistration.IsValid())
+        {
+            throw new ArgumentException("The selected Core layout registration is invalid.",
+                nameof(layoutCoreRegistration));
+        }
+        if (staticInitializationCoreRegistration is not null
+            && !staticInitializationCoreRegistration.IsValid())
+        {
+            throw new ArgumentException(
+                "The selected static-initialization Core registration is invalid.",
+                nameof(staticInitializationCoreRegistration));
+        }
+        if (lazyInitializationCoreRegistration is not null
+            && !lazyInitializationCoreRegistration.IsValid())
+        {
+            throw new ArgumentException(
+                "The selected LazyInitialization Core registration is invalid.",
+                nameof(lazyInitializationCoreRegistration));
+        }
+        if (nativeCoreRegistration is not null && layoutCoreRegistration is not null
+            && !ReferenceEquals(nativeCoreRegistration.ModuleBindings,
+                layoutCoreRegistration.ModuleBindings))
+        {
+            throw new ArgumentException(
+                "The selected Core native and layout registrations must share one provider binding snapshot.",
+                nameof(layoutCoreRegistration));
+        }
+        var selectedBindings = nativeCoreRegistration?.ModuleBindings
+            ?? layoutCoreRegistration?.ModuleBindings
+            ?? staticInitializationCoreRegistration?.ModuleBindings
+            ?? lazyInitializationCoreRegistration?.ModuleBindings;
+        if ((layoutCoreRegistration is not null
+                && !ReferenceEquals(selectedBindings,
+                    layoutCoreRegistration.ModuleBindings))
+            || (staticInitializationCoreRegistration is not null
+                && !ReferenceEquals(selectedBindings,
+                    staticInitializationCoreRegistration.ModuleBindings))
+            || (lazyInitializationCoreRegistration is not null
+                && !ReferenceEquals(selectedBindings,
+                    lazyInitializationCoreRegistration.ModuleBindings)))
+        {
+            throw new ArgumentException(
+                "Selected Core registrations must share one provider binding snapshot.",
+                nameof(lazyInitializationCoreRegistration));
         }
         if (!enumDefinitions.IsDefault && !BoundEnumTypes.IsValidTable(enumDefinitions))
         {
@@ -81,6 +170,13 @@ public sealed class CompilationReference
                 "The selected Core exception identities are invalid.",
                 nameof(coreExceptionIdentitySelections));
         }
+        if (!CoreContractFailureIdentitySelectionContract.IsValidTable(
+            coreContractFailureIdentitySelections))
+        {
+            throw new ArgumentException(
+                "The selected Core contract-failure identities are invalid.",
+                nameof(coreContractFailureIdentitySelections));
+        }
 
         Structures = structures;
         Functions = functions;
@@ -93,6 +189,11 @@ public sealed class CompilationReference
         NativeFixedArrayTypes = nativeFixedArrayTypes.IsDefault
             ? [] : nativeFixedArrayTypes;
         NativeCoreRegistration = nativeCoreRegistration;
+        LayoutCoreRegistration = layoutCoreRegistration;
+        StaticInitializationCoreRegistration
+            = staticInitializationCoreRegistration;
+        LazyInitializationCoreRegistration
+            = lazyInitializationCoreRegistration;
         EnumDefinitions = enumDefinitions.IsDefault ? [] : enumDefinitions;
         CheckedReferenceTypes = checkedReferenceTypes.IsDefault ? [] : checkedReferenceTypes;
         Interfaces = interfaces.IsDefault ? [] : interfaces;
@@ -104,6 +205,96 @@ public sealed class CompilationReference
         CoreExceptionIdentitySelections
             = coreExceptionIdentitySelections.IsDefault
                 ? [] : coreExceptionIdentitySelections;
+        CoreContractFailureIdentitySelections
+            = coreContractFailureIdentitySelections.IsDefault
+                ? [] : coreContractFailureIdentitySelections;
+        PrivateNominalTypeOrigins = privateNominalTypeOrigins.IsDefault
+            ? [] : privateNominalTypeOrigins;
+        Classes = classes.IsDefault ? [] : classes;
+        PrivateClassReferences = privateClassReferences.IsDefault
+            ? [] : privateClassReferences;
+    }
+
+    private static bool IsValidPrivateClassReference(
+        BoundPrivateClassReference? reference,
+        ImmutableArray<BoundPrivateNominalTypeOrigin> origins,
+        ImmutableArray<BoundClass> classes,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions)
+    {
+        if (reference is null || reference.Origin is null
+            || reference.ExpectedSnapshot is null
+            || origins.IsDefault || classes.IsDefault
+            || !ManagedClassTypes.IsClass(reference.ClassType)
+            || !ManagedClassTypes.IsClass(reference.ExpectedClassType))
+        {
+            return false;
+        }
+
+        var snapshot = reference.ExpectedSnapshot;
+        var origin = reference.Origin;
+        var classIndex = ManagedClassTypes.ClassIndex(
+            reference.ClassType);
+        var expectedClassIndex = ManagedClassTypes.ClassIndex(
+            reference.ExpectedClassType);
+        return reference.ClassType
+                == (PrimitiveType)(ManagedClassTypes.First + classIndex)
+            && (uint)classIndex < (uint)classes.Length
+            && !snapshot.Structures.IsDefault
+            && !snapshot.Classes.IsDefault
+            && !snapshot.CheckedReferenceTypes.IsDefault
+            && !snapshot.NativeFunctionPointerSignatures.IsDefault
+            && !snapshot.NativePointerTypes.IsDefault
+            && !snapshot.NativeFixedArrayTypes.IsDefault
+            && !snapshot.NominalTypeOrigins.IsDefault
+            && !snapshot.EnumDefinitions.IsDefault
+            && BoundEnumTypes.IsValidTable(snapshot.EnumDefinitions)
+            && IsValidMapping(reference.ExpectedNativePointerMapping,
+                snapshot.NativePointerTypes.Length,
+                nativePointerTypes.Length)
+            && IsValidMapping(
+                reference.ExpectedNativeFunctionPointerMapping,
+                snapshot.NativeFunctionPointerSignatures.Length,
+                functionPointerSignatures.Length)
+            && IsValidMapping(reference.ExpectedNativeFixedArrayMapping,
+                snapshot.NativeFixedArrayTypes.Length,
+                fixedArrayTypes.Length)
+            && IsValidMapping(reference.ExpectedCheckedReferenceMapping,
+                snapshot.CheckedReferenceTypes.Length,
+                checkedReferenceTypes.Length)
+            && IsValidMapping(reference.ExpectedEnumMapping,
+                snapshot.EnumDefinitions.Length,
+                enumDefinitions.Length)
+            && IsValidMapping(reference.ExpectedClassMapping,
+                snapshot.Classes.Length, classes.Length)
+            && (uint)expectedClassIndex
+                < (uint)snapshot.Classes.Length
+            && reference.ExpectedClassMapping[expectedClassIndex]
+                == classIndex
+            && origin.PrivateType == reference.ClassType
+            && origins.Contains(origin)
+            && origins.Any(candidate =>
+                candidate.PrivateType == reference.ClassType)
+            && classes[classIndex].Name
+                == snapshot.Classes[expectedClassIndex].Name
+            && classes[classIndex].Size
+                == snapshot.Classes[expectedClassIndex].Size
+            && classes[classIndex].Fields.Length
+                == snapshot.Classes[expectedClassIndex].Fields.Length;
+
+        static bool IsValidMapping(ImmutableArray<int> mapping,
+            int sourceCount, int destinationCount)
+        {
+            return !mapping.IsDefault && mapping.Length == sourceCount
+                && mapping.All(index => index >= -1
+                    && (index < 0
+                        || (uint)index < (uint)destinationCount));
+        }
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -130,9 +321,26 @@ public sealed class CompilationReference
     // This host-selected Core profile is deliberately separate from normalized module declarations.
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; }
 
+    // This host-selected Core profile is deliberately separate from normalized module declarations.
+    internal LayoutCoreRegistrationSet? LayoutCoreRegistration { get; }
+
+    internal StaticInitializationCoreRegistrationSet?
+        StaticInitializationCoreRegistration { get; }
+
+    internal LazyInitializationCoreRegistrationSet?
+        LazyInitializationCoreRegistration { get; }
+
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; }
 
     internal ImmutableArray<CheckedReferenceTypeDefinition> CheckedReferenceTypes { get; }
+
+    internal ImmutableArray<BoundPrivateNominalTypeOrigin>
+        PrivateNominalTypeOrigins { get; }
+
+    internal ImmutableArray<BoundClass> Classes { get; }
+
+    internal ImmutableArray<BoundPrivateClassReference>
+        PrivateClassReferences { get; }
 
     internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; }
 
@@ -148,6 +356,10 @@ public sealed class CompilationReference
     /// <summary>Exact host-selected Core exception anchors for using Modules in this reference.</summary>
     public ImmutableArray<CoreExceptionIdentitySelection>
         CoreExceptionIdentitySelections { get; }
+
+    /// <summary>Exact host-selected Core contract-failure identities for originating using Modules.</summary>
+    public ImmutableArray<CoreContractFailureIdentitySelection>
+        CoreContractFailureIdentitySelections { get; }
 
     /// <summary>Returns a reference that explicitly selects one checked provider definition as Core Task.</summary>
     public CompilationReference SelectCoreTaskType(BoundGenericNominalTypeIdentity identity)
@@ -171,6 +383,16 @@ public sealed class CompilationReference
             NativeFunctionPointerSignatures, NativePointerTypes,
             NativeCoreRegistration, EnumDefinitions, CheckedReferenceTypes,
             Interfaces, GenericNominalTypeDefinitions, GenericNominalTypeInstances,
-            selection, NativeFixedArrayTypes, CoreExceptionIdentitySelections);
+            selection, NativeFixedArrayTypes, CoreExceptionIdentitySelections,
+            LayoutCoreRegistration,
+            privateNominalTypeOrigins: PrivateNominalTypeOrigins,
+            classes: Classes,
+            privateClassReferences: PrivateClassReferences,
+            staticInitializationCoreRegistration:
+                StaticInitializationCoreRegistration,
+            coreContractFailureIdentitySelections:
+                CoreContractFailureIdentitySelections,
+            lazyInitializationCoreRegistration:
+                LazyInitializationCoreRegistration);
     }
 }

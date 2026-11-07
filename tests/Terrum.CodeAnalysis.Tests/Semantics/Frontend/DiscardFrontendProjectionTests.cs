@@ -2,16 +2,17 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
-public sealed class DiscardFrontendProjectionTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class DiscardFrontendProjectionTests
 {
     [Test]
     public void IndependentDiscardCertifiesHiddenIdentityAndExactHostedLowering()
@@ -30,13 +31,25 @@ public sealed class DiscardFrontendProjectionTests
             var variable = global::System.Linq.Enumerable.Single(function.Variables);
             Assert.That(variable.Name, Is.EqualTo("<discard>"));
             Assert.That(variable.IsMutable, Is.False);
-            var block = ((global::System.Func<BoundBlock>)(() => { var __nunitActual0 = function.Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual0!; }))();
+            var block = ((global::System.Func<BoundBlock>)(() => {
+                var __nunitActual0 = function.Body.Statements[0];
+                Assert.That(__nunitActual0, Is.TypeOf<BoundBlock>());
+                return (BoundBlock)__nunitActual0!;
+            }))();
             Assert.That(block.IsManagedLexicalScope, Is.True);
-            var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual1 = global::System.Linq.Enumerable.Single(block.Statements); Assert.That(__nunitActual1, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual1!; }))();
+            var local = ((global::System.Func<BoundLocal>)(() => {
+                var __nunitActual1 = global::System.Linq.Enumerable.Single(block.Statements);
+                Assert.That(__nunitActual1, Is.TypeOf<BoundLocal>());
+                return (BoundLocal)__nunitActual1!;
+            }))();
             Assert.That(local.Variable, Is.EqualTo(0));
             Assert.That(local.Span, Is.EqualTo(block.Span));
             Assert.That(variable.Span, Is.EqualTo(local.Span));
-            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = hosted.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Value"],
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = hosted.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), ["Value"],
                 (NativeRuntimePolicy)policy)));
         }
     }
@@ -65,7 +78,7 @@ public sealed class DiscardFrontendProjectionTests
         const string text = "public int32 Value() { _ = int32(7); return 42; }";
         var words = Projection(text);
         words[index] = value;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
     [TestCase("_= int32(7);")]
     [TestCase("_ =int32(7);")]
@@ -75,7 +88,7 @@ public sealed class DiscardFrontendProjectionTests
     public void IndependentDiscardRejectsContradictingSource(string statement)
     {
         const string text = "public int32 Value() { _ = int32(7); return 42; }";
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("_ = int32(7);", statement, StringComparison.Ordinal)),
             Bytes(Projection(text))));
     }
@@ -87,14 +100,14 @@ public sealed class DiscardFrontendProjectionTests
         var words = Projection(text);
         words[37] = 2;
         Array.Clear(words, 58, 16);
-        Node(words, 0, 3, text.IndexOf('7'), 1, -1, 7);
+        Node(words, 0, 3, text.IndexOf('7', System.StringComparison.Ordinal), 1, -1, 7);
         Node(words, 1, 3, text.IndexOf("42", StringComparison.Ordinal), 2, -1, 42);
         words[334] = 0;
         words[339] = 1;
-        words[336] = text.IndexOf(';') + 1 - words[335];
+        words[336] = text.IndexOf(';', System.StringComparison.Ordinal) + 1 - words[335];
         words[340] = text.IndexOf("return", StringComparison.Ordinal);
-        words[341] = text.LastIndexOf(';') + 1 - words[340];
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        words[341] = text.LastIndexOf(';', System.StringComparison.Ordinal) + 1 - words[340];
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
     [Test]
@@ -113,16 +126,16 @@ public sealed class DiscardFrontendProjectionTests
         words[59] = 5;
         Node(words, 3, 3, text.IndexOf("42", StringComparison.Ordinal), 2, -1, 42);
         Statement(words, 1, 15, 2, 2, second, second + 9);
-        Statement(words, 2, 8, 0, 3, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';') + 1);
+        Statement(words, 2, 8, 0, 3, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';', System.StringComparison.Ordinal) + 1);
         Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[306] = words[302];
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         words[306] = second;
         words[338] = 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         words[338] = 2;
         words[339] = 1;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
     private static int[] Projection(string text)
@@ -137,14 +150,14 @@ public sealed class DiscardFrontendProjectionTests
         words[298] = 2;
         words[299] = 1;
         words[300] = 1;
-        words[302] = text.IndexOf('_');
+        words[302] = text.IndexOf('_', System.StringComparison.Ordinal);
         words[303] = 1;
-        var literal = text.IndexOf('7');
+        var literal = text.IndexOf('7', System.StringComparison.Ordinal);
         Node(words, 0, 3, literal, 1, -1, 7);
         Node(words, 1, 83, text.IndexOf("int32(7)", StringComparison.Ordinal), 8, 0, 0);
         Node(words, 2, 3, text.IndexOf("42", StringComparison.Ordinal), 2, -1, 42);
-        Statement(words, 0, 15, 1, 1, text.IndexOf('_'), text.IndexOf(';') + 1);
-        Statement(words, 1, 8, 0, 2, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';') + 1);
+        Statement(words, 0, 15, 1, 1, text.IndexOf('_', System.StringComparison.Ordinal), text.IndexOf(';', System.StringComparison.Ordinal) + 1);
+        Statement(words, 1, 8, 0, 2, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';', System.StringComparison.Ordinal) + 1);
         return words;
     }
     [TestCase(15,true)]
@@ -162,8 +175,8 @@ public sealed class DiscardFrontendProjectionTests
         words[43] = 5;
         for (var index = 1; index <= groups; index++)
         {
-            Node(words, index, 46, literal - index, 4 + 2 * index, index - 1, 0);
-            words[43 + index * 8] = 5;
+            Node(words, index, 46, literal - index, 4 + (2 * index), index - 1, 0);
+            words[43 + (index * 8)] = 5;
         }
         Node(words, groups + 1, 3, text.IndexOf("42", StringComparison.Ordinal), 2, -1, 42);
         words[334] = groups;
@@ -174,7 +187,7 @@ public sealed class DiscardFrontendProjectionTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
     [TestCase(16384,true)]
@@ -190,14 +203,14 @@ public sealed class DiscardFrontendProjectionTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(padded), Bytes(Projection(text))));
         }
     }
 
     private static void Node(int[] words, int index, int operation, int start, int length, int left, int low)
     {
-        var offset = 42 + index * 8;
+        var offset = 42 + (index * 8);
         words[offset] = operation;
         words[offset + 1] = 1;
         words[offset + 2] = start;
@@ -209,7 +222,7 @@ public sealed class DiscardFrontendProjectionTests
 
     private static void Statement(int[] words, int index, int kind, int slot, int root, int start, int end)
     {
-        var offset = 332 + index * 5;
+        var offset = 332 + (index * 5);
         words[offset] = kind;
         words[offset + 1] = slot;
         words[offset + 2] = root;

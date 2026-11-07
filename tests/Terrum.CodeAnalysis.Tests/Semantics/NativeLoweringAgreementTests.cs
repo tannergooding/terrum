@@ -7,7 +7,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
-public sealed class NativeLoweringAgreementTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeLoweringAgreementTests
 {
     private const string Source = "int32 Main() { return 42; }";
 
@@ -23,19 +24,64 @@ public sealed class NativeLoweringAgreementTests
         Assert.That(compilation.NativeProfileVersion, Is.Null);
         var program = compilation.Program!;
 
-        Assert.Throws<System.ArgumentException>(() => SemanticVerifier.Verify(program));
+        _ = Assert.Throws<System.ArgumentException>(() => SemanticVerifier.Verify(program));
         Assert.DoesNotThrow(() => SemanticVerifier.Verify(program, agreement));
-        Assert.Throws<System.ArgumentException>(() =>
+        _ = Assert.Throws<System.ArgumentException>(() =>
             SemanticVerifier.Verify(program, agreement.ToUpperInvariant()));
         var code = NativeEmitter.EmitCode(program,
             NativeRuntimePolicy.FailFast, nativeLoweringAgreement: agreement);
         Assert.That(code.ManagedRuntimeOffset, Is.EqualTo(-1));
         Assert.That(code.NormalBackingRuntimeOffset, Is.Zero);
         Assert.That(code.Data.Length, Is.EqualTo(32));
-        Assert.Throws<System.NotSupportedException>(() =>
+        _ = Assert.Throws<System.NotSupportedException>(() =>
             Compilation.GetNativeProfileVersion(program));
-        Assert.Throws<System.ArgumentException>(() =>
+        _ = Assert.Throws<System.ArgumentException>(() =>
             NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Test]
+    public void RootlessReferenceAgreementUsesAddressOnlyValuesWithoutNormalRuntimeState()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64RootlessReferencesAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(value))]
+            ref<int32> IdentityReference(ref<int32> value) {
+                return value;
+            }
+            int32 Read(ref<int32> value) { return *value; }
+            int32 Main() {
+                mut int32 local = 41;
+                return Read(IdentityReference(ref local));
+            }
+            """), new CompilationOptions {
+                NativeLoweringAgreement = agreement,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        Assert.DoesNotThrow(() => SemanticVerifier.Verify(program, agreement));
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.Verify(program));
+
+        var code = NativeEmitter.EmitCode(program,
+            NativeRuntimePolicy.FailFast, agreement);
+        Assert.That(code.NormalBackingRuntimeOffset, Is.EqualTo(-1));
+        Assert.That(code.Data, Is.Empty);
+        Assert.That(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast, agreement), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program,
+            NativeRuntimePolicy.FailFast,
+            nativeLoweringAgreement: agreement), Is.EqualTo(41));
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast,
+                CompilationOptions.WindowsX64NormalBackingAgreement));
     }
 
     [Test]
@@ -64,6 +110,37 @@ public sealed class NativeLoweringAgreementTests
         Assert.That(defaultProgram.Structures.Single().Size, Is.EqualTo(16));
         Assert.That(defaultProgram.Structures.Single().Fields[1].Offset, Is.EqualTo(8));
 
+        const string rootlessAgreement
+            = CompilationOptions.WindowsX64RootlessReferencesAgreement;
+        var rootlessCompilation = Compilation.CreateLibrary(syntax,
+            new CompilationOptions {
+                NativeLoweringAgreement = rootlessAgreement,
+            });
+        Assert.That(rootlessCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootlessCompilation.Diagnostics));
+        var rootlessProgram = rootlessCompilation.Program!;
+        Assert.That(rootlessProgram.Structures.Single().Size,
+            Is.EqualTo(16));
+        Assert.That(rootlessProgram.Structures.Single().Fields[1].Offset,
+            Is.EqualTo(8));
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(
+            rootlessProgram, rootlessAgreement));
+
+        var optionalCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                struct OptionalHolder {
+                    public mut ref<int32>? Value;
+                }
+                """),
+            new CompilationOptions {
+                NativeLoweringAgreement = rootlessAgreement,
+            });
+        Assert.That(optionalCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                optionalCompilation.Diagnostics));
+        Assert.That(optionalCompilation.Program!.Structures.Single().Size,
+            Is.EqualTo(8));
+
         var agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
         var selectedCompilation = Compilation.CreateLibrary(syntax,
             new CompilationOptions { NativeLoweringAgreement = agreement });
@@ -74,7 +151,7 @@ public sealed class NativeLoweringAgreementTests
         Assert.That(selectedProgram.Structures.Single().Fields[1].Offset, Is.EqualTo(16));
         Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(
             selectedProgram, agreement));
-        Assert.Throws<System.ArgumentException>(() =>
+        _ = Assert.Throws<System.ArgumentException>(() =>
             SemanticVerifier.VerifyLibrary(selectedProgram));
 
         var executable = Compilation.Create(SyntaxTree.Parse(

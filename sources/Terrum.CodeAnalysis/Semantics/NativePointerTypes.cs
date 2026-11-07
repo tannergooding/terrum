@@ -25,7 +25,11 @@ internal static class NativePointerTypeContract
     {
         if (pointerTypes.IsDefault || structures.IsDefault || functionPointers.IsDefault
             || pointerTypes.Length > SemanticVerifier.MaximumAnalysisVisits
-            || !NativeFunctionPointerContract.IsValidTable(functionPointers)
+            || !NativeFunctionPointerContract.IsValidTable(functionPointers,
+                type => DirectNativeImportContract.IsInputPointee(type,
+                    structures))
+            || !NativeFunctionPointerContract.IsValidNativeImportContractTable(
+                functionPointers, pointerTypes, structures)
             || (!fixedArrays.IsDefault
                 && !NativeFixedArrayContract.IsValidTable(structures,
                     fixedArrays)))
@@ -186,6 +190,10 @@ internal static class NativePointerTypeContract
                 pointerTypes, structures, functionPointers, fixedArrays,
                 pointerStates, functionPointerStates, arrayStates, depth + 1);
         }
+        if (BoundEnumTypes.IsType(type))
+        {
+            return true;
+        }
         if (IsSupportedScalar(type))
         {
             return true;
@@ -261,5 +269,6 @@ internal static class NativePointerTypeContract
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
             or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
             or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
-            or PrimitiveType.NativeRawPointer;
+            or PrimitiveType.NativeRawPointer
+            || BoundEnumTypes.IsType(type);
 }

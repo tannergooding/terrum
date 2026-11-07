@@ -6,17 +6,17 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProtocolTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProtocolTests
 {
     private static readonly string s_sample = File.ReadAllText(
         Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..")),
@@ -32,7 +32,11 @@ public sealed class StaticProtocolTests
         Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantNodes(),node => node.Kind == SyntaxKind.GenericNameExpression),Is.True);
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(program.Functions.Count(function => function.Name.StartsWith("EvaluateQuadratic<",
             StringComparison.Ordinal)), Is.EqualTo(2));
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "EvaluateQuadratic"),Is.False);
@@ -47,12 +51,20 @@ public sealed class StaticProtocolTests
             + "new Meters(x), new Meters(3), new Meters(4), new Meters(5)).Value; }";
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = library.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Closed"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = library.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), ["Closed"]);
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("Closed"));
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Closed(2); }"), reference);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), producer);
         Assert.That(await RunAsync(NativeEmitter.Emit(
             ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(25));
     }
@@ -69,10 +81,10 @@ public sealed class StaticProtocolTests
     [TestCase("where T : Addition<T, T, T>","where T : Unknown<T, T, T>","TRM3007")]
     [TestCase("where T : Addition<T, T, T>","where T : Addition.NotAddition<T, T, T>","TRM3007")]
     [TestCase("where T : Addition<T, T, T>","where T : Addition<T, T, T>?","TRM3007")]
-    [TestCase("T EvaluateQuadratic<T>","[NoThrow] T EvaluateQuadratic<T>","TRM3007")]
+    [TestCase("T EvaluateQuadratic<T>","[NoThrow] T EvaluateQuadratic<T>","TRM3017")]
     [TestCase("T EvaluateQuadratic<T>","T EvaluateQuadratic<T, T>","TRM3007")]
     [TestCase("operator +(Meters left, Meters right)","op_Addition(Meters left, Meters right)","TRM3007")]
-    [TestCase("static TResult operator +(TSelf left, TOther right)",        "[NoThrow] [NoThrow] static TResult operator +(TSelf left, TOther right)","TRM3001")]
+    [TestCase("static TResult operator +(TSelf left, TOther right)",        "[NoThrow] [NoThrow] static TResult operator +(TSelf left, TOther right)","TRM3017")]
     [TestCase("static TResult operator +(TSelf left, TOther right);",        "static TResult operator +(TSelf left, TOther right); static TResult operator -(TSelf left, TOther right);",        "TRM3001")]
     [TestCase("static TResult operator +(TSelf left, TOther right)","static TOther operator +(TSelf left, TOther right)","TRM3001")]
     [TestCase("=> (a * x + b) * x + c;","=> EvaluateQuadratic<Meters>(x, a, b, c);","TRM3007")]
@@ -91,7 +103,11 @@ public sealed class StaticProtocolTests
         var compilation = Compilation.Create(SyntaxTree.Parse(s_sample.Replace(
             "EvaluateQuadratic<Meters>(", "EvaluateQuadratic(", StringComparison.Ordinal)));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Functions,function => function.Name == "EvaluateQuadratic<Meters>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))().Functions,function => function.Name == "EvaluateQuadratic<Meters>"),Is.True);
     }
 
     [Test]
@@ -133,20 +149,15 @@ public sealed class StaticProtocolTests
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(await RunAsync(NativeEmitter.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(46));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = compilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(46));
     }
 
     [Test]
-    public void AProtocolEffectPromiseRequiresAProvenImplementation()
-    {
-        var source = s_sample.Replace("static TResult operator +(TSelf left, TOther right)",
-            "[NoThrow] static TResult operator +(TSelf left, TOther right)", StringComparison.Ordinal);
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
-    }
-
-    [Test]
-    public void AFalseOperatorNoThrowPromiseIsRejectedByConcreteVerification()
+    public void RetiredNoThrowOperatorUseIsDiagnosed()
     {
         var source = s_sample.Replace("public static Meters operator +(Meters left, Meters right)",
             "[NoThrow] public static Meters operator +(Meters left, Meters right)", StringComparison.Ordinal);

@@ -1,14 +1,15 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed class StaticProofTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StaticProofTests
 {
     [Test]
     public void ProvenBodyChecksEraseWhileOrdinaryRequireRemainsExecutable()
@@ -28,13 +29,39 @@ public sealed class StaticProofTests
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         _ = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticRequireStatement);
         _ = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticEnsureStatement);
-        var version = ((global::System.Func<System.Reflection.FieldInfo>)(() => { var __nunitActual0 = typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion)); Assert.That(__nunitActual0, Is.InstanceOf<System.Reflection.FieldInfo>()); return (System.Reflection.FieldInfo)__nunitActual0!; }))();
+        var version = ((global::System.Func<System.Reflection.FieldInfo>)(() => {
+            var __nunitActual0 = typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion));
+            Assert.That(__nunitActual0, Is.InstanceOf<System.Reflection.FieldInfo>());
+            return (System.Reflection.FieldInfo)__nunitActual0!;
+        }))();
         Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-47"));
 
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().Functions, function => function.Name == "Main");
-        { var __nunitItems5 = global::System.Linq.Enumerable.ToArray(main.Body.Statements); Assert.That(__nunitItems5, Has.Length.EqualTo(3)); ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = __nunitItems5[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))(); ((global::System.Func<BoundRequire>)(() => { var __nunitActual3 = __nunitItems5[1]; Assert.That(__nunitActual3, Is.TypeOf<BoundRequire>()); return (BoundRequire)__nunitActual3!; }))(); ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = __nunitItems5[2]; Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))(); }
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))().Functions, function => function.Name == "Main");
+        {
+            var __nunitItems5 = global::System.Linq.Enumerable.ToArray(main.Body.Statements);
+            Assert.That(__nunitItems5, Has.Length.EqualTo(3));
+            _ = ((global::System.Func<BoundLocal>)(() => {
+                var __nunitActual2 = __nunitItems5[0];
+                Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>());
+                return (BoundLocal)__nunitActual2!;
+            }))();
+            _ = ((global::System.Func<BoundRequire>)(() => {
+                var __nunitActual3 = __nunitItems5[1];
+                Assert.That(__nunitActual3, Is.TypeOf<BoundRequire>());
+                return (BoundRequire)__nunitActual3!;
+            }))();
+            _ = ((global::System.Func<BoundReturn>)(() => {
+                var __nunitActual4 = __nunitItems5[2];
+                Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>());
+                return (BoundReturn)__nunitActual4!;
+            }))();
+        }
     }
 
     [Test]
@@ -49,7 +76,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions);
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))().Functions);
         Assert.That(global::System.Linq.Enumerable.Any(main.Body.Statements,statement => statement.GetType().Name.Contains("Static", StringComparison.Ordinal)),Is.False);
     }
 
@@ -214,7 +245,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(210));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -310,7 +345,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(336));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -435,7 +474,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
         Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
@@ -488,7 +531,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(126));
         Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
@@ -511,7 +558,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var outputCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -576,7 +627,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(168));
 
         var reachableMiddle = Compilation.Create(SyntaxTree.Parse("""
@@ -618,7 +673,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(84));
     }
 
@@ -638,7 +697,11 @@ public sealed class StaticProofTests
             """));
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(1));
 
         var staleCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -711,7 +774,11 @@ public sealed class StaticProofTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(168));
     }
 
@@ -733,7 +800,11 @@ public sealed class StaticProofTests
             """));
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual16 = compilation.Program;
+            Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual16!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var possibleOverflow = Compilation.Create(SyntaxTree.Parse("""
@@ -847,7 +918,11 @@ public sealed class StaticProofTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual17 = compilation.Program;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual17!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(546));
 
         var divisionOverflow = Compilation.Create(SyntaxTree.Parse("""
@@ -906,9 +981,9 @@ public sealed class StaticProofTests
     public void StaticProofPreservesUnchangedLocalsAcrossCallsAndInvalidatesOutputs()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] void Effect() { }
-            [NoThrow] bool Observe() { return false; }
-            [NoThrow] void Set(out int32 value) { value = 1; }
+             void Effect() { }
+             bool Observe() { return false; }
+             void Set(out int32 value) { value = 1; }
             int32 Verify(int32 input) {
                 mut int32 stable = input;
                 mut int32 output = input;
@@ -958,7 +1033,11 @@ public sealed class StaticProofTests
             """));
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = compilation.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(84));
 
         var copiedValueCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1024,7 +1103,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual19 = compilation.Program;
+            Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual19!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(84));
     }
 
@@ -1054,7 +1137,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = compilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual20 = compilation.Program;
+            Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual20!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var effectfulCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1083,7 +1170,11 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = compilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(),
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual21 = compilation.Program;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual21!;
+        }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
@@ -1189,7 +1280,13 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.Diagnostics.Length, Is.EqualTo(1));
-        {var __nunitItems0 = compilation.Diagnostics;        Assert.Multiple(() => { foreach (var __nunitItem22 in __nunitItems0) { Assert.That(__nunitItem22.Code, Is.EqualTo("TRM3026")); } });}
+        {
+            var __nunitItems0 = compilation.Diagnostics;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem22 in __nunitItems0)
+    {
+        Assert.That(__nunitItem22.Code, Is.EqualTo("TRM3026")); } });
+        }
     }
     [TestCase("if (value > 0) { static require value <= 0; }","TRM3025")]
     [TestCase("if (value > 0) { static require value < 0; }","TRM3025")]
@@ -1206,7 +1303,7 @@ public sealed class StaticProofTests
     {
         var source = """
             bool Runtime() { return true; }
-            [NoThrow] bool NoThrowPredicate(implicit ref<int32> value) { return value > 0; }
+             bool NoThrowPredicate(implicit ref<int32> value) { return value > 0; }
             int32 Verify(int32 input) {
                 mut int32 value = input;
                 STATEMENTS

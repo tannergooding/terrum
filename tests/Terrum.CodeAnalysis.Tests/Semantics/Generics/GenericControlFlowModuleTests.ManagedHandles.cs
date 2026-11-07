@@ -6,17 +6,16 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
-public sealed partial class GenericControlFlowModuleTests
+internal sealed partial class GenericControlFlowModuleTests
 {
     private const string ManagedGenericSource = """
         namespace Models;
@@ -35,21 +34,21 @@ public sealed partial class GenericControlFlowModuleTests
             public int64 Second;
             public Pair(int64 first, int64 second) { First = first; Second = second; }
         }
-        [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
-        [NoThrow] A Forward<A, B, C>(A first, B second, C third)
+         T Identity<T>(T value) where T : [Copy] { return value; }
+         A Forward<A, B, C>(A first, B second, C third)
             where A : [Copy] where B : [Copy] where C : [Copy] {
             return Identity<A>(first);
         }
-        [NoThrow] B Reorder<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
+         B Reorder<A, B>(A first, B second) where A : [Copy] where B : [Copy] {
             return Forward<B, A, A>(second, first, first);
         }
-        [NoThrow] bool Publish<A, B>(A first, B second, out A left, out B right)
+         bool Publish<A, B>(A first, B second, out A left, out B right)
             where A : [Copy] where B : [Copy] {
             left = first;
             right = second;
             return true;
         }
-        [NoThrow] bool Absent<A, B>(A value, out B missing)
+         bool Absent<A, B>(A value, out B missing)
             where A : [Copy] where B : [Copy] {
             return false;
         }
@@ -114,7 +113,11 @@ public sealed partial class GenericControlFlowModuleTests
         var compilation = Compilation.Create(SyntaxTree.Parse(ManagedGenericSource),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
             function.Name == "Models.Identity<write Models.Cell>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
@@ -177,7 +180,7 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var replacementProgram = Compile(ManagedGenericSource, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Models.Proof"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(104));
         _ = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Functions);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(linked.Classes.Select(static @class => @class.Name), Is.EqualTo(["Models.Cell", "$producer.Models.Cell", "$producer.Models.Marker"]));
@@ -213,7 +216,11 @@ public sealed partial class GenericControlFlowModuleTests
             "samples", "LanguageFeatures", "Generics", "managed-generic-selection.terrum")).ConfigureAwait(true);
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
             function.Name == "RetainReversed<Stamp, write Record>"),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
@@ -302,7 +309,7 @@ public sealed partial class GenericControlFlowModuleTests
                 public int32 Value;
                 public Frozen(int32 value) { Value = value; }
             }
-            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
+             T Identity<T>(T value) where T : [Copy] { return value; }
             int32 Main() {
                 require Cell.TryCreate(40, out var writable);
                 Cell read = writable;
@@ -369,7 +376,7 @@ public sealed partial class GenericControlFlowModuleTests
                 public int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
+             T Identity<T>(T value) where T : [Copy] { return value; }
             """ + declaration, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Leak"]))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(program,
@@ -428,7 +435,11 @@ public sealed partial class GenericControlFlowModuleTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), NativeRuntimePolicy.CheckedExceptions))
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = compilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), NativeRuntimePolicy.CheckedExceptions))
             .ConfigureAwait(true), Is.EqualTo(42));
     }
 }
