@@ -8,18 +8,18 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class SourceMapTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class SourceMapTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -182,7 +182,11 @@ public sealed class SourceMapTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
@@ -215,10 +219,10 @@ public sealed class SourceMapTableValidationComponentTests
         var operationCounts = new int[methodCount + 1];
         for (var row = 0; row < methodCount; row++)
         {
-            Write(methodBytes, row * 28 + 4, methodName);
-            Write(methodBytes, row * 28 + 8, 1);
+            Write(methodBytes, (row * 28) + 4, methodName);
+            Write(methodBytes, (row * 28) + 8, 1);
             var bodyRow = reverseBodyOwners ? (uint)(methodCount - row) : (uint)row + 1;
-            Write(methodBytes, row * 28 + 24, bodyRow);
+            Write(methodBytes, (row * 28) + 24, bodyRow);
             operationBlockStarts[row + 1] = row + 1;
             operationBlockCounts[row + 1] = 1;
             operationCounts[row + 1] = 1;
@@ -465,7 +469,7 @@ public sealed class SourceMapTableValidationComponentTests
     }
 
     private static byte[] ToBytes(int[] values)
-        => values.Select(static value => checked((byte)value)).ToArray();
+        => [.. values.Select(static value => checked((byte)value))];
 
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);

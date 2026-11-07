@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmConstantSourceTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmConstantSourceTableTests
 {
     [Test]
     public void ValidatesAssignedKindsAndTheirSelectedPayloadTables()
@@ -31,24 +32,62 @@ public sealed class TrRmConstantSourceTableTests
     }
 
     [Test]
+    public void ConstantSourceReaderChargesRowsAtTheExactWorkBoundary()
+    {
+        var bytes = TrRmConstantSourceTableWriter.Encode([
+            new TrRmConstantSourceRow(1, 1),
+        ], frozenValueNodeCount: 1, constantExecutionCount: 0,
+            targetValueBindingCount: 0);
+        var exactLedger = new TrRmA3LayoutResourceLedger();
+        exactLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 23);
+        var exactReader = new TrRmConstantSourceTableReader(bytes, 1, 1, 0,
+            0, exactLedger);
+
+        Assert.That(exactReader.GetKind(1), Is.EqualTo(1u));
+        Assert.That(exactReader.GetPayloadReference(1), Is.EqualTo(1u));
+        Assert.That(exactLedger.WorkRemaining, Is.Zero);
+
+        var shortLedger = new TrRmA3LayoutResourceLedger();
+        shortLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 22);
+        var shortReader = new TrRmConstantSourceTableReader(bytes, 1, 1, 0,
+            0, shortLedger);
+        _ = shortReader.GetKind(1);
+        TrRmResourceLimitException? exception = null;
+        try
+        {
+            _ = shortReader.GetPayloadReference(1);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.That(exception!.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+    }
+
+    [Test]
     public void RejectsUnknownKindsNullPayloadsAndOutOfRangeReferences()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode(new TrRmConstantSourceRow(4, 1), 1, 1, 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode(new TrRmConstantSourceRow(1, 0), 1, 1, 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode(new TrRmConstantSourceRow(1, 2), 1, 1, 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode(new TrRmConstantSourceRow(2, 2), 1, 1, 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode(new TrRmConstantSourceRow(3, 0x0100_0001), 1, 1, 1));
     }
 
     [Test]
     public void StructuralValidatorRejectsUnassignedSourceKind()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(4, 1)));
     }
 
@@ -59,10 +98,10 @@ public sealed class TrRmConstantSourceTableTests
             2, 1, constantExecutionCount: 1));
         TrRmStructuralMetadataValidator.Validate(CreateArtifact(
             3, 1, targetValueBindingCount: 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 2, 2, constantExecutionCount: 1)));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 3, 2, targetValueBindingCount: 1)));
     }

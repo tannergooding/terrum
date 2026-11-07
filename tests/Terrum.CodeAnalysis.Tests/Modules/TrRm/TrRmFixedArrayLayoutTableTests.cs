@@ -1,21 +1,21 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
-using System.Collections;
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
@@ -113,6 +113,33 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void RejectsFixedArrayLayoutRowCountBeyondIts24BitCapacity()
+    {
+        var artifact = CreateArtifact(count: 0, stride: 4, extent: 0,
+            alignment: 4);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+
+        InvalidDataException? exception = null;
+        try
+        {
+            _ = new TrRmFixedArrayLayoutTableReader(
+                [], 0x1000000, tables.TypeSpecs,
+                tables.TargetProfiles, tables.Features, tables.Modules,
+                tables.Schema);
+        }
+        catch (InvalidDataException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.That(exception?.Message,
+            Is.EqualTo("TRRM FixedArrayLayout row count exceeds its 24-bit table limit."));
+    }
+
+    [Test]
     public void DerivesArrayStrideFromCopiedSequentialTypeLayout()
     {
         var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
@@ -191,7 +218,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         if (StringComparer.Ordinal.Equals(schemaIdentity,
                 LocalAggregateLayoutSchemaIdentity))
         {
-            Assert.Throws<NotSupportedException>(() =>
+            _ = Assert.Throws<NotSupportedException>(() =>
                 TrRmExecutableCompiler.LoadStandard(
                     new TrRmStandardArtifactInput(schemaIdentity, artifact),
                     moduleIdentity,
@@ -561,8 +588,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     pointerTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 8, []))),
+                    [new TrRmReturnCoverageRegion(0, 8, [])]),
                 Is.False);
 
             var (paddedArrayField, paddedArrayEndField)
@@ -600,45 +626,42 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
             TrRmFixedArrayLayoutValidator
                 .ValidateReturnCoverageSubjectAndRegions(tables,
-                    paddedArrayTypeSpecRef, 1, ImmutableArray.Create(
+                    paddedArrayTypeSpecRef, 1,
+                    [
                         new TrRmReturnCoverageRegion(0, 1,
-                            [new TrRmReturnCoverageRepetition(4, 24)]),
+                                        [new TrRmReturnCoverageRepetition(4, 24)]),
                         new TrRmReturnCoverageRegion(8, 9,
-                            [new TrRmReturnCoverageRepetition(4, 24)])));
+                            [new TrRmReturnCoverageRepetition(4, 24)]),
+                    ]);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     paddedArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(8, 1,
-                            [new TrRmReturnCoverageRepetition(2, 48)]))),
+                    [new TrRmReturnCoverageRegion(8, 1,
+                            [new TrRmReturnCoverageRepetition(2, 48)])]),
                 Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     paddedArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(8, 1,
-                            [new TrRmReturnCoverageRepetition(3, 25)]))),
+                    [new TrRmReturnCoverageRegion(8, 1,
+                            [new TrRmReturnCoverageRepetition(3, 25)])]),
                 Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     paddedArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 96, []))),
+                    [new TrRmReturnCoverageRegion(0, 96, [])]),
                 Is.False);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     paddedArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(1, 7, []))),
+                    [new TrRmReturnCoverageRegion(1, 7, [])]),
                 Is.False);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     paddedArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(8, 1, [
+                    [new TrRmReturnCoverageRegion(8, 1, [
                             new TrRmReturnCoverageRepetition(2, 4),
                             new TrRmReturnCoverageRepetition(2, 5),
-                        ]))),
+                        ])]),
                 Is.False);
 
             var (payloadUnionField, payloadUnionFieldEnd)
@@ -650,22 +673,19 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     payloadUnionTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 9, []))),
+                    [new TrRmReturnCoverageRegion(0, 9, [])]),
                 Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     payloadUnionTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 10, []))),
+                    [new TrRmReturnCoverageRegion(0, 10, [])]),
                 Is.False);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     payloadUnionTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 1, [
+                    [new TrRmReturnCoverageRegion(0, 1, [
                             new TrRmReturnCoverageRepetition(9, 1),
-                        ]))),
+                        ])]),
                 Is.True);
 
             var largePayloadArrayTypeSpecRef = 0u;
@@ -700,14 +720,12 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     largePayloadArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 129, []))),
+                    [new TrRmReturnCoverageRegion(0, 129, [])]),
                 Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     largePayloadArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 145, []))),
+                    [new TrRmReturnCoverageRegion(0, 145, [])]),
                 Is.False);
 
             const ulong hugeDenseArrayCount = 1_000_000_000_000;
@@ -734,18 +752,16 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     hugeDenseArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0,
-                            hugeDenseArrayGeometry.Size, []))),
+                    [new TrRmReturnCoverageRegion(0,
+                            hugeDenseArrayGeometry.Size, [])]),
                 Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     hugeDenseArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 16, [
+                    [new TrRmReturnCoverageRegion(0, 16, [
                             new TrRmReturnCoverageRepetition(
                                 hugeDenseArrayCount, 16),
-                        ]))), Is.True);
+                        ])]), Is.True);
 
             const ulong hugeSparseArrayCount = 999_999_999_999;
             var hugeSparseArrayTypeSpecRef = 0u;
@@ -771,25 +787,23 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     hugeSparseArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 9, []))),
+                    [new TrRmReturnCoverageRegion(0, 9, [])]),
                 Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     hugeSparseArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 9, [
+                    [new TrRmReturnCoverageRegion(0, 9, [
                             new TrRmReturnCoverageRepetition(
                                 hugeSparseArrayCount, 16),
-                        ]))), Is.True);
+                        ])]), Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     hugeSparseArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
+                    [
                         new TrRmReturnCoverageRegion(0, 8, [
-                            new TrRmReturnCoverageRepetition(
-                                hugeSparseArrayCount, 16),
-                        ]),
+                                        new TrRmReturnCoverageRepetition(
+                                            hugeSparseArrayCount, 16),
+                                    ]),
                         new TrRmReturnCoverageRegion(0, 1, [
                             new TrRmReturnCoverageRepetition(2, 8),
                             new TrRmReturnCoverageRepetition(
@@ -799,21 +813,20 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                             new TrRmReturnCoverageRepetition(2, 8),
                             new TrRmReturnCoverageRepetition(
                                 hugeSparseArrayCount, 16),
-                        ]))), Is.True);
+                        ]),
+                    ]), Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     hugeSparseArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 16, [
+                    [new TrRmReturnCoverageRegion(0, 16, [
                             new TrRmReturnCoverageRepetition(
                                 hugeSparseArrayCount, 16),
-                        ]))), Is.False);
+                        ])]), Is.False);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     hugeSparseArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0,
-                            hugeSparseArrayGeometry.Size, []))),
+                    [new TrRmReturnCoverageRegion(0,
+                            hugeSparseArrayGeometry.Size, [])]),
                 Is.False);
 
             var sparsePayloadArrayTypeSpecRef = 0u;
@@ -838,20 +851,20 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     sparsePayloadArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
+                    [
                         new TrRmReturnCoverageRegion(0, 9, [
-                            new TrRmReturnCoverageRepetition(10, 16),
-                        ]),
+                                        new TrRmReturnCoverageRepetition(10, 16),
+                                    ]),
                         new TrRmReturnCoverageRegion(12, 4, [
                             new TrRmReturnCoverageRepetition(10, 16),
-                        ]))), Is.True);
+                        ]),
+                    ]), Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     sparsePayloadArrayTypeSpecRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(0, 13, [
+                    [new TrRmReturnCoverageRegion(0, 13, [
                             new TrRmReturnCoverageRepetition(10, 16),
-                        ]))), Is.False);
+                        ])]), Is.False);
 
             var (nestedPaddedFirstField, nestedPaddedEndField)
                 = tables.TypeDefs.GetFieldRange(nestedPaddedHolderTypeDef);
@@ -871,10 +884,9 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     nestedPaddedArrayRef, 1,
-                    ImmutableArray.Create(
-                        new TrRmReturnCoverageRegion(24, 1, [
+                    [new TrRmReturnCoverageRegion(24, 1, [
                             new TrRmReturnCoverageRepetition(2, 24),
-                        ]))),
+                        ])]),
                 Is.True);
         }
 
@@ -3627,7 +3639,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             1, 0, 0, schema);
         var containerFieldCount = includeArrayField ? 2 : 1;
         var fieldCount = 1 + containerFieldCount;
-        var layoutFieldCount = 2 + 2 * containerFieldCount;
+        var layoutFieldCount = 2 + (2 * containerFieldCount);
         var typeDefsBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(1, 4, 0x26, 1, 1, 0, 0, 1, 2, 0, 0),
             new TrRmTypeDefRow(1, 7, 0x26, 2, containerFieldCount,
@@ -3686,7 +3698,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
         var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
             layoutFieldRows, layouts, typeDefs, fields);
-        var layoutFields = new TrRmLayoutFieldTableReader(
+
+        _ = new TrRmLayoutFieldTableReader(
             layoutFieldBytes, layoutFieldCount, layouts, typeDefs, fields);
         var importsBytes = TrRmImportTableWriter.Encode([
             new TrRmImportRow(1, 6, 0x1300_0001),
@@ -3976,7 +3989,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             ? []
             : TrRmConstraintTableWriter.Encode([
                 new TrRmConstraintRow(1, 2, 3),
-            ], genericParams, typeSpecs);
+            ], genericParams, typeSpecs, default);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
         ], schema);
@@ -4266,7 +4279,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             ? []
             : TrRmConstraintTableWriter.Encode([
                 new TrRmConstraintRow(1, 2, 3),
-            ], genericParams, typeSpecs);
+            ], genericParams, typeSpecs, default);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
         ], schema);
@@ -4522,7 +4535,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var constraintsBytes = TrRmConstraintTableWriter.Encode([
             new TrRmConstraintRow(1, 2, 3),
             new TrRmConstraintRow(2, 2, 3),
-        ], genericParams, typeSpecs);
+        ], genericParams, typeSpecs, default);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
         ], schema);
@@ -4631,7 +4644,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var constraintsBytes = TrRmConstraintTableWriter.Encode([
             new TrRmConstraintRow(1, 2, 3),
             new TrRmConstraintRow(2, 2, 3),
-        ], genericParams, typeSpecs);
+        ], genericParams, typeSpecs, default);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
         ], schema);
@@ -5322,7 +5335,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var constraintsBytes = TrRmConstraintTableWriter.Encode([
             new TrRmConstraintRow(1, 2, 3),
             new TrRmConstraintRow(2, 2, 3),
-        ], genericParams, typeSpecs);
+        ], genericParams, typeSpecs, default);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
         ], schema);
@@ -5616,7 +5629,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             : TrRmConstraintTableWriter.Encode([
                 new TrRmConstraintRow(1, constraintKind,
                     constraintPayload),
-            ], genericParams, typeSpecs);
+            ], genericParams, typeSpecs, default);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
         ], schema);

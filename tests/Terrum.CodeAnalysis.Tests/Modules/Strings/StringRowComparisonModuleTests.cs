@@ -4,18 +4,19 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Strings;
 
-public sealed class StringRowComparisonModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringRowComparisonModuleTests
 {
     private const int InvalidComparison = -1;
 
@@ -65,14 +66,20 @@ public sealed class StringRowComparisonModuleTests
         }
         trees[^1] = SyntaxTree.Parse(VerificationSource, "string-row-comparison-module.terrum");
 
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees,
         [
             CreateSourceGrant("\"A\"", "\"A\""),
-        ], policy);
+        ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] { "CompareStringNames", "CompareStringNamespaces" };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
@@ -81,10 +88,14 @@ public sealed class StringRowComparisonModuleTests
                 $"namespace Terrum.CodeAnalysis; int32 Main() {{ return {exports[index]}(); }}",
                 "string-row-comparison-consumer.terrum");
             var consumerCompilation = Compilation.Create(
-                consumerTree, ModuleCompiler.CreateReference(producer), policy);
+                consumerTree, ModuleCompiler.CreateReference(producer), options);
             Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = consumerCompilation.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))(), producer);
             consumers[index] = ModuleCompiler.Link(consumer, producer);
         }
 
@@ -131,22 +142,22 @@ public sealed class StringRowComparisonModuleTests
         }
 
         const int maximumScalarsPerBatch = 818;
-        var leftBuilder = new StringBuilder(maximumScalarsPerBatch * 10 + 2);
-        var rightBuilder = new StringBuilder(maximumScalarsPerBatch * 10 + 2);
+        var leftBuilder = new StringBuilder((maximumScalarsPerBatch * 10) + 2);
+        var rightBuilder = new StringBuilder((maximumScalarsPerBatch * 10) + 2);
         var expectedLeftBuilder = new StringBuilder(maximumScalarsPerBatch * 2);
         var expectedRightBuilder = new StringBuilder(maximumScalarsPerBatch * 2);
         var scalarCount = 0;
         var batchStart = 0;
         void VerifyBatch()
         {
-            leftBuilder.Append('"');
-            rightBuilder.Append('"');
+            _ = leftBuilder.Append('"');
+            _ = rightBuilder.Append('"');
             var leftSpelling = leftBuilder.ToString();
             var rightSpelling = rightBuilder.ToString();
             var expectedLeft = expectedLeftBuilder.ToString();
             var expectedRight = expectedRightBuilder.ToString();
             var expectedEqual = string.Equals(expectedLeft, expectedRight, StringComparison.Ordinal);
-            Assert.That(scalarCount * 20 + 6 <= 16_384, Is.True);
+            Assert.That((scalarCount * 20) + 6 <= 16_384, Is.True);
             var grant = CreateSourceGrant(leftSpelling, rightSpelling);
             for (var apiIndex = 0; apiIndex < exports.Length; apiIndex++)
             {
@@ -155,10 +166,10 @@ public sealed class StringRowComparisonModuleTests
                 Assert.That(result == (expectedEqual ? 1 : 0), Is.True, $"{exports[apiIndex]} failed for batch starting at U+{batchStart:X}: {result}.");
             }
 
-            leftBuilder.Clear();
-            rightBuilder.Clear();
-            expectedLeftBuilder.Clear();
-            expectedRightBuilder.Clear();
+            _ = leftBuilder.Clear();
+            _ = rightBuilder.Clear();
+            _ = expectedLeftBuilder.Clear();
+            _ = expectedRightBuilder.Clear();
             scalarCount = 0;
         }
 
@@ -172,13 +183,15 @@ public sealed class StringRowComparisonModuleTests
             if (scalarCount == 0)
             {
                 batchStart = scalar;
-                leftBuilder.Append('"');
-                rightBuilder.Append('"');
+                _ = leftBuilder.Append('"');
+                _ = rightBuilder.Append('"');
             }
-            leftBuilder.Append($"\\U{scalar:X8}");
-            rightBuilder.Append($"\\U{scalar:x8}");
-            expectedLeftBuilder.Append(new Rune(scalar).ToString());
-            expectedRightBuilder.Append(char.ConvertFromUtf32(scalar));
+            _ = leftBuilder.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"\\U{scalar:X8}");
+            _ = rightBuilder.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"\\U{scalar:x8}");
+            _ = expectedLeftBuilder.Append(new Rune(scalar));
+            _ = expectedRightBuilder.Append(char.ConvertFromUtf32(scalar));
             scalarCount++;
             if (scalarCount == maximumScalarsPerBatch)
             {

@@ -19,7 +19,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
     private readonly int _valueCount;
     private readonly int _nativeFunctionPointerTypeKeyEnd;
 
+    /// <summary>Gets the number of values in the selected compact-linear Body.</summary>
     public int ValueCount => _valueCount;
+    /// <summary>Gets the number of operations in the selected compact-linear Body.</summary>
     public int OperationCount { get; }
 
     private struct ValueInfo
@@ -30,6 +32,14 @@ public readonly ref struct TrRmCompactLinearBodyReader
         public bool Used;
     }
 
+    /// <summary>Validates a compact-linear Body without Import bindings.</summary>
+    /// <param name="bodies">The validated Body table.</param>
+    /// <param name="methodRow">The one-based MethodDef row to inspect.</param>
+    /// <param name="modules">The validated Module table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="parameters">The validated Param table.</param>
+    /// <param name="types">The validated TypeSpec table.</param>
     public TrRmCompactLinearBodyReader(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
@@ -39,6 +49,15 @@ public readonly ref struct TrRmCompactLinearBodyReader
     {
     }
 
+    /// <summary>Validates a compact-linear Body with selected Import bindings.</summary>
+    /// <param name="bodies">The validated Body table.</param>
+    /// <param name="methodRow">The one-based MethodDef row to inspect.</param>
+    /// <param name="modules">The validated Module table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="parameters">The validated Param table.</param>
+    /// <param name="types">The validated TypeSpec table.</param>
+    /// <param name="imports">The validated Import table.</param>
     public TrRmCompactLinearBodyReader(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
@@ -48,6 +67,16 @@ public readonly ref struct TrRmCompactLinearBodyReader
     {
     }
 
+    /// <summary>Validates a compact-linear Body with nominal type and Import bindings.</summary>
+    /// <param name="bodies">The validated Body table.</param>
+    /// <param name="methodRow">The one-based MethodDef row to inspect.</param>
+    /// <param name="modules">The validated Module table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="parameters">The validated Param table.</param>
+    /// <param name="types">The validated TypeSpec table.</param>
+    /// <param name="nominalTypes">The validated TypeDef table.</param>
+    /// <param name="imports">The validated Import table.</param>
     public TrRmCompactLinearBodyReader(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
@@ -62,7 +91,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
-        TrRmImportTableReader imports, TrRmNativeImportTableReader nativeImports)
+        TrRmImportTableReader imports, TrRmDevelopmentNativeImportTableReader nativeImports)
     {
         _nativeFunctionPointerTypeKeyEnd = types.NativeFunctionPointerTypeKeyEnd;
         var bodyRow = methods.GetBodyRow(methodRow);
@@ -206,8 +235,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 if (opcode == 1)
                 {
                     var size = BitWidth(resultType);
-                    if (size < 64 && (bits >> size) != 0
-                        || resultType == 1 && bits > 1)
+                    if ((size < 64 && (bits >> size) != 0)
+                        || (resultType == 1 && bits > 1))
                     {
                         throw InvalidBody();
                     }
@@ -219,10 +248,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
                         throw InvalidBody();
                     }
 
-                    var shift = 64 - dataWidth * 8;
+                    var shift = 64 - (dataWidth * 8);
                     var signed = unchecked((long)(bits << shift)) >> shift;
-                    var inRange = resultType switch
-                    {
+                    var inRange = resultType switch {
                         8 => signed is >= int.MinValue and <= int.MaxValue,
                         9 => true,
                         0x0D => signed is >= 0 and <= uint.MaxValue,
@@ -317,9 +345,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 var targetOwner = methods.GetOwnerType(target);
                 if ((method == 0 || imported)
                     && (methods.GetFlags(target) != 2
-                        || targetOwner != 0 && (targetOwner > nominalTypes.Count
+                        || (targetOwner != 0 && (targetOwner > nominalTypes.Count
                             || (nominalTypes.GetFlags(targetOwner) & 3) != 2
-                            || nominalTypes.GetGenericRange(targetOwner).Count != 0)))
+                            || nominalTypes.GetGenericRange(targetOwner).Count != 0))))
                 {
                     throw InvalidBody();
                 }
@@ -406,12 +434,11 @@ public readonly ref struct TrRmCompactLinearBodyReader
                             : opcode == 0x16
                                 ? (IsInteger(source) || source == 3)
                                     && (IsInteger(resultType) || resultType == 3)
-                                : IsInteger(source) && IsInteger(resultType) && policy switch
-                            {
-                                1 or 2 => true,
-                                3 => BitWidth(source) == BitWidth(resultType),
-                                _ => false,
-                            };
+                                : IsInteger(source) && IsInteger(resultType) && policy switch {
+                                    1 or 2 => true,
+                                    3 => BitWidth(source) == BitWidth(resultType),
+                                    _ => false,
+                                };
                 if (!valid)
                 {
                     throw InvalidBody();
@@ -424,8 +451,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 if (opcode == 0x1C
                     ? !IsFloat(source)
                     : opcode == 4
-                        ? kind switch
-                        {
+                        ? kind switch {
                             1 => source != 1,
                             2 or 3 => !IsInteger(source),
                             _ => true,
@@ -498,11 +524,10 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 if (shift
                     ? !IsInteger(left) || right != 0x0D
                     : left != right
-                        || kind switch
-                        {
+                        || kind switch {
                             4 or 5 when opcode == 5
                                 => left is not (1 or 3 or 8 or 9 or 0x0D or 0x0E)
-                                    && left != 0x103,
+                                    and not 0x103,
                             _ => !IsInteger(left),
                         })
                 {
@@ -513,7 +538,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             }
 
             if ((opcode is not (1 or 2) && dataWidth != 0)
-                || resultType != 0 && !IsMappedType(mappedTypeKeys, resultType))
+                || (resultType != 0 && !IsMappedType(mappedTypeKeys, resultType)))
             {
                 throw InvalidBody();
             }
@@ -586,12 +611,18 @@ public readonly ref struct TrRmCompactLinearBodyReader
     public int GetDefinitionOffset(int value)
         => value > 0 && value <= ValueCount ? _values[value].DefinitionOffset : throw InvalidBody();
 
+    /// <summary>Gets the last operation ordinal that reads a value.</summary>
+    /// <param name="value">The one-based value index.</param>
     public int GetLastUseOrdinal(int value)
         => value > 0 && value <= ValueCount ? _values[value].LastUseOrdinal : throw InvalidBody();
 
+    /// <summary>Gets the number of Blocks that read a value.</summary>
+    /// <param name="value">The one-based value index.</param>
     public int GetUseBlockCount(int value)
         => value > 0 && value <= ValueCount ? (_values[value].Used ? 1 : 0) : throw InvalidBody();
 
+    /// <summary>Gets the encoded type code for a value.</summary>
+    /// <param name="value">The one-based value index.</param>
     public byte GetTypeCode(int value)
         => value > 0 && value <= ValueCount
             ? _values[value].TypeKey >= NativeFunctionPointerTypeKeyStart
@@ -601,6 +632,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
                         ? (byte)0x8C : (byte)(_values[value].TypeKey & 0xFF)
             : throw InvalidBody();
 
+    /// <summary>Gets whether a value has an optional type key.</summary>
+    /// <param name="value">The one-based value index.</param>
     public bool IsOptional(int value)
         => value > 0 && value <= ValueCount
             ? _values[value].TypeKey is >= 0x100 and < NativeFunctionPointerTypeKeyStart
@@ -695,7 +728,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         opcode = body[position++];
         if (layout == 0 || (layout & 0xC0) != 0
             || (layout & 3) == 3 || ((layout >> 2) & 3) == 3
-            || opcode != 0x12 && (layout & 0x0C) != 0)
+            || (opcode != 0x12 && (layout & 0x0C) != 0))
         {
             throw InvalidBody();
         }
@@ -730,8 +763,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
         var bytes = body.Slice(position, width);
         position += width;
-        return width switch
-        {
+        return width switch {
             1 => bytes[0],
             2 => BinaryPrimitives.ReadUInt16LittleEndian(bytes),
             4 => BinaryPrimitives.ReadUInt32LittleEndian(bytes),

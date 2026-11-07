@@ -12,25 +12,41 @@ public readonly ref struct TrRmSourceMapTableReader
 {
     private readonly ReadOnlySpan<byte> _slots;
     private readonly TrRmArtifactSchema _schema;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Validates SourceMap slots and their Body and SourceFile ownership.</summary>
+    /// <param name="section">The borrowed SourceMap section bytes.</param>
+    /// <param name="recordCount">The number of mapping rows.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="files">The validated SourceFile table.</param>
     public TrRmSourceMapTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodDefTableReader methods, TrRmSourceFileTableReader files)
-        : this(section, recordCount, methods, files, TrRmArtifactSchema.Standard)
+        : this(section, recordCount, methods, files,
+            TrRmArtifactSchema.Standard, null)
     {
     }
 
     internal TrRmSourceMapTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodDefTableReader methods, TrRmSourceFileTableReader files,
         TrRmArtifactSchema schema)
+        : this(section, recordCount, methods, files, schema, null)
+    {
+    }
+
+    internal TrRmSourceMapTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmMethodDefTableReader methods, TrRmSourceFileTableReader files,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount <= 0 || recordCount > 0xFF_FFFF || section.Length < 4)
         {
             throw InvalidMap();
         }
 
+        _resourceLedger = resourceLedger;
         var slotCount = Read(section, 0);
-        var rowStart = 4L + slotCount * 16L;
-        if (slotCount == 0 || rowStart + (long)recordCount * 16 != section.Length)
+        var rowStart = 4L + (slotCount * 16L);
+        if (slotCount == 0 || rowStart + ((long)recordCount * 16) != section.Length)
         {
             throw InvalidMap();
         }
@@ -40,6 +56,7 @@ public readonly ref struct TrRmSourceMapTableReader
         _schema = schema;
         for (var slot = 0; slot < slotCount; slot++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = slots.Slice((int)slot * 16, 16);
             var kind = ReadU16(data, 0);
             var selector = ReadU16(data, 2);
@@ -84,7 +101,8 @@ public readonly ref struct TrRmSourceMapTableReader
         var lastFileOwnerModule = 0;
         for (var row = 0; row < recordCount; row++)
         {
-            var data = section.Slice((int)rowStart + row * 16, 16);
+            _resourceLedger?.ConsumeWork();
+            var data = section.Slice((int)rowStart + (row * 16), 16);
             var instructionSlot = Read(data, 0);
             var fileSlot = Read(data, 4);
             if (instructionSlot <= previousInstruction || instructionSlot > slotCount
@@ -96,6 +114,7 @@ public readonly ref struct TrRmSourceMapTableReader
 
             var instruction = slots.Slice(((int)instructionSlot - 1) * 16, 16);
             var file = slots.Slice(((int)fileSlot - 1) * 16, 16);
+            _resourceLedger?.ConsumeWork(2);
             if (!IsBodyInstructionSlot(ReadU16(instruction, 0),
                     ReadU16(instruction, 2), schema)
                 || ReadU16(file, 0) != 0x001F || ReadU16(file, 2) != 0)
@@ -104,6 +123,7 @@ public readonly ref struct TrRmSourceMapTableReader
             }
 
             var bodyRow = (int)Read(instruction, 4);
+            _resourceLedger?.ConsumeWork(2);
             if (!hasLastBody || bodyRow != lastBodyRow)
             {
                 lastBodyOwnerModule = methods.GetOwnerModule(
@@ -113,6 +133,7 @@ public readonly ref struct TrRmSourceMapTableReader
             }
 
             var fileRow = (int)Read(file, 4);
+            _resourceLedger?.ConsumeWork(2);
             if (!hasLastFile || fileRow != lastFileRow)
             {
                 lastFileOwnerModule = files.GetOwnerModule(fileRow);
@@ -139,6 +160,7 @@ public readonly ref struct TrRmSourceMapTableReader
 
         for (var offset = 0; offset < _slots.Length; offset += 16)
         {
+            _resourceLedger?.ConsumeWork();
             var slot = _slots.Slice(offset, 16);
             if (ReadU16(slot, 0) == 0x0020)
             {
@@ -156,15 +178,20 @@ public readonly ref struct TrRmSourceMapTableReader
     {
         for (var offset = 0; offset < _slots.Length; offset += 16)
         {
+            _resourceLedger?.ConsumeWork();
             var slot = _slots.Slice(offset, 16);
             var kind = ReadU16(slot, 0);
-            if ((_schema == TrRmArtifactSchema.Standard && kind == 0)
+            if (((_schema is TrRmArtifactSchema.Standard
+                    or TrRmArtifactSchema.RootPinRuntimeDraft
+                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft) && kind == 0)
                 || (_schema.IsDevelopmentProfile() && kind == 0x0020))
             {
                 var method = methods.GetBodyOwnerMethod((int)Read(slot, 4));
                 var block = ReadU16(slot, 8);
                 var counts = operationCounts[method];
-                var countIndex = _schema == TrRmArtifactSchema.Standard
+                var countIndex = (_schema is TrRmArtifactSchema.Standard
+                    or TrRmArtifactSchema.RootPinRuntimeDraft
+                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
                     ? block + 1 : block;
                 if (ReadU16(slot, 2) != 1 || ReadU16(slot, 10) != 0
                     || (_schema.IsDevelopmentProfile() && block == 0)
@@ -179,15 +206,25 @@ public readonly ref struct TrRmSourceMapTableReader
 
     private static bool IsBodyInstructionSlot(ushort kind, ushort selector,
         TrRmArtifactSchema schema)
-        => schema == TrRmArtifactSchema.Standard
+        => (schema is TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.RootPinRuntimeDraft
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
             ? kind == 0 && selector == 1
             : kind == 0x0020 && selector == 1;
 
-    private static ushort ReadU16(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(offset, sizeof(ushort)));
+    private ushort ReadU16(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
+        return BinaryPrimitives.ReadUInt16LittleEndian(
+            data.Slice(offset, sizeof(ushort)));
+    }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidMap()
         => new("Invalid TRRM SourceMap table.");

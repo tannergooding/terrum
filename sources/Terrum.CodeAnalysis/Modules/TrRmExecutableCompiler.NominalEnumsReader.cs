@@ -193,9 +193,12 @@ public static partial class TrRmExecutableCompiler
                 var declarationKey
                     = tables.EnumMembers.GetDeclarationKey(memberRow);
                 members.Add(new BoundEnumMemberDefinition(
-                    new CoreDeclarationIdentity(providerIdentity,
-                        declarationKey, CoreDeclarationKind.EnumMember),
-                    identity, tables.EnumMembers.GetName(memberRow),
+                    new BoundEnumMemberIdentity.Core(
+                        new CoreDeclarationIdentity(providerIdentity,
+                            declarationKey,
+                            CoreDeclarationKind.EnumMember)),
+                    new BoundEnumDeclarationIdentity.Core(identity),
+                    tables.EnumMembers.GetName(memberRow),
                     tables.EnumMembers.GetValue(memberRow), IsPublic: true,
                     declarationKey));
             }
@@ -209,7 +212,9 @@ public static partial class TrRmExecutableCompiler
                 isBlittable |= (tables.Layouts.GetFlags(layoutRow) & 1) != 0;
             }
 
-            definitions.Add(new BoundEnumDefinition(identity, qualifiedName,
+            definitions.Add(new BoundEnumDefinition(
+                new BoundEnumDeclarationIdentity.Core(identity),
+                qualifiedName,
                 PrimitiveType.Int32, members.MoveToImmutable(),
                 IsPublic: true, IsPrimary: true,
                 IsFlags: tables.EnumDefs.GetFlags(enumRow) == 1)

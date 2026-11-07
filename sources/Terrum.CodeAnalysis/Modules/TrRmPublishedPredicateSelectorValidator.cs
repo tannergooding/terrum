@@ -136,6 +136,52 @@ internal static class TrRmPublishedPredicateSelectorValidator
             {
                 resourceLedger?.ConsumeWork();
                 var firstOutput = outputs[first];
+                if (!contracts.IsNativeOutputCellParameter(method,
+                    firstOutput.ParameterOrdinal))
+                {
+                    continue;
+                }
+
+                var outputCount = 0;
+                var successKind = (byte)0;
+                var complementKind = (byte)0;
+                foreach (var output in outputs)
+                {
+                    resourceLedger?.ConsumeWork();
+                    if (output.ParameterOrdinal != firstOutput.ParameterOrdinal)
+                    {
+                        continue;
+                    }
+
+                    outputCount++;
+                    var selectorKind = GetOutputSelectorKind(output);
+                    if (output.State == 1 && selectorKind is 3 or 5
+                        && successKind == 0)
+                    {
+                        successKind = selectorKind;
+                    }
+                    else if (output.State == 0 && selectorKind is 4 or 6
+                        && complementKind == 0)
+                    {
+                        complementKind = selectorKind;
+                    }
+                    else
+                    {
+                        throw InvalidPredicateSelector();
+                    }
+                }
+
+                if (outputCount != 2 || successKind is not (3 or 5)
+                    || complementKind != successKind + 1)
+                {
+                    throw InvalidPredicateSelector();
+                }
+            }
+
+            for (var first = 0; first < outputs.Length; first++)
+            {
+                resourceLedger?.ConsumeWork();
+                var firstOutput = outputs[first];
                 var firstKind = GetOutputSelectorKind(firstOutput);
                 for (var second = first + 1; second < outputs.Length; second++)
                 {

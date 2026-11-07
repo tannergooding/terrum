@@ -28,6 +28,7 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
     private readonly bool[] _fieldOwned;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated TargetLayoutDependency rows.</summary>
     public int Count => _recordCount;
@@ -41,6 +42,16 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
     public TrRmTargetLayoutDependencyTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmTypeSpecTableReader types,
         TrRmTargetProfileTableReader targetProfiles, int fieldReferenceCount)
+        : this(section, recordCount, types, targetProfiles,
+            fieldReferenceCount, null)
+    {
+    }
+
+    internal TrRmTargetLayoutDependencyTableReader(
+        ReadOnlySpan<byte> section, int recordCount,
+        TrRmTypeSpecTableReader types,
+        TrRmTargetProfileTableReader targetProfiles, int fieldReferenceCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(fieldReferenceCount)
             || (long)recordCount * RowSize != section.Length)
@@ -50,13 +61,16 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        resourceLedger?.ConsumeWork(checked(
+            (ulong)fieldReferenceCount + 1UL));
         _fieldOwned = new bool[fieldReferenceCount + 1];
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
-            var queryKind = data[0];
-            var flags = data[1];
-            var reserved = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(2, 2));
+            var queryKind = ReadByte(data, 0);
+            var flags = ReadByte(data, 1);
+            var reserved = ReadUInt16(data, 2);
             var subjectType = Read(data, 4);
             var targetProfile = Read(data, 8);
             var first = Read(data, 12);
@@ -64,6 +78,7 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
             if (queryKind is < 1 or > 4 || flags != 0 || reserved != 0
                 || subjectType == 0 || targetProfile is 0 or > 0xFF_FFFF
                 || targetProfile > (uint)targetProfiles.Count
+                || !targetProfiles.IsAssignedProfileReference(targetProfile)
                 || !ValidRange(first, count, fieldReferenceCount)
                 || (queryKind is 1 or 2 && count != 0)
                 || (queryKind is 3 or 4 && count == 0))
@@ -74,6 +89,7 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
             _ = types.GetTypeSpecRef(subjectType);
             for (var field = first; field < first + count; field++)
             {
+                _resourceLedger?.ConsumeWork(2);
                 if (_fieldOwned[field])
                 {
                     throw InvalidTargetLayoutDependency();
@@ -85,6 +101,7 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
 
         for (var field = 1; field <= fieldReferenceCount; field++)
         {
+            _resourceLedger?.ConsumeWork();
             if (!_fieldOwned[field])
             {
                 throw InvalidTargetLayoutDependency();
@@ -94,7 +111,7 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
 
     /// <summary>Gets the assigned query kind.</summary>
     public byte GetQueryKind(int row)
-        => GetRow(row)[0];
+        => ReadByte(GetRow(row), 0);
 
     /// <summary>Gets the complete queried TypeSpecRef.</summary>
     public uint GetSubjectTypeSpecRef(int row)
@@ -113,6 +130,7 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidTargetLayoutDependency();
@@ -121,8 +139,25 @@ public readonly ref struct TrRmTargetLayoutDependencyTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
+
+    private byte ReadByte(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(byte) + 1);
+        return data[offset];
+    }
+
+    private ushort ReadUInt16(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
+        return BinaryPrimitives.ReadUInt16LittleEndian(
+            data.Slice(offset, sizeof(ushort)));
+    }
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;

@@ -6,12 +6,26 @@ using System.Collections.Generic;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Describes a property and its getter MethodDef.</summary>
+/// <param name="OwnerTypeDefRow">The owning TypeDef row.</param>
+/// <param name="NameStringRow">The String row containing the property name.</param>
+/// <param name="TypeSpecRef">The property's TypeSpec reference.</param>
+/// <param name="GetterMethodDefRow">The one-based getter MethodDef row.</param>
+/// <param name="Flags">The PropertyDef flags.</param>
 public readonly record struct TrRmPropertyDefRow(
     int OwnerTypeDefRow, int NameStringRow, uint TypeSpecRef, int GetterMethodDefRow, uint Flags);
 
 /// <summary>Emits PropertyDef rows with checked getter owner and result type.</summary>
 public static class TrRmPropertyDefTableWriter
 {
+    /// <summary>Encodes PropertyDef rows and validates their getter references.</summary>
+    /// <param name="rows">The PropertyDef rows in table order.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
+    /// <returns>The encoded PropertyDef section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmPropertyDefRow> rows,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,

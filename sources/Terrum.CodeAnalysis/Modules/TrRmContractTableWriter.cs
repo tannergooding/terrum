@@ -7,11 +7,24 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Describes a Contract row's owner, assigned clause kind and payload.</summary>
+/// <param name="OwnerDefId">The identifier of the definition that owns the clause.</param>
+/// <param name="Kind">The assigned Contract clause kind.</param>
+/// <param name="Payload">The encoded clause payload.</param>
 public readonly record struct TrRmContractRow(uint OwnerDefId, ushort Kind, ReadOnlyMemory<byte> Payload);
 
 /// <summary>Emits assigned clause shapes without establishing their executable promises.</summary>
 public static class TrRmContractTableWriter
 {
+    /// <summary>Encodes Contract rows after validating their owner and clause shape.</summary>
+    /// <param name="rows">The Contract rows in table order.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="parameters">The validated Param table.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
+    /// <param name="developmentProfile">Whether to apply the Development-profile clause rules.</param>
+    /// <returns>The encoded Contract section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmContractRow> rows,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,

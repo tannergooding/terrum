@@ -244,6 +244,16 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmTargetProfileTableReader targetProfiles)
     {
         ConsumeWork(body);
+        if (!body.Schema.IsDevelopmentProfile()
+            && (body.FieldCount != 0 || body.HasTypeIdentityCarrier
+                || body.HasLayoutQueryOperation)
+            && !TrRmFeatureManifestValidator.Requires(features, modules,
+                ownerModule, TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                body.Schema))
+        {
+            throw InvalidMap();
+        }
+
         if (body.HasExceptionDirectory
             && !TrRmFeatureManifestValidator.Requires(features, modules,
                 ownerModule,
@@ -462,10 +472,22 @@ internal static class TrRmRegisterBodyMapValidator
                         throw InvalidMap();
                     }
                     ConsumeWork(body);
+                    var parameterRow = firstParameter + formalOrdinal;
+                    var parameterTypeSpec = parameters.GetTypeSpec(
+                        parameterRow);
+                    if ((parameters.GetFlags(parameterRow) & 1) != 0
+                        && !typeSpecs
+                            .TryGetImplicitReadonlyReferenceReferentTypeSpecRef(
+                                parameterTypeSpec,
+                                out parameterTypeSpec))
+                    {
+                        throw InvalidMap();
+                    }
+
                     if (!MatchesTypeMapEntry(body, typeMapIndex,
-                        parameters.GetTypeSpec(firstParameter + formalOrdinal),
-                        ownerModule, types, typeSpecs, genericParams, imports,
-                        constantValues, nativeFunctionPointerAnchors))
+                        parameterTypeSpec, ownerModule, types, typeSpecs,
+                        genericParams, imports, constantValues,
+                        nativeFunctionPointerAnchors))
                     {
                         throw InvalidMap();
                     }
@@ -3271,7 +3293,7 @@ internal static class TrRmRegisterBodyMapValidator
         if (baseKind == 2)
         {
             var home = GetHomeMapEntry(body, baseIndex);
-            if (ReadByte(body, home, 0) != 3)
+            if (ReadByte(body, home, 0) is not (2 or 3))
             {
                 throw InvalidMap();
             }
@@ -3393,7 +3415,7 @@ internal static class TrRmRegisterBodyMapValidator
             var homeTypeSpecRef = GetTypeMapTypeSpecRef(body,
                 ReadUInt16(body, home, 2));
             var homeType = typeSpecs.GetTypeSpecRef(homeTypeSpecRef);
-            if (ReadByte(body, home, 0) != 3
+            if (ReadByte(body, home, 0) is not (2 or 3)
                 || !homeType.IsRow
                 || homeType.Form is not (0x02 or 0x03)
                 || typeSpecs.GetNominalTypeDefRow(homeTypeSpecRef, types,
@@ -4351,6 +4373,9 @@ internal static class TrRmRegisterBodyMapValidator
                                 ConsumeWork(body);
                                 var formalType = parameters.GetTypeSpec(
                                     firstParameter + ordinal);
+                                var isImplicitReference
+                                    = (parameters.GetFlags(firstParameter
+                                        + ordinal) & 1) != 0;
                                 var nativeParameterAccess = (byte)0;
                                 foreach (var nativeParameter in nativeParameters)
                                 {
@@ -4390,15 +4415,44 @@ internal static class TrRmRegisterBodyMapValidator
                                         throw InvalidMap();
                                     }
                                 }
-                                else if (nativeParameterAccess != 0
-                                    ? !TrRmNativeImportTypeContract
-                                        .MatchesNativeParameterArgumentType(typeSpecs,
-                                            GetRegisterTypeSpecRef(body, typeState),
-                                            formalType, nativeParameterAccess)
-                                    : !MatchesRegisterType(body, typeState,
-                                        formalType, ownerModule, types, typeSpecs,
-                                        genericParams, imports, constantValues,
-                                        nativeFunctionPointerAnchors))
+                                else if (isImplicitReference)
+                                {
+                                    if (sourceUse != 3
+                                        || nativeParameterAccess != 0
+                                        || !typeSpecs
+                                            .TryGetImplicitReadonlyReferenceReferentTypeSpecRef(
+                                                formalType,
+                                                out var referentType)
+                                        || (selectorKind == 1
+                                            ? !typeState.IsPlaceHandle
+                                                || typeState.AccessKind
+                                                    is not (1 or 2)
+                                            : typeState.IsPlaceHandle)
+                                        || !AreEquivalentSelectedTypeSpecRefs(
+                                            GetRegisterTypeSpecRef(body,
+                                                typeState),
+                                            referentType, ownerModule,
+                                            types, typeSpecs, genericParams,
+                                            imports, constantValues,
+                                            nativeFunctionPointerAnchors))
+                                    {
+                                        throw InvalidMap();
+                                    }
+                                }
+                                else if (sourceUse == 3
+                                    || (nativeParameterAccess != 0
+                                        ? !TrRmNativeImportTypeContract
+                                            .MatchesNativeParameterArgumentType(
+                                                typeSpecs,
+                                                GetRegisterTypeSpecRef(body,
+                                                    typeState),
+                                                formalType,
+                                                nativeParameterAccess)
+                                        : !MatchesRegisterType(body, typeState,
+                                            formalType, ownerModule, types,
+                                            typeSpecs, genericParams, imports,
+                                            constantValues,
+                                            nativeFunctionPointerAnchors)))
                                 {
                                     throw InvalidMap();
                                 }

@@ -5,18 +5,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class TypeSpecTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TypeSpecTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -113,7 +113,7 @@ public sealed class TypeSpecTableValidationComponentTests
                 importCount, invalidCount);
         }
 
-        AddInvalid(cases, [Array.Empty<byte>()], 1,
+        AddInvalid(cases, [[]], 1,
             typeDefCount, importCount, genericParamCount);
         AddInvalid(cases, [[1, 2, 8]], 1,
             typeDefCount, importCount, genericParamCount);
@@ -227,7 +227,7 @@ public sealed class TypeSpecTableValidationComponentTests
             typeDefCount, importCount, genericParamCount);
 
         var invalidByteWords = validTable.Select(static value => (int)value).ToArray();
-        invalidByteWords[(validRows.Length + 1) * sizeof(uint) + 1] = 256;
+        invalidByteWords[((validRows.Length + 1) * sizeof(uint)) + 1] = 256;
         cases.Add(new TableCase(invalidByteWords, validRows.Length, typeDefCount,
             importCount, genericParamCount, false, false));
 
@@ -269,7 +269,11 @@ public sealed class TypeSpecTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }

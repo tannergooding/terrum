@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmLayoutTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmLayoutTableReaderTests
 {
     [Test]
     public void LinksDefaultLayoutToItsTypeDef()
@@ -42,27 +43,27 @@ public sealed class TrRmLayoutTableReaderTests
     {
         var bytes = Layout();
         bytes[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(bytes, 1, Type(), 1, [], 0));
     }
 
     [Test]
     public void RejectsTruncatedOrUnownedVariantsAndMissingDefault()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Layout()[..^1], 1, Type(), 1, [], 0));
 
         var orphan = new byte[56];
         Layout().CopyTo(orphan, 0);
         Layout().CopyTo(orphan, 28);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(orphan, 2, Type(), 1, [], 0));
 
         var targetOnlyType = Type();
         Write(targetOnlyType, 32, 1);
         var targetOnlyLayout = Layout();
         Write(targetOnlyLayout, 4, 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(targetOnlyLayout, 1, targetOnlyType, 1,
                 TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(1, 1)]), 0));
     }
@@ -73,7 +74,7 @@ public sealed class TrRmLayoutTableReaderTests
         var typeRows = new byte[88];
         Type().CopyTo(typeRows, 0);
         Type().CopyTo(typeRows, 44);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Layout(), 1, typeRows, 2, [], 0));
     }
 

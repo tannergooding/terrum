@@ -23,6 +23,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
     private readonly int[] _methodOwners;
     private readonly int[] _rowOwners;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated InterfaceMethod rows.</summary>
     public int Count => _recordCount;
@@ -36,6 +37,14 @@ public readonly ref struct TrRmInterfaceMethodTableReader
     public TrRmInterfaceMethodTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmInterfaceDefTableReader interfaces, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures)
+        : this(section, recordCount, interfaces, methods, signatures, null)
+    {
+    }
+
+    internal TrRmInterfaceMethodTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmInterfaceDefTableReader interfaces,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != interfaces.InterfaceMethodCount
@@ -46,15 +55,21 @@ public readonly ref struct TrRmInterfaceMethodTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        var storageWork = checked((ulong)methods.Count
+            + (ulong)recordCount + 2UL);
+        resourceLedger?.ConsumeWork(storageWork);
         _methodOwners = new int[methods.Count + 1];
         _rowOwners = new int[recordCount + 1];
+        _resourceLedger = resourceLedger;
         for (var interfaceDef = 1; interfaceDef <= interfaces.Count; interfaceDef++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = interfaces.GetMethodRange(interfaceDef);
             var ownerTypeDef = interfaces.GetOwnerTypeDef(interfaceDef);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
                 var row = first + ordinal;
+                _resourceLedger?.ConsumeWork(3);
                 if (_rowOwners[row] != 0)
                 {
                     throw InvalidInterfaceMethod();
@@ -79,6 +94,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_rowOwners[row] == 0)
             {
                 throw InvalidInterfaceMethod();
@@ -100,6 +116,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
 
     internal int GetOwnerInterfaceDefForMethod(int methodDef)
     {
+        _resourceLedger?.ConsumeWork();
         if (methodDef <= 0 || methodDef >= _methodOwners.Length)
         {
             throw InvalidInterfaceMethod();
@@ -110,6 +127,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidInterfaceMethod();
@@ -121,8 +139,12 @@ public readonly ref struct TrRmInterfaceMethodTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidInterfaceMethod()
         => new("Invalid TRRM InterfaceMethod table.");

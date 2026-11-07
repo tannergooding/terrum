@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmBuilderAndTextTargetTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmBuilderAndTextTargetTableTests
 {
     [Test]
     public void ReadsAndWritesBuilderAndTextTargetTypeReferences()
@@ -38,22 +39,47 @@ public sealed class TrRmBuilderAndTextTargetTableTests
     }
 
     [Test]
+    public void BuilderAndTextTargetReadersChargeAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        var setup = CreateReaders(fixture);
+        var builderBytes = TrRmBuilderRegistrationTableWriter.Encode([
+            new TrRmBuilderRegistrationRow(1, 1, 1),
+        ], setup.TypeDefs, setup.TypeSpecs);
+        var targetBytes = TrRmTextTargetTableWriter.Encode([
+            new TrRmTextTargetRow(1, 1, 0),
+        ], setup.Methods, setup.Signatures, setup.TypeSpecs);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var builders = new TrRmBuilderRegistrationTableReader(
+                builderBytes, 1, readers.TypeDefs, readers.TypeSpecs, ledger);
+            var targets = new TrRmTextTargetTableReader(targetBytes, 1,
+                readers.Methods, readers.Signatures, readers.TypeSpecs, ledger);
+
+            Assert.That(builders.GetRecipeTypeSpecRef(1), Is.EqualTo(1u));
+            Assert.That(targets.GetParameterOrdinal(1), Is.Zero);
+        });
+    }
+
+    [Test]
     public void RejectsInvalidBuilderAndTextTargetReferences()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeBuilders(fixture, [new TrRmBuilderRegistrationRow(2, 1, 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeBuilders(fixture, [new TrRmBuilderRegistrationRow(1, 0, 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeBuilders(fixture, [new TrRmBuilderRegistrationRow(1, 1, 0)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeTargets(fixture, [new TrRmTextTargetRow(2, 1, 0)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeTargets(fixture, [new TrRmTextTargetRow(1, 0, 0)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeTargets(fixture, [new TrRmTextTargetRow(1, 1, 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeTargets(fixture, [
                 new TrRmTextTargetRow(1, 1, 0),
                 new TrRmTextTargetRow(1, 1, 0),
@@ -73,13 +99,13 @@ public sealed class TrRmBuilderAndTextTargetTableTests
 
         var malformedBuilder = (byte[])builderBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformedBuilder.AsSpan(4), 0xF400_0008);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(fixture.CreateArtifact(
                 malformedBuilder, targetBytes)));
 
         var malformedTarget = (byte[])targetBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformedTarget.AsSpan(8), 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(fixture.CreateArtifact(
                 builderBytes, malformedTarget)));
     }
@@ -132,7 +158,8 @@ public sealed class TrRmBuilderAndTextTargetTableTests
         var parameterBytes = TrRmParamTableWriter.Encode([
             new TrRmParamRow(1, 0, 1, 0),
         ], signatures, typeSpecs);
-        var parameters = new TrRmParamTableReader(
+
+        _ = new TrRmParamTableReader(
             parameterBytes, 1, signatures, typeSpecs);
         var methodBytes = TrRmMethodDefTableWriter.Encode([
             new TrRmMethodDefRow(1, 4, 1, 2, 0, 0, 0),

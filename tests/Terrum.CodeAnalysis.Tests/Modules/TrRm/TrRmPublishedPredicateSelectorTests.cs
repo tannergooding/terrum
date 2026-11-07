@@ -2,9 +2,11 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using Terrum.CodeAnalysis.Modules;
+using System.IO;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
@@ -22,6 +24,22 @@ internal sealed class TrRmPublishedPredicateSelectorTests
 
         TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
             Validate(fixture, ledger));
+    }
+
+    [Test]
+    public void NativeOutputCellRequiresSuccessAndComplementSelectors()
+    {
+        var fixture = CreateNativeOutputFixture(includeComplement: true);
+        Assert.That(ValidateNativeOutput(fixture),
+            Is.EqualTo(new byte[] { 0, 3, 4 }));
+
+        var incompleteFixture = CreateNativeOutputFixture(
+            includeComplement: false);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateNativeOutput(incompleteFixture));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CreateNativeOutputFixture(includeComplement: true,
+                includeOutputFeature: false));
     }
 
     private static void Validate(Fixture fixture,
@@ -143,8 +161,173 @@ internal sealed class TrRmPublishedPredicateSelectorTests
             graphBytes, footprintBytes, readRootBytes, nodeBytes, operandBytes);
     }
 
+    private static byte[] ValidateNativeOutput(NativeOutputFixture fixture)
+    {
+        var strings = new TrRmStringTableReader(fixture.Strings, 3);
+        var modules = new TrRmModuleTableReader(fixture.Modules, 1, strings,
+            0, 0, 1, 0, fixture.FeatureCount);
+        var features = new TrRmFeatureTableReader(fixture.Features,
+            fixture.FeatureCount,
+            s_schema);
+        var typeSpecs = new TrRmTypeSpecTableReader(fixture.TypeSpecs, 2,
+            0, 0, 0, 0, s_schema, 1, 0);
+        var types = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, fixture.ContractCount, s_schema);
+        var signatures = new TrRmMethodSigTableReader(fixture.Signatures, 1,
+            typeSpecs, 1, 0);
+        var methods = new TrRmMethodDefTableReader(fixture.Methods, 1,
+            strings, modules, types, signatures, fixture.ContractCount, 0);
+        var parameters = new TrRmParamTableReader(fixture.Parameters, 1,
+            signatures, typeSpecs, s_schema);
+        var contracts = new TrRmContractTableReader(fixture.Contracts,
+            fixture.ContractCount, types, methods, signatures, parameters,
+            typeSpecs, fieldPathCount: 0, features: features, modules: modules,
+            schema: s_schema, predicateGraphCount: 2);
+        var graphs = new TrRmPredicateGraphTableReader(fixture.Graphs, 2, 2, 2);
+        var footprints = new TrRmPredicateReadFootprintTableReader(
+            fixture.Footprints, 2, 2, 0);
+        var childEdges = new TrRmPredicateChildEdgeTableReader([], 0, 2,
+            graphs);
+        var captures = new TrRmPredicateCaptureTableReader([], 0, 2,
+            typeSpecs);
+        _ = new TrRmPredicateReadRootTableReader(fixture.ReadRoots, 2,
+            0, 0, s_schema);
+        var readDependencies = new TrRmPredicateReadDependencyTableReader(
+            [], 0, 1, 0, 0, 0);
+        _ = new TrRmPredicateNodeTableReader(fixture.Nodes, 2, 2,
+            typeSpecs, s_schema);
+        var operandCounts = new TrRmPredicateTableRowCounts(
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        _ = new TrRmPredicateNodeOperandTableReader(fixture.Operands, 2,
+            operandCounts, s_schema);
+
+        return TrRmPublishedPredicateSelectorValidator.Validate(
+            fixture.ReadRoots, 2, fixture.Nodes, 2, fixture.Operands, 2,
+            readDependencies.Count, graphs, footprints, childEdges, captures,
+            methods, signatures, typeSpecs, contracts);
+    }
+
+    private static NativeOutputFixture CreateNativeOutputFixture(
+        bool includeComplement, bool includeOutputFeature = true)
+    {
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("Run", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 3);
+        TrRmFeatureRow[] featureRows = includeOutputFeature
+            ? [
+                TrRmFeatureRow.NativeOutputCellsCandidate,
+                TrRmFeatureRow.PublishedPredicates,
+            ]
+            : [TrRmFeatureRow.PublishedPredicates];
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, s_schema);
+        var featureCount = featureRows.Length;
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
+                FeatureFirst: 1, FeatureCount: featureCount),
+        ], strings, 0, 0, 1, 0, featureCount);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 1, 0, featureCount);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount,
+            s_schema);
+        var contractCount = includeComplement ? 4 : 3;
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.InlineFamily(0x8C, 8, 1),
+        ], 0, 0, 0, 0, s_schema, methodDefCount: 1);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2,
+            0, 0, 0, 0, s_schema, 1);
+        var types = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, contractCount, s_schema);
+        var signaturesBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(1, 0, 1, 1, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(signaturesBytes, 1,
+            typeSpecs, 1, 0);
+        var parametersBytes = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, 2, 0),
+        ], signatures, typeSpecs, s_schema);
+        var parameters = new TrRmParamTableReader(parametersBytes, 1,
+            signatures, typeSpecs, s_schema);
+        var contractRows = new List<TrRmContractRow>
+        {
+            NativeOutputState(0, 1, 1),
+            PredicateGraphContract(0, 1),
+            PredicateGraphContract(1, 2),
+        };
+        if (includeComplement)
+        {
+            contractRows.Insert(1, NativeOutputState(0, 2, 0));
+        }
+
+        var methodsBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 1, contractRows.Count, 0),
+        ], strings, modules, types, signatures, contractRows.Count, 0);
+        var methods = new TrRmMethodDefTableReader(methodsBytes, 1,
+            strings, modules, types, signatures, contractRows.Count, 0);
+        var contractBytes = TrRmContractTableWriter
+            .EncodeForeignInvocationDraft(contractRows, types, methods,
+                signatures, parameters, typeSpecs, features, modules,
+                predicateGraphCount: 2, schema: s_schema);
+        var graphBytes = TrRmPredicateGraphTableWriter.Encode([
+            new TrRmPredicateGraphRow(1, 1),
+            new TrRmPredicateGraphRow(2, 2),
+        ], 2, 2);
+        var footprintBytes = TrRmPredicateReadFootprintTableWriter.Encode([
+            new TrRmPredicateReadFootprintRow(1, 1, 0, 0),
+            new TrRmPredicateReadFootprintRow(2, 1, 0, 0),
+        ], 2, 0);
+        var readRootBytes = TrRmPredicateReadRootTableWriter.Encode([
+            new TrRmPredicateReadRootRow(5, 0),
+            new TrRmPredicateReadRootRow(5, 0),
+        ], 0, 0, s_schema);
+        var nodeBytes = TrRmPredicateNodeTableWriter.Encode([
+            new TrRmPredicateNodeRow(3, 0xF200_0001, 1, 1),
+            new TrRmPredicateNodeRow(4, 0xF200_0001, 2, 1),
+        ], 2, typeSpecs, s_schema);
+        var operandCounts = new TrRmPredicateTableRowCounts(
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var operandBytes = TrRmPredicateNodeOperandTableWriter.Encode([
+            new TrRmPredicateNodeOperandRow(1, 1),
+            new TrRmPredicateNodeOperandRow(1, 2),
+        ], operandCounts, s_schema);
+
+        return new NativeOutputFixture(stringBytes, moduleBytes, featureBytes,
+            typeSpecBytes, signaturesBytes, parametersBytes, methodsBytes,
+            contractBytes, graphBytes, footprintBytes, readRootBytes,
+            nodeBytes, operandBytes, contractRows.Count, featureCount);
+    }
+
+    private static TrRmContractRow NativeOutputState(uint ordinal,
+        uint predicateGraph, byte state)
+    {
+        var payload = new byte[12];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, ordinal);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
+            predicateGraph);
+        payload[8] = state;
+        return new TrRmContractRow(0x1600_0001, 2, payload);
+    }
+
+    private static TrRmContractRow PredicateGraphContract(uint ordinal,
+        uint predicateGraph)
+    {
+        var payload = new byte[12];
+        payload[0] = 3;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), ordinal);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8),
+            predicateGraph);
+        return new TrRmContractRow(0x1600_0001, 0x0B, payload);
+    }
+
     private sealed record Fixture(byte[] Strings, byte[] Modules,
         byte[] Features, byte[] TypeSpecs, byte[] Signatures,
         byte[] Methods, byte[] Contracts, byte[] Graphs, byte[] Footprints,
         byte[] ReadRoots, byte[] Nodes, byte[] Operands);
+
+    private sealed record NativeOutputFixture(byte[] Strings, byte[] Modules,
+        byte[] Features, byte[] TypeSpecs, byte[] Signatures,
+        byte[] Parameters, byte[] Methods, byte[] Contracts,
+        byte[] Graphs, byte[] Footprints, byte[] ReadRoots, byte[] Nodes,
+        byte[] Operands, int ContractCount, int FeatureCount);
 }

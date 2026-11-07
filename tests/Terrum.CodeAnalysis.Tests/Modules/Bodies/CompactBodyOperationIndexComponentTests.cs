@@ -15,7 +15,8 @@ using Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Bodies;
 
-public sealed class CompactBodyOperationIndexComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CompactBodyOperationIndexComponentTests
 {
     private const string SourceMapConsumerVerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -111,7 +112,7 @@ public sealed class CompactBodyOperationIndexComponentTests
             }
         }
 
-        int methodCount = bodyRows.Length;
+        var methodCount = bodyRows.Length;
         var bodyOwners = new int[methodCount + 1];
         var expectedStarts = new int[methodCount + 1];
         var expectedBlockCounts = new int[methodCount + 1];
@@ -152,7 +153,7 @@ public sealed class CompactBodyOperationIndexComponentTests
         await VerifyAsync(CreateEmptyCase(0), policy).ConfigureAwait(true);
         await VerifyAsync(CreateEmptyCase(3), policy).ConfigureAwait(true);
         await VerifyAsync(CreateEmptyCase(3) with {
-            BodyRows = [new byte[] { 0 }],
+            BodyRows = [[0]],
             ExpectedValid = false,
         }, policy).ConfigureAwait(true);
     }
@@ -188,7 +189,7 @@ public sealed class CompactBodyOperationIndexComponentTests
         BoundRuntimePolicy policy)
     {
         var malformed = CreateValidCase();
-        var badLastBody = (byte[])malformed.BodyRows[^1].ToArray();
+        var badLastBody = (byte[])[.. malformed.BodyRows[^1]];
         badLastBody[^1] = 2;
         await VerifyAsync(malformed with {
             BodyRows = [.. malformed.BodyRows[..^1], badLastBody],
@@ -253,7 +254,11 @@ public sealed class CompactBodyOperationIndexComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -308,7 +313,7 @@ public sealed class CompactBodyOperationIndexComponentTests
         {
             expectedStarts[method] = method;
             expectedBlockCounts[method] = 1;
-            int body = methodCount - method + 1;
+            var body = methodCount - method + 1;
             expectedOperationCounts[method] = body % 2 == 0 ? 1 : 0;
         }
 
@@ -327,23 +332,23 @@ public sealed class CompactBodyOperationIndexComponentTests
 
     private static IndexCase CreateManyIndexedCase(int methodCount)
     {
-        byte[] body = CompactIndexedBodyFramingComponentTests.TwoBlockIndexedBody();
+        var body = CompactIndexedBodyFramingComponentTests.TwoBlockIndexedBody();
         var bodyRows = Enumerable.Range(0, methodCount)
             .Select(_ => (byte[])body.Clone())
             .ToArray();
         var bodyOwners = new int[methodCount + 1];
         var expectedStarts = new int[methodCount + 1];
         var expectedBlockCounts = new int[methodCount + 1];
-        var expectedOperationCounts = new int[1 + methodCount * 2];
+        var expectedOperationCounts = new int[1 + (methodCount * 2)];
         expectedOperationCounts[0] = 1;
         for (var bodyRow = 1; bodyRow <= methodCount; bodyRow++)
         {
-            int method = methodCount - bodyRow + 1;
+            var method = methodCount - bodyRow + 1;
             bodyOwners[bodyRow] = method;
         }
         for (var method = 1; method <= methodCount; method++)
         {
-            int start = 1 + (method - 1) * 2;
+            var start = 1 + ((method - 1) * 2);
             expectedStarts[method] = start;
             expectedBlockCounts[method] = 2;
             expectedOperationCounts[start] = 1;
@@ -386,7 +391,7 @@ public sealed class CompactBodyOperationIndexComponentTests
         components.Add(SyntaxTree.Parse(SourceMapConsumerVerificationSource,
             "compact-body-operation-index-source-map-consumer.terrum"));
 
-        byte[] body = indexedBody
+        var body = indexedBody
             ? CompactIndexedBodyFramingComponentTests.TwoBlockIndexedBody()
             : hasOperation
                 ? [0x04, 0, 1, 1, 1, 1, 42, 0x83, 1]
@@ -394,7 +399,7 @@ public sealed class CompactBodyOperationIndexComponentTests
         var bodySection = TrRmVariableTableWriter.EncodeBodies([
             new ReadOnlyMemory<byte>(body),
         ]);
-        byte[] strings = TrRmStringTableWriter.EncodeNames([
+        var strings = TrRmStringTableWriter.EncodeNames([
             ("Module", 0), ("Run", 0), ("src/A", 0),
         ]);
         var modules = new byte[48];
@@ -455,7 +460,11 @@ public sealed class CompactBodyOperationIndexComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [expectedValid ? 1 : 0], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));

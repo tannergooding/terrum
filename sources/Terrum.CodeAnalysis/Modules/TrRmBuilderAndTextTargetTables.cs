@@ -21,6 +21,7 @@ public readonly ref struct TrRmBuilderRegistrationTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated BuilderRegistration rows.</summary>
     public int Count => _recordCount;
@@ -33,6 +34,14 @@ public readonly ref struct TrRmBuilderRegistrationTableReader
     public TrRmBuilderRegistrationTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmTypeDefTableReader typeDefs,
         TrRmTypeSpecTableReader typeSpecs)
+        : this(section, recordCount, typeDefs, typeSpecs, null)
+    {
+    }
+
+    internal TrRmBuilderRegistrationTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeDefTableReader typeDefs,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount)
             || (long)recordCount * RowSize != section.Length)
@@ -42,6 +51,7 @@ public readonly ref struct TrRmBuilderRegistrationTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
@@ -74,6 +84,7 @@ public readonly ref struct TrRmBuilderRegistrationTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidBuilderRegistration();
@@ -85,8 +96,12 @@ public readonly ref struct TrRmBuilderRegistrationTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidBuilderRegistration()
         => new("Invalid TRRM BuilderRegistration table.");
@@ -144,6 +159,7 @@ public readonly ref struct TrRmTextTargetTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated TextTarget rows.</summary>
     public int Count => _recordCount;
@@ -157,6 +173,14 @@ public readonly ref struct TrRmTextTargetTableReader
     public TrRmTextTargetTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader types)
+        : this(section, recordCount, methods, signatures, types, null)
+    {
+    }
+
+    internal TrRmTextTargetTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader types,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount)
             || (long)recordCount * RowSize != section.Length)
@@ -166,13 +190,16 @@ public readonly ref struct TrRmTextTargetTableReader
 
         _rows = section;
         _recordCount = recordCount;
-        var targets = new HashSet<(uint Method, uint Ordinal)>();
+        resourceLedger?.ConsumeWork(checked((ulong)recordCount + 1UL));
+        var targets = new HashSet<(uint Method, uint Ordinal)>(recordCount);
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
             var method = Read(data, 0);
             var schemaType = Read(data, 4);
             var ordinal = Read(data, 8);
+            _resourceLedger?.ConsumeWork(2);
             if (method is 0 or > 0xFF_FFFF || method > (uint)methods.Count
                 || schemaType == 0
                 || !targets.Add((method, ordinal)))
@@ -204,6 +231,7 @@ public readonly ref struct TrRmTextTargetTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidTextTarget();
@@ -215,8 +243,12 @@ public readonly ref struct TrRmTextTargetTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidTextTarget()
         => new("Invalid TRRM TextTarget table.");

@@ -4,12 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmInterfaceWitnessTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmInterfaceWitnessTableTests
 {
     [Test]
     public void ValidatesWitnessTypePairsRangesAndSelectedMemberRows()
@@ -39,50 +40,108 @@ public sealed class TrRmInterfaceWitnessTableTests
     }
 
     [Test]
+    public void InterfaceWitnessAndMemberReadersChargeAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        var setup = CreateReaders(fixture);
+        var witnessBytes = TrRmInterfaceWitnessTableWriter.Encode([
+            new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
+        ], setup.TypeSpecs, 1, 0, 0);
+        var setupWitnesses = new TrRmInterfaceWitnessTableReader(
+            witnessBytes, 1, setup.TypeSpecs, 1, 0, 0);
+        var memberBytes = TrRmWitnessMemberTableWriter.Encode([
+            new TrRmWitnessMemberRow(1, 2, 1, 1, 2),
+        ], setupWitnesses, setup.TypeSpecs, setup.Methods);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var witnesses = new TrRmInterfaceWitnessTableReader(
+                witnessBytes, 1, readers.TypeSpecs, 1, 0, 0, ledger);
+            var members = new TrRmWitnessMemberTableReader(memberBytes, 1,
+                witnesses, readers.TypeSpecs, readers.Methods, ledger);
+            Assert.That(witnesses.GetMemberRange(1), Is.EqualTo((1, 1)));
+            Assert.That(members.GetSelectedMethodDef(1), Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public void WitnessAssociatedTypeReaderChargesClosureAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture(includeAssociatedType: true,
+            defaultTypeSpecRef: 1, includeBaseInterface: true);
+        var setup = CreateReaders(fixture);
+        var witnessBytes = TrRmInterfaceWitnessTableWriter.Encode([
+            new TrRmInterfaceWitnessRow(1, 2, 0, 0, 1, 1, 0, 0),
+        ], setup.TypeSpecs, 0, 1, 0);
+        var setupWitnesses = new TrRmInterfaceWitnessTableReader(
+            witnessBytes, 1, setup.TypeSpecs, 0, 1, 0);
+        var associatedTypeBytes
+            = TrRmWitnessAssociatedTypeTableWriter.Encode([
+                new TrRmWitnessAssociatedTypeRow(1, 3, 0x2000_0001, 1, 1),
+            ], setupWitnesses, setup.TypeSpecs, setup.TypeDefs,
+                setup.Interfaces, setup.InterfaceBases,
+                setup.AssociatedTypeDefs, default);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var witnesses = new TrRmInterfaceWitnessTableReader(
+                witnessBytes, 1, readers.TypeSpecs, 0, 1, 0, ledger);
+            var associatedTypes = new TrRmWitnessAssociatedTypeTableReader(
+                associatedTypeBytes, 1, witnesses, readers.TypeSpecs,
+                readers.TypeDefs, readers.Interfaces, readers.InterfaceBases,
+                readers.AssociatedTypeDefs, default, ledger);
+            Assert.That(associatedTypes.GetBindingOrigin(1),
+                Is.EqualTo(1u));
+        });
+    }
+
+    [Test]
     public void RejectsInvalidWitnessRangesTypesAndMemberReferences()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
             new TrRmInterfaceWitnessRow(0, 2, 0, 0, 0, 0, 0, 0),
         ], 0));
-        Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
             new TrRmInterfaceWitnessRow(1, 0xF400_0008, 0, 0, 0, 0, 0, 0),
         ], 0));
-        Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 0, 1, 0, 0, 0, 0),
         ], 1));
-        Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
             new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
         ], 1));
-        Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 0, 0, 0, 0, 0, 0),
         ], 1));
-        Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeWitnesses(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 0, 0, 1, 1, 0, 0),
         ], 0));
 
-        Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
         ], [
             new TrRmWitnessMemberRow(2, 2, 1, 1, 2),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
         ], [
             new TrRmWitnessMemberRow(1, 0, 1, 1, 2),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
         ], [
             new TrRmWitnessMemberRow(1, 2, 3, 1, 2),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
         ], [
             new TrRmWitnessMemberRow(1, 2, 1, 0xF400_0008, 2),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMembers(fixture, [
             new TrRmInterfaceWitnessRow(1, 2, 1, 1, 0, 0, 0, 0),
         ], [
             new TrRmWitnessMemberRow(1, 2, 1, 1, 3),
@@ -102,7 +161,7 @@ public sealed class TrRmInterfaceWitnessTableTests
             new TrRmWitnessMemberRow(1, 2, 1, 1, 2),
         ]);
         BinaryPrimitives.WriteUInt32LittleEndian(memberBytes.AsSpan(16), 3);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(witnessBytes, memberBytes)));
     }
@@ -154,38 +213,40 @@ public sealed class TrRmInterfaceWitnessTableTests
         ], readers.TypeSpecs, 0, 1, 0);
         var witnesses = new TrRmInterfaceWitnessTableReader(
             witnessBytes, 1, readers.TypeSpecs, 0, 1, 0);
-        TrRmWitnessAssociatedTypeRow ValidRow(uint origin)
-            => new(1, 3, 0x2000_0001, 1, origin);
+        static TrRmWitnessAssociatedTypeRow ValidRow(uint origin)
+        {
+            return new(1, 3, 0x2000_0001, 1, origin);
+        }
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [
                 ValidRow(1) with { WitnessRow = 2 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [
                 ValidRow(1) with { DeclaringInterfaceTypeSpecRef = 1 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [
                 ValidRow(1) with { AssociatedTypeDefReference = 0x1300_0001 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [ValidRow(3)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [ValidRow(0)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [
                 ValidRow(1) with { DeclaringInterfaceTypeSpecRef = 0xF200_0008 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [
                 ValidRow(1) with { AssociatedTypeDefReference = 0x1C00_0001 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [
                 ValidRow(1) with { ValueTypeSpecRef = 0 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [ValidRow(2)]));
 
         var validRows = TrRmWitnessAssociatedTypeTableWriter.Encode([
@@ -193,7 +254,7 @@ public sealed class TrRmInterfaceWitnessTableTests
         ], witnesses, readers.TypeSpecs, readers.TypeDefs, readers.Interfaces,
             readers.InterfaceBases, readers.AssociatedTypeDefs, default);
         BinaryPrimitives.WriteUInt32LittleEndian(validRows.AsSpan(16), 3);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(witnessBytes, [], validRows)));
     }
@@ -213,11 +274,11 @@ public sealed class TrRmInterfaceWitnessTableTests
         BinaryPrimitives.WriteUInt32LittleEndian(malformedRows.AsSpan(12), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(malformedRows.AsSpan(16), 1);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeWitnessAssociatedTypes(fixture, witnessBytes, [
                 new TrRmWitnessAssociatedTypeRow(1, 3, 0x2000_0001, 1, 1),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(witnessBytes, [], malformedRows)));
     }
@@ -343,12 +404,12 @@ public sealed class TrRmInterfaceWitnessTableTests
                     associatedTypeCount == 0 ? 0 : 1, associatedTypeCount,
                     0, 0, 0, 0),
             }
-            : new[]
-            {
+            :
+            [
                 new TrRmInterfaceDefRow(2, 0, 0, 0, 1, 1,
                     associatedTypeCount == 0 ? 0 : 1, associatedTypeCount,
                     0, 0, 0, 0),
-            };
+            ];
         var interfaceBytes = TrRmInterfaceDefTableWriter.Encode(interfaceRows,
             typeDefs, generics, baseCount, 1, associatedTypeCount, 0, 0);
         var interfaces = new TrRmInterfaceDefTableReader(interfaceBytes,
@@ -417,7 +478,7 @@ public sealed class TrRmInterfaceWitnessTableTests
             {
                 new(0x0001, 0, 1, Modules),
                 new(0x0002, 0, (uint)StringCount, Strings),
-                new(0x0011, 0, (uint)(InterfaceDefs.Length / 48 + 1), TypeSpecs),
+                new(0x0011, 0, (uint)((InterfaceDefs.Length / 48) + 1), TypeSpecs),
                 new(0x0013, 0, (uint)(TypeDefs.Length / 44), TypeDefs),
                 new(0x0015, 0, (uint)(Layouts.Length / 28), Layouts),
                 new(0x0016, 0, 2, Methods),

@@ -14,7 +14,8 @@ using Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Bodies;
 
-public sealed class CompactIndexedBodyFramingComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CompactIndexedBodyFramingComponentTests
 {
     private const string BlockOperationCountVerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -272,7 +273,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
                     [.. Enumerable.Repeat(-1, 16)], true),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             var jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
             Assert.That(jitResult == 0, Is.True, $"JIT result {jitResult} for Body {Convert.ToHexString(testCase.Section.AsSpan(8))}.");
             var aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
@@ -306,7 +311,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -336,7 +345,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -363,7 +376,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
                 [.. Enumerable.Repeat(-1, 3)], true),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -391,7 +408,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -413,9 +434,9 @@ public sealed class CompactIndexedBodyFramingComponentTests
         var constant = new byte[] { 1, 1, 1, 42 };
         foreach (var terminator in new[] {
             Return(1),
-            new byte[] { 0x80, 1, 0 },
-            new byte[] { 0x81, 1, 1, 0, 1, 0 },
-            new byte[] { 0x82, 1, 0, 1, 0 },
+            [0x80, 1, 0],
+            [0x81, 1, 1, 0, 1, 0],
+            [0x82, 1, 0, 1, 0],
             [0xF0, 0x01, 0x83, 1, 0],
             [0xF0, 0x01, 0x80, 1, 0, 0],
             [0xF0, 0x01, 0x81, 1, 0, 1, 0, 0, 1, 0, 0],
@@ -450,7 +471,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -523,7 +548,7 @@ public sealed class CompactIndexedBodyFramingComponentTests
         body.Add(0);
         AppendLocal(body, width, 0);
         body.AddRange([0x87, 1]);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static IEnumerable<(byte[] Operation, int ResultCount)> IndexedOperations()
@@ -593,7 +618,7 @@ public sealed class CompactIndexedBodyFramingComponentTests
             row[definitionsStart + value] = (byte)(operationStart - blockStart);
         }
 
-        return row.ToArray();
+        return [.. row];
     }
 
     internal static byte[] TwoBlockIndexedBody() =>

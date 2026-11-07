@@ -6,18 +6,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class GenericParamConstraintTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class GenericParamConstraintTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -70,6 +70,25 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             valid with { TypeSpecCount = 0x1000000, ExpectedValid = false },
             valid with { ConstraintCount = 1, ExpectedValid = false },
         };
+        var relationBytes = new byte[12];
+        WriteWord(relationBytes, 0, 1);
+        WriteWord(relationBytes, 4, 0x2000_0001);
+        WriteWord(relationBytes, 8, 1);
+        var relationConstraint = WithConstraintHalfWord(valid, 4, 3) with {
+            AssociatedRelations = [.. relationBytes.Select(static value => (int)value)],
+            ExpectedValid = true,
+        };
+        cases.Add(relationConstraint);
+        cases.Add(WithConstraintWord(relationConstraint, 8, 2));
+        cases.Add(WithConstraintWord(relationConstraint, 8, 0x2000_0001));
+        cases.Add(relationConstraint with {
+            AssociatedRelations = [],
+            ExpectedValid = false,
+        });
+        cases.Add(relationConstraint with {
+            AssociatedRelations = [1],
+            ExpectedValid = false,
+        });
 
         var overlappingRanges = WithFormalWord(valid, 44, 1);
         cases.Add(overlappingRanges);
@@ -129,6 +148,8 @@ public sealed class GenericParamConstraintTableValidationComponentTests
                 new HostBuffer("Params", PrimitiveType.Int32, [], false),
                 new HostBuffer("GenericParams", PrimitiveType.Int32, [.. testCase.GenericParams], false),
                 new HostBuffer("Constraints", PrimitiveType.Int32, [.. testCase.Constraints], false),
+                new HostBuffer("AssociatedRelations", PrimitiveType.Int32,
+                    [.. testCase.AssociatedRelations], false),
                 new HostBuffer("IdentitySlots", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.ModuleCount + 1)], true),
                 new HostBuffer("FieldOwners", PrimitiveType.Int32, [123], true),
@@ -158,7 +179,11 @@ public sealed class GenericParamConstraintTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true), Is.EqualTo(0));
@@ -167,7 +192,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
 
     private static TableCase CreateValidCase()
     {
-        byte[] strings = TrRmStringTableWriter.EncodeTextRows([
+        var strings = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Module", 0), ("Widget", 0), ("Build", 0), ("T", 0), ("U", 0),
         ]);
         var testCase = new TableCase(
@@ -178,6 +203,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             [.. Signature().Select(static value => (int)value)],
             [.. GenericParams().Select(static value => (int)value)],
             [.. Constraints().Select(static value => (int)value)],
+            [],
             1, 6, 1, 1, 1, 2, 2, 1, true, true);
         Assert.That(ValidateHosted(testCase), Is.True);
         return testCase;
@@ -286,7 +312,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             var types = new TrRmTypeDefTableReader(ToBytes(testCase.TypeDefs),
                 testCase.TypeDefCount, strings, modules, 0,
                 testCase.GenericParamCount, 0, 0);
-            byte[] typeSpecRows = TrRmTypeSpecTableWriter.Encode([
+            var typeSpecRows = TrRmTypeSpecTableWriter.Encode([
                 TrRmTypeSpecTableWriter.Builtin(8),
             ], testCase.TypeDefCount, 0, testCase.GenericParamCount, 0);
             var typeSpecs = new TrRmTypeSpecTableReader(typeSpecRows,
@@ -299,8 +325,13 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             var formals = new TrRmGenericParamTableReader(ToBytes(testCase.GenericParams),
                 testCase.GenericParamCount, strings, types, methods, signatures,
                 typeSpecs, testCase.ConstraintCount);
+            var associatedRelationBytes = ToBytes(testCase.AssociatedRelations);
+            var associatedRelations = new TrRmAssociatedRelationTableReader(
+                associatedRelationBytes, associatedRelationBytes.Length / 12,
+                typeSpecs, associatedTypeDefCount: 1, imports: default);
             _ = new TrRmConstraintTableReader(ToBytes(testCase.Constraints),
-                testCase.ConstraintCount, formals, typeSpecs);
+                testCase.ConstraintCount, formals, typeSpecs,
+                associatedRelations);
             return true;
         }
         catch (InvalidDataException)
@@ -382,7 +413,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
     }
 
     private static byte[] ToBytes(int[] values)
-        => values.Select(static value => checked((byte)value)).ToArray();
+        => [.. values.Select(static value => checked((byte)value))];
 
     private static void WriteWord(byte[] bytes, int offset, uint value)
         => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
@@ -418,7 +449,8 @@ public sealed class GenericParamConstraintTableValidationComponentTests
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
 
     private sealed record TableCase(int[] Strings, int[] Modules, int[] TypeDefs, int[] Methods,
-        int[] Signatures, int[] GenericParams, int[] Constraints, int ModuleCount, int StringCount,
+        int[] Signatures, int[] GenericParams, int[] Constraints,
+        int[] AssociatedRelations, int ModuleCount, int StringCount,
         int TypeDefCount, int MethodDefCount, int SignatureCount, int GenericParamCount,
         int ConstraintCount, int TypeSpecCount, bool ExpectedValid, bool HasHostedOracle);
 }

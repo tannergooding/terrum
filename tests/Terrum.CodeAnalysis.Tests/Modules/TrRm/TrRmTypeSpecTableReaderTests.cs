@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmTypeSpecTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmTypeSpecTableReaderTests
 {
     private const TrRmArtifactSchema s_a3Schema
         = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
@@ -19,8 +20,8 @@ public sealed class TrRmTypeSpecTableReaderTests
         byte[] section = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         var reader = new TrRmTypeSpecTableReader(section, 1, 0, 0, 0, 0);
         Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(new byte[] { 1, 0, 8 }));
-        Assert.Throws<InvalidDataException>(() => ReadRow(section, 0));
-        Assert.Throws<InvalidDataException>(() => ReadRow(section, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadRow(section, 0));
+        _ = Assert.Throws<InvalidDataException>(() => ReadRow(section, 2));
     }
 
     [Test]
@@ -221,11 +222,11 @@ public sealed class TrRmTypeSpecTableReaderTests
         _ = new TrRmTypeSpecTableReader(developmentSection, 1, 0, 0, 0, 1,
             TrRmArtifactSchema.Development);
 
-        Assert.Throws<InvalidDataException>(() => CreateForProfile(
+        _ = Assert.Throws<InvalidDataException>(() => CreateForProfile(
             Rows(developmentRow), 1, 0, TrRmArtifactSchema.Standard, 1));
 
         var standardRow = TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 1);
-        Assert.Throws<InvalidDataException>(() => CreateForProfile(
+        _ = Assert.Throws<InvalidDataException>(() => CreateForProfile(
             Rows(standardRow), 1, 1, TrRmArtifactSchema.Development, 1));
     }
 
@@ -239,7 +240,7 @@ public sealed class TrRmTypeSpecTableReaderTests
         bytes[0] = 0x0D;
         bytes[2] = convention;
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(3), anchor);
-        Assert.Throws<InvalidDataException>(() => CreateForProfile(
+        _ = Assert.Throws<InvalidDataException>(() => CreateForProfile(
             Rows(bytes), 1, 0, TrRmArtifactSchema.Standard, 1));
     }
 
@@ -271,7 +272,7 @@ public sealed class TrRmTypeSpecTableReaderTests
         Assert.That(reader.GetTypeSpecRef(1, allowInitQualifier: true)
             .Qualifiers, Is.EqualTo((byte)0x04));
         Assert.That(reader.GetTypeSpecRef(2).Form, Is.EqualTo((byte)0x0C));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             GetTypeSpecRef(section, 2, 1));
     }
 
@@ -293,8 +294,8 @@ public sealed class TrRmTypeSpecTableReaderTests
         Assert.That(reader.GetRow(4)[0], Is.EqualTo((byte)0x0E));
         Assert.That(reader.AreEquivalentTypeSpecRefs(2, 7), Is.True);
         Assert.That(reader.AreEquivalentTypeSpecRefs(3, 6), Is.True);
-        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 7, 5));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 7, 5));
+        _ = Assert.Throws<InvalidDataException>(() =>
             GetTypeSpecRef(section, 7, 0xF3048B08));
     }
 
@@ -308,12 +309,12 @@ public sealed class TrRmTypeSpecTableReaderTests
         Assert.That(reader.AreEquivalentTypeSpecRefs(2, 0xF3008B08), Is.True);
         Assert.That(reader.GetTypeSpecRef(0xF200001A).Form, Is.EqualTo((byte)0x0F));
         Assert.That(reader.GetTypeSpecRef(0xF3008B08).TypeCode, Is.EqualTo((byte)0x8B));
-        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 3));
-        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF2010008));
-        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF200001B));
-        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3008508));
-        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3008B1A));
-        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3028C08));
+        _ = Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 3));
+        _ = Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF2010008));
+        _ = Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF200001B));
+        _ = Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3008508));
+        _ = Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3008B1A));
+        _ = Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3028C08));
     }
 
     [Test]
@@ -358,7 +359,7 @@ public sealed class TrRmTypeSpecTableReaderTests
 
         Assert.That(reader.GetCompactValueTypeKey(firstPointerRow), Is.EqualTo(ushort.MaxValue));
         Assert.That(reader.GetCompactValueTypeKey(firstPointerRow + 1), Is.EqualTo(ushort.MaxValue));
-        Assert.Throws<InvalidDataException>(() => GetCompactValueTypeKey(section,
+        _ = Assert.Throws<InvalidDataException>(() => GetCompactValueTypeKey(section,
             rows.Length, signatureCount, firstPointerRow + 2));
     }
 
@@ -378,15 +379,15 @@ public sealed class TrRmTypeSpecTableReaderTests
     [TestCase(new byte[] { 0x0C, 0, 0x8B, 1, 0, 0, 0 })]
     public void RejectsInvalidRowShapesAndReferences(byte[] row)
     {
-        Assert.Throws<InvalidDataException>(() => Create(Rows(row)));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Rows(row)));
     }
 
     [Test]
     public void RejectsNoncanonicalIndexedAtomicArguments()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Rows([1, 0, 8], [7, 0, 1, 0, 0, 0]), count: 2));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Rows([1, 0, 8], [0x0C, 0, 0x8A, 1, 0, 0, 0]), count: 2));
     }
     [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2 })]
@@ -394,14 +395,14 @@ public sealed class TrRmTypeSpecTableReaderTests
     [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 0, 0, 0, 0 })]
     public void RejectsMalformedConstructedArgumentPayloads(byte[] constructed)
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Rows([2, 0, 1, 0, 0, 0], constructed), count: 2));
     }
 
     [Test]
     public void ConstructedFormRequiresNominalGenericBase()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Rows([1, 0, 8], [5, 0, 1, 0, 0, 0, 1, 0, 0, 0]),
                 count: 2));
     }
@@ -409,8 +410,8 @@ public sealed class TrRmTypeSpecTableReaderTests
     [Test]
     public void RejectsWrongIndexAndReferencedTableCounts()
     {
-        Assert.Throws<InvalidDataException>(() => Create([0, 0, 0, 0, 4, 0, 0, 0, 1, 0, 8]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() => Create([0, 0, 0, 0, 4, 0, 0, 0, 1, 0, 8]));
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Rows([2, 0, 1, 0, 0, 0]), typeDefCount: 0));
     }
 

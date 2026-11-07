@@ -5,14 +5,43 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmRegisterBodyReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmRegisterBodyReaderTests
 {
+    [Test]
+    public void ReadsFeatureEightNativeOutputReservationAndRejectsMismatches()
+    {
+        var bodyBytes = CreateNativeOutputReservationBody(
+            TrRmArtifactSchema.ForeignInvocationDraft);
+        var body = new TrRmRegisterBodyReader(bodyBytes,
+            schema: TrRmArtifactSchema.ForeignInvocationDraft);
+
+        Assert.That(body.GetRecord(1)[0], Is.EqualTo(0x02));
+        Assert.That(body.GetRecord(2)[0], Is.EqualTo(0x0C));
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CreateNativeOutputReservationBody(
+                TrRmArtifactSchema.ForeignInvocationDraft,
+                includeReservation: false));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CreateNativeOutputReservationBody(
+                TrRmArtifactSchema.ForeignInvocationDraft,
+                formalOrdinal: 1));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CreateNativeOutputReservationBody(
+                TrRmArtifactSchema.ForeignInvocationDraft,
+                action: 2));
+        _ = Assert.Throws<ArgumentException>(() =>
+            CreateNativeOutputReservationBody(
+                TrRmArtifactSchema.Standard));
+    }
+
     [TestCase(0x00)]
     [TestCase(0x01)]
     [TestCase(0x02)]
@@ -60,10 +89,10 @@ public sealed class TrRmRegisterBodyReaderTests
     [Test]
     public void AcceptsAllInstructionWidthsAndMaximumMapCount()
     {
-        AssertBody(new byte[] { 0x00 });
-        AssertBody(new byte[] { 0x18, 0 });
-        AssertBody(new byte[] { 0xE3, 0, 0, 0 });
-        AssertBody(new byte[] { 0x0A, 0x17, 0 });
+        AssertBody([0x00]);
+        AssertBody([0x18, 0]);
+        AssertBody([0xE3, 0, 0, 0]);
+        AssertBody([0x0A, 0x17, 0]);
 
         var counts = new uint[5];
         counts[1] = 65_536;
@@ -154,7 +183,7 @@ public sealed class TrRmRegisterBodyReaderTests
         Assert.That(body.GetRecord(1)[13], Is.EqualTo(3));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
             body.GetRecord(1)[16..]), Is.EqualTo(1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmRegisterBodyWriter.Encode(homeMap, typeMap, default, default,
                 default, [new TrRmRegisterBodyBlock(0, 6, 0)],
                 records,
@@ -230,16 +259,16 @@ public sealed class TrRmRegisterBodyReaderTests
         var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
         var providers = Array.Empty<TrRmStandardArtifactInput>();
 
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.LoadStandard(input, "module", providers,
-            ImmutableArray<CoreExceptionIdentitySelection>.Empty));
+            []));
 
         var selection = new CoreExceptionIdentitySelection(
             "module", "missing-core", "IException",
             "missing-core", "UnreachableException");
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.LoadStandard(input, "module", providers,
-            ImmutableArray.Create(selection)));
+            [selection]));
     }
 
     [Test]
@@ -812,7 +841,7 @@ public sealed class TrRmRegisterBodyReaderTests
         malformedBody[2] = 0x20;
         var malformedArtifact = CreateStandardArtifact(malformedBody);
         TrRmStructuralMetadataValidator.Validate(malformedArtifact);
-        Assert.Throws<InvalidDataException>(() => GetSelectedRegisterBodyFirstOpcode(malformedArtifact));
+        _ = Assert.Throws<InvalidDataException>(() => GetSelectedRegisterBodyFirstOpcode(malformedArtifact));
     }
 
     [Test]
@@ -840,7 +869,7 @@ public sealed class TrRmRegisterBodyReaderTests
 
         var invalidTypeMapIndex = (byte[])vector.Clone();
         invalidTypeMapIndex[^3] = 0x10;
-        Assert.Throws<InvalidDataException>(() => ReadRegisterBody(invalidTypeMapIndex));
+        _ = Assert.Throws<InvalidDataException>(() => ReadRegisterBody(invalidTypeMapIndex));
     }
 
     [Test]
@@ -919,7 +948,7 @@ public sealed class TrRmRegisterBodyReaderTests
 
         var wrongKind = (byte[])body.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(wrongKind.AsSpan(37), 0x1C00_0001);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(wrongKind));
     }
 
@@ -938,28 +967,28 @@ public sealed class TrRmRegisterBodyReaderTests
             CreateCallSiteBody(0, 0x1C00_0001, [0x90, 1, 0x18, 0]),
             targetReturnsUnit: true);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateCallSiteBody(1, 0x1C00_0001, [0x90, 1]),
                 targetDoesNotReturn: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateCallSiteBody(0, 0x1C00_0001, [0x90, 1, 0x18, 0]),
                 targetReturnsUnit: false));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateCallSiteBody(0, 0x1C00_0001, [0x90, 1, 0x18, 0]),
                 targetDoesNotReturn: true));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateBoundMethodCallBody([0x80, 0, 0x18, 0], 0x1C00_0001),
                 targetDoesNotReturn: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateBoundMethodCallBody([0x82, 0, 0x18, 0], 0x1C00_0001),
                 targetDoesNotReturn: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateBoundMethodCallBody([0xE1, 0, 0, 0, 0x18, 0],
                     0x1C00_0001),
@@ -978,21 +1007,21 @@ public sealed class TrRmRegisterBodyReaderTests
             CreateCallSiteBody(0, 0x1600_0002, callCode, unitInput),
             targetReturnsUnit: true, targetParameterTypeSpecRef: 0xF200_0000);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateCallSiteBody(0, 0x1C00_0001, callCode, unitInput),
                 targetReturnsUnit: true,
                 targetParameterTypeSpecRef: 0xF200_0008));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateCallSiteBody(0, 0x1C00_0001, callCode,
                     [new TrRmRegisterBodyCallInput(1, 1, 0)]),
                 targetReturnsUnit: true, targetParameterTypeSpecRef: 0xF200_0000));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateCallSiteBody(0, 0x1C00_0001, callCode, []),
                 targetReturnsUnit: true, targetParameterTypeSpecRef: 0xF200_0000));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateCallSiteBody(0, 0x1C00_0001, callCode,
                     [new TrRmRegisterBodyCallInput(1, 1, 0)]),
@@ -1009,7 +1038,7 @@ public sealed class TrRmRegisterBodyReaderTests
             callerParameterTypeSpecRef: 0xF200_0008);
 
         var wrongInput = CreateHomeCallSiteBody(0xF200_0009, 0, 0);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(wrongInput,
                 targetReturnsUnit: true,
                 targetParameterTypeSpecRef: 0xF200_0008,
@@ -1019,7 +1048,7 @@ public sealed class TrRmRegisterBodyReaderTests
         ValidateSelectedImportedMethodBodyMaps(matchingResult);
 
         var wrongResult = CreateHomeCallSiteBody(0, 0xF200_0009, 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(wrongResult));
     }
 
@@ -1038,17 +1067,17 @@ public sealed class TrRmRegisterBodyReaderTests
 
         var readOnlyWrite = CreateForeignInvocationCallSiteHomeArtifact(
             access: 2, actualQualifier: 0, actualPointeeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateForeignInvocationCallSiteHomeArtifact(readOnlyWrite));
 
         var readOnlyReadWrite = CreateForeignInvocationCallSiteHomeArtifact(
             access: 3, actualQualifier: 0, actualPointeeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateForeignInvocationCallSiteHomeArtifact(readOnlyReadWrite));
 
         var wrongPointee = CreateForeignInvocationCallSiteHomeArtifact(
             access: 1, actualQualifier: 0, actualPointeeCode: 0x0E);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateForeignInvocationCallSiteHomeArtifact(wrongPointee));
     }
 
@@ -1072,17 +1101,17 @@ public sealed class TrRmRegisterBodyReaderTests
 
         var readOnlyWrite = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
             access: 2, actualQualifier: 0, actualPointeeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(readOnlyWrite));
 
         var readOnlyReadWrite = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
             access: 3, actualQualifier: 0, actualPointeeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(readOnlyReadWrite));
 
         var wrongPointee = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
             access: 1, actualQualifier: 0, actualPointeeCode: 0x0E);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(wrongPointee));
     }
 
@@ -1098,19 +1127,19 @@ public sealed class TrRmRegisterBodyReaderTests
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
                 doesNotReturn: true, resultKind: 0, hasContinuation: false)));
 
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
                 doesNotReturn: true, resultKind: 1, hasContinuation: false)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
                 doesNotReturn: true, resultKind: 0, hasContinuation: true)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: false, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
@@ -1148,13 +1177,13 @@ public sealed class TrRmRegisterBodyReaderTests
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadFormalPair: true)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadTargetFromHome: true,
                 loadInputFromHome: true, callableHomeIsLocal: true)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: false, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
@@ -1165,13 +1194,13 @@ public sealed class TrRmRegisterBodyReaderTests
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
                 doesNotReturn: true, resultKind: 0, hasContinuation: false,
                 targetKind: 2, registerTargetInitialized: true)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, registerTargetInitialized: true,
                 entryArgumentTypeToken: 0xF200_0009)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
@@ -1207,22 +1236,22 @@ public sealed class TrRmRegisterBodyReaderTests
         Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(floatResult));
 
         var wrongFormal = CreateStandardConstantCallSiteArtifact(0xF200_0009);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(wrongFormal));
         var wrongArithmeticFormal = CreateStandardConstantCallSiteArtifact(
             0xF200_0009, addArithmetic: true);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(wrongArithmeticFormal));
         var wrongFloatFormal = CreateStandardConstantCallSiteArtifact(
             0xF200_0008, addArithmetic: true,
             constantTypeSpecRef: 0xF200_0014,
             constantBits: 0x4228_0000, binaryOpcode: 0x27, unaryOpcode: 0x26);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(wrongFloatFormal));
         var mismatchedOperands = CreateStandardConstantCallSiteArtifact(
             0xF200_0008, addArithmetic: true,
             callerInputTypeSpecRef: 0xF200_0009);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(mismatchedOperands));
 
         var bitwiseResult = CreateStandardConstantCallSiteArtifact(
@@ -1259,9 +1288,9 @@ public sealed class TrRmRegisterBodyReaderTests
         var wrongConvertedFormal = CreateStandardConstantCallSiteArtifact(
             0xF200_0008, registerInstructionPrefix: [0x51, 0x00],
             registerTargetTypeToken: 0xF200_0009);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(wrongConvertedFormal));
-        foreach (var conversionOpcode in new byte[] { 0x50, 0x52 })
+        foreach (var conversionOpcode in "PR"u8.ToArray())
         {
             var convertedFloatResult = CreateStandardConstantCallSiteArtifact(
                 0xF200_0014, registerInstructionPrefix: [conversionOpcode, 0x00],
@@ -1269,7 +1298,7 @@ public sealed class TrRmRegisterBodyReaderTests
             Assert.DoesNotThrow(() =>
                 ValidateSelectedArtifactBodyMaps(convertedFloatResult));
         }
-        foreach (var shiftOpcode in new byte[] { 0x34, 0x35, 0x36 })
+        foreach (var shiftOpcode in "456"u8.ToArray())
         {
             foreach (var countTypeSpecRef in new uint[]
                 { 0xF200_0008, 0xF200_0009, 0xF200_0010, 0xF200_0011 })
@@ -1290,7 +1319,7 @@ public sealed class TrRmRegisterBodyReaderTests
                     0x11, 0x01, shiftOpcode, 0x10,
                 ],
                 callerInputTypeSpecRef: 0xF200_0014);
-            Assert.Throws<InvalidDataException>(() =>
+            _ = Assert.Throws<InvalidDataException>(() =>
                 ValidateSelectedArtifactBodyMaps(floatingCount));
         }
         var nativeShiftResult = CreateStandardConstantCallSiteArtifact(
@@ -1300,31 +1329,31 @@ public sealed class TrRmRegisterBodyReaderTests
             secondCallerInputTypeSpecRef: 0xF200_0011);
         Assert.DoesNotThrow(() =>
             ValidateSelectedArtifactBodyMaps(nativeShiftResult));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadFormalsToRegisters: true,
                 targetFormalOrdinal: 2)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadFormalsToRegisters: true,
                 targetFormalOrdinal: 1)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadFormalsToRegisters: true,
                 inputFormalOrdinal: 0)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadFormalPair: true,
                 firstFormalPairOrdinal: 1)));
-        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+        _ = Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
@@ -1344,13 +1373,13 @@ public sealed class TrRmRegisterBodyReaderTests
 
         var wrongFormal = CreateStandardCallSiteResultPropagationArtifact(
             0xF200_0009, targetKind: 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(wrongFormal));
 
         var transferredInput = CreateStandardCallSiteResultPropagationArtifact(
             0xF200_0008, targetKind: 2, transferFirstInput: true,
             receiverRegister: 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(transferredInput));
     }
 
@@ -1365,7 +1394,7 @@ public sealed class TrRmRegisterBodyReaderTests
             CreateBoundMethodCallBody([0xE1, 0, 0, 0, 0x18, 0],
                 0x1C00_0001));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedImportedMethodBodyMaps(
                 CreateBoundMethodCallBody([0xE1, 0xF0, 0, 0, 0x18, 0],
                     0x1C00_0001)));
@@ -1396,6 +1425,76 @@ public sealed class TrRmRegisterBodyReaderTests
         var artifact = CreateStandardArtifactWithFieldMaps(body);
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    [Test]
+    public void RequiresLayoutQueriesFeatureForTypeIdentityAndLayoutQueryBodies()
+    {
+        var typeIdentityBody = CreateBodyWithRecord([
+            1, 0, 0, 0,
+            1, 0, 0, 0,
+            0, 2, 0, 0, 0,
+        ]);
+        Assert.That(new TrRmRegisterBodyReader(typeIdentityBody)
+            .HasTypeIdentityCarrier, Is.True);
+
+        var typeCounts = new uint[5];
+        typeCounts[1] = 1;
+        var layoutQueryBody = CreateBody(0x02, typeCounts,
+            [0xDE, 0x50, 0, 0, 0x18, 0]);
+
+        var reader = new TrRmRegisterBodyReader(layoutQueryBody);
+        Assert.That(reader.HasLayoutQueryOperation, Is.True);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                CreateStandardArtifact(layoutQueryBody)));
+        var missingLayoutQueriesRejected = false;
+        try
+        {
+            tables.ValidateRegisterBodyMapsForMethod(1);
+        }
+        catch (InvalidDataException)
+        {
+            missingLayoutQueriesRejected = true;
+        }
+        Assert.That(missingLayoutQueriesRejected, Is.True);
+
+        tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                CreateStandardArtifact(layoutQueryBody,
+                    includeLayoutQueries: true)));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    [Test]
+    public void RequiresLayoutQueriesFeatureForNonemptyFieldMap()
+    {
+        var fieldCounts = new uint[5];
+        fieldCounts[3] = 1;
+        var body = CreateBody(0x08, fieldCounts);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(
+                CreateStandardArtifactWithFieldMaps(body,
+                    includeLayoutQueries: false,
+                    includeFieldDefImport: false,
+                    includeFieldPath: false)));
+        var missingLayoutQueriesRejected = false;
+        try
+        {
+            tables.ValidateRegisterBodyMapsForMethod(1);
+        }
+        catch (InvalidDataException)
+        {
+            missingLayoutQueriesRejected = true;
+        }
+        Assert.That(missingLayoutQueriesRejected, Is.True);
+
+        tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            new TrRmArtifactIndex(CreateStandardArtifactWithFieldMaps(body,
+                includeLayoutQueries: true,
+                includeFieldDefImport: false,
+                includeFieldPath: false)));
         tables.ValidateRegisterBodyMapsForMethod(1);
     }
 
@@ -1512,11 +1611,11 @@ public sealed class TrRmRegisterBodyReaderTests
         ValidateSelectedConstructedTypeMap(body,
             constantFormal: true, includeFeature11: true);
 
-        Assert.Throws<NotSupportedException>(
+        _ = Assert.Throws<NotSupportedException>(
             () => ValidateSelectedConstructedTypeMap(body,
                 constantFormal: true));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedConstructedTypeMap(body,
             constantFormal: true, includeFeature11: true,
             constantTypeSpecRef: 0xF200_000D));
@@ -1530,12 +1629,12 @@ public sealed class TrRmRegisterBodyReaderTests
             methodParameterTypeSpecRef: 5,
             constantFormal: true, includeFeature11: true);
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             ValidateSelectedConstructedTypeMap(body,
                 methodParameterTypeSpecRef: 5,
                 constantFormal: true));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedConstructedTypeMap(body,
                 methodParameterTypeSpecRef: 5,
                 constantFormal: true, includeFeature11: true,
@@ -1559,7 +1658,7 @@ public sealed class TrRmRegisterBodyReaderTests
         var mismatchedArgument = (byte[])body.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             mismatchedArgument.AsSpan(mapStart + 8), 0x1100_0009);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedConstructedTypeMap(
                 mismatchedArgument, methodParameterTypeSpecRef: 7));
     }
@@ -1601,7 +1700,7 @@ public sealed class TrRmRegisterBodyReaderTests
             includeFeature11: true,
             duplicateConstantSource: true);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedConstructedTypeMap(body,
                 methodParameterTypeSpecRef: 5,
                 constantFormal: true,
@@ -1623,7 +1722,7 @@ public sealed class TrRmRegisterBodyReaderTests
             importedTypeOwnerIsDifferentModule: true);
         TrRmStructuralMetadataValidator.Validate(artifact);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedConstructedTypeMap(body,
                 importedTypeOwnerIsDifferentModule: true));
     }
@@ -1637,12 +1736,12 @@ public sealed class TrRmRegisterBodyReaderTests
         counts[2] = 1;
         var directBody = CreateBody(0x07, counts);
         BinaryPrimitives.WriteUInt32LittleEndian(directBody.AsSpan(41), 0x1600_0002);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedTwoModuleBodyMaps(directBody));
 
         var importedBody = CreateBody(0x07, counts);
         BinaryPrimitives.WriteUInt32LittleEndian(importedBody.AsSpan(41), 0x1C00_0001);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedTwoModuleBodyMaps(importedBody));
     }
 
@@ -1704,7 +1803,7 @@ public sealed class TrRmRegisterBodyReaderTests
 
     private static void AssertInvalid(byte[] body)
     {
-        Assert.Throws<InvalidDataException>(() => ReadRegisterBody(body));
+        _ = Assert.Throws<InvalidDataException>(() => ReadRegisterBody(body));
     }
 
     private static void ReadRegisterBody(byte[] body)
@@ -1796,7 +1895,7 @@ public sealed class TrRmRegisterBodyReaderTests
         };
         var filterCode = valueKind == 1 && initializeRegister
             ? new byte[] { 0x13, 0, 0xB6, 5 }
-            : new byte[] { 0xB6, 5 };
+            : [0xB6, 5];
         var filterOffset = 4;
         var handlerOffset = filterOffset + filterCode.Length;
         var code = new byte[handlerOffset + 2];
@@ -1956,6 +2055,37 @@ public sealed class TrRmRegisterBodyReaderTests
         BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(homeMapStart + 8),
             typeMapToken);
         return body;
+    }
+
+    private static byte[] CreateNativeOutputReservationBody(
+        TrRmArtifactSchema schema, bool includeReservation = true,
+        uint formalOrdinal = 0, byte action = 0)
+    {
+        var homeMap = new byte[8];
+        var methodMap = new byte[4];
+        var entryState = new byte[8];
+        entryState[0] = 0x01;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            1, 0, 0, 0, [new TrRmRegisterBodyCallInput(2, 6, 0)], [],
+            schema: schema);
+        var records = new List<ReadOnlyMemory<byte>>
+        {
+            entryState,
+            callSite,
+        };
+        if (includeReservation)
+        {
+            records.Add(TrRmRegisterBodyRecordWriter
+                .EncodeNativeOutputReservation(1, 0, formalOrdinal));
+        }
+
+        byte[] code = includeReservation
+            ? [0xDF, action, 2, 0, 0xE0, 0, 1, 0, 0x18, 0]
+            : [0xE0, 0, 1, 0, 0x18, 0];
+        return TrRmRegisterBodyWriter.Encode(homeMap, default, methodMap,
+            default, default,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            records, code, schema: schema);
     }
 
     private static byte[] CreateCallSiteBody(byte resultKind,
@@ -2274,7 +2404,8 @@ public sealed class TrRmRegisterBodyReaderTests
                     secondCallerInputTypeSpecRef.GetValueOrDefault(), 0),
                 new TrRmParamRow(2, 0, targetFormalTypeSpecRef, 0),
             ],
-            _ => throw new ArgumentOutOfRangeException(nameof(callerParameterCount)),
+            _ => throw new InvalidOperationException(
+                "Unsupported caller parameter count."),
         };
         var parameterBytes = TrRmParamTableWriter.Encode(
             parameterRows, signatures, typeSpecs);
@@ -2289,7 +2420,7 @@ public sealed class TrRmRegisterBodyReaderTests
             strings, modules, typeDefs, signatures, 0, 1);
         var typeTokens = registerTargetTypeToken is uint targetType
             ? new[] { targetType }
-            : Array.Empty<uint>();
+            : [];
         var maps = TrRmRegisterBodyMapBuilder.Create(
             typeTokens, [0x1600_0002]);
         var constantMap = new byte[8];
@@ -2322,7 +2453,7 @@ public sealed class TrRmRegisterBodyReaderTests
             [entryState, callSite], code);
 
         var scalarPayload = constantTypeSpecRef == 0xF200_0001
-            ? new byte[] { (byte)constantBits }
+            ? [(byte)constantBits]
             : new byte[sizeof(uint)];
         if (scalarPayload.Length != 1)
         {
@@ -2748,7 +2879,9 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     private static byte[] CreateStandardArtifactWithFieldMaps(byte[] body,
-        uint formalTypeSpecRef = 3, uint receiverTypeSpecRef = 0)
+        uint formalTypeSpecRef = 3, uint receiverTypeSpecRef = 0,
+        bool includeLayoutQueries = true, bool includeFieldDefImport = true,
+        bool includeFieldPath = true)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("main", 0), ("Example", 0),
@@ -2756,17 +2889,19 @@ public sealed class TrRmRegisterBodyReaderTests
             ("type-key", 0), ("field-key", 0),
         ]);
         var strings = new TrRmStringTableReader(stringsBytes, 9);
+        var featureCount = includeLayoutQueries ? 2 : 1;
         var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1, 1, 1),
-        ], strings, 1, 1, 1, 0, 1);
+            new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1, 1, featureCount),
+        ], strings, 1, 1, 1, 0, featureCount);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            1, 1, 1, 0, 1);
+            1, 1, 1, 0, featureCount);
         var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
             new TrRmModuleRefRow(7, 0, 0),
         ], strings, modules);
-        var featuresBytes = TrRmFeatureTableWriter.Encode([
-            new TrRmFeatureRow(11, 1),
-        ]);
+        var featureRows = includeLayoutQueries
+            ? (TrRmFeatureRow[])[new TrRmFeatureRow(11, 1), TrRmFeatureRow.LayoutQueries]
+            : [new TrRmFeatureRow(11, 1)];
+        var featuresBytes = TrRmFeatureTableWriter.Encode(featureRows);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(0),
             TrRmTypeSpecTableWriter.Builtin(8),
@@ -2809,18 +2944,23 @@ public sealed class TrRmRegisterBodyReaderTests
         ], signatures, typeSpecs);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1,
             strings, modules);
-        var importRows = new[]
-        {
-            new TrRmImportRow(1, 8, 0x1300_0001),
-            new TrRmImportRow(1, 9, 0x1400_0001),
-        };
+        var importRows = includeFieldDefImport
+            ? (TrRmImportRow[])[
+                new TrRmImportRow(1, 8, 0x1300_0001),
+                new TrRmImportRow(1, 9, 0x1400_0001),
+            ]
+            : [new TrRmImportRow(1, 8, 0x1300_0001)];
         var importBytes = TrRmImportTableWriter.Encode(importRows, strings,
             moduleRefs, typeDefs, methods, default, default, default, fields);
         var imports = new TrRmImportTableReader(importBytes, importRows.Length,
             strings, moduleRefs, typeDefs, methods, default, default, default, fields);
-        var fieldPathsBytes = TrRmFieldPathTableWriter.Encode([
-            new TrRmFieldPathRow(3, [0x1C00_0002]),
-        ], typeSpecs, fields, imports);
+        var fieldPathBytes = includeFieldPath
+            ? TrRmFieldPathTableWriter.Encode([
+                new TrRmFieldPathRow(3, [
+                    includeFieldDefImport ? 0x1C00_0002u : 0x1400_0001u,
+                ]),
+            ], typeSpecs, fields, imports)
+            : [];
         var constantSourcesBytes = TrRmConstantSourceTableWriter.Encode([
             new TrRmConstantSourceRow(1, 1),
         ], 1, 0, 0);
@@ -2832,26 +2972,31 @@ public sealed class TrRmRegisterBodyReaderTests
         frozenValueBytes[4] = 1;
         BinaryPrimitives.WriteUInt32LittleEndian(frozenValueBytes.AsSpan(8), 1);
 
-        return TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, moduleBytes),
-            new TrRmSection(0x0002, 0, 9, stringsBytes),
-            new TrRmSection(0x0003, 0, 1, blobBytes),
-            new TrRmSection(0x0004, 0, 1, featuresBytes),
-            new TrRmSection(0x0010, 0, 1, moduleRefBytes),
-            new TrRmSection(0x0011, 0, 9, typeSpecBytes),
-            new TrRmSection(0x0013, 0, 1, typeDefBytes),
-            new TrRmSection(0x0014, 0, 1, fieldBytes),
-            new TrRmSection(0x0015, 0, 1, layoutBytes),
-            new TrRmSection(0x0016, 0, 1, methodBytes),
-            new TrRmSection(0x0017, 0, 1, signatureBytes),
-            new TrRmSection(0x0018, 0, 1, paramBytes),
-            new TrRmSection(0x001C, 0, 2, importBytes),
-            new TrRmSection(0x0020, 0, 1,
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 9, stringsBytes),
+            new(0x0003, 0, 1, blobBytes),
+            new(0x0004, 0, (uint)featureCount, featuresBytes),
+            new(0x0010, 0, 1, moduleRefBytes),
+            new(0x0011, 0, 9, typeSpecBytes),
+            new(0x0013, 0, 1, typeDefBytes),
+            new(0x0014, 0, 1, fieldBytes),
+            new(0x0015, 0, 1, layoutBytes),
+            new(0x0016, 0, 1, methodBytes),
+            new(0x0017, 0, 1, signatureBytes),
+            new(0x0018, 0, 1, paramBytes),
+            new(0x001C, 0, (uint)importRows.Length, importBytes),
+            new(0x0020, 0, 1,
                 TrRmVariableTableWriter.EncodeBodies([body])),
-            new TrRmSection(0x0030, 0, 1, constantSourcesBytes),
-            new TrRmSection(0x003F, 0, 1, frozenValueBytes),
-            new TrRmSection(0x004B, 0, 1, fieldPathsBytes),
-        ]);
+            new(0x0030, 0, 1, constantSourcesBytes),
+            new(0x003F, 0, 1, frozenValueBytes),
+        };
+        if (includeFieldPath)
+        {
+            sections.Add(new TrRmSection(0x004B, 0, 1, fieldPathBytes));
+        }
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static byte[] CreateStandardArtifactWithConstructedTypeMap(byte[] body,
@@ -2887,11 +3032,11 @@ public sealed class TrRmRegisterBodyReaderTests
                     featureFirst, featureCount),
                 new TrRmModuleRow(10, 0, 0, 0, 1, 2, 2, 1),
             }
-            : new[]
-            {
+            :
+            [
                 new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1,
                     featureFirst, featureCount),
-            };
+            ];
         var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows,
             strings, 1, 2, 1, 0, featureCount);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleRows.Length,
@@ -2973,23 +3118,23 @@ public sealed class TrRmRegisterBodyReaderTests
             ? TrRmParamTableWriter.Encode([
                 new TrRmParamRow(1, 0, methodParameterTypeSpecRef, 0),
             ], signatures, typeSpecs)
-            : Array.Empty<byte>();
+            : [];
         var genericParamRows = constantFormal
             ? new[] {
                 new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
                     2, 0, 0, constantTypeSpecRef, 0),
             }
             : equivalentLocalAndImportedGenericDefinitions
-                ? new[] {
+                ? [
                     new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
                         1, 1, 1, 0, 0),
                     new TrRmGenericParamRow(0x1300_0002, 0, 6, 0, 0,
                         1, 1, 1, 0, 0),
-                }
-                : new[] {
+                ]
+                : [
                     new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
                         1, 1, 1, 0, 0),
-                };
+                ];
         var constantSourceCount = constantFormal ? 1 : 0;
         if (constantFormal && duplicateConstantSource)
         {
@@ -3087,12 +3232,13 @@ public sealed class TrRmRegisterBodyReaderTests
         }
 
         var instructions = code ?? [0x00];
-        var bytes = new List<byte>(128);
-        bytes.Add(0x01);
-        bytes.Add(0x01);
-        bytes.Add(mapMask);
-        bytes.Add(0);
-        bytes.Add(0);
+        var bytes = new List<byte>(128) {
+            0x01,
+            0x01,
+            mapMask,
+            0,
+            0
+        };
         for (var map = 0; map < counts.Length; map++)
         {
             if ((mapMask & (1 << map)) != 0)
@@ -3151,20 +3297,27 @@ public sealed class TrRmRegisterBodyReaderTests
         }
 
         bytes.AddRange(instructions);
-        return bytes.ToArray();
+        return [.. bytes];
     }
 
-    private static byte[] CreateStandardArtifact(byte[] body)
+    private static byte[] CreateStandardArtifact(byte[] body,
+        bool includeLayoutQueries = false)
     {
         var stringBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("main", 0),
         ]);
         var strings = new TrRmStringTableReader(stringBytes, 3);
+        var featureRows = includeLayoutQueries
+            ? (TrRmFeatureRow[])[TrRmFeatureRow.LayoutQueries]
+            : [];
         var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1),
-        ], strings, 0, 0, 1, 0, 0);
+            new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1,
+                featureRows.Length == 0 ? 0 : 1, featureRows.Length),
+        ], strings, 0, 0, 1, 0, featureRows.Length);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, 0, 1, 0, 0);
+            0, 0, 1, 0, featureRows.Length);
+        var featureBytes = featureRows.Length == 0 ? []
+            : TrRmFeatureTableWriter.Encode(featureRows);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(0),
             TrRmTypeSpecTableWriter.Builtin(8),
@@ -3180,15 +3333,22 @@ public sealed class TrRmRegisterBodyReaderTests
         var methodBytes = TrRmMethodDefTableWriter.Encode([
             new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
         ], strings, modules, typeDefs, signatures, 0, 1);
-        return TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, moduleBytes),
-            new TrRmSection(0x0002, 0, 3, stringBytes),
-            new TrRmSection(0x0011, 0, 2, typeSpecBytes),
-            new TrRmSection(0x0016, 0, 1, methodBytes),
-            new TrRmSection(0x0017, 0, 1, signatureBytes),
-            new TrRmSection(0x0020, 0, 1,
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 3, stringBytes),
+            new(0x0011, 0, 2, typeSpecBytes),
+            new(0x0016, 0, 1, methodBytes),
+            new(0x0017, 0, 1, signatureBytes),
+            new(0x0020, 0, 1,
                 TrRmVariableTableWriter.EncodeBodies([body])),
-        ]);
+        };
+        if (featureRows.Length != 0)
+        {
+            sections.Insert(2, new TrRmSection(0x0004, 0,
+                (uint)featureRows.Length, featureBytes));
+        }
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static byte[] CreateStandardArtifactWithImportedMethod(byte[] body,
@@ -3260,7 +3420,7 @@ public sealed class TrRmRegisterBodyReaderTests
                 new TrRmContractRow(0x1600_0001, 1, new byte[] { 2, 0, 0, 0 }),
                 new TrRmContractRow(0x1600_0002, 1, new byte[] { 2, 0, 0, 0 }),
             ], typeDefs, methods, signatures, default, typeSpecs)
-            : Array.Empty<byte>();
+            : [];
         var importBytes = TrRmImportTableWriter.Encode([
             new TrRmImportRow(1, 6, 0x1600_0002),
         ], strings, new TrRmModuleRefTableReader(moduleRefBytes, 1, strings, modules),

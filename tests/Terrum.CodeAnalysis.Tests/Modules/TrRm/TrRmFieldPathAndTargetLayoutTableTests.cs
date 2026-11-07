@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmFieldPathAndTargetLayoutTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmFieldPathAndTargetLayoutTableTests
 {
     [Test]
     public void ReadsAndWritesFieldPathsAndExclusiveLayoutObservationRanges()
@@ -131,15 +132,15 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
     public void RejectsInvalidFieldReferencesAndFieldPathShapes()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFieldReferences(fixture, 0x1D00_0001));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFieldReferences(fixture, 0x1C00_0001));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFieldPath(fixture, new TrRmFieldPathRow(0, [0x1400_0001])));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFieldPath(fixture, new TrRmFieldPathRow(1, [0x1400_0003])));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFieldPath(fixture, new TrRmFieldPathRow(1, [])));
 
         var malformedPath = new byte[20];
@@ -147,7 +148,7 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
         BinaryPrimitives.WriteUInt32LittleEndian(malformedPath.AsSpan(8), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(malformedPath.AsSpan(12), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(malformedPath.AsSpan(16), 0x1D00_0001);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(fixture.CreateArtifact(
                 fixture.DependencyBytes, fixture.DependencyFieldBytes,
                 malformedPath, fieldPathCount: 1)));
@@ -157,23 +158,23 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
     public void RejectsInvalidQueryRangesProfilesAndFieldRangeOwnership()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
             new TrRmTargetLayoutDependencyRow(1, 0, 0, 1, 1, 1, 1),
         ], 1));
-        Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
             new TrRmTargetLayoutDependencyRow(3, 0, 0, 1, 1, 0, 0),
         ], 0));
-        Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
             new TrRmTargetLayoutDependencyRow(1, 0, 0, 1, 2, 0, 0),
         ], 0));
-        Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
             new TrRmTargetLayoutDependencyRow(3, 0, 0, 1, 1, 1, 1),
             new TrRmTargetLayoutDependencyRow(4, 0, 0, 1, 1, 1, 1),
         ], 1));
-        Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
             new TrRmTargetLayoutDependencyRow(3, 0, 0, 1, 1, 1, 1),
         ], 2));
-        Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeDependencies(fixture, [
             new TrRmTargetLayoutDependencyRow(5, 0, 0, 1, 1, 0, 0),
         ], 0));
     }
@@ -184,20 +185,20 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
         var fixture = CreateFixture();
         var malformed = (byte[])fixture.DependencyBytes.Clone();
         malformed[0] = 5;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(fixture.CreateArtifact(
                 malformed, fixture.DependencyFieldBytes, fixture.FieldPathBytes)));
 
         malformed = (byte[])fixture.DependencyBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(8), 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(fixture.CreateArtifact(
                 malformed, fixture.DependencyFieldBytes, fixture.FieldPathBytes)));
 
         malformed = (byte[])fixture.DependencyBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(12), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(16), 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(fixture.CreateArtifact(
                 malformed, fixture.DependencyFieldBytes, fixture.FieldPathBytes)));
     }
@@ -231,12 +232,15 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
             ("Field", 0), ("TypeKey", 0), ("FieldKey", 0),
         ]);
         var strings = new TrRmStringTableReader(stringBytes, 7);
+        var featureBytes = TrRmFeatureTableWriter.Encode([
+            TrRmFeatureRow.LayoutQueries,
+        ]);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1),
-            new TrRmModuleRow(3, 1, 0, 0, 1, 2, 1, 1),
-        ], strings, 1, 2, 0, 0, 0);
+            new TrRmModuleRow(3, 1, 0, 0, 1, 2, 1, 1, 1, 1),
+        ], strings, 1, 2, 0, 0, 1);
         var modules = new TrRmModuleTableReader(moduleBytes, 2, strings,
-            1, 2, 0, 0, 0);
+            1, 2, 0, 0, 1);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
         ], 2, 1, 0, 0);
@@ -283,8 +287,8 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
         var fieldPathBytes = TrRmFieldPathTableWriter.Encode([
             new TrRmFieldPathRow(1, [0x1400_0001, 0x1C00_0002]),
         ], typeSpecs, fields, imports);
-        return new Fixture(moduleBytes, stringBytes, typeSpecBytes, typeDefBytes,
-            fieldBytes, moduleRefBytes, importsBytes, layoutBytes,
+        return new Fixture(moduleBytes, stringBytes, featureBytes,
+            typeSpecBytes, typeDefBytes, fieldBytes, moduleRefBytes, importsBytes, layoutBytes,
             targetProfileBytes, dependencyBytes, dependencyFieldBytes, fieldPathBytes);
     }
 
@@ -292,7 +296,7 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
     {
         var strings = new TrRmStringTableReader(fixture.Strings, 7);
         var modules = new TrRmModuleTableReader(fixture.Modules, 2, strings,
-            1, 2, 0, 0, 0);
+            1, 2, 0, 0, 1);
         var typeSpecs = new TrRmTypeSpecTableReader(fixture.TypeSpecBytes, 1,
             2, 1, 0, 0);
         var types = new TrRmTypeDefTableReader(fixture.TypeDefs, 2,
@@ -311,6 +315,7 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
     private sealed record Fixture(
         byte[] Modules,
         byte[] Strings,
+        byte[] Features,
         byte[] TypeSpecBytes,
         byte[] TypeDefs,
         byte[] FieldsBytes,
@@ -327,6 +332,7 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
             => TrRmArtifactWriter.Encode([
                 new TrRmSection(0x0001, 0, 2, Modules),
                 new TrRmSection(0x0002, 0, 7, Strings),
+                new TrRmSection(0x0004, 0, 1, Features),
                 new TrRmSection(0x0010, 0, 1, ModuleRefs),
                 new TrRmSection(0x0011, 0, 1, TypeSpecBytes),
                 new TrRmSection(0x0013, 0, 2, TypeDefs),

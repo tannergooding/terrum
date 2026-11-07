@@ -7,18 +7,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class LayoutTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class LayoutTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -284,8 +284,8 @@ public sealed class LayoutTableValidationComponentTests
         for (var row = 0; row < count; row++)
         {
             WriteWord(bytes, row * 16, 1);
-            WriteWord(bytes, row * 16 + 4, 4);
-            WriteWord(bytes, row * 16 + 8, 1);
+            WriteWord(bytes, (row * 16) + 4, 4);
+            WriteWord(bytes, (row * 16) + 8, 1);
         }
         return bytes;
     }

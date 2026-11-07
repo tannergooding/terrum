@@ -9,7 +9,8 @@ using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmFrozenValueNodeTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmFrozenValueNodeTableTests
 {
     [TestCase(0x00, 0)]
     [TestCase(0x01, 1)]
@@ -38,14 +39,48 @@ public sealed class TrRmFrozenValueNodeTableTests
     public void ScalarCodecPreservesExactFixedWidthPayload(int typeCode, int width)
     {
         var payload = CreatePayload(typeCode, width);
-        var table = CreateScalarTable(typeCode, payload);
+        var (Nodes, Blobs, BlobCount) = CreateScalarTable(typeCode, payload);
         var typeSpecs = CreateTypeSpecs(typeCode);
-        var blobs = CreateBlobs(table.Blobs, table.BlobCount);
-        var nodes = new TrRmFrozenValueNodeTableReader(table.Nodes, 1, typeSpecs,
-            table.BlobCount, 0, 0);
+        var blobs = CreateBlobs(Blobs, BlobCount);
+        var nodes = new TrRmFrozenValueNodeTableReader(Nodes, 1, typeSpecs,
+            BlobCount, 0, 0);
 
         Assert.That(nodes.GetKind(1), Is.EqualTo((byte)1));
         Assert.That(nodes.GetScalarPayload(1, blobs).ToArray(), Is.EqualTo(payload));
+    }
+
+    [Test]
+    public void FrozenValueNodeReaderChargesFixedFieldsAtTheExactWorkBoundary()
+    {
+        var (Nodes, _, BlobCount) = CreateScalarTable(0x0D, [1, 2, 3, 4]);
+        var typeSpecs = CreateTypeSpecs(0x0D);
+        var exactLedger = new TrRmA3LayoutResourceLedger();
+        exactLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 36);
+        var exactReader = new TrRmFrozenValueNodeTableReader(Nodes, 1,
+            typeSpecs, BlobCount, 0, 0, exactLedger);
+
+        Assert.That(exactReader.GetKind(1), Is.EqualTo((byte)1));
+        Assert.That(exactLedger.WorkRemaining, Is.Zero);
+
+        var shortLedger = new TrRmA3LayoutResourceLedger();
+        shortLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 35);
+        TrRmResourceLimitException? exception = null;
+        try
+        {
+            var shortReader = new TrRmFrozenValueNodeTableReader(Nodes,
+                1, typeSpecs, BlobCount, 0, 0, shortLedger);
+            _ = shortReader.GetKind(1);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.That(exception!.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.WorkLimit + 1)));
     }
 
     [TestCase((uint)0xD800)]
@@ -54,11 +89,11 @@ public sealed class TrRmFrozenValueNodeTableTests
     {
         var payload = new byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(payload, value);
-        var table = CreateRawScalarTable(0x05, payload);
+        var (Nodes, Blobs, BlobCount) = CreateRawScalarTable(0x05, payload);
         var typeSpecs = CreateTypeSpecs(0x05);
-        var blobs = CreateBlobs(table.Blobs, table.BlobCount);
-        var nodes = new TrRmFrozenValueNodeTableReader(table.Nodes, 1, typeSpecs,
-            table.BlobCount, 0, 0);
+        var blobs = CreateBlobs(Blobs, BlobCount);
+        var nodes = new TrRmFrozenValueNodeTableReader(Nodes, 1, typeSpecs,
+            BlobCount, 0, 0);
 
         AssertInvalidScalar(nodes, blobs);
     }
@@ -66,15 +101,15 @@ public sealed class TrRmFrozenValueNodeTableTests
     [Test]
     public void ScalarCodecRejectsNonBooleanByteAndWrongBlobExtent()
     {
-        Assert.Throws<InvalidDataException>(() => CreateScalarTable(0x01, [2]));
-        var boolTable = CreateRawScalarTable(0x01, [2]);
+        _ = Assert.Throws<InvalidDataException>(() => CreateScalarTable(0x01, [2]));
+        var (Nodes, Blobs, BlobCount) = CreateRawScalarTable(0x01, [2]);
         var boolTypes = CreateTypeSpecs(0x01);
-        var boolBlobs = CreateBlobs(boolTable.Blobs, boolTable.BlobCount);
-        var boolNodes = new TrRmFrozenValueNodeTableReader(boolTable.Nodes, 1,
-            boolTypes, boolTable.BlobCount, 0, 0);
+        var boolBlobs = CreateBlobs(Blobs, BlobCount);
+        var boolNodes = new TrRmFrozenValueNodeTableReader(Nodes, 1,
+            boolTypes, BlobCount, 0, 0);
         AssertInvalidScalar(boolNodes, boolBlobs);
 
-        Assert.Throws<InvalidDataException>(() => CreateScalarTable(0x08, [1, 2]));
+        _ = Assert.Throws<InvalidDataException>(() => CreateScalarTable(0x08, [1, 2]));
         var wrongWidthTable = CreateRawScalarTable(0x08, [1, 2]);
         var intTypes = CreateTypeSpecs(0x08);
         var wrongWidthBlobs = CreateBlobs(wrongWidthTable.Blobs, wrongWidthTable.BlobCount);
@@ -87,12 +122,12 @@ public sealed class TrRmFrozenValueNodeTableTests
     public void UnitRequiresNoBlobReference()
     {
         var typeSpecs = CreateTypeSpecs(0x00);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             CreateScalarTable(0x00, [], forceBlobRow: true));
-        var table = CreateRawScalarTable(0x00, [], forceBlobRow: true);
-        var blobs = CreateBlobs(table.Blobs, table.BlobCount);
-        var nodes = new TrRmFrozenValueNodeTableReader(table.Nodes, 1,
-            typeSpecs, table.BlobCount, 0, 0);
+        var (Nodes, Blobs, BlobCount) = CreateRawScalarTable(0x00, [], forceBlobRow: true);
+        var blobs = CreateBlobs(Blobs, BlobCount);
+        var nodes = new TrRmFrozenValueNodeTableReader(Nodes, 1,
+            typeSpecs, BlobCount, 0, 0);
 
         AssertInvalidScalar(nodes, blobs);
     }
@@ -100,13 +135,13 @@ public sealed class TrRmFrozenValueNodeTableTests
     [Test]
     public void ScalarCodecRejectsNativeWidthAndNominalTypesAsUnsupported()
     {
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             CreateScalarTable(0x10, new byte[8]));
-        var nativeWidthTable = CreateRawScalarTable(0x10, new byte[8]);
+        var (Nodes, Blobs, BlobCount) = CreateRawScalarTable(0x10, new byte[8]);
         var nativeWidthTypes = CreateTypeSpecs(0x10);
-        var nativeWidthBlobs = CreateBlobs(nativeWidthTable.Blobs, nativeWidthTable.BlobCount);
-        var nativeWidthNodes = new TrRmFrozenValueNodeTableReader(nativeWidthTable.Nodes,
-            1, nativeWidthTypes, nativeWidthTable.BlobCount, 0, 0);
+        var nativeWidthBlobs = CreateBlobs(Blobs, BlobCount);
+        var nativeWidthNodes = new TrRmFrozenValueNodeTableReader(Nodes,
+            1, nativeWidthTypes, BlobCount, 0, 0);
         AssertUnsupportedScalar(nativeWidthNodes, nativeWidthBlobs);
 
         var nominalTypeBytes = TrRmTypeSpecTableWriter.Encode(
@@ -126,37 +161,37 @@ public sealed class TrRmFrozenValueNodeTableTests
     public void StructuralReaderRejectsUnknownKindsReservedFieldsAndBadReferences()
     {
         var typeSpecs = CreateTypeSpecs(0x08);
-        var valid = CreateScalarTable(0x08, new byte[4]);
-        var blobs = CreateBlobs(valid.Blobs, valid.BlobCount);
+        var (Nodes, Blobs, BlobCount) = CreateScalarTable(0x08, new byte[4]);
+        var blobs = CreateBlobs(Blobs, BlobCount);
 
-        var unknownKind = (byte[])valid.Nodes.Clone();
+        var unknownKind = (byte[])Nodes.Clone();
         unknownKind[4] = 7;
-        AssertInvalidNode(unknownKind, typeSpecs, valid.BlobCount);
+        AssertInvalidNode(unknownKind, typeSpecs, BlobCount);
 
-        var reserved = (byte[])valid.Nodes.Clone();
+        var reserved = (byte[])Nodes.Clone();
         reserved[6] = 1;
-        AssertInvalidNode(reserved, typeSpecs, valid.BlobCount);
+        AssertInvalidNode(reserved, typeSpecs, BlobCount);
 
-        var invalidTypeReference = (byte[])valid.Nodes.Clone();
+        var invalidTypeReference = (byte[])Nodes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(invalidTypeReference, 2);
-        AssertInvalidNode(invalidTypeReference, typeSpecs, valid.BlobCount);
+        AssertInvalidNode(invalidTypeReference, typeSpecs, BlobCount);
 
-        var invalidBlobReference = (byte[])valid.Nodes.Clone();
+        var invalidBlobReference = (byte[])Nodes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(invalidBlobReference.AsSpan(8), 2);
-        AssertInvalidNode(invalidBlobReference, typeSpecs, valid.BlobCount);
+        AssertInvalidNode(invalidBlobReference, typeSpecs, BlobCount);
 
-        var invalidBlobTag = (byte[])valid.Nodes.Clone();
+        var invalidBlobTag = (byte[])Nodes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(invalidBlobTag.AsSpan(8), 0x0100_0001);
-        AssertInvalidNode(invalidBlobTag, typeSpecs, valid.BlobCount);
+        AssertInvalidNode(invalidBlobTag, typeSpecs, BlobCount);
 
-        var invalidChildRange = (byte[])valid.Nodes.Clone();
+        var invalidChildRange = (byte[])Nodes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(invalidChildRange.AsSpan(12), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(invalidChildRange.AsSpan(16), 1);
-        AssertInvalidNode(invalidChildRange, typeSpecs, valid.BlobCount);
+        AssertInvalidNode(invalidChildRange, typeSpecs, BlobCount);
 
-        var invalidUnionCase = (byte[])valid.Nodes.Clone();
+        var invalidUnionCase = (byte[])Nodes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(invalidUnionCase.AsSpan(20), 0x2100_0001);
-        AssertInvalidNode(invalidUnionCase, typeSpecs, valid.BlobCount);
+        AssertInvalidNode(invalidUnionCase, typeSpecs, BlobCount);
 
         Assert.That(blobs.Count, Is.EqualTo(1));
     }
@@ -177,7 +212,7 @@ public sealed class TrRmFrozenValueNodeTableTests
 
         nodeBytes[5] = 1;
         var malformed = AddValueSections(baseArtifact, nodeBytes, blobBytes);
-        Assert.Throws<InvalidDataException>(
+        _ = Assert.Throws<InvalidDataException>(
             () => TrRmStructuralMetadataValidator.Validate(malformed));
     }
 
@@ -189,7 +224,7 @@ public sealed class TrRmFrozenValueNodeTableTests
             ? []
             : [new ReadOnlyMemory<byte>(payload)];
         var blobBytes = blobRows.Length == 0
-            ? Array.Empty<byte>()
+            ? []
             : TrRmVariableTableWriter.EncodeBlobs(blobRows);
         var blobs = CreateBlobs(blobBytes, blobRows.Length);
         var nodes = TrRmFrozenValueNodeTableWriter.Encode(
@@ -206,7 +241,7 @@ public sealed class TrRmFrozenValueNodeTableTests
             ? []
             : [new ReadOnlyMemory<byte>(payload)];
         var blobBytes = blobRows.Length == 0
-            ? Array.Empty<byte>()
+            ? []
             : TrRmVariableTableWriter.EncodeBlobs(blobRows);
         var nodes = CreateRawNode(1, 1, blobRows.Length == 0 ? 0u : 1u);
         return (nodes, blobBytes, blobRows.Length);

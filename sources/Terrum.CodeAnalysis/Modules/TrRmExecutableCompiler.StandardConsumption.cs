@@ -288,6 +288,16 @@ public static partial class TrRmExecutableCompiler
                 "The current B+E1 Standard consumer requires one explicitly selected artifact.");
         }
 
+        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardLocalAggregateLayoutSchemaIdentity)
+            && schemaIdentities.Any(static schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardLocalAggregateLayoutSchemaIdentity)))
+        {
+            throw Unsupported(
+                "An L1 Standard operation requires exact L1 selections for every supplied artifact.");
+        }
+
         moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger);
         var rootModuleRow = moduleValidation.RootModuleRow;
@@ -358,7 +368,19 @@ public static partial class TrRmExecutableCompiler
                     moduleValidation.Modules, rootModuleRow);
         }
 
-        if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0)
+        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardLocalAggregateLayoutSchemaIdentity)
+            && HasLocalAggregateMethodClosureWork(artifacts,
+                schemaIdentities, moduleValidation))
+        {
+            return LoadLocalAggregateLayoutProviderClosure(artifacts,
+                schemaIdentities, moduleIdentity, moduleValidation,
+                typeProviderBindings);
+        }
+
+        if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0
+            && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardLocalAggregateLayoutSchemaIdentity))
         {
             var loadedProgram = LoadForeignInvocationDraftNativeAddressLibrary(
                 artifacts[0], rootModuleRow, null, verifySemantics,
@@ -396,6 +418,13 @@ public static partial class TrRmExecutableCompiler
             {
                 var targetMethodRow = checked((int)
                     (importedDefinition & 0x00FF_FFFF));
+                if (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                        StandardLocalAggregateLayoutSchemaIdentity))
+                {
+                    throw Invalid(
+                        "An L1 MethodDef Import escaped the checked semantic provider-closure path.");
+                }
+
                 if (!tables.StandardNativeImports.HasImportForMethod(
                         targetMethodRow)
                     || !importedMethodRows.Add(targetMethodRow))
@@ -444,11 +473,20 @@ public static partial class TrRmExecutableCompiler
 
         if (methodImportRows.Count == 0)
         {
-            var loadedProgram = LoadForeignInvocationDraftNativeAddressLibrary(
-                artifacts[0], rootModuleRow, null, verifySemantics,
-                schema: GetForeignInvocationSchema(schemaIdentities[0]),
-                a3LayoutResourceLedger: a3LayoutResourceLedger,
-                typeProviderBindings: typeProviderBindings);
+            var isLocalAggregateLayout
+                = StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardLocalAggregateLayoutSchemaIdentity);
+            var (rootMethodStart, rootMethodEnd)
+                = tables.Modules.GetMethodDefRange(rootModuleRow);
+            var loadedProgram = isLocalAggregateLayout
+                && rootMethodStart != rootMethodEnd
+                ? LoadLocalAggregateLayoutExecution(index, tables,
+                    rootModuleRow).Program
+                : LoadForeignInvocationDraftNativeAddressLibrary(
+                    artifacts[0], rootModuleRow, null, verifySemantics,
+                    schema: GetForeignInvocationSchema(schemaIdentities[0]),
+                    a3LayoutResourceLedger: a3LayoutResourceLedger,
+                    typeProviderBindings: typeProviderBindings);
             return RetainLoadedA2SourceTypeFacts(loadedProgram, artifacts,
                 schemaIdentities, tables, rootModuleRow,
                 typeProviderBindings,
@@ -657,51 +695,12 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("The selected export is not a provider-owned NativeImport.");
         }
 
-        EnsureNativeAddressContracts(provider.Methods, provider.Contracts,
-            providerMethodRow,
-            provider.Contracts.GetNativeParameters(providerMethodRow).Length + 1,
-            allowEffects: true);
-        EnsureNativeAddressContracts(consumer.Methods, consumer.Contracts,
-            expectedMethodRow,
-            consumer.Contracts.GetNativeParameters(expectedMethodRow).Length + 1,
-            allowEffects: true);
         var expectedSignatureRow = consumer.Methods.GetSignature(expectedMethodRow);
         var providerSignatureRow = provider.Methods.GetSignature(providerMethodRow);
         var (expectedParameterFirst, expectedParameterCount)
             = consumer.Signatures.GetParamRange(expectedSignatureRow);
         var (providerParameterFirst, providerParameterCount)
             = provider.Signatures.GetParamRange(providerSignatureRow);
-        if (consumer.Signatures.GetReceiverTypeSpec(expectedSignatureRow) != 0
-            || provider.Signatures.GetReceiverTypeSpec(providerSignatureRow) != 0
-            || consumer.Signatures.GetGenericCount(expectedSignatureRow) != 0
-            || provider.Signatures.GetGenericCount(providerSignatureRow) != 0
-            || expectedParameterCount != providerParameterCount
-            || !AreEquivalentProviderTypeSpecs(consumer.TypeSpecs,
-                consumer.Signatures.GetResultTypeSpec(expectedSignatureRow),
-                provider.TypeSpecs,
-                provider.Signatures.GetResultTypeSpec(providerSignatureRow))
-            || consumer.Contracts.GetEffectsMask(expectedMethodRow) != 4
-            || provider.Contracts.GetEffectsMask(providerMethodRow) != 4
-            || !consumer.Contracts.GetNativeOutputs(expectedMethodRow).IsEmpty
-            || !provider.Contracts.GetNativeOutputs(providerMethodRow).IsEmpty
-            || !consumer.Contracts.GetNativeParameters(expectedMethodRow)
-                .SequenceEqual(provider.Contracts.GetNativeParameters(providerMethodRow)))
-        {
-            throw Invalid("The selected provider does not satisfy the original NativeImport signature.");
-        }
-
-        for (var ordinal = 0; ordinal < expectedParameterCount; ordinal++)
-        {
-            var expectedParameterRow = expectedParameterFirst + ordinal;
-            var providerParameterRow = providerParameterFirst + ordinal;
-            if (consumer.Parameters.GetMode(expectedParameterRow)
-                    != provider.Parameters.GetMode(providerParameterRow)
-                || !(hasNativeOutputContracts
-                    ? AreEquivalentNativeOutputProviderTypeSpecs(
-                        consumer.TypeSpecs,
-                        consumer.Parameters.GetTypeSpec(expectedParameterRow),
-                        provider.TypeSpecs,
-                        provider.Parameters.GetTypeSpec(providerParameterRow))
         var consumerOutputStates
             = consumer.Contracts.GetOutputStateContracts(expectedMethodRow);
         var providerOutputStates
@@ -795,6 +794,33 @@ public static partial class TrRmExecutableCompiler
             : consumer.Contracts.GetNativeParameters(expectedMethodRow)
                 .SequenceEqual(
                     provider.Contracts.GetNativeParameters(providerMethodRow));
+        if (consumer.Signatures.GetReceiverTypeSpec(expectedSignatureRow) != 0
+            || provider.Signatures.GetReceiverTypeSpec(providerSignatureRow) != 0
+            || consumer.Signatures.GetGenericCount(expectedSignatureRow) != 0
+            || provider.Signatures.GetGenericCount(providerSignatureRow) != 0
+            || expectedParameterCount != providerParameterCount
+            || !resultTypesEquivalent
+            || consumer.Contracts.GetEffectsMask(expectedMethodRow) != 4
+            || provider.Contracts.GetEffectsMask(providerMethodRow) != 4
+            || !consumer.Contracts.GetNativeOutputs(expectedMethodRow).IsEmpty
+            || !provider.Contracts.GetNativeOutputs(providerMethodRow).IsEmpty
+            || !outputContractsEquivalent)
+        {
+            throw Invalid("The selected provider does not satisfy the original NativeImport signature.");
+        }
+
+        for (var ordinal = 0; ordinal < expectedParameterCount; ordinal++)
+        {
+            var expectedParameterRow = expectedParameterFirst + ordinal;
+            var providerParameterRow = providerParameterFirst + ordinal;
+            if (consumer.Parameters.GetMode(expectedParameterRow)
+                    != provider.Parameters.GetMode(providerParameterRow)
+                || !(hasNativeOutputContracts
+                    ? AreEquivalentNativeOutputProviderTypeSpecs(
+                        consumer.TypeSpecs,
+                        consumer.Parameters.GetTypeSpec(expectedParameterRow),
+                        provider.TypeSpecs,
+                        provider.Parameters.GetTypeSpec(providerParameterRow))
                     : AreEquivalentProviderTypeSpecs(consumer.TypeSpecs,
                         consumer.Parameters.GetTypeSpec(expectedParameterRow),
                         provider.TypeSpecs,
@@ -829,132 +855,6 @@ public static partial class TrRmExecutableCompiler
         return (providerMethodRow, providerLibraryName, providerExportName);
     }
 
-    private static bool AreEquivalentProviderTypeSpecs(
-        TrRmTypeSpecTableReader leftTypeSpecs, uint leftTypeSpecRef,
-        TrRmTypeSpecTableReader rightTypeSpecs, uint rightTypeSpecRef)
-    {
-        var maximumDepth = Math.Max(leftTypeSpecs.Count,
-            rightTypeSpecs.Count) + 1;
-        for (var depth = 0; depth < maximumDepth; depth++)
-        {
-            var left = leftTypeSpecs.GetTypeSpecRef(leftTypeSpecRef);
-            var right = rightTypeSpecs.GetTypeSpecRef(rightTypeSpecRef);
-            if (left.Form != right.Form
-                || left.Qualifiers != right.Qualifiers
-                || left.TypeCode != right.TypeCode)
-            {
-                return false;
-            }
-
-            if (left.IsRow && right.IsRow
-                && left.Form == 0x0C && left.TypeCode == 0x8C)
-            {
-                var leftRow = leftTypeSpecs.GetRow(left.Row);
-                var rightRow = rightTypeSpecs.GetRow(right.Row);
-                leftTypeSpecRef
-                    = BinaryPrimitives.ReadUInt32LittleEndian(
-                        leftRow[3..]);
-                rightTypeSpecRef
-                    = BinaryPrimitives.ReadUInt32LittleEndian(
-                        rightRow[3..]);
-                continue;
-            }
-
-            return leftTypeSpecs.GetTypeSpecBytes(leftTypeSpecRef)
-                .SequenceEqual(rightTypeSpecs.GetTypeSpecBytes(
-                    rightTypeSpecRef));
-        }
-
-        return false;
-    }
-
-    private readonly record struct StandardProviderImportEdge(
-        int ConsumerArtifactIndex,
-        int ConsumerModuleRow,
-        string ConsumerModuleIdentity,
-        int ImportRow,
-        int ModuleRefRow,
-        int ExpectedMethodRow,
-        string ExpectedMethodName,
-        TrRmImportBinding ExpectedBinding,
-        int ProviderArtifactIndex,
-        int ProviderModuleRow);
-
-    internal static TrRmStandardNativeProviderClosureValidation
-        ValidateStandardProviderClosure(byte[][] artifacts,
-            string[] schemaIdentities, string moduleIdentity,
-            bool verifyRootSemantics)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
-        if (!IsExactForeignInvocationSchemaSet(schemaIdentities))
-        {
-            ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
-            var moduleValidation = ValidateStandardInputModules(artifacts,
-                schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
-        return ValidateStandardProviderClosureCore(artifacts,
-            schemaIdentities, moduleValidation, verifyRootSemantics);
-    }
-
-    internal static bool IsExactForeignInvocationSchemaSet(
-        IReadOnlyList<string> schemaIdentities)
-        => schemaIdentities.Count != 0
-            && schemaIdentities.All(static schemaIdentity =>
-                StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardForeignInvocationSchemaIdentity));
-
-    private static TrRmStandardNativeProviderClosureValidation
-        ValidateStandardProviderClosureCore(byte[][] artifacts,
-            string[] schemaIdentities,
-            StandardModuleValidation moduleValidation,
-            bool verifyRootSemantics)
-    {
-        if ((!IsExactForeignInvocationSchemaSet(schemaIdentities)
-                && !moduleValidation.HasNativeOutputProviderImports)
-            || !IsNativeOutputProviderSchemaSet(schemaIdentities)
-            || artifacts.Length != schemaIdentities.Length)
-        {
-            throw Unsupported(
-                "The provider closure requires exact F selections or a selected F/F+S NativeOutput edge.");
-        }
-
-        var modulesByIdentity
-            = new Dictionary<string, TrRmStandardModuleSelection>(
-                moduleValidation.Modules.Length, StringComparer.Ordinal);
-        var modulesByArtifact
-            = new List<TrRmStandardModuleSelection>[artifacts.Length];
-        for (var artifactIndex = 0; artifactIndex < modulesByArtifact.Length;
-            artifactIndex++)
-        {
-            modulesByArtifact[artifactIndex] = [];
-        }
-
-        TrRmStandardModuleSelection? rootSelection = null;
-        foreach (var module in moduleValidation.Modules)
-        {
-            if ((uint)module.ArtifactIndex >= (uint)artifacts.Length
-                || !modulesByIdentity.TryAdd(module.Identity, module))
-            {
-                throw Invalid(
-                    "The provider closure has a duplicate or invalid Module selection.");
-            }
-
-            modulesByArtifact[module.ArtifactIndex].Add(module);
-            if (module.ArtifactIndex == 0
-                && module.ModuleRow == moduleValidation.RootModuleRow)
-            {
-                rootSelection = module;
-            }
-        }
-
-        if (rootSelection is not TrRmStandardModuleSelection selectedRoot)
-        {
-            throw Invalid("The provider closure lost its selected root Module.");
-        }
-
-        var edgePairs
-            = new Dictionary<(int ConsumerArtifactIndex,
-                int ProviderArtifactIndex), List<StandardProviderImportEdge>>();
-        var ownedNativeImportsByModule
     private static bool IsSupportedNativeOutputProviderType(
         TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
     {
@@ -1066,184 +966,76 @@ public static partial class TrRmExecutableCompiler
         return false;
     }
 
-            = new Dictionary<(int ArtifactIndex, int ModuleRow), int>();
-        var rootModuleImports = (Dictionary<int, BoundModuleImport>?)null;
-        BoundProgram? rootProgram = null;
-
-        for (var artifactIndex = 0; artifactIndex < artifacts.Length;
-            artifactIndex++)
+    private static bool AreEquivalentProviderTypeSpecs(
+        TrRmTypeSpecTableReader leftTypeSpecs, uint leftTypeSpecRef,
+        TrRmTypeSpecTableReader rightTypeSpecs, uint rightTypeSpecRef)
+    {
+        var maximumDepth = Math.Max(leftTypeSpecs.Count,
+            rightTypeSpecs.Count) + 1;
+        for (var depth = 0; depth < maximumDepth; depth++)
         {
-            var index = CreateForeignInvocationIndex(artifacts[artifactIndex],
-                schemaIdentities[artifactIndex]);
-            var tables = ValidateForeignInvocationArtifact(index,
-                schemaIdentities[artifactIndex],
-                createA3ResourceLedger: false);
-            var hasNativeOutputBody = false;
-            foreach (var module in modulesByArtifact[artifactIndex])
+            var left = leftTypeSpecs.GetTypeSpecRef(leftTypeSpecRef);
+            var right = rightTypeSpecs.GetTypeSpecRef(rightTypeSpecRef);
+            if (left.Form != right.Form
+                || left.Qualifiers != right.Qualifiers
+                || left.TypeCode != right.TypeCode)
             {
-                hasNativeOutputBody |= HasNativeOutputReservationBody(tables,
-                    module.ModuleRow);
-            }
-            var artifactSchema = GetForeignInvocationSchema(
-                schemaIdentities[artifactIndex]);
-            if (!hasNativeOutputBody)
-            {
-                ValidateNativeAddressArtifactSections(index, tables,
-                    artifactSchema);
-                ValidateNativeAddressArtifactTables(tables);
-            }
-            var moduleRefsUsed = new bool[tables.ModuleRefs.Count + 1];
-            var edgesByModule
-                = new Dictionary<int, List<StandardProviderImportEdge>>();
-            foreach (var module in modulesByArtifact[artifactIndex])
-            {
-                edgesByModule.Add(module.ModuleRow, []);
+                return false;
             }
 
-            for (var importRow = 1; importRow <= tables.Imports.Count;
-                importRow++)
+            if (left.IsRow && right.IsRow
+                && left.Form == 0x0C && left.TypeCode == 0x8C)
             {
-                var moduleRefRow
-                    = tables.Imports.GetModuleRefForImportRow(importRow);
-                var expectedDefinition
-                    = tables.Imports.GetExpectedDefinitionForImportRow(
-                        importRow);
-                if ((expectedDefinition >> 24) != 0x16)
-                {
-                    throw Unsupported(
-                        "The exact-F provider closure supports MethodDef Imports only.");
-                }
-
-                var expectedMethodRow = checked((int)
-                    (expectedDefinition & 0x00FF_FFFF));
-                var consumerModuleRow
-                    = tables.ModuleRefs.GetOwnerModule(moduleRefRow);
-                if (!edgesByModule.TryGetValue(consumerModuleRow,
-                        out var moduleEdges)
-                    || !tables.StandardNativeImports.HasImportForMethod(
-                        expectedMethodRow)
-                    || !tables.Imports.TryGetExpectedBinding(
-                        expectedDefinition, out var expectedBinding))
-                {
-                    throw Invalid(
-                        "A provider closure Import has no owned NativeImport expectation.");
-                }
-
-                var moduleRefIdentity
-                    = tables.ModuleRefs.GetProducerIdentity(moduleRefRow);
-                var (moduleRefTargetRequirement, moduleRefRuntimePolicy)
-                    = tables.ModuleRefs.GetRequirements(moduleRefRow);
-                if (!StringComparer.Ordinal.Equals(moduleRefIdentity,
-                        expectedBinding.ProducerIdentity)
-                    || moduleRefTargetRequirement
-                        != expectedBinding.TargetRequirement
-                    || moduleRefRuntimePolicy != expectedBinding.RuntimePolicy
-                    || !modulesByIdentity.TryGetValue(
-                        expectedBinding.ProducerIdentity,
-                        out var providerModule)
-                    || providerModule.TargetRequirement
-                        != expectedBinding.TargetRequirement
-                    || providerModule.RuntimePolicy
-                        != expectedBinding.RuntimePolicy)
-                {
-                    throw Invalid(
-                        "A provider closure ModuleRef does not select its retained producer requirements.");
-                }
-
-                moduleRefsUsed[moduleRefRow] = true;
-                moduleEdges.Add(new StandardProviderImportEdge(
-                    artifactIndex, consumerModuleRow, moduleRefIdentity,
-                    importRow, moduleRefRow, expectedMethodRow,
-                    tables.Methods.GetName(expectedMethodRow),
-                    expectedBinding, providerModule.ArtifactIndex,
-                    providerModule.ModuleRow));
+                var leftRow = leftTypeSpecs.GetRow(left.Row);
+                var rightRow = rightTypeSpecs.GetRow(right.Row);
+                leftTypeSpecRef
+                    = BinaryPrimitives.ReadUInt32LittleEndian(
+                        leftRow[3..]);
+                rightTypeSpecRef
+                    = BinaryPrimitives.ReadUInt32LittleEndian(
+                        rightRow[3..]);
+                continue;
             }
 
-            foreach (var module in modulesByArtifact[artifactIndex])
-            {
-                var (moduleRefStart, moduleRefEnd)
-                    = tables.Modules.GetModuleRefRange(module.ModuleRow);
-                var (typeStart, typeEnd)
-                    = tables.Modules.GetTypeDefRange(module.ModuleRow);
-                var (sourceFileStart, sourceFileEnd)
-                    = tables.Modules.GetSourceFileRange(module.ModuleRow);
-                var moduleEdges = edgesByModule[module.ModuleRow];
-                var moduleRefCount = moduleRefEnd - moduleRefStart;
-                if ((moduleEdges.Count == 0 && moduleRefCount != 0)
-                    || (moduleEdges.Count != 0
-                        && (moduleRefCount == 0
-                            || moduleRefCount > moduleEdges.Count)))
-                {
-                    throw Invalid(
-                        "A provider Module has an unconsumed or inconsistent ModuleRef set.");
-                }
+            return leftTypeSpecs.GetTypeSpecBytes(leftTypeSpecRef)
+                .SequenceEqual(rightTypeSpecs.GetTypeSpecBytes(
+                    rightTypeSpecRef));
+        }
 
-                var moduleHasNativeOutputBody
-                    = HasNativeOutputReservationBody(
-                    tables, module.ModuleRow);
-                if ((typeStart != typeEnd && !moduleHasNativeOutputBody)
-                    || sourceFileStart != sourceFileEnd)
-                {
-                    throw Unsupported(
-                        "The exact-F provider closure does not admit TypeDef or SourceFile declarations.");
-                }
+        return false;
+    }
 
-                for (var moduleRefRow = moduleRefStart;
-                    moduleRefRow < moduleRefEnd; moduleRefRow++)
-                {
-                    if (!moduleRefsUsed[moduleRefRow])
-                    {
-                        throw Invalid(
-                            "A provider Module has an unconsumed ModuleRef.");
-                    }
-                }
+    private readonly record struct StandardProviderImportEdge(
+        int ConsumerArtifactIndex,
+        int ConsumerModuleRow,
+        string ConsumerModuleIdentity,
+        int ImportRow,
+        int ModuleRefRow,
+        int ExpectedMethodRow,
+        string ExpectedMethodName,
+        TrRmImportBinding ExpectedBinding,
+        int ProviderArtifactIndex,
+        int ProviderModuleRow);
 
-                Dictionary<int, BoundModuleImport>? selectedModuleImports
-                    = null;
-                var importedMethodRows
-                    = new HashSet<int>(moduleEdges.Select(static edge =>
-                        edge.ExpectedMethodRow));
-                var ownedNativeImportCount = 0;
-                for (var methodRow = module.MethodDefStart;
-                    methodRow < module.MethodDefEnd; methodRow++)
-                {
-                    if (tables.StandardNativeImports.HasImportForMethod(
-                            methodRow)
-                        && !importedMethodRows.Contains(methodRow))
-                    {
-                        ownedNativeImportCount++;
-                    }
-                }
+    internal static TrRmStandardNativeProviderClosureValidation
+        ValidateStandardProviderClosure(byte[][] artifacts,
+                string[] schemaIdentities, string moduleIdentity,
+                bool verifyRootSemantics)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+            var moduleValidation = ValidateStandardInputModules(artifacts,
+                schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
+        return ValidateStandardProviderClosureCore(artifacts,
+            schemaIdentities, moduleValidation, verifyRootSemantics);
+    }
 
-                ownedNativeImportsByModule.Add(
-                    (artifactIndex, module.ModuleRow),
-                    ownedNativeImportCount);
-                if (moduleEdges.Count != 0)
-                {
-                    selectedModuleImports
-                        = new Dictionary<int, BoundModuleImport>(
-                            moduleEdges.Count);
-                    foreach (var edge in moduleEdges)
-                    {
-                        if (!selectedModuleImports.TryAdd(
-                                edge.ExpectedMethodRow,
-                                new BoundModuleImport(
-                                    edge.ExpectedBinding.ProducerIdentity,
-                                    edge.ExpectedBinding.ExportKey,
-                                    edge.ExpectedBinding.TargetRequirement,
-                                    edge.ExpectedBinding.RuntimePolicy)))
-                        {
-                            throw Invalid(
-                                "A provider Module has more than one Import for a MethodDef.");
-                        }
-                    }
-                }
+    internal static bool IsExactForeignInvocationSchemaSet(
+        IReadOnlyList<string> schemaIdentities)
+        => schemaIdentities.Count != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationSchemaIdentity));
 
-                if (module.MethodDefStart == module.MethodDefEnd)
-                {
-                    if (module.ModuleRow == selectedRoot.ModuleRow
-                        && artifactIndex == selectedRoot.ArtifactIndex)
-                    {
     internal static bool IsNativeOutputProviderSchemaSet(
         string[] schemaIdentities)
         => schemaIdentities.Length != 0
@@ -1394,26 +1186,230 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-                        throw Unsupported(
-                            "The selected exact-F root Module has no bounded NativeAddress caller.");
-                    }
+    private static TrRmStandardNativeProviderClosureValidation
+        ValidateStandardProviderClosureCore(byte[][] artifacts,
+            string[] schemaIdentities,
+            StandardModuleValidation moduleValidation,
+            bool verifyRootSemantics)
+    {
+        if ((!IsExactForeignInvocationSchemaSet(schemaIdentities)
+                && !moduleValidation.HasNativeOutputProviderImports)
+            || !IsNativeOutputProviderSchemaSet(schemaIdentities)
+            || artifacts.Length != schemaIdentities.Length)
+        {
+            throw Unsupported(
+                "The provider closure requires exact F selections or a selected F/F+S NativeOutput edge.");
+        }
 
-                    continue;
+        var modulesByIdentity
+            = new Dictionary<string, TrRmStandardModuleSelection>(
+                moduleValidation.Modules.Length, StringComparer.Ordinal);
+        var modulesByArtifact
+            = new List<TrRmStandardModuleSelection>[artifacts.Length];
+        for (var artifactIndex = 0; artifactIndex < modulesByArtifact.Length;
+            artifactIndex++)
+        {
+            modulesByArtifact[artifactIndex] = [];
+        }
+
+        TrRmStandardModuleSelection? rootSelection = null;
+        foreach (var module in moduleValidation.Modules)
+        {
+            if ((uint)module.ArtifactIndex >= (uint)artifacts.Length
+                || !modulesByIdentity.TryAdd(module.Identity, module))
+            {
+                throw Invalid(
+                    "The provider closure has a duplicate or invalid Module selection.");
+            }
+
+            modulesByArtifact[module.ArtifactIndex].Add(module);
+            if (module.ArtifactIndex == 0
+                && module.ModuleRow == moduleValidation.RootModuleRow)
+            {
+                rootSelection = module;
+            }
+        }
+
+        if (rootSelection is not TrRmStandardModuleSelection selectedRoot)
+        {
+            throw Invalid("The provider closure lost its selected root Module.");
+        }
+
+        var edgePairs
+            = new Dictionary<(int ConsumerArtifactIndex,
+                int ProviderArtifactIndex), List<StandardProviderImportEdge>>();
+        var ownedNativeImportsByModule
+            = new Dictionary<(int ArtifactIndex, int ModuleRow), int>();
+        var rootModuleImports = (Dictionary<int, BoundModuleImport>?)null;
+        BoundProgram? rootProgram = null;
+
+        for (var artifactIndex = 0; artifactIndex < artifacts.Length;
+            artifactIndex++)
+        {
+            var index = CreateForeignInvocationIndex(artifacts[artifactIndex],
+                schemaIdentities[artifactIndex]);
+            var tables = ValidateForeignInvocationArtifact(index,
+                schemaIdentities[artifactIndex],
+                createA3ResourceLedger: false);
+            var hasNativeOutputBody = false;
+            foreach (var module in modulesByArtifact[artifactIndex])
+            {
+                hasNativeOutputBody |= HasNativeOutputReservationBody(tables,
+                    module.ModuleRow);
+            }
+            var artifactSchema = GetForeignInvocationSchema(
+                schemaIdentities[artifactIndex]);
+            if (!hasNativeOutputBody)
+            {
+                ValidateNativeAddressArtifactSections(index, tables,
+                    artifactSchema);
+                ValidateNativeAddressArtifactTables(tables);
+            }
+            var moduleRefsUsed = new bool[tables.ModuleRefs.Count + 1];
+            var edgesByModule
+                = new Dictionary<int, List<StandardProviderImportEdge>>();
+            foreach (var module in modulesByArtifact[artifactIndex])
+            {
+                edgesByModule.Add(module.ModuleRow, []);
+            }
+
+            for (var importRow = 1; importRow <= tables.Imports.Count;
+                importRow++)
+            {
+                var moduleRefRow
+                    = tables.Imports.GetModuleRefForImportRow(importRow);
+                var expectedDefinition
+                    = tables.Imports.GetExpectedDefinitionForImportRow(
+                        importRow);
+                if ((expectedDefinition >> 24) != 0x16)
+                {
+                    throw Unsupported(
+                        "The exact-F provider closure supports MethodDef Imports only.");
                 }
 
-                var isRoot = artifactIndex == selectedRoot.ArtifactIndex
-                    && module.ModuleRow == selectedRoot.ModuleRow;
-                var program = LoadForeignInvocationDraftNativeAddressLibrary(
-                    index, tables, module.ModuleRow,
-                    selectedModuleImports,
-                    verifySemantics: isRoot && verifyRootSemantics,
-                    schema: artifactSchema,
-                    a3LayoutResourceLedger: null,
-                    typeProviderBindings: default);
-                if (isRoot)
+                var expectedMethodRow = checked((int)
+                    (expectedDefinition & 0x00FF_FFFF));
+                var consumerModuleRow
+                    = tables.ModuleRefs.GetOwnerModule(moduleRefRow);
+                if (!edgesByModule.TryGetValue(consumerModuleRow,
+                        out var moduleEdges)
+                    || !tables.StandardNativeImports.HasImportForMethod(
+                        expectedMethodRow)
+                    || !tables.Imports.TryGetExpectedBinding(
+                        expectedDefinition, out var expectedBinding))
                 {
-                    rootProgram = program;
-                    rootModuleImports = selectedModuleImports;
+                    throw Invalid(
+                        "A provider closure Import has no owned NativeImport expectation.");
+                }
+
+                var moduleRefIdentity
+                    = tables.ModuleRefs.GetProducerIdentity(moduleRefRow);
+                var (moduleRefTargetRequirement, moduleRefRuntimePolicy)
+                    = tables.ModuleRefs.GetRequirements(moduleRefRow);
+                if (!StringComparer.Ordinal.Equals(moduleRefIdentity,
+                        expectedBinding.ProducerIdentity)
+                    || moduleRefTargetRequirement
+                        != expectedBinding.TargetRequirement
+                    || moduleRefRuntimePolicy != expectedBinding.RuntimePolicy
+                    || !modulesByIdentity.TryGetValue(
+                        expectedBinding.ProducerIdentity,
+                        out var providerModule)
+                    || providerModule.TargetRequirement
+                        != expectedBinding.TargetRequirement
+                    || providerModule.RuntimePolicy
+                        != expectedBinding.RuntimePolicy)
+                {
+                    throw Invalid(
+                        "A provider closure ModuleRef does not select its retained producer requirements.");
+                }
+
+                moduleRefsUsed[moduleRefRow] = true;
+                moduleEdges.Add(new StandardProviderImportEdge(
+                    artifactIndex, consumerModuleRow, moduleRefIdentity,
+                    importRow, moduleRefRow, expectedMethodRow,
+                    tables.Methods.GetName(expectedMethodRow),
+                    expectedBinding, providerModule.ArtifactIndex,
+                    providerModule.ModuleRow));
+            }
+
+            foreach (var module in modulesByArtifact[artifactIndex])
+            {
+                var (moduleRefStart, moduleRefEnd)
+                    = tables.Modules.GetModuleRefRange(module.ModuleRow);
+                var (typeStart, typeEnd)
+                    = tables.Modules.GetTypeDefRange(module.ModuleRow);
+                var (sourceFileStart, sourceFileEnd)
+                    = tables.Modules.GetSourceFileRange(module.ModuleRow);
+                var moduleEdges = edgesByModule[module.ModuleRow];
+                var moduleRefCount = moduleRefEnd - moduleRefStart;
+                if ((moduleEdges.Count == 0 && moduleRefCount != 0)
+                    || (moduleEdges.Count != 0
+                        && (moduleRefCount == 0
+                            || moduleRefCount > moduleEdges.Count)))
+                {
+                    throw Invalid(
+                        "A provider Module has an unconsumed or inconsistent ModuleRef set.");
+                }
+
+                var moduleHasNativeOutputBody
+                    = HasNativeOutputReservationBody(
+                    tables, module.ModuleRow);
+                if ((typeStart != typeEnd && !moduleHasNativeOutputBody)
+                    || sourceFileStart != sourceFileEnd)
+                {
+                    throw Unsupported(
+                        "The exact-F provider closure does not admit these TypeDef or SourceFile declarations.");
+                }
+
+                for (var moduleRefRow = moduleRefStart;
+                    moduleRefRow < moduleRefEnd; moduleRefRow++)
+                {
+                    if (!moduleRefsUsed[moduleRefRow])
+                    {
+                        throw Invalid(
+                            "A provider Module has an unconsumed ModuleRef.");
+                    }
+                }
+
+                Dictionary<int, BoundModuleImport>? selectedModuleImports
+                    = null;
+                var importedMethodRows
+                    = new HashSet<int>(moduleEdges.Select(static edge =>
+                        edge.ExpectedMethodRow));
+                var ownedNativeImportCount = 0;
+                for (var methodRow = module.MethodDefStart;
+                    methodRow < module.MethodDefEnd; methodRow++)
+                {
+                    if (tables.StandardNativeImports.HasImportForMethod(
+                            methodRow)
+                        && !importedMethodRows.Contains(methodRow))
+                    {
+                        ownedNativeImportCount++;
+                    }
+                }
+
+                ownedNativeImportsByModule.Add(
+                    (artifactIndex, module.ModuleRow),
+                    ownedNativeImportCount);
+                if (moduleEdges.Count != 0)
+                {
+                    selectedModuleImports
+                        = new Dictionary<int, BoundModuleImport>(
+                            moduleEdges.Count);
+                    foreach (var edge in moduleEdges)
+                    {
+                        if (!selectedModuleImports.TryAdd(
+                                edge.ExpectedMethodRow,
+                                new BoundModuleImport(
+                                    edge.ExpectedBinding.ProducerIdentity,
+                                    edge.ExpectedBinding.ExportKey,
+                                    edge.ExpectedBinding.TargetRequirement,
+                                    edge.ExpectedBinding.RuntimePolicy)))
+                        {
+                            throw Invalid(
+                                "A provider Module has more than one Import for a MethodDef.");
+                        }
+                    }
                 }
 
                 foreach (var edge in moduleEdges)
@@ -1428,7 +1424,48 @@ public static partial class TrRmExecutableCompiler
 
                     pairEdges.Add(edge);
                 }
+
+                var isRoot = artifactIndex == selectedRoot.ArtifactIndex
+                    && module.ModuleRow == selectedRoot.ModuleRow;
+                if (!isRoot
+                    && IsStandaloneNativeOutputProviderModule(tables, module))
+                {
+                    continue;
+                }
+
+                if (module.MethodDefStart == module.MethodDefEnd)
+                {
+                    if (isRoot)
+                    {
+                        throw Unsupported(
+                            "The selected exact-F root Module has no bounded NativeAddress caller.");
+                    }
+
+                    continue;
+                }
+
+                var program = LoadForeignInvocationDraftNativeAddressLibrary(
+                    index, tables, module.ModuleRow,
+                    selectedModuleImports,
+                    verifySemantics: isRoot && verifyRootSemantics,
+                    schema: artifactSchema,
+                    a3LayoutResourceLedger: null,
+                    typeProviderBindings: default);
+                if (isRoot)
+                {
+                    rootProgram = program;
+                    rootModuleImports = selectedModuleImports;
+                }
             }
+        }
+
+        if (schemaIdentities.Any(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationStorageAddressSchemaIdentity)))
+        {
+            ValidateNativeOutputProviderTopology(schemaIdentities,
+                moduleValidation, edgePairs,
+                selectedRoot);
         }
 
         var dependencyBindings
@@ -1528,14 +1565,49 @@ public static partial class TrRmExecutableCompiler
             orderedRootBindings, orderedDependencies);
     }
 
+    private static bool IsStandaloneNativeOutputProviderModule(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        TrRmStandardModuleSelection module)
+    {
+        if (module.MethodDefEnd == module.MethodDefStart
+            || tables.Modules.GetEntryMethod(module.ModuleRow) != 0)
+        {
+            return false;
+        }
+
+        var hasExportedNativeOutput = false;
+        for (var methodRow = module.MethodDefStart;
+            methodRow < module.MethodDefEnd; methodRow++)
+        {
+            var visibility = tables.Methods.GetFlags(methodRow);
+            if (tables.Methods.GetOwnerType(methodRow) != 0
+                || tables.Methods.GetOwnerModule(methodRow) != module.ModuleRow
+                || visibility is not (1 or 2)
+                || tables.Methods.GetBodyRow(methodRow) != 0
+                || !tables.StandardNativeImports.HasImportForMethod(methodRow)
+                || !tables.Contracts.GetNativeParameters(methodRow).IsEmpty
+                || !tables.Contracts.GetNativeOutputs(methodRow).IsEmpty)
+            {
+                return false;
+            }
+
+            if (visibility == 2
+                && tables.Exports.HasExportForMethod(methodRow)
+                && !tables.Contracts.GetOutputStateContracts(methodRow).IsEmpty)
+            {
+                hasExportedNativeOutput = true;
+            }
+        }
+
+        return hasExportedNativeOutput;
+    }
+
     private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
         ValidateStandardProviderArtifact(byte[] artifact,
             string schemaIdentity)
     {
-        var index = CreateForeignInvocationIndex(artifact,
-            StandardForeignInvocationSchemaIdentity);
-        return ValidateForeignInvocationArtifact(index,
-            StandardForeignInvocationSchemaIdentity,
+        var index = CreateForeignInvocationIndex(artifact, schemaIdentity);
+        return ValidateForeignInvocationArtifact(index, schemaIdentity,
             createA3ResourceLedger: false);
     }
 
@@ -1786,14 +1858,6 @@ public static partial class TrRmExecutableCompiler
                 resourceLedger)
             || IsSelectedStandardSchemaIdentity(identity,
                 StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity,
-                var isRoot = artifactIndex == selectedRoot.ArtifactIndex
-                    && module.ModuleRow == selectedRoot.ModuleRow;
-                if (!isRoot && moduleEdges.Count == 0
-                    && IsStandaloneNativeOutputProviderModule(tables, module))
-                {
-                    continue;
-                }
-
                 resourceLedger)
             || IsSelectedStandardSchemaIdentity(identity,
                 StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity,
@@ -1841,15 +1905,6 @@ public static partial class TrRmExecutableCompiler
     private static byte[] SnapshotStandardInput(
         TrRmStandardArtifactInput input, string parameterName)
     {
-        if (schemaIdentities.Any(static schemaIdentity =>
-                StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardForeignInvocationStorageAddressSchemaIdentity)))
-        {
-            ValidateNativeOutputProviderTopology(schemaIdentities,
-                moduleValidation, edgePairs,
-                selectedRoot);
-        }
-
         ArgumentException.ThrowIfNullOrEmpty(input.SchemaIdentity,
             parameterName);
         if (input.SchemaIdentity is not (StandardForeignInvocationSchemaIdentity
@@ -1957,35 +2012,6 @@ public static partial class TrRmExecutableCompiler
         {
             return TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
-    private static bool IsStandaloneNativeOutputProviderModule(
-        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-        TrRmStandardModuleSelection module)
-    {
-        if (module.MethodDefEnd - module.MethodDefStart != 1
-            || tables.Modules.GetEntryMethod(module.ModuleRow) != 0)
-        {
-            return false;
-        }
-
-        var (moduleRefStart, moduleRefEnd)
-            = tables.Modules.GetModuleRefRange(module.ModuleRow);
-        if (moduleRefStart != moduleRefEnd)
-        {
-            return false;
-        }
-
-        var methodRow = module.MethodDefStart;
-        return tables.Methods.GetOwnerType(methodRow) == 0
-            && tables.Methods.GetOwnerModule(methodRow) == module.ModuleRow
-            && tables.Methods.GetFlags(methodRow) == 2
-            && tables.Methods.GetBodyRow(methodRow) == 0
-            && tables.StandardNativeImports.HasImportForMethod(methodRow)
-            && tables.Exports.HasExportForMethod(methodRow)
-            && !tables.Contracts.GetOutputStateContracts(methodRow).IsEmpty
-            && tables.Contracts.GetNativeParameters(methodRow).IsEmpty
-            && tables.Contracts.GetNativeOutputs(methodRow).IsEmpty;
-    }
-
                     artifact);
         }
 
@@ -2081,8 +2107,20 @@ public static partial class TrRmExecutableCompiler
         string rootModuleIdentity,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
-        var includesFProviderClosure
+        var exactFProviderClosure
             = IsExactForeignInvocationSchemaSet(schemaIdentities);
+        var hasNativeOutputProviderImports
+            = !exactFProviderClosure
+                && IsNativeOutputProviderSchemaSet(schemaIdentities)
+                && !GetNativeOutputProviderImportIdentities(artifacts[0],
+                    schemaIdentities[0], rootModuleIdentity).IsEmpty;
+        var includesFProviderClosure = exactFProviderClosure
+            || hasNativeOutputProviderImports;
+        var includesL1MethodProviderClosure
+            = schemaIdentities.Length != 0
+                && schemaIdentities.All(static schemaIdentity =>
+                    StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardLocalAggregateLayoutSchemaIdentity));
         var identities = new HashSet<string>(StringComparer.Ordinal);
         var rootModuleRow = 0;
         var moduleSelections
@@ -2129,6 +2167,14 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                     or StandardLocalAggregateLayoutSchemaIdentity;
+                var supportsNativeOutputCells
+                    = StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignInvocationSchemaIdentity)
+                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignInvocationStorageAddressSchemaIdentity)
+                    || supportsA2Features
+                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignInvocationStorageGenericFixedArraySchemaIdentity);
                 var supportsScalarFrozenValues
                     = StringComparer.Ordinal.Equals(schemaIdentities[index],
                         StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)
@@ -2156,6 +2202,12 @@ public static partial class TrRmExecutableCompiler
                         is not (TrRmFeatureTableReader.NativeExportEntriesFeatureId
                             or TrRmFeatureTableReader.RootlessNativeValuesFeatureId
                             or TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId)
+                        && !(supportsNativeOutputCells
+                            && feature.FeatureId
+                                == TrRmFeatureTableReader.DirectNativeCallsFeatureId)
+                        && !(supportsNativeOutputCells
+                            && feature.FeatureId
+                                == TrRmFeatureTableReader.NativeBoundaryContractsFeatureId)
                         && !(supportsCopyOriginAndUnionCoverage
                             && feature.FeatureId is
                                 TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId
@@ -2208,10 +2260,11 @@ public static partial class TrRmExecutableCompiler
                         or StandardLocalAggregateLayoutSchemaIdentity)
                     && methodEnd == methodStart && typeEnd > typeStart;
                 if (!isSelectedRoot && moduleRefEnd != moduleRefStart
-                    && !isA2TypeOnlyModule && !includesFProviderClosure)
+                    && !isA2TypeOnlyModule && !includesFProviderClosure
+                    && !includesL1MethodProviderClosure)
                 {
                     throw Unsupported(
-                        "Only A2 type-only provider Modules may retain provider Imports in this F slice.");
+                        "Provider Imports require an A2 type-only Module, an exact F closure, or an exact L1 semantic closure.");
                 }
 
                 if (isA2TypeOnlyModule)
@@ -2253,7 +2306,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 if (!isSelectedRoot && methodEnd != methodStart
-                    && !includesFProviderClosure)
+                    && !includesFProviderClosure
+                    && !includesL1MethodProviderClosure)
                 {
                     _ = LoadForeignInvocationDraftNativeAddressLibrary(
                         artifacts[index], moduleRow, null,
@@ -2324,24 +2378,3 @@ public static partial class TrRmExecutableCompiler
             nameof(moduleIdentity));
     }
 }
-                        && !(supportsNativeOutputCells
-                            && feature.FeatureId
-                                == TrRmFeatureTableReader.DirectNativeCallsFeatureId)
-                        && !(supportsNativeOutputCells
-                            && feature.FeatureId
-                                == TrRmFeatureTableReader.NativeBoundaryContractsFeatureId)
-                var supportsNativeOutputCells
-                    = StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardForeignInvocationSchemaIdentity)
-                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardForeignInvocationStorageAddressSchemaIdentity)
-                    || supportsA2Features
-                    || StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardForeignInvocationStorageGenericFixedArraySchemaIdentity);
-        var hasNativeOutputProviderImports
-            = !exactFProviderClosure
-                && IsNativeOutputProviderSchemaSet(schemaIdentities)
-                && !GetNativeOutputProviderImportIdentities(artifacts[0],
-                    schemaIdentities[0], rootModuleIdentity).IsEmpty;
-        var includesFProviderClosure = exactFProviderClosure
-            || hasNativeOutputProviderImports;

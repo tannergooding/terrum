@@ -15,7 +15,8 @@ using Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Bodies;
 
-public sealed class CompactLinearBodyValueIndexComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CompactLinearBodyValueIndexComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -220,15 +221,15 @@ public sealed class CompactLinearBodyValueIndexComponentTests
 
             if (testCase.HostedValid)
             {
-                var index = InspectHosted(testCase);
-                Assert.That(index.ValueCount, Is.EqualTo(3));
-                expected.AddRange(index.Definitions);
-                expected.AddRange(index.LastUses);
-                expected.AddRange(index.UseBlocks);
+                var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = InspectHosted(testCase);
+                Assert.That(ValueCount, Is.EqualTo(3));
+                expected.AddRange(Definitions);
+                expected.AddRange(LastUses);
+                expected.AddRange(UseBlocks);
             }
             else
             {
-                Assert.Throws<InvalidDataException>(() =>
+                _ = Assert.Throws<InvalidDataException>(() =>
                     TrRmCompactLinearBodyReaderTests.Inspect(
                         testCase.Row, testCase.ParameterCount, typeCode: testCase.TypeCode,
                         secondTypeCode: testCase.SecondTypeCode,
@@ -251,7 +252,11 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             new HostBuffer("BodyValueUseBlocks", PrimitiveType.Int32, [0, 0, 0], true),
         ], policy).ConfigureAwait(true);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -265,18 +270,18 @@ public sealed class CompactLinearBodyValueIndexComponentTests
         var fixture = new ValueIndexCase(
             [0x04, 1, 1, 0, 0, 0, 1, 1, 3, 1, 42, 0x83, 3],
             ParameterCount: 2, ExpectedCandidateValid: true, HostedValid: true);
-        var hosted = InspectHosted(fixture);
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = InspectHosted(fixture);
         var bodyRows = TrRmVariableTableWriter.EncodeBodies(Enumerable.Repeat(
             new ReadOnlyMemory<byte>(fixture.Row), recordCount).ToArray());
         var expected = new List<int> { recordCount };
         for (var row = 0; row < recordCount; row++)
         {
             expected.AddRange([
-                fixture.ParameterCount, fixture.TypeSpecCount, 1, 1, hosted.ValueCount,
+                fixture.ParameterCount, fixture.TypeSpecCount, 1, 1, ValueCount,
             ]);
-            expected.AddRange(hosted.Definitions);
-            expected.AddRange(hosted.LastUses);
-            expected.AddRange(hosted.UseBlocks);
+            expected.AddRange(Definitions);
+            expected.AddRange(LastUses);
+            expected.AddRange(UseBlocks);
         }
 
         var buffers = ImmutableArray.Create(
@@ -286,15 +291,19 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
             new HostBuffer("BodyValueIndexComplete", PrimitiveType.Int32, [0], true),
             new HostBuffer("BodyValueDefinitions", PrimitiveType.Int32,
-                [.. Enumerable.Repeat(0, hosted.ValueCount)], true),
+                [.. Enumerable.Repeat(0, ValueCount)], true),
             new HostBuffer("BodyValueLastUses", PrimitiveType.Int32,
-                [.. Enumerable.Repeat(0, hosted.ValueCount)], true),
+                [.. Enumerable.Repeat(0, ValueCount)], true),
             new HostBuffer("BodyValueUseBlocks", PrimitiveType.Int32,
-                [.. Enumerable.Repeat(0, hosted.ValueCount)], true));
+                [.. Enumerable.Repeat(0, ValueCount)], true));
         var compilation = await CreateCompilationAsync(
             buffers, policy, ValidatedBatchVerificationSource).ConfigureAwait(true);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -307,9 +316,9 @@ public sealed class CompactLinearBodyValueIndexComponentTests
         var testCase = new ValueIndexCase(row, ParameterCount: 0,
             ExpectedCandidateValid: true, HostedValid: true,
             TypeSpecCount: 0, TypeCode: 0, SecondMethod: true);
-        var hosted = InspectHosted(testCase);
-        Assert.That(hosted.Operations, Is.EqualTo(1));
-        Assert.That(hosted.Definitions, Is.Empty);
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = InspectHosted(testCase);
+        Assert.That(Operations, Is.EqualTo(1));
+        Assert.That(Definitions, Is.Empty);
 
         var bodyRows = TrRmVariableTableWriter.EncodeBodies([
             new ReadOnlyMemory<byte>(row),
@@ -326,7 +335,11 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             new HostBuffer("BodyValueUseBlocks", PrimitiveType.Int32, [], true),
         ], policy).ConfigureAwait(true);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -343,17 +356,17 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             0x18, 5, 6, 3, 4,
             0x83, 6,
         ];
-        var hosted = InspectHosted(new ValueIndexCase(row, ParameterCount: 2,
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = InspectHosted(new ValueIndexCase(row, ParameterCount: 2,
             ExpectedCandidateValid: true, HostedValid: true));
-        Assert.That(hosted.ValueCount, Is.EqualTo(6));
+        Assert.That(ValueCount, Is.EqualTo(6));
 
         var bodyRows = TrRmVariableTableWriter.EncodeBodies([
             new ReadOnlyMemory<byte>(row),
         ]);
-        var expected = new List<int> { 1, 2, 1, 1, 1, hosted.ValueCount };
-        expected.AddRange(hosted.Definitions);
-        expected.AddRange(hosted.LastUses);
-        expected.AddRange(hosted.UseBlocks);
+        var expected = new List<int> { 1, 2, 1, 1, 1, ValueCount };
+        expected.AddRange(Definitions);
+        expected.AddRange(LastUses);
+        expected.AddRange(UseBlocks);
         var compilation = await CreateCompilationAsync(
         [
             new HostBuffer("Rows", PrimitiveType.Int32, [], false),
@@ -369,7 +382,11 @@ public sealed class CompactLinearBodyValueIndexComponentTests
                 [0, 0, 0, 0, 0, 0], true),
         ], policy).ConfigureAwait(true);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -437,7 +454,7 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             row.Add(0x83);
         }
         AppendWord(row, 3, referenceWidth);
-        return row.ToArray();
+        return [.. row];
     }
 
     private static void AppendWord(List<byte> bytes, uint value, int width)

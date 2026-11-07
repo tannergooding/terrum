@@ -24,9 +24,13 @@ public readonly ref struct TrRmTypeDefTableReader
     private readonly int[] _fieldOwners;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Gets the number of TypeDef rows.</summary>
     public int Count => _recordCount;
+    /// <summary>Gets the number of FieldDef rows owned by TypeDefs.</summary>
     public int FieldCount => _fieldCount;
+    /// <summary>Gets the number of Layout rows owned by TypeDefs.</summary>
     public int LayoutCount => _layoutCount;
+    /// <summary>Gets the number of Contract rows owned by TypeDefs.</summary>
     public int ContractCount => _contractCount;
 
     /// <summary>Validates TypeDef rows, names, flags and owned table ranges.</summary>
@@ -127,18 +131,26 @@ public readonly ref struct TrRmTypeDefTableReader
         }
     }
 
+    /// <summary>Gets the name of a TypeDef row.</summary>
+    /// <param name="row">The one-based TypeDef row.</param>
+    /// <returns>The decoded type name.</returns>
     public string GetName(int row)
     {
         CheckRow(row);
         return ReadName(row - 1);
     }
 
+    /// <summary>Gets the namespace of a TypeDef row.</summary>
+    /// <param name="row">The one-based TypeDef row.</param>
+    /// <returns>The decoded namespace, or an empty string for the global namespace.</returns>
     public string GetNamespace(int row)
     {
         CheckRow(row);
         return ReadNamespace(row - 1);
     }
 
+    /// <summary>Gets the one-based half-open FieldDef range owned by a TypeDef.</summary>
+    /// <param name="row">The one-based TypeDef row.</param>
     public (int Start, int End) GetFieldRange(int row)
     {
         CheckRow(row);
@@ -152,6 +164,8 @@ public readonly ref struct TrRmTypeDefTableReader
         return (first, first == 0 ? 0 : first + count);
     }
 
+    /// <summary>Gets the Module row that owns a TypeDef.</summary>
+    /// <param name="row">The one-based TypeDef row.</param>
     public int GetOwnerModule(int row)
     {
         CheckRow(row);
@@ -160,7 +174,7 @@ public readonly ref struct TrRmTypeDefTableReader
         while (low <= high)
         {
             _resourceLedger?.ConsumeWork();
-            var middle = low + (high - low) / 2;
+            var middle = low + ((high - low) / 2);
             var (start, end) = _modules.GetTypeDefRange(middle);
             if (row < start)
             {
@@ -179,6 +193,8 @@ public readonly ref struct TrRmTypeDefTableReader
         throw InvalidType();
     }
 
+    /// <summary>Gets the TypeDef row that owns a FieldDef.</summary>
+    /// <param name="row">The one-based FieldDef row.</param>
     public int GetFieldOwner(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -191,6 +207,8 @@ public readonly ref struct TrRmTypeDefTableReader
         return _fieldOwners[row];
     }
 
+    /// <summary>Gets the validated flags word for a TypeDef row.</summary>
+    /// <param name="row">The one-based TypeDef row.</param>
     public uint GetFlags(int row)
     {
         CheckRow(row);
@@ -212,6 +230,8 @@ public readonly ref struct TrRmTypeDefTableReader
         return (byte)((Read(row - 1, 8) >> 2) & 7);
     }
 
+    /// <summary>Gets the one-based GenericParam range owned by a TypeDef.</summary>
+    /// <param name="row">The one-based TypeDef row.</param>
     public (int Start, int Count) GetGenericRange(int row)
     {
         CheckRow(row);
@@ -225,6 +245,8 @@ public readonly ref struct TrRmTypeDefTableReader
         return ((int)Read(row - 1, 28), (int)Read(row - 1, 32));
     }
 
+    /// <summary>Gets the one-based Contract range owned by a TypeDef.</summary>
+    /// <param name="row">The one-based TypeDef row.</param>
     public (int Start, int Count) GetContractRange(int row)
     {
         CheckRow(row);
@@ -277,7 +299,7 @@ public readonly ref struct TrRmTypeDefTableReader
     {
         _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
         return BinaryPrimitives.ReadUInt32LittleEndian(
-            _rows.Slice(row * RowSize + offset, sizeof(uint)));
+            _rows.Slice((row * RowSize) + offset, sizeof(uint)));
     }
 
     private static bool ValidCount(int count)

@@ -194,10 +194,11 @@ internal static class TrRmRegisterBodyTestData
     }
 
     internal static byte[] StandardScalarConstantEntryArtifact(byte typeCode,
-        byte[] payload, bool isEntryPoint = true, string methodName = "Main")
+        byte[] payload, bool isEntryPoint = true, string methodName = "Main",
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
     {
         ArgumentNullException.ThrowIfNull(payload);
-        if ((typeCode == 0) != (payload.Length == 0))
+        if (typeCode == 0 != (payload.Length == 0))
         {
             throw new ArgumentException("Unit alone has an empty scalar payload.", nameof(payload));
         }
@@ -209,14 +210,15 @@ internal static class TrRmRegisterBodyTestData
         var strings = new TrRmStringTableReader(stringBytes, 3);
         var featureBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.TypedFrozenValues,
-        ]);
+        ], schema);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 1, 0, isEntryPoint ? 1 : 0, 1, 1, 1, 1, 1, 1, 1),
         ], strings, 0, 0, 1, 0, 1);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(typeCode),
-        ], 0, 0, 0);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1, 0, 0, 0);
+        ], 0, 0, 0, 0, schema);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1, 0, 0, 0,
+            0, schema);
         var signatureBytes = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(typeSpecRef, 0, 0, 0, 0, 0),
         ], typeSpecs, 0, 0);
@@ -271,7 +273,6 @@ internal static class TrRmRegisterBodyTestData
             payload.Length == 0 ? 0u : 1u);
         sections.Add(new TrRmSection(0x003F, 0, 1, node));
         sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
-
 }

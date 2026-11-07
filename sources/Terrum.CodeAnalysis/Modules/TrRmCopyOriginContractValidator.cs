@@ -15,6 +15,8 @@ internal static class TrRmCopyOriginContractValidator
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
         TrRmFieldPathTableReader fieldPaths, TrRmImportTableReader imports,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema,
         TrRmUnionCaseDefTableReader unionCaseDefs,
         TrRmLayoutTableReader layouts,
         ReadOnlySpan<byte> nativeImportBytes, int nativeImportCount)
@@ -91,6 +93,13 @@ internal static class TrRmCopyOriginContractValidator
                 var destinationPath = Read(data, offset);
                 var originCount = checked((int)Read(data, offset + 4));
                 offset += 8;
+                if (destinationPath != 0
+                    && !TrRmFeatureManifestValidator.Requires(features, modules,
+                        ownerModule,
+                        TrRmFeatureTableReader.LayoutQueriesFeatureId, schema))
+                {
+                    throw InvalidCopyOrigin();
+                }
 
                 var destination = ResolvePath(destinationPath, valueTypeSpec,
                     typeSpecs, types, fields, fieldPaths, imports, unionTypes,
@@ -105,6 +114,14 @@ internal static class TrRmCopyOriginContractValidator
                     var sourceOrdinal = Read(data, offset + 4);
                     var sourcePath = Read(data, offset + 8);
                     offset += 12;
+                    if (sourcePath != 0
+                        && !TrRmFeatureManifestValidator.Requires(features,
+                            modules, ownerModule,
+                            TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                            schema))
+                    {
+                        throw InvalidCopyOrigin();
+                    }
 
                     var sourceKey = new SourceKey(
                         sourceKind, sourceView, sourceOrdinal);
@@ -355,15 +372,11 @@ internal static class TrRmCopyOriginContractValidator
         HashSet<PathNode> destinations,
         Dictionary<PathNode, int> descendants)
     {
-        var node = path.PathNode;
-        if (node is null)
-        {
-            throw InvalidCopyOrigin();
-        }
+        var node = path.PathNode ?? throw InvalidCopyOrigin();
 
         if (destinations.Contains(node)
-            || descendants.TryGetValue(node, out var descendantCount)
-                && descendantCount != 0)
+            || (descendants.TryGetValue(node, out var descendantCount)
+                && descendantCount != 0))
         {
             throw InvalidCopyOrigin();
         }
@@ -519,34 +532,24 @@ internal static class TrRmCopyOriginContractValidator
             ? typeSpecs.GetRow(leftReference.Row) : default;
         var rightRow = rightReference.IsRow
             ? typeSpecs.GetRow(rightReference.Row) : default;
-        switch (leftReference.Form)
-        {
-            case 0x01:
-                return leftReference.TypeCode == rightReference.TypeCode
-                    && leftReference.ArgumentCode == rightReference.ArgumentCode;
-            case 0x04:
-                return leftReference.IsRow && rightReference.IsRow
-                    && Read(leftRow, 2) == Read(rightRow, 2);
-            case 0x05:
-            case 0x0D:
-                return leftReference.IsRow && rightReference.IsRow
-                    && leftRow.SequenceEqual(rightRow);
-            case >= 0x06 and <= 0x0B:
-            case 0x0E:
-                return leftReference.IsRow && rightReference.IsRow
-                    && AreEquivalentTypeSpecs(Read(leftRow, 2), Read(rightRow, 2),
-                        typeSpecs, types, imports, depth + 1);
-            case 0x0C:
-                return leftReference.IsRow && rightReference.IsRow
-                    && leftRow[2] == rightRow[2]
-                    && AreEquivalentTypeSpecs(Read(leftRow, 3), Read(rightRow, 3),
-                        typeSpecs, types, imports, depth + 1,
-                        allowInitQualifier: leftRow[2] == 0x8A);
-            case 0x0F:
-                return true;
-            default:
-                return false;
-        }
+        return leftReference.Form switch {
+            0x01 => leftReference.TypeCode == rightReference.TypeCode
+                                && leftReference.ArgumentCode == rightReference.ArgumentCode,
+            0x04 => leftReference.IsRow && rightReference.IsRow
+                                && Read(leftRow, 2) == Read(rightRow, 2),
+            0x05 or 0x0D => leftReference.IsRow && rightReference.IsRow
+                                && leftRow.SequenceEqual(rightRow),
+            (>= 0x06 and <= 0x0B) or 0x0E => leftReference.IsRow && rightReference.IsRow
+                                && AreEquivalentTypeSpecs(Read(leftRow, 2), Read(rightRow, 2),
+                                    typeSpecs, types, imports, depth + 1),
+            0x0C => leftReference.IsRow && rightReference.IsRow
+                                && leftRow[2] == rightRow[2]
+                                && AreEquivalentTypeSpecs(Read(leftRow, 3), Read(rightRow, 3),
+                                    typeSpecs, types, imports, depth + 1,
+                                    allowInitQualifier: leftRow[2] == 0x8A),
+            0x0F => true,
+            _ => false,
+        };
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

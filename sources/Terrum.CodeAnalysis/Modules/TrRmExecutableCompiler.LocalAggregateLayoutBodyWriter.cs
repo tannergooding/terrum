@@ -315,7 +315,6 @@ public static partial class TrRmExecutableCompiler
                     || function.NoFailureProof
                     || function.Variables.Any(static variable =>
                         variable.IsOut || variable.IsInit
-                        || variable.IsImplicitRef
                         || variable.IsImplicitReferenceTemporary)
                     || !StringComparer.Ordinal.Equals(
                         moduleImport.ProducerIdentity,
@@ -351,8 +350,7 @@ public static partial class TrRmExecutableCompiler
                 || function.ResultDependencyIncludesReceiver
                 || !function.DependencyContracts.IsEmpty
                 || function.Variables.Any(static variable =>
-                    variable.IsOut || variable.IsInit || variable.IsImplicitRef
-                    || variable.IsImplicitReferenceTemporary))
+                    variable.IsOut || variable.IsInit))
             {
                 throw Unsupported(
                     "L1 executable Body emission supports ordinary local methods and the selected bodyless MethodDef Import subset.");
@@ -610,6 +608,45 @@ public static partial class TrRmExecutableCompiler
             declarationTables.TypeSpecs.Count, 2, 1);
         var typeSpecRefs = CreateLocalAggregateTypeSpecMap(program,
             declarationTables.TypeSpecs, typeImports, typeSpecRows);
+        var implicitReferenceTypeSpecRefs
+            = new Dictionary<PrimitiveType, uint>();
+        uint GetLocalAggregateImplicitReferenceTypeSpecRef(
+            PrimitiveType referentType)
+        {
+            if (implicitReferenceTypeSpecRefs.TryGetValue(referentType,
+                    out var existing))
+            {
+                return existing;
+            }
+
+            if (!typeSpecRefs.TryGetValue(referentType,
+                    out var referentTypeSpec))
+            {
+                throw Unsupported(
+                    "An L1 implicit-reference parameter has no selected referent TypeSpec.");
+            }
+
+            var builtinIndex = Array.IndexOf(s_types, referentType);
+            byte[] typeSpec;
+            if (builtinIndex >= 0 && referentType != PrimitiveType.Void)
+            {
+                typeSpec = TrRmTypeSpecTableWriter.InlineFamily(0x8B,
+                    s_codes[builtinIndex]);
+            }
+            else
+            {
+                typeSpec = new byte[sizeof(uint) + 2];
+                typeSpec[0] = 0x07;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    typeSpec.AsSpan(2), referentTypeSpec);
+            }
+
+            typeSpecRows.Add(typeSpec);
+            var typeSpecRow = checked((uint)typeSpecRows.Count);
+            implicitReferenceTypeSpecRefs.Add(referentType, typeSpecRow);
+            return typeSpecRow;
+        }
+
         var scalarValues = new TrRmFrozenScalarValueBuilder();
         var bodies = new List<ReadOnlyMemory<byte>>(
             program.Functions.Length);
@@ -647,8 +684,13 @@ public static partial class TrRmExecutableCompiler
                 ordinal++)
             {
                 var parameter = function.Variables[ordinal];
+                var parameterTypeSpec = parameter.IsImplicitRef
+                    ? GetLocalAggregateImplicitReferenceTypeSpecRef(
+                        parameter.Type)
+                    : typeSpecRefs[parameter.Type];
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
-                    typeSpecRefs[parameter.Type], 0));
+                    parameterTypeSpec, 0, parameter.IsImplicitRef
+                        ? (byte)1 : (byte)0));
             }
 
             signatureRows.Add(new TrRmMethodSigRow(
@@ -1289,9 +1331,27 @@ public static partial class TrRmExecutableCompiler
                         {
                             AddTemporary(call);
                         }
-                        foreach (var argument in call.Arguments)
+                        for (var argumentIndex = 0;
+                            argumentIndex < call.Arguments.Length;
+                            argumentIndex++)
                         {
-                            AddTemporary(argument);
+                            var formalIndex
+                                = call.ParameterIndex(argumentIndex);
+                            if ((uint)formalIndex
+                                >= (uint)program.Functions[call.Function]
+                                    .ParameterCount)
+                            {
+                                throw Unsupported(
+                                    "An L1 CallSite argument has no selected formal.");
+                            }
+
+                            if (!program.Functions[call.Function]
+                                    .Variables[formalIndex].IsImplicitRef
+                                || call.ImplicitReferenceTemporary(
+                                    argumentIndex) >= 0)
+                            {
+                                AddTemporary(call.Arguments[argumentIndex]);
+                            }
                         }
                         break;
                     case BoundBinary binary:
@@ -2428,6 +2488,8 @@ public static partial class TrRmExecutableCompiler
             var inputs = new TrRmRegisterBodyCallInput[
                 call.Arguments.Length];
             var assignedFormals = new bool[call.Arguments.Length];
+            var fieldReferenceArguments
+                = new List<(int FormalIndex, BoundFieldRead Field)>();
             for (var argumentIndex = 0;
                 argumentIndex < call.Arguments.Length; argumentIndex++)
             {
@@ -2444,11 +2506,62 @@ public static partial class TrRmExecutableCompiler
                 }
                 assignedFormals[formalIndex] = true;
 
+                var formal = target.Variables[formalIndex];
                 if (argument.Type == PrimitiveType.Void)
                 {
+                    if (formal.IsImplicitRef)
+                    {
+                        throw Unsupported(
+                            "L1 implicit-reference parameters require a non-unit referent.");
+                    }
+
                     AppendUnitExpression(argument);
                     inputs[formalIndex] = new TrRmRegisterBodyCallInput(
                         0, 0, 0);
+                    continue;
+                }
+
+                if (formal.IsImplicitRef)
+                {
+                    var temporary
+                        = call.ImplicitReferenceTemporary(argumentIndex);
+                    if (temporary < -1
+                        || (temporary >= 0
+                            && ((uint)temporary
+                                    >= (uint)function.Variables.Length
+                                || temporary < function.ParameterCount
+                                || !function.Variables[temporary]
+                                    .IsImplicitReferenceTemporary
+                                || function.Variables[temporary].Type
+                                    != argument.Type)))
+                    {
+                        throw Unsupported(
+                            "An L1 implicit-reference temporary does not match its argument and formal.");
+                    }
+
+                    if (temporary >= 0)
+                    {
+                        inputs[formalIndex]
+                            = new TrRmRegisterBodyCallInput(2, 3,
+                                checked((ushort)CaptureValueHome(argument)));
+                    }
+                    else if (argument is BoundRead read)
+                    {
+                        inputs[formalIndex]
+                            = new TrRmRegisterBodyCallInput(2, 3,
+                                checked((ushort)HomeForVariable(
+                                    read.Variable)));
+                    }
+                    else if (argument is BoundFieldRead field)
+                    {
+                        fieldReferenceArguments.Add((formalIndex, field));
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "L1 implicit-reference arguments require a local Home, a supported field place, or an explicit materialization temporary.");
+                    }
+
                     continue;
                 }
 
@@ -2485,6 +2598,37 @@ public static partial class TrRmExecutableCompiler
 
                 inputs[formalIndex] = new TrRmRegisterBodyCallInput(2, 1,
                     checked((ushort)argumentHome));
+            }
+            for (var placeIndex = 0;
+                placeIndex < fieldReferenceArguments.Count; placeIndex++)
+            {
+                var (formalIndex, field) = fieldReferenceArguments[
+                    placeIndex];
+                var destinationRegister = checked((byte)(3 + placeIndex));
+                if (destinationRegister > 13)
+                {
+                    throw Unsupported(
+                        "L1 implicit-reference field arguments exceed the available call registers.");
+                }
+
+                var path = GetFieldPath(field, out var root);
+                if (root is not BoundRead rootRead)
+                {
+                    throw Unsupported(
+                        "L1 implicit-reference field arguments require a local or formal Home root.");
+                }
+
+                var selectedRegister = SelectFieldPath(path,
+                    HomeForVariable(rootRead.Variable), rootRead.Type,
+                    1, 1, 0xD8, destinationRegister);
+                if (selectedRegister != destinationRegister)
+                {
+                    throw Invalid(
+                        "An L1 implicit-reference field selection changed its destination register.");
+                }
+
+                inputs[formalIndex] = new TrRmRegisterBodyCallInput(1, 3,
+                    destinationRegister);
             }
             if (assignedFormals.Any(static assigned => !assigned))
             {

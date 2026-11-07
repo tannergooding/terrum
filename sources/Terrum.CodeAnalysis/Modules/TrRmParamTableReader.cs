@@ -146,13 +146,8 @@ public readonly ref struct TrRmParamTableReader
 
     private static bool IsImplicitReadonlyReference(uint typeSpecRef,
         TrRmTypeSpecTableReader types)
-    {
-        var type = types.GetTypeSpecRef(typeSpecRef);
-        return type.Qualifiers == 0
-            && (type.Form == 0x07
-                || (type.Form == 0x0C && type.TypeCode == 0x8B)
-                || (type.Form == 0x01 && type.TypeCode == 0x8B));
-    }
+        => types.TryGetImplicitReadonlyReferenceReferentTypeSpecRef(
+            typeSpecRef, out _);
 
     private static InvalidDataException InvalidParam()
         => new("Invalid TRRM Param table.");

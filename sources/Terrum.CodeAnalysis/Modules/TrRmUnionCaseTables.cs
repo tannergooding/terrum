@@ -32,6 +32,7 @@ public readonly ref struct TrRmUnionCaseDefTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated UnionCaseDef rows.</summary>
     public int Count => _recordCount;
@@ -48,6 +49,14 @@ public readonly ref struct TrRmUnionCaseDefTableReader
     public TrRmUnionCaseDefTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmStringTableReader strings,
         TrRmTypeDefTableReader types, int payloadFieldCount)
+        : this(section, recordCount, strings, types, payloadFieldCount, null)
+    {
+    }
+
+    internal TrRmUnionCaseDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmTypeDefTableReader types, int payloadFieldCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(payloadFieldCount)
             || (long)recordCount * RowSize != section.Length)
@@ -58,7 +67,9 @@ public readonly ref struct TrRmUnionCaseDefTableReader
         _rows = section;
         _recordCount = recordCount;
         PayloadFieldCount = payloadFieldCount;
+        resourceLedger?.ConsumeWork(checked((ulong)payloadFieldCount + 2UL));
         var fieldOwned = new bool[payloadFieldCount + 1];
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
@@ -66,6 +77,7 @@ public readonly ref struct TrRmUnionCaseDefTableReader
             var name = Read(data, 8);
             var first = Read(data, 12);
             var count = Read(data, 16);
+            _resourceLedger?.ConsumeWork();
             if (owner is 0 or > 0xFF_FFFF || owner > (uint)types.Count
                 || name is 0 or > 0xFF_FFFF
                 || !ValidRange(first, count, payloadFieldCount))
@@ -80,6 +92,7 @@ public readonly ref struct TrRmUnionCaseDefTableReader
 
             for (var field = first; field < first + count; field++)
             {
+                _resourceLedger?.ConsumeWork(2);
                 if (fieldOwned[field])
                 {
                     throw InvalidUnionCaseDef();
@@ -91,6 +104,7 @@ public readonly ref struct TrRmUnionCaseDefTableReader
 
         for (var field = 1; field <= payloadFieldCount; field++)
         {
+            _resourceLedger?.ConsumeWork();
             if (!fieldOwned[field])
             {
                 throw InvalidUnionCaseDef();
@@ -119,6 +133,7 @@ public readonly ref struct TrRmUnionCaseDefTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidUnionCaseDef();
@@ -135,8 +150,12 @@ public readonly ref struct TrRmUnionCaseDefTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidUnionCaseDef()
         => new("Invalid TRRM UnionCaseDef table.");
@@ -149,6 +168,7 @@ public readonly ref struct TrRmUnionCaseFieldTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated UnionCaseField rows.</summary>
     public int Count => _recordCount;
@@ -162,6 +182,14 @@ public readonly ref struct TrRmUnionCaseFieldTableReader
     public TrRmUnionCaseFieldTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmStringTableReader strings,
         TrRmTypeSpecTableReader types, TrRmUnionCaseDefTableReader cases)
+        : this(section, recordCount, strings, types, cases, null)
+    {
+    }
+
+    internal TrRmUnionCaseFieldTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmTypeSpecTableReader types, TrRmUnionCaseDefTableReader cases,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || recordCount != cases.PayloadFieldCount
             || (long)recordCount * RowSize != section.Length)
@@ -171,17 +199,21 @@ public readonly ref struct TrRmUnionCaseFieldTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var caseRow = 1; caseRow <= cases.Count; caseRow++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = cases.GetPayloadRange(caseRow);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
+                _resourceLedger?.ConsumeWork();
                 var row = first + ordinal;
                 var data = GetRow(row);
                 var owner = Read(data, 0);
                 var fieldOrdinal = Read(data, 4);
                 var name = Read(data, 8);
                 var typeSpecRef = Read(data, 12);
+                _resourceLedger?.ConsumeWork();
                 if (owner != (uint)caseRow || fieldOrdinal != (uint)ordinal
                     || name is 0 or > 0xFF_FFFF || typeSpecRef == 0)
                 {
@@ -216,6 +248,7 @@ public readonly ref struct TrRmUnionCaseFieldTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidUnionCaseField();
@@ -227,8 +260,12 @@ public readonly ref struct TrRmUnionCaseFieldTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidUnionCaseField()
         => new("Invalid TRRM UnionCaseField table.");

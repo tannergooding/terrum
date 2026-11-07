@@ -2,12 +2,13 @@
 
 using System;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmLayoutTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmLayoutTableWriterTests
 {
     [Test]
     public void EmitsDefaultAndBlittableTargetVariantsWithCompleteFieldLists()
@@ -86,12 +87,12 @@ public sealed class TrRmLayoutTableWriterTests
     [Test]
     public void RejectsUnassignedProfilesAndIncompleteVariants()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(2, 1)]));
 
-        Assert.Throws<InvalidDataException>(() => EncodeLayoutRows(TypeDefRows(1), 1,
+        _ = Assert.Throws<InvalidDataException>(() => EncodeLayoutRows(TypeDefRows(1), 1,
             [], [new TrRmLayoutRow(1, 0, 1, 1, 0, 16, 0, 0)], 0));
-        Assert.Throws<InvalidDataException>(() => EncodeLayoutRows(TypeDefRows(2), 2,
+        _ = Assert.Throws<InvalidDataException>(() => EncodeLayoutRows(TypeDefRows(2), 2,
             [], [
                 new TrRmLayoutRow(1, 0, 1, 0, 0, 16, 0, 0),
                 new TrRmLayoutRow(1, 0, 1, 0, 0, 16, 0, 0),

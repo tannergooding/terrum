@@ -2,12 +2,13 @@
 
 using System;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmTypeDefTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmTypeDefTableWriterTests
 {
     [Test]
     public void EmitsMultiModuleTypePartitionsAndFieldOwnership()
@@ -57,18 +58,18 @@ public sealed class TrRmTypeDefTableWriterTests
     {
         var first = new TrRmTypeDefRow(1, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0);
         var second = new TrRmTypeDefRow(1, 5, 4, 1, 1, 0, 0, 0, 0, 0, 0);
-        Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first with { NamespaceStringRow = 0 }, second]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first with { NameStringRow = 1 }, second]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first, second with { Flags = 0 }]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first with { FieldFirst = 1, FieldCount = 1 }, second]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first, second with { FieldFirst = 0, FieldCount = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([first]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([first]));
     }
 
     private static byte[] Encode(TrRmTypeDefRow[] rows)

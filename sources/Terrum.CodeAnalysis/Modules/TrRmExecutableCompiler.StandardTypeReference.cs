@@ -630,19 +630,29 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, byte[][] artifacts, string[] schemaIdentities,
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int moduleRow,
-        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        bool retainExecutableTypes = false,
+        int consumerArtifactIndex = 0)
     {
-        if (!(StringComparer.Ordinal.Equals(schemaIdentities[0],
+        if ((uint)consumerArtifactIndex >= (uint)artifacts.Length
+            || consumerArtifactIndex >= schemaIdentities.Length
+            || !(StringComparer.Ordinal.Equals(
+                    schemaIdentities[consumerArtifactIndex],
                 StandardForeignInvocationStorageFixedArraySchemaIdentity)
-            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+            || StringComparer.Ordinal.Equals(
+                schemaIdentities[consumerArtifactIndex],
                 StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
-            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+            || StringComparer.Ordinal.Equals(
+                schemaIdentities[consumerArtifactIndex],
                 StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity)
-            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+            || StringComparer.Ordinal.Equals(
+                schemaIdentities[consumerArtifactIndex],
                 StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)
-            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+            || StringComparer.Ordinal.Equals(
+                schemaIdentities[consumerArtifactIndex],
                 StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
-            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+            || StringComparer.Ordinal.Equals(
+                schemaIdentities[consumerArtifactIndex],
                 StandardLocalAggregateLayoutSchemaIdentity))
             || tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
@@ -652,7 +662,9 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
                 or TrRmArtifactSchema.LocalAggregateLayoutDraft)
-            || program.EntryPoint != -1 || !program.Functions.IsEmpty
+            || (!retainExecutableTypes
+                && (program.EntryPoint != -1
+                    || !program.Functions.IsEmpty))
             || program.Structures.IsEmpty)
         {
             return program;
@@ -668,11 +680,12 @@ public static partial class TrRmExecutableCompiler
         }
 
         var rootSnapshot = CreateA2SourceTypeProviderSnapshot(tables,
-            artifacts[0], schemaIdentities[0], moduleRow);
+            artifacts[consumerArtifactIndex],
+            schemaIdentities[consumerArtifactIndex], moduleRow);
         var snapshotsByModule = new Dictionary<(int ArtifactIndex, int ModuleRow),
             BoundSourceTypeProviderSnapshot>
         {
-            [(0, moduleRow)] = rootSnapshot,
+            [(consumerArtifactIndex, moduleRow)] = rootSnapshot,
         };
 
         BoundSourceTypeProviderSnapshot GetSnapshot(int artifactIndex,
@@ -711,7 +724,7 @@ public static partial class TrRmExecutableCompiler
             List<TrRmStandardTypeProviderBinding>>();
         foreach (var binding in typeProviderBindings)
         {
-            if (binding.ConsumerArtifactIndex != 0
+            if (binding.ConsumerArtifactIndex != consumerArtifactIndex
                 || binding.ConsumerModuleRow != moduleRow)
             {
                 continue;

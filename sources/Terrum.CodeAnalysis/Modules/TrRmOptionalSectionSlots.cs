@@ -21,11 +21,17 @@ public readonly record struct TrRmReferenceSlot(
 /// that relocated Body instruction references retain their meaning.</remarks>
 public static class TrRmOptionalSectionSlots
 {
+    /// <summary>Creates an optional section from reference slots and opaque payload bytes.</summary>
+    /// <param name="kind">The assigned optional-section kind.</param>
+    /// <param name="recordCount">The nonzero row count recorded in the artifact directory.</param>
+    /// <param name="slots">The references preceding the opaque payload.</param>
+    /// <param name="payload">The payload bytes, which are not interpreted.</param>
+    /// <returns>The optional section with reference-slot metadata.</returns>
     public static TrRmSection Create(ushort kind, uint recordCount,
         IReadOnlyList<TrRmReferenceSlot> slots, ReadOnlyMemory<byte> payload)
     {
         ArgumentNullException.ThrowIfNull(slots);
-        var size = 4L + slots.Count * 16L + payload.Length;
+        var size = 4L + (slots.Count * 16L) + payload.Length;
         if (kind < 0x8000 || recordCount is 0 or > 0xFF_FFFF || size > int.MaxValue)
         {
             throw InvalidSlots();
@@ -37,10 +43,14 @@ public static class TrRmOptionalSectionSlots
         {
             WriteSlot(result, index, slots[index]);
         }
-        payload.Span.CopyTo(result.AsSpan(4 + slots.Count * 16));
+        payload.Span.CopyTo(result.AsSpan(4 + (slots.Count * 16)));
         return new TrRmSection(kind, 2, recordCount, result);
     }
 
+    /// <summary>Inserts an optional section into a standard TRRM artifact.</summary>
+    /// <param name="artifact">The artifact to extend.</param>
+    /// <param name="extension">The optional section to insert.</param>
+    /// <returns>The recomposed artifact; validate it to check referenced target rows.</returns>
     public static byte[] InsertInArtifact(ReadOnlySpan<byte> artifact, TrRmSection extension)
         => InsertInArtifact(artifact, extension, TrRmArtifactSchema.Standard);
 
@@ -48,7 +58,7 @@ public static class TrRmOptionalSectionSlots
         TrRmSection extension)
         => InsertInArtifact(artifact, extension, TrRmArtifactSchema.Development);
 
-    private static byte[] InsertInArtifact(ReadOnlySpan<byte> artifact,
+    internal static byte[] InsertInArtifact(ReadOnlySpan<byte> artifact,
         TrRmSection extension, TrRmArtifactSchema schema)
     {
         if (extension.Kind < 0x8000 || extension.Flags != 2)
@@ -63,6 +73,11 @@ public static class TrRmOptionalSectionSlots
         return TrRmArtifactWriter.Encode(sections, schema);
     }
 
+    /// <summary>Replaces the reference slots of an existing optional section.</summary>
+    /// <param name="artifact">The artifact containing the optional section.</param>
+    /// <param name="kind">The optional-section kind to replace.</param>
+    /// <param name="slots">The replacement slots, with the same count as the existing slots.</param>
+    /// <returns>The recomposed artifact; validate it to check referenced target rows.</returns>
     public static byte[] ReplaceInArtifact(ReadOnlySpan<byte> artifact, ushort kind,
         IReadOnlyList<TrRmReferenceSlot> slots)
         => ReplaceInArtifact(artifact, kind, slots, TrRmArtifactSchema.Standard);
@@ -71,7 +86,7 @@ public static class TrRmOptionalSectionSlots
         ushort kind, IReadOnlyList<TrRmReferenceSlot> slots)
         => ReplaceInArtifact(artifact, kind, slots, TrRmArtifactSchema.Development);
 
-    private static byte[] ReplaceInArtifact(ReadOnlySpan<byte> artifact, ushort kind,
+    internal static byte[] ReplaceInArtifact(ReadOnlySpan<byte> artifact, ushort kind,
         IReadOnlyList<TrRmReferenceSlot> slots, TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(slots);
@@ -115,6 +130,10 @@ public static class TrRmOptionalSectionSlots
         return sections;
     }
 
+    /// <summary>Replaces the slots in an optional section while preserving its payload.</summary>
+    /// <param name="section">The optional section to update.</param>
+    /// <param name="slots">The replacement slots, with the same count as the existing slots.</param>
+    /// <returns>The updated section.</returns>
     public static TrRmSection Replace(TrRmSection section, IReadOnlyList<TrRmReferenceSlot> slots)
     {
         ArgumentNullException.ThrowIfNull(slots);
@@ -127,7 +146,7 @@ public static class TrRmOptionalSectionSlots
 
         var source = section.Bytes.Span;
         var slotCount = BinaryPrimitives.ReadUInt32LittleEndian(source);
-        if (slotCount != slots.Count || 4L + slotCount * 16L > source.Length)
+        if (slotCount != slots.Count || 4L + (slotCount * 16L) > source.Length)
         {
             throw InvalidSlots();
         }
@@ -148,7 +167,7 @@ public static class TrRmOptionalSectionSlots
             throw InvalidSlots();
         }
 
-        var offset = 4 + index * 16;
+        var offset = 4 + (index * 16);
         BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset), slot.TargetKind);
         BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset + 2), slot.Selector);
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 4), slot.TargetRow);

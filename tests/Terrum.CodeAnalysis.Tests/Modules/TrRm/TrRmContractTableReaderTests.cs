@@ -4,33 +4,34 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmContractTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmContractTableReaderTests
 {
     [Test]
     public void DistinctTypeAndMethodRangesOwnAssignedClauses()
     {
-        Create(Section(Cleanup(), Effects()));
-        Create([], recordCount: 0, declaredCount: 0,
+        _ = Create(Section(Cleanup(), Effects()));
+        _ = Create([], recordCount: 0, declaredCount: 0,
             typeFirst: 0, typeCount: 0, methodFirst: 0, methodCount: 0);
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(3,(byte)(0))]
-    [TestCase(4,(byte)(0))]
-    [TestCase(4,(byte)(6))]
-    [TestCase(6,(byte)(1))]
-    [TestCase(8,(byte)(0))]
-    [TestCase(8,(byte)(2))]
+    [TestCase(0,(byte)0)]
+    [TestCase(3,(byte)0)]
+    [TestCase(4,(byte)0)]
+    [TestCase(4,(byte)6)]
+    [TestCase(6,(byte)1)]
+    [TestCase(8,(byte)0)]
+    [TestCase(8,(byte)2)]
     public void RejectsMalformedCleanupReferenceKindAndFlags(int offset, byte replacement)
     {
         var row = Cleanup();
         row[offset] = replacement;
-        Assert.Throws<InvalidDataException>(() => Create(Section(row, Effects())));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(row, Effects())));
     }
 
     [Test]
@@ -38,24 +39,24 @@ public sealed class TrRmContractTableReaderTests
     {
         var effects = Effects();
         effects[8] = 8;
-        Assert.Throws<InvalidDataException>(() => Create(Section(Cleanup(), effects)));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(Cleanup(), effects)));
 
-        Assert.Throws<InvalidDataException>(() => Create(Section(Effects(), Effects()),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(Effects(), Effects()),
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2));
     }
 
     [Test]
     public void DevelopmentProfileRetiresNoThrowAndAllowsCleanupWithoutIt()
     {
-        Create(Section(Cleanup(), Effects(2)));
-        Create(Section(Cleanup(), Effects(4)));
-        Create(Section(Cleanup(), Effects(6)));
-        Create(Section(Cleanup(), Effects(0)));
-        Create(Section(Effects(), Cleanup()), typeFirst: 2, methodFirst: 1);
+        _ = Create(Section(Cleanup(), Effects(2)));
+        _ = Create(Section(Cleanup(), Effects(4)));
+        _ = Create(Section(Cleanup(), Effects(6)));
+        _ = Create(Section(Cleanup(), Effects(0)));
+        _ = Create(Section(Effects(), Cleanup()), typeFirst: 2, methodFirst: 1);
 
         foreach (var mask in new uint[] { 1, 3, 5, 7 })
         {
-            Assert.Throws<InvalidDataException>(() => Create(Section(Effects(mask)),
+            _ = Assert.Throws<InvalidDataException>(() => Create(Section(Effects(mask)),
                 recordCount: 1, declaredCount: 1,
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
         }
@@ -66,19 +67,19 @@ public sealed class TrRmContractTableReaderTests
     {
         foreach (var mask in new uint[] { 2, 4, 6 })
         {
-            Create(Section(Effects(mask)), recordCount: 1, declaredCount: 1,
+            _ = Create(Section(Effects(mask)), recordCount: 1, declaredCount: 1,
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
                 writeRows: true, developmentProfile: false);
         }
 
-        Create(Section(Effects(0)), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(Effects(0)), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Section(Effects(1)), recordCount: 1, declaredCount: 1,
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
                 writeRows: true, developmentProfile: false));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Section(Effects(8)), recordCount: 1, declaredCount: 1,
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
                 writeRows: true, developmentProfile: false));
@@ -87,7 +88,7 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void StandardCleanupClauseDoesNotRequireRetiredNoThrowEffectBit()
     {
-        Create(Section(Cleanup()), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(Cleanup()), recordCount: 1, declaredCount: 1,
             typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
             writeRows: true, frameArtifact: true, developmentProfile: false);
     }
@@ -98,7 +99,7 @@ public sealed class TrRmContractTableReaderTests
     [TestCase(4)]
     public void StandardNativeCallableClausePreservesItsExactConvention(byte convention)
     {
-        Create(Section(NativeCallable(convention)), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(NativeCallable(convention)), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             writeRows: true, developmentProfile: false,
             expectedNativeCallableConvention: convention);
@@ -107,12 +108,12 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void StandardNativeCallableClauseRequiresNativeBoundaryFeature()
     {
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(NativeCallable()), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             frameArtifact: true, developmentProfile: false));
 
-        Create(Section(NativeCallable()), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(NativeCallable()), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             frameArtifact: true, developmentProfile: false,
             includeNativeBoundaryFeature: true);
@@ -122,23 +123,23 @@ public sealed class TrRmContractTableReaderTests
     public void StandardPredicateGraphContractUsesTypedClauseAndFeatureClosure()
     {
         var predicate = PredicateGraphContract(phase: 3, ordinal: 0, graphRow: 1);
-        Create(Section(predicate), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(predicate), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, predicateGraphCount: 1,
             includePublishedPredicatesFeature: true, writeRows: true,
             expectedPredicateGraphContractCount: 1);
 
-        Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, predicateGraphCount: 1));
-        Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false));
 
         var selector = PredicateGraphContract(phase: 3, ordinal: 0, graphRow: 1);
-        Create(Section(selector),
+        _ = Create(Section(selector),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, predicateGraphCount: 1,
@@ -148,7 +149,7 @@ public sealed class TrRmContractTableReaderTests
         foreach (var phase in new byte[] { 0, 4 })
         {
             var invalidPhase = PredicateGraphContract(phase, 0, 1);
-            Assert.Throws<InvalidDataException>(() => Create(Section(invalidPhase),
+            _ = Assert.Throws<InvalidDataException>(() => Create(Section(invalidPhase),
                 recordCount: 1, declaredCount: 1,
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
                 developmentProfile: false, predicateGraphCount: 1,
@@ -158,20 +159,20 @@ public sealed class TrRmContractTableReaderTests
         var phaseGap = Section(
             PredicateGraphContract(phase: 1, ordinal: 0, graphRow: 1),
             PredicateGraphContract(phase: 1, ordinal: 2, graphRow: 2));
-        Assert.Throws<InvalidDataException>(() => Create(phaseGap,
+        _ = Assert.Throws<InvalidDataException>(() => Create(phaseGap,
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             developmentProfile: false, predicateGraphCount: 2,
             includePublishedPredicatesFeature: true));
 
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(PredicateGraphContract(phase: 1, ordinal: 0, graphRow: 2)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, predicateGraphCount: 1,
             includePublishedPredicatesFeature: true));
 
-        Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: true, predicateGraphCount: 1,
@@ -193,18 +194,18 @@ public sealed class TrRmContractTableReaderTests
         Assert.That(rows.GetRow(1)[8], Is.EqualTo((byte)1));
         Assert.That(rows.GetRow(2)[8], Is.EqualTo((byte)2));
 
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(EvaluationForm(1), EvaluationForm(1)),
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             developmentProfile: false, generalPredicateGraphsDraft: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(EvaluationForm(1)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, generalPredicateGraphsDraft: true,
             includeGeneralPredicateGraphsFeature: false));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(EvaluationForm(2)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
@@ -215,7 +216,7 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void ForeignInvocationCandidatePublishedPredicateFeatureDoesNotRequireFrozenValues()
     {
-        Create(Section(Effects()), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(Effects()), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, includePublishedPredicatesFeature: true,
             foreignInvocationDraft: true, verifyPublishedPredicatePrerequisites: true);
@@ -226,39 +227,39 @@ public sealed class TrRmContractTableReaderTests
     {
         var convention = NativeCallable(1);
         convention[8] = 0;
-        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(convention),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, developmentProfile: false));
 
         convention = NativeCallable(1);
         convention[8] = 5;
-        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(convention),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, developmentProfile: false));
 
         convention = NativeCallable(1);
         convention[9] = 1;
-        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(convention),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, developmentProfile: false));
 
         convention = NativeCallable(1);
         convention[10] = 1;
-        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(convention),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, developmentProfile: false));
 
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(NativeCallable(owner: 0x1300_0001)), recordCount: 1,
             declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, developmentProfile: false));
 
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(NativeCallable()), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: true));
 
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(NativeCallable(1), NativeCallable(2)), recordCount: 2,
             declaredCount: 2, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 2, developmentProfile: false));
@@ -268,12 +269,12 @@ public sealed class TrRmContractTableReaderTests
     public void RejectsOverlapsOrphansAndMismatchedDeclaredCounts()
     {
         var rows = Section(Cleanup(), Effects());
-        Assert.Throws<InvalidDataException>(() => Create(rows,
+        _ = Assert.Throws<InvalidDataException>(() => Create(rows,
             typeFirst: 1, typeCount: 2, methodFirst: 2, methodCount: 1));
-        Assert.Throws<InvalidDataException>(() => Create(Section(Cleanup(), Effects(), Effects()),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(Cleanup(), Effects(), Effects()),
             recordCount: 3, declaredCount: 3));
-        Assert.Throws<InvalidDataException>(() => Create(rows, declaredCount: 3));
-        Assert.Throws<InvalidDataException>(() => Create(rows[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => Create(rows, declaredCount: 3));
+        _ = Assert.Throws<InvalidDataException>(() => Create(rows[..^1]));
     }
 
     [Test]
@@ -283,24 +284,24 @@ public sealed class TrRmContractTableReaderTests
         var transfer = Contract(0x1600_0001, 3, [0, 0, 0, 0, 0, 0, 0, 0]);
         var dependency = Contract(0x1600_0001, 4,
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        Create(Section(output), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(output), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true);
-        Create(Section(transfer), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(transfer), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1);
-        Create(Section(dependency), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(dependency), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1);
 
         output[12] = 2;
-        Assert.Throws<InvalidDataException>(() => Create(Section(output),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(output),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true));
         transfer[15] = 1;
-        Assert.Throws<InvalidDataException>(() => Create(Section(transfer),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(transfer),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
-        Assert.Throws<InvalidDataException>(() => Create(Section(Contract(0x1600_0001, 0x12, [])),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(Contract(0x1600_0001, 0x12, [])),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
     }
@@ -316,13 +317,13 @@ public sealed class TrRmContractTableReaderTests
 
         var invalidDestination = Contract(0x1600_0001, 4,
             [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
-        Assert.Throws<InvalidDataException>(() => Create(Section(invalidDestination),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(invalidDestination),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, developmentProfile: false));
 
         var invalidSource = Contract(0x1600_0001, 4,
             [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
-        Assert.Throws<InvalidDataException>(() => Create(Section(invalidSource),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(invalidSource),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, developmentProfile: false));
     }
@@ -333,37 +334,37 @@ public sealed class TrRmContractTableReaderTests
         var predicate = PredicateGraphContract(phase: 3, ordinal: 0, graphRow: 1);
         var output = OutputStateContract(ordinal: 0, graphRow: 1, state: 1);
         var section = Section(predicate, output);
-        Create(section, recordCount: 2, declaredCount: 2,
+        _ = Create(section, recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             hasOutputParam: true, paramMode: 0, initializationParameter: true,
             predicateGraphCount: 1, includePublishedPredicatesFeature: true,
             writeRows: true, developmentProfile: false);
 
-        Assert.Throws<InvalidDataException>(() => Create(Section(output),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(output),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, initializationParameter: true,
             predicateGraphCount: 1, includePublishedPredicatesFeature: true,
             developmentProfile: false));
-        Assert.Throws<InvalidDataException>(() => Create(section,
+        _ = Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             predicateGraphCount: 1, includePublishedPredicatesFeature: true,
             developmentProfile: false));
-        Assert.Throws<InvalidDataException>(() => Create(section,
+        _ = Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             hasOutputParam: true, paramMode: 1, initializationParameter: true,
             predicateGraphCount: 1, includePublishedPredicatesFeature: true,
             developmentProfile: false));
-        Assert.Throws<InvalidDataException>(() => Create(section,
+        _ = Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             hasOutputParam: true, paramMode: 0, predicateGraphCount: 1,
             includePublishedPredicatesFeature: true, developmentProfile: false));
 
         output = OutputStateContract(ordinal: 0, graphRow: 1, state: 2);
-        Assert.Throws<InvalidDataException>(() => Create(Section(predicate, output),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(predicate, output),
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             hasOutputParam: true, paramMode: 0, initializationParameter: true,
@@ -371,7 +372,7 @@ public sealed class TrRmContractTableReaderTests
             developmentProfile: false));
 
         output = OutputStateContract(ordinal: 0, graphRow: 2, state: 1);
-        Assert.Throws<InvalidDataException>(() => Create(Section(predicate, output),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(predicate, output),
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             hasOutputParam: true, paramMode: 0, initializationParameter: true,
@@ -382,11 +383,11 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void RetiredNativeVTableContractKindsAreRejected()
     {
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(Contract(0x1300_0001, 7, new byte[20])), recordCount: 1, declaredCount: 1,
             typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
             typeFlags: 12));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(Contract(0x1600_0001, 8, new byte[8])), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             methodOwnerType: 1));
@@ -395,14 +396,14 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void RemovedNativeComOwnerAndAcquisitionClausesAreRejected()
     {
-        Assert.Throws<InvalidDataException>(() => Create(Section(
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(
                 Contract(0x1300_0001, 9, new byte[4])),
             recordCount: 1, declaredCount: 1,
             typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
             typeFlags: 12));
 
         var acquisition = Contract(0x1600_0001, 11, new byte[20]);
-        Assert.Throws<InvalidDataException>(() => Create(Section(acquisition),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(acquisition),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
     }
@@ -411,13 +412,13 @@ public sealed class TrRmContractTableReaderTests
     public void NativeParameterRequiresAnAddressParameterAndAssignedAccess()
     {
         var contract = NativeParameter(ordinal: 0, access: 3, retention: 1, extent: 0);
-        Create(Section(contract), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(contract), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, pointerParameter: true);
-        Assert.Throws<InvalidDataException>(() => Create(Section(contract),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(contract),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, hasOutputParam: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(NativeParameter(ordinal: 0, access: 0, retention: 1, extent: 0)),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, hasOutputParam: true, pointerParameter: true));
@@ -426,21 +427,21 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void ForeignInvocationDraftNativeParameterPreservesUnsignedExtentAndWritableType()
     {
-        Create(Section(StandardNativeParameter(ordinal: 0, access: 3,
+        _ = Create(Section(StandardNativeParameter(ordinal: 0, access: 3,
                 retention: 1, extentKind: 1, extent: uint.MaxValue)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             writeRows: true, developmentProfile: false,
             foreignInvocationDraft: true, expectedNativeParameterExtent: uint.MaxValue);
-        Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
+        _ = Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
                 retention: 1, extentKind: 1, extent: 1)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             developmentProfile: false, foreignInvocationDraft: true,
             expectedNativeParameterExtent: 1);
-        Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
+        _ = Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
                 retention: 1, extentKind: 0, extent: 0)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
@@ -448,7 +449,7 @@ public sealed class TrRmContractTableReaderTests
             pointerParameterWritable: false, pointerPointeeCode: 0x0D,
             developmentProfile: false, foreignInvocationDraft: true,
             expectedNativeParameterExtent: 0);
-        Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
+        _ = Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
                 retention: 1, extentKind: 0, extent: 0)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
@@ -457,7 +458,7 @@ public sealed class TrRmContractTableReaderTests
             developmentProfile: false, foreignInvocationDraft: true,
             expectedNativeParameterExtent: 0);
 
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(StandardNativeParameter(ordinal: 0, access: 2,
                 retention: 1, extentKind: 0, extent: 0)),
             recordCount: 1, declaredCount: 1,
@@ -465,21 +466,21 @@ public sealed class TrRmContractTableReaderTests
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             pointerParameterWritable: false,
             developmentProfile: false, foreignInvocationDraft: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(StandardNativeParameter(ordinal: 0, access: 0,
                 retention: 1, extentKind: 0, extent: 0)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             developmentProfile: false, foreignInvocationDraft: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(StandardNativeParameter(ordinal: 0, access: 1,
                 retention: 1, extentKind: 0, extent: 1)),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             developmentProfile: false, foreignInvocationDraft: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(StandardNativeParameter(ordinal: 0, access: 2,
                 retention: 1, extentKind: 0, extent: 0)),
             recordCount: 1, declaredCount: 1,
@@ -487,7 +488,7 @@ public sealed class TrRmContractTableReaderTests
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             pointerParameterWritable: true, pointerPointeeCode: 0,
             developmentProfile: false, foreignInvocationDraft: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(StandardNativeParameter(ordinal: 0, access: 3,
                 retention: 1, extentKind: 0, extent: 0)),
             recordCount: 1, declaredCount: 1,
@@ -496,7 +497,7 @@ public sealed class TrRmContractTableReaderTests
             developmentProfile: false, foreignInvocationDraft: true,
             includeForeignInvocationFeature: false,
             includeNativeBoundaryFeature: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(StandardNativeParameter(ordinal: 0, access: 3,
                 retention: 1, extentKind: 1, extent: 1),
                 StandardNativeParameter(ordinal: 0, access: 3,
@@ -505,7 +506,7 @@ public sealed class TrRmContractTableReaderTests
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             developmentProfile: false, foreignInvocationDraft: true));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(StandardNativeParameter(ordinal: 0, access: 1,
                 retention: 1, extentKind: 0, extent: 0)),
             recordCount: 1, declaredCount: 1,
@@ -517,19 +518,19 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void CopyOriginDraftContractUsesTypedWholeValueReferences()
     {
-        Create(Section(CopyOriginContract()), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(CopyOriginContract()), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             writeRows: true, frameArtifact: true,
             developmentProfile: false, copyOriginDraft: true);
 
         var standardRow = Section(CopyOriginContract());
-        Assert.Throws<InvalidDataException>(() => Create(standardRow,
+        _ = Assert.Throws<InvalidDataException>(() => Create(standardRow,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             developmentProfile: false));
-        Assert.Throws<InvalidDataException>(() => Create(standardRow,
+        _ = Assert.Throws<InvalidDataException>(() => Create(standardRow,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
@@ -542,7 +543,7 @@ public sealed class TrRmContractTableReaderTests
     {
         var referent = CopyOriginContract();
         referent[29] = 2;
-        Create(Section(referent), recordCount: 1, declaredCount: 1,
+        _ = Create(Section(referent), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, referentParameter: true,
             writeRows: true, frameArtifact: true,
@@ -550,13 +551,13 @@ public sealed class TrRmContractTableReaderTests
 
         var pointer = CopyOriginContract();
         pointer[29] = 2;
-        Assert.Throws<InvalidDataException>(() => Create(Section(pointer),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(pointer),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
             developmentProfile: false, copyOriginDraft: true));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Section(CopyOriginContract()), recordCount: 1,
                declaredCount: 1, typeFirst: 0, typeCount: 0,
                methodFirst: 1, methodCount: 1, hasOutputParam: true,
@@ -574,16 +575,16 @@ public sealed class TrRmContractTableReaderTests
             [new CopyOriginTestFact(1, [new CopyOriginTestOrigin(1, 1, 0, 1)])],
             summaryKind: 2, receiver: true);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact(
                [new CopyOriginTestFact(1,
                    [new CopyOriginTestOrigin(1, 1, 0, 0)])]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact(
                [new CopyOriginTestFact(1,
                    [new CopyOriginTestOrigin(1, 1, 0, 1)])],
                fieldPathRootTypeSpec: 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact(
                [new CopyOriginTestFact(1,
                    [new CopyOriginTestOrigin(1, 1, 0, 1)])],
@@ -593,7 +594,7 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void CopyOriginDraftRejectsDuplicateAndOverlappingFacts()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact([
                new CopyOriginTestFact(1,
                    [new CopyOriginTestOrigin(1, 1, 0, 1)]),
@@ -601,7 +602,7 @@ public sealed class TrRmContractTableReaderTests
                    [new CopyOriginTestOrigin(1, 1, 0, 1)]),
             ]));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact([
                new CopyOriginTestFact(1, [
                    new CopyOriginTestOrigin(1, 1, 0, 1),
@@ -609,7 +610,7 @@ public sealed class TrRmContractTableReaderTests
                ]),
             ]));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact([
                new CopyOriginTestFact(0,
                    [new CopyOriginTestOrigin(1, 1, 0, 0)]),
@@ -626,10 +627,10 @@ public sealed class TrRmContractTableReaderTests
             new CopyOriginTestFact(1,
                 [new CopyOriginTestOrigin(1, 1, 0, 1)]),
         };
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact(facts,
                 nativeImportMethod: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact(facts,
                 functionPointerAnchor: true));
     }
@@ -642,7 +643,7 @@ public sealed class TrRmContractTableReaderTests
             new CopyOriginTestFact(1,
                 [new CopyOriginTestOrigin(1, 1, 0, 1)]),
         };
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateCopyOriginFieldArtifact(facts,
                 standardFunctionPointerAnchor: true));
     }
@@ -704,24 +705,24 @@ public sealed class TrRmContractTableReaderTests
         foreach (var repetitions in new[]
         {
             new (ulong Count, ulong Stride)[] { (1, 8) },
-            new (ulong Count, ulong Stride)[] { (3, 7) },
-            new (ulong Count, ulong Stride)[] { (ulong.MaxValue, ulong.MaxValue) },
+            [(3, 7)],
+            [(ulong.MaxValue, ulong.MaxValue)],
         })
         {
-            Assert.Throws<InvalidDataException>(() => Create(
+            _ = Assert.Throws<InvalidDataException>(() => Create(
                 Section(ReturnCoverageContract(repetitions: repetitions)),
                 recordCount: 1, declaredCount: 1,
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
                 developmentProfile: false, a2r1ReturnCoverageDraft: true));
         }
 
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(ReturnCoverageContract()),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, a2r1ReturnCoverageDraft: true,
             includeRawUnionValueCoverageFeature: false));
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(ReturnCoverageContract()),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
@@ -740,7 +741,7 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void A2R1StructuralReaderRejectsCoverageForAResultWithoutRawUnion()
     {
-        Assert.Throws<InvalidDataException>(() => Create(
+        _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(ReturnCoverageContract()),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
@@ -802,7 +803,7 @@ public sealed class TrRmContractTableReaderTests
     {
         var row = CopyOriginContract();
         row[offset] = replacement;
-        Assert.Throws<InvalidDataException>(() => Create(Section(row),
+        _ = Assert.Throws<InvalidDataException>(() => Create(Section(row),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, paramMode: 0, pointerParameter: true,
@@ -812,14 +813,14 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void WrittenClausesComposeAcrossTypeAndMethodInFramedArtifact()
     {
-        Create(Section(Cleanup(), Effects(0)), writeRows: true,
+        _ = Create(Section(Cleanup(), Effects(0)), writeRows: true,
             frameArtifact: true, developmentProfile: false);
         var invalidKind = Effects(2);
         invalidKind[4] = 6;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Section(Cleanup(), invalidKind), writeRows: true,
                 developmentProfile: false));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(Section(Effects(2), Effects(2)),
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
                 writeRows: true, developmentProfile: false));
@@ -902,7 +903,7 @@ public sealed class TrRmContractTableReaderTests
                     : [new TrRmFeatureRow(1, 1), new TrRmFeatureRow(2, 1)]
                 : includeCopyOriginFeature
                     ? [new TrRmFeatureRow(15, 1)]
-                    : Array.Empty<TrRmFeatureRow>()
+                    : []
             : foreignInvocationDraft
                 ? (includeNativeBoundaryFeature, includeForeignInvocationFeature,
                     includePublishedPredicatesFeature) switch
@@ -924,7 +925,7 @@ public sealed class TrRmContractTableReaderTests
                     (false, true, false) =>
                         [TrRmFeatureRow.ForeignInvocationContractsCandidate],
                     (false, false, true) => [TrRmFeatureRow.PublishedPredicates],
-                    _ => Array.Empty<TrRmFeatureRow>(),
+                    _ => [],
                 }
             : generalPredicateGraphsDraft
                 ? includeGeneralPredicateGraphsFeature
@@ -932,16 +933,16 @@ public sealed class TrRmContractTableReaderTests
                         ? [TrRmFeatureRow.GeneralPredicateGraphsCandidate,
                             TrRmFeatureRow.ConstantExecution]
                         : [TrRmFeatureRow.GeneralPredicateGraphsCandidate]
-                    : Array.Empty<TrRmFeatureRow>()
+                    : []
             : (includeNativeBoundaryFeature, includePublishedPredicatesFeature) switch
                 {
                     (true, true) =>
                         [new TrRmFeatureRow(1, 1), TrRmFeatureRow.PublishedPredicates],
                     (true, false) => [new TrRmFeatureRow(1, 1)],
                     (false, true) => [TrRmFeatureRow.PublishedPredicates],
-                    _ => Array.Empty<TrRmFeatureRow>(),
+                    _ => [],
                 };
-        var featureBytes = featureRows.Length == 0 ? Array.Empty<byte>()
+        var featureBytes = featureRows.Length == 0 ? []
             : TrRmFeatureTableWriter.Encode(featureRows, schema);
         if (featureRows.Length != 0)
         {
@@ -1302,7 +1303,7 @@ public sealed class TrRmContractTableReaderTests
         Write(module, 0, 2);
         Write(module, 4, 1);
         Write(module, 24, 1);
-        Write(module, 28, 3);
+        Write(module, 28, 4);
         Write(module, 32, 1);
         Write(module, 36, 1);
         Write(module, 40, 1);
@@ -1311,6 +1312,7 @@ public sealed class TrRmContractTableReaderTests
         var features = TrRmFeatureTableWriter.Encode([
             new TrRmFeatureRow(1, 1),
             new TrRmFeatureRow(2, 1),
+            TrRmFeatureRow.LayoutQueries,
             new TrRmFeatureRow(15, 1),
         ], TrRmArtifactSchema.CopyOriginDraft);
         var typeSpecs = standardFunctionPointerAnchor
@@ -1421,7 +1423,7 @@ public sealed class TrRmContractTableReaderTests
         {
             new(0x0001, 0, 1, module),
             new(0x0002, 0, 5, strings),
-            new(0x0004, 0, 3, features),
+            new(0x0004, 0, 4, features),
             new(0x0011, 0, 2, typeSpecs),
             new(0x0013, 0, 1, type),
             new(0x0014, 0, (uint)fieldCount, field),
@@ -1430,7 +1432,7 @@ public sealed class TrRmContractTableReaderTests
             new(0x0017, 0, 1, signature),
             new(0x0018, 0, 1, parameter),
             new(0x001B, 0, (uint)contractRows.Count,
-                Section(contractRows.ToArray())),
+                Section([.. contractRows])),
         };
         if (nativeImportMethod)
         {

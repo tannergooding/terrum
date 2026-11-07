@@ -39,6 +39,7 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated InterfaceWitness rows.</summary>
     public int Count => _recordCount;
@@ -62,6 +63,15 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
     public TrRmInterfaceWitnessTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmTypeSpecTableReader types,
         int memberCount, int associatedTypeCount, int associatedConstCount)
+        : this(section, recordCount, types, memberCount, associatedTypeCount,
+            associatedConstCount, null)
+    {
+    }
+
+    internal TrRmInterfaceWitnessTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeSpecTableReader types,
+        int memberCount, int associatedTypeCount, int associatedConstCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(memberCount)
             || !ValidCount(associatedTypeCount) || !ValidCount(associatedConstCount)
@@ -75,9 +85,13 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
         MemberCount = memberCount;
         AssociatedTypeCount = associatedTypeCount;
         AssociatedConstCount = associatedConstCount;
+        var storageWork = checked((ulong)memberCount
+            + (ulong)associatedTypeCount + (ulong)associatedConstCount + 6UL);
+        resourceLedger?.ConsumeWork(storageWork);
         var membersOwned = new bool[memberCount + 1];
         var associatedTypesOwned = new bool[associatedTypeCount + 1];
         var associatedConstsOwned = new bool[associatedConstCount + 1];
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
@@ -99,13 +113,16 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
 
             _ = types.GetTypeSpecRef(implementingType);
             _ = types.GetTypeSpecRef(interfaceType);
-            MarkRange(membersOwned, memberFirst, members);
-            MarkRange(associatedTypesOwned, associatedTypeFirst, associatedTypes);
-            MarkRange(associatedConstsOwned, associatedConstFirst, associatedConsts);
+            MarkRange(membersOwned, memberFirst, members, _resourceLedger);
+            MarkRange(associatedTypesOwned, associatedTypeFirst,
+                associatedTypes, _resourceLedger);
+            MarkRange(associatedConstsOwned, associatedConstFirst,
+                associatedConsts, _resourceLedger);
         }
 
-        if (HasUnownedRows(membersOwned) || HasUnownedRows(associatedTypesOwned)
-            || HasUnownedRows(associatedConstsOwned))
+        if (HasUnownedRows(membersOwned, _resourceLedger)
+            || HasUnownedRows(associatedTypesOwned, _resourceLedger)
+            || HasUnownedRows(associatedConstsOwned, _resourceLedger))
         {
             throw InvalidInterfaceWitness();
         }
@@ -142,6 +159,7 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidInterfaceWitness();
@@ -150,10 +168,12 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static void MarkRange(bool[] owners, uint first, uint count)
+    private static void MarkRange(bool[] owners, uint first, uint count,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         for (var row = first; row < first + count; row++)
         {
+            resourceLedger?.ConsumeWork(2);
             if (owners[row])
             {
                 throw InvalidInterfaceWitness();
@@ -163,10 +183,12 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
         }
     }
 
-    private static bool HasUnownedRows(bool[] owners)
+    private static bool HasUnownedRows(bool[] owners,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         for (var row = 1; row < owners.Length; row++)
         {
+            resourceLedger?.ConsumeWork();
             if (!owners[row])
             {
                 return true;
@@ -184,8 +206,12 @@ public readonly ref struct TrRmInterfaceWitnessTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidInterfaceWitness()
         => new("Invalid TRRM InterfaceWitness table.");
@@ -198,6 +224,7 @@ public readonly ref struct TrRmWitnessMemberTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated WitnessMember rows.</summary>
     public int Count => _recordCount;
@@ -211,6 +238,14 @@ public readonly ref struct TrRmWitnessMemberTableReader
     public TrRmWitnessMemberTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmInterfaceWitnessTableReader witnesses,
         TrRmTypeSpecTableReader types, TrRmMethodDefTableReader methods)
+        : this(section, recordCount, witnesses, types, methods, null)
+    {
+    }
+
+    internal TrRmWitnessMemberTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmInterfaceWitnessTableReader witnesses,
+        TrRmTypeSpecTableReader types, TrRmMethodDefTableReader methods,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || recordCount != witnesses.MemberCount
             || (long)recordCount * RowSize != section.Length)
@@ -220,11 +255,14 @@ public readonly ref struct TrRmWitnessMemberTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var witness = 1; witness <= witnesses.Count; witness++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = witnesses.GetMemberRange(witness);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
+                _resourceLedger?.ConsumeWork();
                 var row = first + ordinal;
                 var data = GetRow(row);
                 var owner = Read(data, 0);
@@ -269,6 +307,7 @@ public readonly ref struct TrRmWitnessMemberTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidWitnessMember();
@@ -280,8 +319,12 @@ public readonly ref struct TrRmWitnessMemberTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidWitnessMember()
         => new("Invalid TRRM WitnessMember table.");
@@ -393,6 +436,7 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated WitnessAssociatedType rows.</summary>
     public int Count => _recordCount;
@@ -414,6 +458,19 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
         TrRmInterfaceBaseTableReader interfaceBases,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs,
         TrRmImportTableReader imports)
+        : this(section, recordCount, witnesses, types, typeDefs, interfaces,
+            interfaceBases, associatedTypeDefs, imports, null)
+    {
+    }
+
+    internal TrRmWitnessAssociatedTypeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmInterfaceWitnessTableReader witnesses,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader typeDefs,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != witnesses.AssociatedTypeCount
@@ -424,8 +481,10 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var witness = 1; witness <= witnesses.Count; witness++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = witnesses.GetAssociatedTypeRange(witness);
             if (count == 0)
             {
@@ -434,9 +493,10 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
 
             var interfaceClosure = GetInterfaceClosure(
                 witnesses.GetInterfaceTypeSpecRef(witness), types, typeDefs,
-                interfaces, interfaceBases, imports);
+                interfaces, interfaceBases, imports, _resourceLedger);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
+                _resourceLedger?.ConsumeWork();
                 var row = first + ordinal;
                 var data = GetRow(row);
                 var witnessRow = Read(data, 0);
@@ -444,6 +504,7 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
                 var associatedTypeDef = Read(data, 8);
                 var valueType = Read(data, 12);
                 var bindingOrigin = Read(data, 16);
+                _resourceLedger?.ConsumeWork();
                 if (witnessRow != (uint)witness
                     || !TrRmAssociatedTypeReference.TryGetLocalRow(
                         associatedTypeDef, associatedTypeDefs.Count, imports,
@@ -464,6 +525,7 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
                     declaringInterface, typeDefs, imports);
                 var associatedOwnerTypeDef = interfaces.GetOwnerTypeDef(
                     associatedTypeDefs.GetOwnerInterfaceDef(associatedTypeDefRow));
+                _resourceLedger?.ConsumeWork();
                 if (declaringTypeDef != associatedOwnerTypeDef
                     || !interfaceClosure.Contains(declaringTypeDef))
                 {
@@ -480,47 +542,60 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
         }
     }
 
-    private static HashSet<int> GetInterfaceClosure(uint interfaceTypeSpecRef,
+    internal static HashSet<int> GetInterfaceClosure(uint interfaceTypeSpecRef,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader typeDefs,
         TrRmInterfaceDefTableReader interfaces,
         TrRmInterfaceBaseTableReader interfaceBases,
-        TrRmImportTableReader imports)
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         var rootTypeDef = types.GetNominalTypeDefRow(
             interfaceTypeSpecRef, typeDefs, imports);
-        var pending = new Stack<int>();
+        resourceLedger?.ConsumeWork(2);
+        var pending = new Stack<(int TypeDefRow, ulong Depth)>();
         var closure = new HashSet<int>();
-        pending.Push(rootTypeDef);
-        while (pending.TryPop(out var typeDef))
+        resourceLedger?.ReserveWorkAtDepth(1, 1);
+        pending.Push((rootTypeDef, 1));
+        while (pending.TryPop(out var current))
         {
-            if (!closure.Add(typeDef))
+            resourceLedger?.ConsumeWork();
+            resourceLedger?.CheckDepthFromCurrent(current.Depth);
+            resourceLedger?.ConsumeWork(2);
+            if (!closure.Add(current.TypeDefRow))
             {
                 continue;
             }
 
-            var interfaceDef = interfaces.GetInterfaceDefForTypeDef(typeDef);
+            var interfaceDef = interfaces.GetInterfaceDefForTypeDef(
+                current.TypeDefRow);
             if (interfaceDef == 0)
             {
-                throw InvalidWitnessAssociatedType();
+                throw InvalidWitnessInterfaceClosure();
             }
 
             var (first, count) = interfaces.GetBaseRange(interfaceDef);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
+                resourceLedger?.ConsumeWork();
                 var baseTypeDef = types.GetNominalTypeDefRow(
                     interfaceBases.GetBaseTypeSpecRef(first + ordinal),
                     typeDefs, imports);
                 if (interfaces.GetInterfaceDefForTypeDef(baseTypeDef) == 0)
                 {
-                    throw InvalidWitnessAssociatedType();
+                    throw InvalidWitnessInterfaceClosure();
                 }
 
-                pending.Push(baseTypeDef);
+                var childDepth = checked(current.Depth + 1);
+                resourceLedger?.ReserveWorkAtDepth(1, childDepth);
+                pending.Push((baseTypeDef, childDepth));
             }
         }
 
         return closure;
     }
+
+    private static InvalidDataException InvalidWitnessInterfaceClosure()
+        => new("Invalid TRRM InterfaceWitness interface closure.");
 
     /// <summary>Gets the one-based owning InterfaceWitness row.</summary>
     public int GetWitnessRow(int row)
@@ -544,6 +619,7 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidWitnessAssociatedType();
@@ -552,8 +628,12 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidWitnessAssociatedType()
         => new("Invalid TRRM WitnessAssociatedType table.");

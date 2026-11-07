@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmSourceFileTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmSourceFileTableReaderTests
 {
     [Test]
     public void ReadsPathsAndOwnersWithoutResolvingFiles()
@@ -21,26 +22,26 @@ public sealed class TrRmSourceFileTableReaderTests
         Assert.That(files.GetPath(2), Is.EqualTo("src/\u00E9.terrum"));
         Assert.That(files.GetOwnerModule(1), Is.EqualTo(1));
         Assert.That(files.GetOwnerModule(2), Is.EqualTo(2));
-        Assert.Throws<InvalidDataException>(() => ReadPath(TwoFiles(), 0));
-        Assert.Throws<InvalidDataException>(() => ReadOwner(TwoFiles(), 3));
+        _ = Assert.Throws<InvalidDataException>(() => ReadPath(TwoFiles(), 0));
+        _ = Assert.Throws<InvalidDataException>(() => ReadOwner(TwoFiles(), 3));
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(3,(byte)(1))]
-    [TestCase(4,(byte)(1))]
-    [TestCase(8,(byte)(3))]
-    [TestCase(12,(byte)(1))]
+    [TestCase(0,(byte)0)]
+    [TestCase(3,(byte)1)]
+    [TestCase(4,(byte)1)]
+    [TestCase(8,(byte)3)]
+    [TestCase(12,(byte)1)]
     public void RejectsMalformedPathReferencesAndUnassignedDigests(int byteIndex, byte replacement)
     {
         var bytes = TwoFiles();
         bytes[byteIndex] = replacement;
-        Assert.Throws<InvalidDataException>(() => Create(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
     [Test]
     public void RejectsTruncatedAndMismatchedSections()
     {
-        Assert.Throws<InvalidDataException>(() => Create(TwoFiles()[..^1]));
-        Assert.Throws<InvalidDataException>(() => Create(TwoFiles(), 1));
+        _ = Assert.Throws<InvalidDataException>(() => Create(TwoFiles()[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => Create(TwoFiles(), 1));
     }
 
     private static void Create(byte[] bytes, int count = 2)

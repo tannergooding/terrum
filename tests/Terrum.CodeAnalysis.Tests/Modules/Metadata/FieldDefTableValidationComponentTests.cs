@@ -7,18 +7,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class FieldDefTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FieldDefTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -52,9 +52,7 @@ public sealed class FieldDefTableValidationComponentTests
         var layouts = Array.Empty<byte>();
         var fields = EncodeFields(1, 4, 1, 0);
         const int largeRecordCount = 512;
-        var manyTypes = EncodeTypeDefs(Enumerable.Range(0, largeRecordCount)
-            .Select(static index => (3u, 4u, (uint)index + 1, 1u, (uint)index + 1))
-            .ToArray());
+        var manyTypes = EncodeTypeDefs([.. Enumerable.Range(0, largeRecordCount).Select(static index => (3u, 4u, (uint)index + 1, 1u, (uint)index + 1))]);
         var manyLayouts = Array.Empty<byte>();
         var manyFields = new byte[largeRecordCount * 16];
         for (var row = 0; row < largeRecordCount; row++)
@@ -183,7 +181,11 @@ public sealed class FieldDefTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
         }

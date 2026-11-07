@@ -25,6 +25,8 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
 {
     private const string SchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
+    private static readonly string[] s_methodTypeExportKeys = ["PacketKey", "LeafKey"];
+    private static readonly string[] s_methodTypeNames = ["Packet", "Leaf"];
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetValueDelegate();
@@ -97,7 +99,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
                 edge.ConsumerArtifactIndex == consumer.ArtifactIndex
                 && edge.ConsumerModuleRow == consumer.ModuleRow).ToArray();
             Assert.That(edges.Select(static edge => edge.ExportKey),
-                Is.EquivalentTo(new[] { "PacketKey", "LeafKey" }));
+                Is.EquivalentTo(s_methodTypeExportKeys));
             Assert.That(edges.All(edge =>
                 edge.ProviderArtifactIndex == types.ArtifactIndex
                 && edge.ProviderModuleRow == types.ModuleRow), Is.True);
@@ -265,7 +267,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         var incompatibleTypes = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(SchemaIdentity,
                 incompatibleTypeProvider), "NominalTypes", []);
-        foreach (var name in new[] { "Packet", "Leaf" })
+        foreach (var name in s_methodTypeNames)
         {
             Assert.That(incompatibleTypes.Structures.Single(
                 structure => structure.Name == name).Size,
@@ -342,6 +344,53 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
         Assert.That(loaded.Functions[edge.Expected.FunctionIndex]
             .ModuleImport?.ExportKey, Is.EqualTo("Actual"));
         Assert.That(closure.MethodEdges, Has.Length.EqualTo(2));
+    }
+
+    [Test]
+    public async Task StandardL1ImportedImplicitReferenceExecutesAfterProviderBindingAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var (rootArtifact, providerArtifact)
+            = TrRmLocalAggregateLayoutProducerTests
+                .CreateL1MethodProviderArtifacts(implicitReference: true);
+        var rootInput = new TrRmStandardArtifactInput(SchemaIdentity,
+            rootArtifact);
+        var providers = new[] {
+            new TrRmStandardArtifactInput(SchemaIdentity, providerArtifact),
+        };
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput, "Root",
+            providers);
+        var closure = loaded.StandardMethodProviderClosure
+            ?? throw new InvalidOperationException(
+                "The L1 imported-reference call must retain its provider closure.");
+        var edge = closure.MethodEdges.Single(static candidate =>
+            candidate.ExportKey == "Actual");
+        var provider = closure.Modules.Single(static module =>
+            module.Identity == "Provider");
+        Assert.That(provider.Program.Functions[edge.Actual.FunctionIndex]
+            .Variables[0].IsImplicitRef, Is.True);
+        WriteNativeTestIdentity("Root", rootArtifact);
+        WriteNativeTestIdentity("Provider", providerArtifact);
+
+        Assert.That(NativeModuleCompiler.ExecuteStandard(rootInput, "Root",
+            providers, NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+        var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
+            "Root", providers, NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1-implicit-reference-provider-");
+        try
+        {
+            await AssertNativeImageExitCodeAsync(image,
+                Path.Combine(directory, "program.exe"), "Root", 1)
+                .ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
     }
 
     [Test]
@@ -661,6 +710,72 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
             moduleIdentity, [], NativeRuntimePolicy.FailFast);
         var directory = TestArtifactPaths.CreateDirectory(
             "terrum-l1-multidimensional-field-path-");
+        try
+        {
+            var imagePath = Path.Combine(directory, "program.exe");
+            await AssertNativeImageExitCodeAsync(image, imagePath,
+                moduleIdentity, 42).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task StandardL1RepeatReassignmentExecutesThroughJitAndAotAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        const string moduleIdentity = "l1-repeat-reassignment-native";
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Item {
+                public mut uint32 Value;
+
+                internal Item(uint32 value) {
+                    Value = value;
+                }
+            }
+
+            int32 Main() {
+                mut Item seed = new Item(uint32(1));
+                mut [Item; 2] items = [seed; 2];
+                items = [new Item(uint32(42)); 2];
+                return int32(items[1].Value);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, SchemaIdentity, moduleTargetRequirement: 1);
+        var input = new TrRmStandardArtifactInput(SchemaIdentity, artifact);
+        WriteNativeTestIdentity(moduleIdentity, artifact);
+        TestContext.WriteLine(
+            $"L1 Repeat reassignment source-sha256={Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(source)))}.");
+
+        var jitResult = NativeModuleCompiler.ExecuteStandard(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        Assert.That(jitResult, Is.EqualTo(42));
+        TestContext.WriteLine(
+            $"L1 Repeat reassignment JIT: expected=42; actual={jitResult}.");
+
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-l1-repeat-reassignment-");
         try
         {
             var imagePath = Path.Combine(directory, "program.exe");
@@ -1224,7 +1339,7 @@ internal sealed class TrRmLocalAggregateLayoutNativeTests
     }
 
     private static byte[] ReplaceSections(TrRmArtifactIndex index,
-        IReadOnlyDictionary<ushort, TrRmSection> replacements)
+        Dictionary<ushort, TrRmSection> replacements)
     {
         var sections = new List<TrRmSection>(index.SectionCount);
         for (var sectionIndex = 0; sectionIndex < index.SectionCount;

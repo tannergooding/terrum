@@ -4,18 +4,18 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Tests.Semantics;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmControlFlowTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmControlFlowTests
 {
     private static BoundProgram Compile(string source, bool library = false,
         BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
@@ -23,7 +23,11 @@ public sealed class TrRmControlFlowTests
         var tree = SyntaxTree.Parse(source);
         var compilation = library ? Compilation.CreateLibrary(tree, policy) : Compilation.Create(tree, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
     [TestCase("int32 Main() { if (true) { return 1; } return 0; }",1)]
     [TestCase("int32 Main() { return true ? 42 : 0; }",42)]
@@ -97,10 +101,10 @@ public sealed class TrRmControlFlowTests
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; while (x < 1) { ");
         for (var i = 0; i < 28; i++)
         {
-            source.Append("x = x + 1; ");
+            _ = source.Append("x = x + 1; ");
         }
 
-        source.Append("} return x; }");
+        _ = source.Append("} return x; }");
         var artifact = TrRmExecutableCompiler.Emit(Compile(source.ToString()), "wide-indexed");
         var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
@@ -116,13 +120,13 @@ public sealed class TrRmControlFlowTests
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; while (x < 1) { ");
         for (var i = 0; i < increments; i++)
         {
-            source.Append("x = x + 1; ");
+            _ = source.Append("x = x + 1; ");
         }
-        source.Append("} return +x; }");
+        _ = source.Append("} return +x; }");
         var original = Compile(source.ToString());
         if (!supported)
         {
-            Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "value-limit"));
+            _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "value-limit"));
             return;
         }
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "value-limit"));
@@ -175,7 +179,7 @@ public sealed class TrRmControlFlowTests
         const string source = "int32 Main() { mut int32 x = 0; while (x < 2) { x = x + 1; } return x; }";
         var checkedProgram = Compile(source, policy: BoundRuntimePolicy.CheckedExceptions);
         Assert.That(NativeJit.Execute(checkedProgram, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(2));
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedProgram, "policy"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedProgram, "policy"));
     }
 
     [Test]
@@ -183,7 +187,7 @@ public sealed class TrRmControlFlowTests
     {
         var program = BoundProgramTestHelpers.MarkNoFailureProof(
             Compile(" void Guard() { require true; } int32 Main() { return 42; }"), "Guard");
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "no-throw-failure"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "no-throw-failure"));
     }
     [TestCase("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }",2)]
     [TestCase("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }",1)]
@@ -215,11 +219,11 @@ public sealed class TrRmControlFlowTests
         foreach (var replacement in invalid)
         {
             var program = loaded with { Functions = [replacement] };
-            Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
         }
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(
             loaded with { RuntimePolicy = BoundRuntimePolicy.CheckedExceptions }));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(loaded, ["Action"]));
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "not-structured"));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(loaded, ["Action"]));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "not-structured"));
     }
 }

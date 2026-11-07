@@ -4,18 +4,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class MethodSigParamTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class MethodSigParamTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -103,9 +103,17 @@ public sealed class MethodSigParamTableValidationComponentTests
         AddInvalidParameters(cases, valid, parameters => WriteWord(parameters, 8, 0));
         AddInvalidParameters(cases, valid, parameters => WriteWord(parameters, 8, 3));
         AddInvalidParameters(cases, valid, parameters => parameters[12] = 5);
-        AddInvalidParameters(cases, valid, parameters => parameters[13] = 1);
+        AddInvalidParameters(cases, valid, parameters => parameters[12] = 1);
+        AddInvalidParameters(cases, valid, parameters => parameters[12] = 4);
+        AddInvalidParameters(cases, valid, parameters => parameters[13] = 2);
         AddInvalidParameters(cases, valid, parameters => parameters[14] = 1);
         AddInvalidParameters(cases, valid, parameters => parameters[15] = 1);
+        var implicitScalar = valid.Parameters.ToArray();
+        WriteWord(implicitScalar, 8, 1);
+        AddRejected(cases, valid with {
+            Parameters = [.. implicitScalar.Select(static value => (int)value)],
+            ExpectedValid = false,
+        });
         cases.Add(valid with {
             Signatures = [.. valid.Signatures[..^1]],
             ExpectedValid = false,
@@ -170,7 +178,11 @@ public sealed class MethodSigParamTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
@@ -178,14 +190,15 @@ public sealed class MethodSigParamTableValidationComponentTests
 
     private static TableCase CreateValidCase()
     {
-        byte[] types = TrRmTypeSpecTableWriter.Encode([
+        var types = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
             TrRmTypeSpecTableWriter.Builtin(0),
         ], 0, 0, 2);
-        byte[] signatures = EncodeWords(1, 0, 1, 2, 1, 1,
+        var signatures = EncodeWords(1, 0, 1, 2, 1, 1,
             2, 1, 3, 1, 2, 1);
-        byte[] parameters = EncodeParameters((1, 0, 1, 0),
-            (1, 1, 2, 1), (2, 0, 1, 4));
+        var parameters = EncodeParameters((1, 0, 0xF300_8B08, 0),
+            (1, 1, 2, 0), (2, 0, 1, 0));
+        parameters[13] = 1;
         var testCase = new TableCase([.. types.Select(static value => (int)value)],
             [.. signatures.Select(static value => (int)value)],
             [.. parameters.Select(static value => (int)value)], 2, 3, 2, 2, 0, 0, true, true);
@@ -196,11 +209,11 @@ public sealed class MethodSigParamTableValidationComponentTests
     private static TableCase CreateGroupedCase()
     {
         const int paramCount = 512;
-        byte[] types = TrRmTypeSpecTableWriter.Encode([
+        var types = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
             TrRmTypeSpecTableWriter.Builtin(0),
         ], 0, 0, 0);
-        byte[] signatures = EncodeWords(1, 0, 1, paramCount, 0, 0);
+        var signatures = EncodeWords(1, 0, 1, paramCount, 0, 0);
         var parameters = new byte[paramCount * 16];
         for (var index = 0; index < paramCount; index++)
         {

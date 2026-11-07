@@ -6,15 +6,22 @@ using System.Text;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Decodes individual TRRM String rows.</summary>
 public static class TrRmStringRowReader
 {
     private static readonly UTF8Encoding s_utf8 = new(false, true);
     private static readonly UnicodeEncoding s_utf16 = new(false, false, true);
     private static readonly UTF32Encoding s_utf32 = new(false, false, true);
 
+    /// <summary>Decodes a nonempty name row.</summary>
+    /// <param name="row">The encoded String row.</param>
+    /// <returns>The decoded name.</returns>
     public static string DecodeName(ReadOnlySpan<byte> row)
         => DecodeText(row, allowEmpty: false);
 
+    /// <summary>Decodes a namespace row, which may be empty.</summary>
+    /// <param name="row">The encoded String row.</param>
+    /// <returns>The decoded namespace.</returns>
     public static string DecodeNamespace(ReadOnlySpan<byte> row)
         => DecodeText(row, allowEmpty: true);
 
@@ -69,7 +76,7 @@ public static class TrRmStringRowReader
             throw new InvalidDataException("Invalid TRRM String name encoding.", exception);
         }
 
-        if (!isAscii && name.IndexOf('\0') >= 0)
+        if (!isAscii && name.Contains('\0', StringComparison.Ordinal))
         {
             throw InvalidRow();
         }
@@ -114,7 +121,7 @@ public static class TrRmStringRowReader
     {
         foreach (var value in content)
         {
-            if (value == 0 || value >= 0x80)
+            if (value is 0 or >= 0x80)
             {
                 return false;
             }

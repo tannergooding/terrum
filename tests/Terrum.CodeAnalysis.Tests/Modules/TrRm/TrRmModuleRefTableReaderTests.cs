@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmModuleRefTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmModuleRefTableReaderTests
 {
     [Test]
     public void ResolvesPackedProducerRequirementsAndModuleOwnership()
@@ -20,8 +21,8 @@ public sealed class TrRmModuleRefTableReaderTests
         Assert.That(refs.GetOwnerModule(1), Is.EqualTo(1));
         Assert.That(refs.GetProducerIdentity(2), Is.EqualTo("A"));
         Assert.That(refs.GetOwnerModule(2), Is.EqualTo(2));
-        Assert.Throws<InvalidDataException>(() => GetProducerIdentity(TwoRefs(), 0));
-        Assert.Throws<InvalidDataException>(() => GetOwnerModule(TwoRefs(), 3));
+        _ = Assert.Throws<InvalidDataException>(() => GetProducerIdentity(TwoRefs(), 0));
+        _ = Assert.Throws<InvalidDataException>(() => GetOwnerModule(TwoRefs(), 3));
     }
 
     [Test]
@@ -35,24 +36,24 @@ public sealed class TrRmModuleRefTableReaderTests
         Assert.That(refs.GetProducerIdentity(2), Is.EqualTo("X"));
         Assert.That(refs.GetOwnerModule(2), Is.EqualTo(2));
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(3,(byte)(1))]
-    [TestCase(4,(byte)(0))]
-    [TestCase(4,(byte)(2))]
-    [TestCase(8,(byte)(2))]
-    [TestCase(12 + 8,(byte)(1))]
+    [TestCase(0,(byte)0)]
+    [TestCase(3,(byte)1)]
+    [TestCase(4,(byte)0)]
+    [TestCase(4,(byte)2)]
+    [TestCase(8,(byte)2)]
+    [TestCase(12 + 8,(byte)1)]
     public void RejectsInvalidReferencesAndPackedProducerMismatches(int byteIndex, byte replacement)
     {
         var bytes = TwoRefs();
         bytes[byteIndex] = replacement;
-        Assert.Throws<InvalidDataException>(() => Create(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
     [Test]
     public void RejectsTruncatedSectionsAndCountMismatch()
     {
-        Assert.Throws<InvalidDataException>(() => Create(TwoRefs()[..^1]));
-        Assert.Throws<InvalidDataException>(() => CreateWithCount(TwoRefs(), 1));
+        _ = Assert.Throws<InvalidDataException>(() => Create(TwoRefs()[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => CreateWithCount(TwoRefs(), 1));
     }
 
     private static void Create(byte[] bytes)

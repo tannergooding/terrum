@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -93,12 +94,12 @@ internal readonly ref struct TrRmRegisterBodyReader
         resourceLedger?.ConsumeWork(checked(1UL
             + (ulong)homeCount + (ulong)typeCount + (ulong)methodCount
             + (ulong)fieldCount + (ulong)constantCount
-            + (ulong)BlockCount + 2UL * (ulong)_recordCount + 1));
+            + (ulong)BlockCount + (2UL * (ulong)_recordCount) + 1));
 
         var mapStart = position;
         var blockStart = AddExtent(mapStart,
-            (long)homeCount * 8 + (long)typeCount * 4 + (long)methodCount * 4
-                + (long)fieldCount * 4 + (long)constantCount * 8,
+            ((long)homeCount * 8) + ((long)typeCount * 4) + ((long)methodCount * 4)
+                + ((long)fieldCount * 4) + ((long)constantCount * 8),
             body.Length);
         var recordOffsetsStart = AddExtent(blockStart,
             (long)BlockCount * BlockSize, body.Length);
@@ -106,7 +107,7 @@ internal readonly ref struct TrRmRegisterBodyReader
             ((long)_recordCount + 1) * sizeof(uint), body.Length);
 
         _homeMap = body.Slice(mapStart, homeCount * 8);
-        var nextMap = mapStart + homeCount * 8;
+        var nextMap = mapStart + (homeCount * 8);
         _typeMap = body.Slice(nextMap, typeCount * 4);
         nextMap += typeCount * 4;
         _methodMap = body.Slice(nextMap, methodCount * 4);
@@ -169,6 +170,7 @@ internal readonly ref struct TrRmRegisterBodyReader
             resourceLedger?.ConsumeWork();
             ValidateRecord(GetRecord(record));
         }
+        ValidateNativeOutputReservationRecords();
         ValidateExceptionDirectoryRecords();
         ValidateBlocks();
     }
@@ -186,6 +188,57 @@ internal readonly ref struct TrRmRegisterBodyReader
     internal int CodeByteLength { get; }
     internal bool HasExceptionDirectory
         => _schema.UsesRegisterExceptionRegions();
+    internal bool HasTypeIdentityCarrier
+    {
+        get
+        {
+            for (var recordIndex = 0; recordIndex < _recordCount;
+                recordIndex++)
+            {
+                var record = GetRecord(recordIndex);
+                if (record[0] != 0x01)
+                {
+                    continue;
+                }
+
+                var payload = record[RecordHeaderSize..];
+                var registerCount = ReadUInt32(payload, 0);
+                for (var row = 0; row < registerCount; row++)
+                {
+                    _resourceLedger?.ConsumeWork();
+                    if (payload[5 + (int)(row * 5)] == 2)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+    internal bool HasLayoutQueryOperation
+    {
+        get
+        {
+            for (var blockIndex = 0; blockIndex < BlockCount;
+                blockIndex++)
+            {
+                var code = GetBlockCode(blockIndex);
+                for (var position = 0; position < code.Length;)
+                {
+                    _resourceLedger?.ConsumeWork();
+                    var opcode = code[position];
+                    if (opcode == 0xDE)
+                    {
+                        return true;
+                    }
+                    position += InstructionLength(opcode, _schema);
+                }
+            }
+
+            return false;
+        }
+    }
     internal TrRmExceptionDirectoryReader ExceptionDirectory
         => _exceptionDirectory;
     internal bool HasCoreExceptionIdentityUse
@@ -507,6 +560,8 @@ internal readonly ref struct TrRmRegisterBodyReader
             0xC1 => control is >= 0x01 and <= 0x07,
             0xC2 => control <= 0x02,
             0xC3 or 0xC4 or 0xC5 => control <= 0x0F,
+            0xDF => _schema.UsesForeignInvocationContracts()
+                && control is 0 or 1,
             0xE9 => _schema.UsesForeignInvocationContracts()
                 && control == 0,
             0xEC => _schema.UsesForeignInvocationStorageAddresses()
@@ -677,6 +732,9 @@ internal readonly ref struct TrRmRegisterBodyReader
                 }
                 ValidateMapIndex(reference,
                     queryKind is 3 or 4 ? FieldCount : TypeCount);
+                break;
+            case 0xDF:
+                ValidateRecordReference(reference, 0x0C);
                 break;
             case 0xE0:
                 if (control != 0)
@@ -940,17 +998,17 @@ internal readonly ref struct TrRmRegisterBodyReader
             return 1;
         }
 
-        if (opcode is >= 0x10 and <= 0x1A
-            or >= 0x20 and <= 0x2B
-            or >= 0x30 and <= 0x36
+        if (opcode is (>= 0x10 and <= 0x1A)
+            or (>= 0x20 and <= 0x2B)
+            or (>= 0x30 and <= 0x36)
             or 0x40 or 0x41
-            or >= 0x50 and <= 0x52
-            or >= 0x60 and <= 0x67
-            or >= 0x70 and <= 0x7F
-            or >= 0x80 and <= 0x83
-            or >= 0x90 and <= 0x92
-            or >= 0xA0 and <= 0xAF
-            or >= 0xB0 and <= 0xB8)
+            or (>= 0x50 and <= 0x52)
+            or (>= 0x60 and <= 0x67)
+            or (>= 0x70 and <= 0x7F)
+            or (>= 0x80 and <= 0x83)
+            or (>= 0x90 and <= 0x92)
+            or (>= 0xA0 and <= 0xAF)
+            or (>= 0xB0 and <= 0xB8))
         {
             return 2;
         }
@@ -959,6 +1017,8 @@ internal readonly ref struct TrRmRegisterBodyReader
             or (>= 0xD0 and <= 0xDE)
             or (>= 0xE0 and <= 0xE8)
             or 0xEA or 0xEB)
+            || (opcode == 0xDF
+                && schema.UsesForeignInvocationContracts())
             || (opcode == 0xE9
                 && schema.UsesForeignInvocationContracts())
             || (opcode == 0xEC
@@ -972,20 +1032,20 @@ internal readonly ref struct TrRmRegisterBodyReader
     }
 
     private static bool IsPotentialTerminator(int opcode)
-        => opcode == 0x00
-            || opcode is 0x17 or 0x18
-                or >= 0xA0 and <= 0xAF
+        => opcode is 0x00
+            or 0x17 or 0x18
+                or (>= 0xA0 and <= 0xAF)
                 or 0xB0 or 0xB1 or 0xB2 or 0xB4 or 0xB5 or 0xB6 or 0xB7 or 0xB8
                 or 0x90 or 0xE0
-                or >= 0xE3 and <= 0xE6
+                or (>= 0xE3 and <= 0xE6)
                 or 0xE8 or 0xEA or 0xEB;
 
     private static bool IsDefiniteTerminator(byte opcode)
-        => opcode == 0x00
-            || opcode is 0x17 or 0x18
-                or >= 0xA0 and <= 0xAF
+        => opcode is 0x00
+            or 0x17 or 0x18
+                or (>= 0xA0 and <= 0xAF)
                 or 0xB0 or 0xB1 or 0xB2 or 0xB4 or 0xB5 or 0xB6 or 0xB7 or 0xB8
-                or >= 0xE3 and <= 0xE6
+                or (>= 0xE3 and <= 0xE6)
                 or 0xE8 or 0xEA or 0xEB;
 
     private int ReadMapCount(ReadOnlySpan<byte> body, ref int position,
@@ -1188,7 +1248,8 @@ internal readonly ref struct TrRmRegisterBodyReader
                 ValidateConstructorBinding(payload);
                 break;
             case 0x0C:
-                throw InvalidBody();
+                ValidateNativeOutputReservation(payload);
+                break;
             case 0x0D:
                 if (_schema.UsesForeignInvocationContracts())
                 {
@@ -1320,7 +1381,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         var resultIndex = ReadUInt16(payload, 2);
         if (resultKind is not (1 or 2) || payload[1] != 0
             || (resultKind == 1
-                ? resultIndex > 15 || resultIndex == 14
+                ? resultIndex is > 15 or 14
                 : resultIndex >= HomeCount)
             || ReadUInt16(payload, 4) >= MethodCount
             || ReadUInt16(payload, 6) >= TypeCount)
@@ -1338,7 +1399,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
         var registerCount = ReadUInt32(payload, 0);
         if (registerCount > 14
-            || 4L + registerCount * 5L != payload.Length)
+            || 4L + (registerCount * 5L) != payload.Length)
         {
             throw InvalidBody();
         }
@@ -1347,7 +1408,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         for (var row = 0; row < registerCount; row++)
         {
             _resourceLedger?.ConsumeWork();
-            var offset = 4 + row * 5;
+            var offset = 4 + (row * 5);
             var register = payload[offset];
             var carrier = payload[offset + 1];
             var typeMapIndex = ReadUInt16(payload, offset + 2);
@@ -1384,7 +1445,7 @@ internal readonly ref struct TrRmRegisterBodyReader
             || (payload[1] == 2 && resultIndex >= HomeCount)
             || (payload[1] == 0 && resultIndex != 0)
             || inputCount > 65_536 || preparationCount > 65_536
-            || 16L + inputCount * 4L + preparationCount * 2L != payload.Length)
+            || 16L + (inputCount * 4L) + (preparationCount * 2L) != payload.Length)
         {
             throw InvalidBody();
         }
@@ -1399,7 +1460,9 @@ internal readonly ref struct TrRmRegisterBodyReader
             if (selectorKind > 2 || !IsValidSelector(selectorKind, selectorIndex)
                 || (selectorKind == 0
                     ? sourceUse != 0 || selectorIndex != 0
-                    : sourceUse is < 1 or > 5))
+                    : (sourceUse is < 1 or > 5)
+                        && !(sourceUse == 6 && selectorKind == 2
+                            && _schema.UsesForeignInvocationContracts())))
             {
                 throw InvalidBody();
             }
@@ -1410,11 +1473,121 @@ internal readonly ref struct TrRmRegisterBodyReader
         for (var preparation = 0; preparation < preparationCount; preparation++)
         {
             _resourceLedger?.ConsumeWork();
-            var recordIndex = ReadUInt16(payload, inputOffset + preparation * 2);
+            var recordIndex = ReadUInt16(payload, inputOffset + (preparation * 2));
             if (recordIndex >= _recordCount || GetRecord(recordIndex)[0] != 0x03)
             {
                 throw InvalidBody();
             }
+        }
+    }
+
+    private void ValidateNativeOutputReservation(
+        ReadOnlySpan<byte> payload)
+    {
+        if (!_schema.UsesForeignInvocationContracts()
+            || payload.Length != 8)
+        {
+            throw InvalidBody();
+        }
+
+        var callSiteRecordIndex = ReadUInt16(payload, 0);
+        var destinationHomeIndex = ReadUInt16(payload, 2);
+        var formalOrdinal = ReadUInt32(payload, 4);
+        if (callSiteRecordIndex >= _recordCount
+            || destinationHomeIndex >= HomeCount)
+        {
+            throw InvalidBody();
+        }
+
+        var callSiteRecord = GetRecord(callSiteRecordIndex);
+        if (callSiteRecord[0] != 0x02 || callSiteRecord.Length < 20)
+        {
+            throw InvalidBody();
+        }
+
+        var callSite = callSiteRecord[RecordHeaderSize..];
+        var inputCount = ReadUInt32(callSite, 8);
+        var preparationCount = ReadUInt32(callSite, 12);
+        if (callSite[0] != 1
+            || formalOrdinal >= inputCount
+            || inputCount > 65_536 || preparationCount > 65_536
+            || 16L + (inputCount * 4L) + (preparationCount * 2L)
+                != callSite.Length)
+        {
+            throw InvalidBody();
+        }
+
+        var inputOffset = checked(16 + ((int)formalOrdinal * 4));
+        if (callSite[inputOffset] != 2 || callSite[inputOffset + 1] != 6
+            || ReadUInt16(callSite, inputOffset + 2)
+                != destinationHomeIndex)
+        {
+            throw InvalidBody();
+        }
+    }
+
+    private void ValidateNativeOutputReservationRecords()
+    {
+        if (!_schema.UsesForeignInvocationContracts())
+        {
+            return;
+        }
+
+        var reservations
+            = new HashSet<(ushort CallSite, uint Formal, ushort Home)>();
+        for (var recordIndex = 0; recordIndex < _recordCount; recordIndex++)
+        {
+            _resourceLedger?.ConsumeWork();
+            var record = GetRecord(recordIndex);
+            if (record[0] != 0x0C)
+            {
+                continue;
+            }
+
+            var payload = record[RecordHeaderSize..];
+            var key = (ReadUInt16(payload, 0), ReadUInt32(payload, 4),
+                ReadUInt16(payload, 2));
+            _resourceLedger?.ConsumeWork(2);
+            if (!reservations.Add(key))
+            {
+                throw InvalidBody();
+            }
+        }
+
+        for (var recordIndex = 0; recordIndex < _recordCount; recordIndex++)
+        {
+            _resourceLedger?.ConsumeWork();
+            var record = GetRecord(recordIndex);
+            if (record[0] != 0x02)
+            {
+                continue;
+            }
+
+            var callSite = record[RecordHeaderSize..];
+            var inputCount = ReadUInt32(callSite, 8);
+            var inputOffset = 16;
+            for (var formal = 0u; formal < inputCount; formal++)
+            {
+                _resourceLedger?.ConsumeWork();
+                var input = callSite.Slice(inputOffset, 4);
+                if (input[1] == 6)
+                {
+                    var key = (checked((ushort)recordIndex), formal,
+                        ReadUInt16(input, 2));
+                    _resourceLedger?.ConsumeWork(2);
+                    if (!reservations.Remove(key))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+
+                inputOffset += 4;
+            }
+        }
+
+        if (reservations.Count != 0)
+        {
+            throw InvalidBody();
         }
     }
 
@@ -1430,7 +1603,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
 
         var caseCount = ReadUInt32(payload, 8);
-        if (caseCount > 65_536 || 12L + caseCount * 4L != payload.Length)
+        if (caseCount > 65_536 || 12L + (caseCount * 4L) != payload.Length)
         {
             throw InvalidBody();
         }
@@ -1438,7 +1611,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         for (var item = 0; item < caseCount; item++)
         {
             _resourceLedger?.ConsumeWork();
-            var offset = 12 + item * 4;
+            var offset = 12 + (item * 4);
             if (ReadUInt16(payload, offset) >= ConstantCount
                 || ReadUInt16(payload, offset + 2) >= BlockCount)
             {
@@ -1464,7 +1637,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         var formalCount = ReadUInt32(payload, 8);
         var bindingCount = ReadUInt32(payload, 12);
         if (suppliedCount != 0 || bindingCount != formalCount
-            || 16L + bindingCount * 8L != payload.Length)
+            || 16L + (bindingCount * 8L) != payload.Length)
         {
             throw InvalidBody();
         }
@@ -1472,7 +1645,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         for (var binding = 0; binding < bindingCount; binding++)
         {
             _resourceLedger?.ConsumeWork();
-            var offset = 16 + binding * 8;
+            var offset = 16 + (binding * 8);
             var formalOrdinal = ReadUInt32(payload, offset);
             var bindingKind = payload[offset + 4];
             var sourceUse = payload[offset + 5];
@@ -1799,7 +1972,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
 
         var regionCount = ReadUInt32(payload, 4);
-        if (8L + regionCount * 2L != payload.Length)
+        if (8L + (regionCount * 2L) != payload.Length)
         {
             throw InvalidBody();
         }

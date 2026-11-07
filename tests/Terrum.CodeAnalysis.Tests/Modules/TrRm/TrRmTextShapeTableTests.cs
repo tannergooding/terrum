@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmTextShapeTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmTextShapeTableTests
 {
     [Test]
     public void ValidatesExclusiveShapeRangesAndTypedCaptureRows()
@@ -37,40 +38,66 @@ public sealed class TrRmTextShapeTableTests
     }
 
     [Test]
+    public void TextShapeReadersChargeRangesAndCapturesAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        var setup = CreateReaders(fixture);
+        var shapeBytes = TrRmTextContentShapeTableWriter.Encode([
+            new TrRmTextContentShapeRow(1, 1, 1, 0, 0),
+        ], setup.TypeDefs, 1, 0);
+        var setupShapes = new TrRmTextContentShapeTableReader(
+            shapeBytes, 1, setup.TypeDefs, 1, 0);
+        var captureBytes = TrRmTextCaptureShapeTableWriter.Encode([
+            new TrRmTextCaptureShapeRow(1, 0, 0xF200_0008, 2),
+        ], setup.TypeSpecs, setupShapes);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var shapes = new TrRmTextContentShapeTableReader(shapeBytes, 1,
+            readers.TypeDefs, 1, 0, ledger);
+            var captures = new TrRmTextCaptureShapeTableReader(captureBytes, 1,
+            readers.TypeSpecs, shapes, ledger);
+            Assert.That(shapes.GetCaptureRange(1), Is.EqualTo((1, 1)));
+            Assert.That(captures.GetMode(1), Is.EqualTo((byte)2));
+        });
+    }
+
+    [Test]
     public void RejectsInvalidShapeOwnersRangesCaptureModesAndTypes()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeShapes(fixture, [
                 new TrRmTextContentShapeRow(0, 0, 0, 0, 0),
             ], 0, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeShapes(fixture, [
                 new TrRmTextContentShapeRow(1, 0, 1, 0, 0),
             ], 1, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeShapes(fixture, [
                 new TrRmTextContentShapeRow(1, 1, 1, 0, 0),
                 new TrRmTextContentShapeRow(1, 1, 1, 0, 0),
             ], 1, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeShapes(fixture, [
                 new TrRmTextContentShapeRow(1, 0, 0, 0, 0),
             ], 1, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeShapes(fixture, [
                 new TrRmTextContentShapeRow(1, 0, 0, 0, 0),
             ], 0, 1));
 
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
             [new TrRmTextCaptureShapeRow(2, 0, 1, 1)]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
             [new TrRmTextCaptureShapeRow(1, 1, 1, 1)]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
             [new TrRmTextCaptureShapeRow(1, 0, 0, 1)]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
             [new TrRmTextCaptureShapeRow(1, 0, 0xF400_0008, 1)]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures(fixture,
             [new TrRmTextCaptureShapeRow(1, 0, 1, 0)]));
     }
 
@@ -85,7 +112,7 @@ public sealed class TrRmTextShapeTableTests
             new TrRmTextCaptureShapeRow(1, 0, 1, 1),
         ]);
         BinaryPrimitives.WriteUInt32LittleEndian(captures.AsSpan(8), 0xF400_0008);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(shapes, captures)));
 
@@ -93,7 +120,7 @@ public sealed class TrRmTextShapeTableTests
             new TrRmTextCaptureShapeRow(1, 0, 1, 1),
         ]);
         captures[13] = 1;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(shapes, captures)));
     }
@@ -133,7 +160,8 @@ public sealed class TrRmTextShapeTableTests
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
         ], 1, 0, 0, 0);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
+
+        _ = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
             1, 0, 0, 0);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(1, 3, 6, 0, 0, 0, 0, 1, 1, 0, 0),

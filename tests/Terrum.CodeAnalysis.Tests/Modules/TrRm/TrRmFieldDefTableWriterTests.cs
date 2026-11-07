@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmFieldDefTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmFieldDefTableWriterTests
 {
     [Test]
     public void EmitsFieldOwnedBySecondModuleTypeInFramedArtifact()
@@ -60,13 +61,13 @@ public sealed class TrRmFieldDefTableWriterTests
     public void RejectsInvalidOwnerNameSpecFlagsAndCount()
     {
         var row = new TrRmFieldDefRow(2, 6, 1, 0);
-        Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { OwnerTypeDefRow = 1 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { NameStringRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRef = 2 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 3 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 16 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row, row]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { OwnerTypeDefRow = 1 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { NameStringRow = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRef = 2 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 3 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 16 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row, row]));
     }
 
     [TestCase(0xF2000008u)]

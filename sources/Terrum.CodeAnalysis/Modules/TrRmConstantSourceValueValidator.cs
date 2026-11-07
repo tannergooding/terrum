@@ -243,7 +243,7 @@ internal static class TrRmConstantSourceValueValidator
         var structures = Array.Empty<BoundStruct>();
         var size = ValueLayout.Size(type, structures);
         var alignment = ValueLayout.Alignment(type, structures);
-        if (size != payload.Length || alignment != payload.Length)
+        if (size != (ulong)payload.Length || alignment != payload.Length)
         {
             throw new NotSupportedException(
                 "The selected target's scalar layout does not match the frozen representation.");

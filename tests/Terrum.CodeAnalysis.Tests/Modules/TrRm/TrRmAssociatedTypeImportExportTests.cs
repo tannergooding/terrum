@@ -4,12 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmAssociatedTypeImportExportTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmAssociatedTypeImportExportTests
 {
     [Test]
     public void BindsExplicitAssociatedMemberAndOwnerImportsToPublicProviderRows()
@@ -41,6 +42,15 @@ public sealed class TrRmAssociatedTypeImportExportTests
             new TrRmImportRow(1, 7, 0x2000_0002),
         };
         Assert.That(Read(fixture, imports, []), Is.True);
+    }
+
+    [Test]
+    public void AssociatedRelationReaderChargesAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+            Assert.That(Read(fixture, [], [], resourceLedger: ledger),
+                Is.False));
     }
 
     [Test]
@@ -96,28 +106,39 @@ public sealed class TrRmAssociatedTypeImportExportTests
         var fixture = CreateFixture();
         var malformed = (byte[])fixture.RelationBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(4), 0x1400_0001);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [], [], associatedRelationBytes: malformed));
 
         malformed = (byte[])fixture.RelationBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(8), 0xF400_0008);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [], [], associatedRelationBytes: malformed));
 
         malformed = (byte[])fixture.RelationBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(4), 0x2000_0003);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [], [], associatedRelationBytes: malformed));
 
         malformed = (byte[])fixture.RelationBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed, 0xF200_0008);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [], [], associatedRelationBytes: malformed));
 
         malformed = (byte[])fixture.RelationBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed, 0xF300_8B08);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [], [], associatedRelationBytes: malformed));
+    }
+
+    [Test]
+    public void StructuralValidatorBindsKindThreeConstraintToAssociatedRelationRow()
+    {
+        var fixture = CreateFixture();
+        Assert.That(Read(fixture, [], [], includeKindThreeConstraint: true),
+            Is.False);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, [], [], includeKindThreeConstraint: true,
+                constraintPayload: 2));
     }
 
     [Test]
@@ -125,14 +146,14 @@ public sealed class TrRmAssociatedTypeImportExportTests
     {
         var fixture = CreateFixture();
         var exports = new[] { new TrRmExportRow(0x2000_0001, 7) };
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [new TrRmImportRow(1, 7, 0x2000_0002)], exports));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [
                 new TrRmImportRow(1, 6, 0x1300_0002),
                 new TrRmImportRow(1, 7, 0x2000_0001),
             ], exports));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [
                 new TrRmImportRow(1, 6, 0x1300_0002),
                 new TrRmImportRow(1, 7, 0x2000_0003),
@@ -148,9 +169,9 @@ public sealed class TrRmAssociatedTypeImportExportTests
             new TrRmImportRow(1, 6, 0x1300_0002),
             new TrRmImportRow(1, 7, 0x2000_0002),
         };
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, imports, [new TrRmExportRow(0x2000_0002, 7)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [new TrRmImportRow(1, 6, 0x1300_0002)],
                 [new TrRmExportRow(0x2000_0002, 7)]));
     }
@@ -160,34 +181,52 @@ public sealed class TrRmAssociatedTypeImportExportTests
     {
         var fixture = CreateFixture(providerTypeFlags: 13);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(fixture, [], [new TrRmExportRow(0x2000_0001, 7)]));
     }
 
     private static bool Read(Fixture fixture,
-        IReadOnlyList<TrRmImportRow> importRows,
-        IReadOnlyList<TrRmExportRow> exportRows, bool writeRows = false,
+        TrRmImportRow[] importRows,
+        TrRmExportRow[] exportRows, bool writeRows = false,
         byte[]? associatedRelationBytes = null,
         byte[]? interfaceWitnessBytes = null,
-        byte[]? witnessAssociatedTypeBytes = null)
+        byte[]? witnessAssociatedTypeBytes = null,
+        bool includeKindThreeConstraint = false,
+        uint constraintPayload = 1,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         var strings = new TrRmStringTableReader(fixture.Strings, 7);
         var modules = new TrRmModuleTableReader(fixture.Modules, 2, strings,
             1, 2, 0, 0);
         var moduleRefs = new TrRmModuleRefTableReader(fixture.ModuleRefs, 1,
             strings, modules);
-        var types = new TrRmTypeDefTableReader(fixture.TypeDefs, 2,
-            strings, modules, 0, 0, 2, 0);
+        var typeDefBytes = (byte[])fixture.TypeDefs.Clone();
+        var genericParamCount = includeKindThreeConstraint ? 1 : 0;
+        if (includeKindThreeConstraint)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(typeDefBytes.AsSpan(20), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(typeDefBytes.AsSpan(24), 1);
+        }
+        var types = new TrRmTypeDefTableReader(typeDefBytes, 2,
+            strings, modules, 0, genericParamCount, 2, 0);
         var targetProfiles = new TrRmTargetProfileTableReader([], 0);
-        var layouts = new TrRmLayoutTableReader(fixture.Layouts, 2,
+
+        _ = new TrRmLayoutTableReader(fixture.Layouts, 2,
             types, targetProfiles, 0);
         var signatures = default(TrRmMethodSigTableReader);
         var methods = new TrRmMethodDefTableReader([], 0,
             strings, modules, types, signatures, 0, 0);
         var typeSpecs = new TrRmTypeSpecTableReader(
             fixture.TypeSpecs, 2, 2, 0, 0, 0);
-        var generics = new TrRmGenericParamTableReader([], 0,
-            strings, types, methods, signatures, typeSpecs, 0);
+        var genericParamBytes = includeKindThreeConstraint
+            ? TrRmGenericParamTableWriter.Encode([
+                new TrRmGenericParamRow(0x1300_0001, 0, 5,
+                    1, 1, 1, 3, 1, 0, 0),
+            ], strings, types, methods, signatures, typeSpecs, 1)
+            : [];
+        var generics = new TrRmGenericParamTableReader(genericParamBytes,
+            genericParamCount, strings, types, methods, signatures,
+            typeSpecs, includeKindThreeConstraint ? 1 : 0);
         var interfaces = new TrRmInterfaceDefTableReader(fixture.InterfaceDefs, 2,
             types, generics, 0, 0, 2, 0, 0);
         var associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
@@ -197,17 +236,25 @@ public sealed class TrRmAssociatedTypeImportExportTests
             ? TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
                 types, methods, default, interfaces, associatedTypeDefs)
             : EncodeImportRows(importRows);
-        var imports = new TrRmImportTableReader(importBytes, importRows.Count,
+        var imports = new TrRmImportTableReader(importBytes, importRows.Length,
             strings, moduleRefs, types, methods, default, interfaces, associatedTypeDefs);
         var relations = associatedRelationBytes ?? TrRmAssociatedRelationTableWriter.Encode([
-            new TrRmAssociatedRelationRow(importRows.Count > 1 ? 2u : 1u,
-                importRows.Count > 1 ? 0x1C00_0002u : 0x2000_0001u, 1),
+            new TrRmAssociatedRelationRow(importRows.Length > 1 ? 2u : 1u,
+                importRows.Length > 1 ? 0x1C00_0002u : 0x2000_0001u, 1),
         ], typeSpecs, 2, imports);
+        var relationReader = new TrRmAssociatedRelationTableReader(relations,
+            relations.Length / 12, typeSpecs, associatedTypeDefs.Count, imports,
+            resourceLedger);
+        var constraintBytes = includeKindThreeConstraint
+            ? TrRmConstraintTableWriter.Encode([
+                new TrRmConstraintRow(1, 3, constraintPayload),
+            ], generics, typeSpecs, relationReader)
+            : [];
         var exportBytes = writeRows
             ? TrRmExportTableWriter.Encode(exportRows, strings, types, methods,
                 default, imports, interfaces, associatedTypeDefs)
             : EncodeExportRows(exportRows);
-        _ = new TrRmExportTableReader(exportBytes, exportRows.Count,
+        _ = new TrRmExportTableReader(exportBytes, exportRows.Length,
             strings, types, methods, default, imports, interfaces, associatedTypeDefs);
 
         var sections = new List<TrRmSection>
@@ -216,7 +263,7 @@ public sealed class TrRmAssociatedTypeImportExportTests
             new(0x0002, 0, 7, fixture.Strings),
             new(0x0010, 0, 1, fixture.ModuleRefs),
             new(0x0011, 0, 2, fixture.TypeSpecs),
-            new(0x0013, 0, 2, fixture.TypeDefs),
+            new(0x0013, 0, 2, typeDefBytes),
             new(0x0015, 0, 2, fixture.Layouts),
             new(0x0025, 0, 2, fixture.InterfaceDefs),
             new(0x0027, 0, 2, fixture.AssociatedTypeDefs),
@@ -225,12 +272,21 @@ public sealed class TrRmAssociatedTypeImportExportTests
         if (importBytes.Length != 0)
         {
             sections.Insert(6,
-                new TrRmSection(0x001C, 0, (uint)importRows.Count, importBytes));
+                new TrRmSection(0x001C, 0, (uint)importRows.Length, importBytes));
         }
         if (exportBytes.Length != 0)
         {
             sections.Insert(importBytes.Length == 0 ? 6 : 7,
-                new TrRmSection(0x001D, 0, (uint)exportRows.Count, exportBytes));
+                new TrRmSection(0x001D, 0, (uint)exportRows.Length, exportBytes));
+        }
+        if (includeKindThreeConstraint)
+        {
+            var genericIndex = sections.FindIndex(
+                static section => section.Kind > 0x0019);
+            sections.Insert(genericIndex, new TrRmSection(0x0019, 0, 1,
+                genericParamBytes));
+            sections.Insert(genericIndex + 1, new TrRmSection(0x001A, 0, 1,
+                constraintBytes));
         }
         if (interfaceWitnessBytes is { Length: > 0 })
         {
@@ -307,31 +363,31 @@ public sealed class TrRmAssociatedTypeImportExportTests
             associatedTypeDefBytes, relationBytes);
     }
 
-    private static byte[] EncodeImportRows(IReadOnlyList<TrRmImportRow> rows)
+    private static byte[] EncodeImportRows(TrRmImportRow[] rows)
     {
-        var result = new byte[rows.Count * 12];
-        for (var row = 0; row < rows.Count; row++)
+        var result = new byte[rows.Length * 12];
+        for (var row = 0; row < rows.Length; row++)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(row * 12),
                 unchecked((uint)rows[row].ModuleRefRow));
             BinaryPrimitives.WriteUInt32LittleEndian(
-                result.AsSpan(row * 12 + 4), unchecked((uint)rows[row].ExportKeyStringRow));
+                result.AsSpan((row * 12) + 4), unchecked((uint)rows[row].ExportKeyStringRow));
             BinaryPrimitives.WriteUInt32LittleEndian(
-                result.AsSpan(row * 12 + 8), rows[row].ExpectedLocalDefId);
+                result.AsSpan((row * 12) + 8), rows[row].ExpectedLocalDefId);
         }
 
         return result;
     }
 
-    private static byte[] EncodeExportRows(IReadOnlyList<TrRmExportRow> rows)
+    private static byte[] EncodeExportRows(TrRmExportRow[] rows)
     {
-        var result = new byte[rows.Count * 8];
-        for (var row = 0; row < rows.Count; row++)
+        var result = new byte[rows.Length * 8];
+        for (var row = 0; row < rows.Length; row++)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(
                 result.AsSpan(row * 8), rows[row].LocalDefId);
             BinaryPrimitives.WriteUInt32LittleEndian(
-                result.AsSpan(row * 8 + 4), unchecked((uint)rows[row].ExportKeyStringRow));
+                result.AsSpan((row * 8) + 4), unchecked((uint)rows[row].ExportKeyStringRow));
         }
 
         return result;

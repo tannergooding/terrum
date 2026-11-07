@@ -19,6 +19,7 @@ public readonly ref struct TrRmConstantSourceTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated ConstantSource rows.</summary>
     public int Count => _recordCount;
@@ -31,6 +32,15 @@ public readonly ref struct TrRmConstantSourceTableReader
     /// <param name="targetValueBindingCount">The number of TargetValueBinding rows.</param>
     public TrRmConstantSourceTableReader(ReadOnlySpan<byte> section, int recordCount,
         int frozenValueNodeCount, int constantExecutionCount, int targetValueBindingCount)
+        : this(section, recordCount, frozenValueNodeCount,
+            constantExecutionCount, targetValueBindingCount, null)
+    {
+    }
+
+    internal TrRmConstantSourceTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int frozenValueNodeCount, int constantExecutionCount,
+        int targetValueBindingCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(frozenValueNodeCount)
             || !ValidCount(constantExecutionCount) || !ValidCount(targetValueBindingCount)
@@ -41,6 +51,7 @@ public readonly ref struct TrRmConstantSourceTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
@@ -71,6 +82,7 @@ public readonly ref struct TrRmConstantSourceTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidConstantSource();
@@ -82,8 +94,12 @@ public readonly ref struct TrRmConstantSourceTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;

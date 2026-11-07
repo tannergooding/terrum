@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmMethodSigTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmMethodSigTableReaderTests
 {
     [Test]
     public void ValidatesParameterModesAndZeroBasedOrdinals()
@@ -17,8 +18,8 @@ public sealed class TrRmMethodSigTableReaderTests
         var signatures = new TrRmMethodSigTableReader(Signature(), 1, types, 2, 0);
         Assert.That(signatures.GetParamOwner(1), Is.EqualTo(1));
         Assert.That(signatures.GetParamOwner(2), Is.EqualTo(1));
-        Assert.Throws<InvalidDataException>(() => GetOwner(0));
-        Assert.Throws<InvalidDataException>(() => GetOwner(3));
+        _ = Assert.Throws<InvalidDataException>(() => GetOwner(0));
+        _ = Assert.Throws<InvalidDataException>(() => GetOwner(3));
         _ = new TrRmParamTableReader(Params(), 2, signatures, types);
     }
 
@@ -43,20 +44,20 @@ public sealed class TrRmMethodSigTableReaderTests
         Assert.That(signatures.GetParamOwner(2), Is.EqualTo(1));
         _ = new TrRmParamTableReader(paramRows, 2, signatures, types);
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(0,(byte)(2))]
-    [TestCase(4,(byte)(2))]
-    [TestCase(8,(byte)(0))]
-    [TestCase(8,(byte)(2))]
-    [TestCase(12,(byte)(0))]
-    [TestCase(12,(byte)(3))]
-    [TestCase(16,(byte)(1))]
-    [TestCase(20,(byte)(1))]
+    [TestCase(0,(byte)0)]
+    [TestCase(0,(byte)2)]
+    [TestCase(4,(byte)2)]
+    [TestCase(8,(byte)0)]
+    [TestCase(8,(byte)2)]
+    [TestCase(12,(byte)0)]
+    [TestCase(12,(byte)3)]
+    [TestCase(16,(byte)1)]
+    [TestCase(20,(byte)1)]
     public void RejectsInvalidSignatureReferencesAndRanges(int offset, byte replacement)
     {
         var bytes = Signature();
         bytes[offset] = replacement;
-        Assert.Throws<InvalidDataException>(() => CreateSignature(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => CreateSignature(bytes));
     }
 
     [Test]
@@ -65,37 +66,37 @@ public sealed class TrRmMethodSigTableReaderTests
         var overlapping = new byte[48];
         Signature().CopyTo(overlapping, 0);
         Signature().CopyTo(overlapping, 24);
-        Assert.Throws<InvalidDataException>(() => CreateSignature(overlapping, recordCount: 2));
+        _ = Assert.Throws<InvalidDataException>(() => CreateSignature(overlapping, recordCount: 2));
 
         var unowned = Signature();
         Write(unowned, 12, 1);
-        Assert.Throws<InvalidDataException>(() => CreateSignature(unowned));
-        Assert.Throws<InvalidDataException>(() => CreateSignature(Signature()[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => CreateSignature(unowned));
+        _ = Assert.Throws<InvalidDataException>(() => CreateSignature(Signature()[..^1]));
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(0,(byte)(2))]
-    [TestCase(4,(byte)(1))]
-    [TestCase(8,(byte)(0))]
-    [TestCase(8,(byte)(2))]
-    [TestCase(12,(byte)(5))]
-    [TestCase(13,(byte)(1))]
-    [TestCase(14,(byte)(1))]
-    [TestCase(15,(byte)(1))]
-    [TestCase(20,(byte)(0))]
-    [TestCase(24,(byte)(0))]
-    [TestCase(28,(byte)(5))]
+    [TestCase(0,(byte)0)]
+    [TestCase(0,(byte)2)]
+    [TestCase(4,(byte)1)]
+    [TestCase(8,(byte)0)]
+    [TestCase(8,(byte)2)]
+    [TestCase(12,(byte)5)]
+    [TestCase(13,(byte)1)]
+    [TestCase(14,(byte)1)]
+    [TestCase(15,(byte)1)]
+    [TestCase(20,(byte)0)]
+    [TestCase(24,(byte)0)]
+    [TestCase(28,(byte)5)]
     public void RejectsInvalidParameterOwnerOrdinalAndFlags(int offset, byte replacement)
     {
         var bytes = Params();
         bytes[offset] = replacement;
-        Assert.Throws<InvalidDataException>(() => CreateParams(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => CreateParams(bytes));
     }
 
     [Test]
     public void RejectsWrongParameterCountAndStride()
     {
-        Assert.Throws<InvalidDataException>(() => CreateParams(Params(), recordCount: 1));
-        Assert.Throws<InvalidDataException>(() => CreateParams(Params()[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => CreateParams(Params(), recordCount: 1));
+        _ = Assert.Throws<InvalidDataException>(() => CreateParams(Params()[..^1]));
     }
 
     private static int GetOwner(int row)
@@ -139,7 +140,7 @@ public sealed class TrRmMethodSigTableReaderTests
         Write(rows, 16, 1);
         Write(rows, 20, 1);
         Write(rows, 24, 1);
-        rows[28] = 4;
+        rows[28] = 0;
         return rows;
     }
 

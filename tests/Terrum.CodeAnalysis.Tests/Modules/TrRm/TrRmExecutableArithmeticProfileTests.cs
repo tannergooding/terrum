@@ -15,7 +15,8 @@ using Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmExecutableArithmeticProfileTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmExecutableArithmeticProfileTests
 {
     private static BoundProgram Compile(string source, SourceArithmeticProfile profile)
     {

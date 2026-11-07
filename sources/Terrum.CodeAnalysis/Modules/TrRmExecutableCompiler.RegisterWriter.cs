@@ -102,7 +102,8 @@ public static partial class TrRmExecutableCompiler
         (uint TargetRequirement, uint RuntimePolicy) GetProviderRequirements(
             BoundEnumDefinition definition)
         {
-            var identity = definition.Identity.ProviderIdentity;
+            var coreIdentity = GetCoreIdentity(definition);
+            var identity = coreIdentity.ProviderIdentity;
             if (coreRegistration is not null)
             {
                 var origin = GetProviderOrigin(identity);
@@ -113,7 +114,7 @@ public static partial class TrRmExecutableCompiler
                 && StringComparer.Ordinal.Equals(
                     moduleImport.ProducerIdentity, identity)
                 && StringComparer.Ordinal.Equals(
-                    moduleImport.ExportKey, definition.Identity.ExportKey))
+                    moduleImport.ExportKey, coreIdentity.ExportKey))
             {
                 return (moduleImport.TargetRequirement,
                     moduleImport.RuntimePolicy);
@@ -123,9 +124,23 @@ public static partial class TrRmExecutableCompiler
                 "NominalEnumsDraft imports require preserved Module identity and requirements.");
         }
 
+        CoreDeclarationIdentity GetCoreIdentity(
+            BoundEnumDefinition definition)
+        {
+            if (definition.Identity
+                is BoundEnumDeclarationIdentity.Core core)
+            {
+                return core.Value;
+            }
+
+            throw Unsupported(
+                "NominalEnumsDraft cannot serialize a private-only enum identity.");
+        }
+
         for (var index = 0; index < program.EnumDefinitions.Length; index++)
         {
             var definition = program.EnumDefinitions[index];
+            var coreIdentity = GetCoreIdentity(definition);
             var separator = definition.Name.LastIndexOf(
                 '.', StringComparison.Ordinal);
             var namespaceName = separator < 0
@@ -181,16 +196,16 @@ public static partial class TrRmExecutableCompiler
                 0xF200_0008, definition.IsFlags ? 1u : 0u,
                 memberFirst, memberCount));
 
-            var exportKey = GetStringRow(definition.Identity.ExportKey);
+            var exportKey = GetStringRow(coreIdentity.ExportKey);
             if (StringComparer.Ordinal.Equals(
-                    definition.Identity.ProviderIdentity, moduleIdentity))
+                    coreIdentity.ProviderIdentity, moduleIdentity))
             {
                 exportsToWrite.Add(new TrRmExportRow(
                     0x1300_0000u | (uint)typeDefRow, exportKey));
             }
             else
             {
-                var providerIdentity = definition.Identity.ProviderIdentity;
+                var providerIdentity = coreIdentity.ProviderIdentity;
                 if (!moduleRefByProvider.TryGetValue(
                         providerIdentity, out var moduleRefRow))
                 {

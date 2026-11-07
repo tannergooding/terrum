@@ -14,7 +14,8 @@ using Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Bodies;
 
-public sealed class CompactLinearBodyFramingComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CompactLinearBodyFramingComponentTests
 {
     private const string BatchVerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -252,7 +253,11 @@ public sealed class CompactLinearBodyFramingComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -289,7 +294,11 @@ public sealed class CompactLinearBodyFramingComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [recordCount, 1], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
             .ConfigureAwait(true), Is.EqualTo(0));
@@ -323,7 +332,7 @@ public sealed class CompactLinearBodyFramingComponentTests
     internal static byte[] LocalCallBody(
         int referenceWidth, int countWidth, int argumentCount = 1)
     {
-        if (argumentCount < 0 || argumentCount > 1)
+        if (argumentCount is < 0 or > 1)
         {
             throw new ArgumentOutOfRangeException(nameof(argumentCount));
         }
@@ -340,7 +349,7 @@ public sealed class CompactLinearBodyFramingComponentTests
             row.Add(0x12);
         }
 
-        int result = argumentCount == 0 ? 1 : 2;
+        var result = argumentCount == 0 ? 1 : 2;
         AppendWord(row, result, referenceWidth);
         AppendWord(row, 2, referenceWidth);
         AppendWord(row, argumentCount, countWidth);

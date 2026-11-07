@@ -2,12 +2,13 @@
 
 using System;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmTypeSpecTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmTypeSpecTableWriterTests
 {
     [Test]
     public void EncodesDependentRowsAndOwnsTheirInput()
@@ -29,17 +30,17 @@ public sealed class TrRmTypeSpecTableWriterTests
     [Test]
     public void RejectsMalformedRowsAndMissingReferencedTables()
     {
-        Assert.Throws<ArgumentNullException>(() =>
+        _ = Assert.Throws<ArgumentNullException>(() =>
             TrRmTypeSpecTableWriter.Encode(null!, 0, 0, 0));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmTypeSpecTableWriter.Encode([], 0, 0, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmTypeSpecTableWriter.Encode([ReadOnlyMemory<byte>.Empty], 0, 0, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 0x1A }], 0, 0, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmTypeSpecTableWriter.Encode([new byte[] { 2, 0, 1, 0, 0, 0 }], 0, 0, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmTypeSpecTableWriter.Encode([new byte[] { 7, 0, 1, 0, 0, 0 }], 0, 0, 0));
     }
 
@@ -68,18 +69,18 @@ public sealed class TrRmTypeSpecTableWriterTests
             Assert.That(reader.GetRow(index + 1).ToArray(), Is.EqualTo(rows[index].ToArray()));
         }
 
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmTypeSpecTableWriter.Reference(0x05, 1));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmTypeSpecTableWriter.Wrapped(0x05, 1));
-        Assert.Throws<InvalidDataException>(() => TrRmTypeSpecTableWriter.Encode([
+        _ = Assert.Throws<InvalidDataException>(() => TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
             TrRmTypeSpecTableWriter.Wrapped(0x07, 1),
         ], 0, 0, 0));
-        Assert.Throws<InvalidDataException>(() => TrRmTypeSpecTableWriter.Encode([
+        _ = Assert.Throws<InvalidDataException>(() => TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.InlineFamily(0x80, 0x1A),
         ], 0, 0, 0));
-        Assert.Throws<InvalidDataException>(() => TrRmTypeSpecTableWriter.Encode([
+        _ = Assert.Throws<InvalidDataException>(() => TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Reference(0x02, 1),
             TrRmTypeSpecTableWriter.Constructed(1, [0u, 2u]),
         ], 1, 0, 0));

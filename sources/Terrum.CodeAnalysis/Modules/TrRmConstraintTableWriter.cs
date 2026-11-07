@@ -20,9 +20,11 @@ public static class TrRmConstraintTableWriter
     /// <param name="rows">The Constraint rows in one-based table order.</param>
     /// <param name="formals">The validated GenericParam table.</param>
     /// <param name="types">The validated TypeSpec table used by type-valued payloads.</param>
+    /// <param name="associatedRelations">The validated AssociatedRelation table used by kind-3 payloads.</param>
     /// <returns>The encoded Constraint section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmConstraintRow> rows,
-        TrRmGenericParamTableReader formals, TrRmTypeSpecTableReader types)
+        TrRmGenericParamTableReader formals, TrRmTypeSpecTableReader types,
+        TrRmAssociatedRelationTableReader associatedRelations)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -40,7 +42,8 @@ public static class TrRmConstraintTableWriter
             BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(offset + 8), row.Payload);
         }
 
-        _ = new TrRmConstraintTableReader(result, rows.Count, formals, types);
+        _ = new TrRmConstraintTableReader(result, rows.Count, formals, types,
+            associatedRelations);
         return result;
     }
 }

@@ -6,18 +6,18 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Strings;
 
-public sealed class StringTableTextComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringTableTextComponentTests
 {
     private const string BatchVerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -149,7 +149,7 @@ public sealed class StringTableTextComponentTests
     public async Task StringTableTextMatchesSelectedHostedRowDecoding(BoundRuntimePolicy policy)
     {
         const int recordCount = 5;
-        byte[] table = TrRmStringTableWriter.EncodeTextRows([
+        var table = TrRmStringTableWriter.EncodeTextRows([
             ("A", 0), ("", 1), ("B", 2), ("\U0001F600", 3), ("\u00E9", 1),
         ]);
         var dataStart = (recordCount + 1) * sizeof(uint);
@@ -194,7 +194,11 @@ public sealed class StringTableTextComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. cases.SelectMany(static item => item)], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -245,14 +249,14 @@ public sealed class StringTableTextComponentTests
 
     private static void AddInvalidRow(List<int[]> cases, byte[] table, int recordCount, int row, bool isName)
     {
-        Assert.Throws<InvalidDataException>(() => {
+        _ = Assert.Throws<InvalidDataException>(() => {
             if (isName)
             {
-                DecodeName(table, recordCount, row);
+                _ = DecodeName(table, recordCount, row);
             }
             else
             {
-                DecodeNamespace(table, recordCount, row);
+                _ = DecodeNamespace(table, recordCount, row);
             }
         });
 
@@ -296,7 +300,11 @@ public sealed class StringTableTextComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)

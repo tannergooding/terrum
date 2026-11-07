@@ -9,6 +9,11 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <summary>Emits optional SourceFile identities owned by Module partitions.</summary>
 public static class TrRmSourceFileTableWriter
 {
+    /// <summary>Encodes SourceFile rows from their path strings and Module partitions.</summary>
+    /// <param name="pathStringRows">The String row for each SourceFile, in table order.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="modules">The validated Module table.</param>
+    /// <returns>The encoded SourceFile section.</returns>
     public static byte[] Encode(IReadOnlyList<int> pathStringRows,
         TrRmStringTableReader strings, TrRmModuleTableReader modules)
     {

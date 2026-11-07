@@ -5,18 +5,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Strings;
 
-public sealed class StringTableIndexComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringTableIndexComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -88,7 +88,7 @@ public sealed class StringTableIndexComponentTests
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringTableIndexMatchesHostedVariableRows(BoundRuntimePolicy policy)
     {
-        byte[] valid = TrRmStringTableWriter.EncodeTextRows([
+        var valid = TrRmStringTableWriter.EncodeTextRows([
             ("A", 0), ("\u00E9", 1), ("\U0001F600", 2), ("Z", 3), ("", 1),
         ]);
         const int recordCount = 5;
@@ -129,7 +129,7 @@ public sealed class StringTableIndexComponentTests
         var secondRowStart = BinaryPrimitives.ReadUInt32LittleEndian(malformedText.AsSpan(4));
         var dataStart = (recordCount + 1) * sizeof(uint);
         malformedText[dataStart + checked((int)secondRowStart) + 4] = 0xC0;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStringRowReader.DecodeNamespace(new TrRmVariableTableIndex(
                 malformedText, recordCount, 8, 4).GetRow(2)));
         var malformedTextStart = checked((int)secondRowStart);
@@ -204,7 +204,11 @@ public sealed class StringTableIndexComponentTests
                 new HostBuffer("Expected", PrimitiveType.Int32, [.. testCase.Expected.SelectMany(static item => item)], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
@@ -226,7 +230,7 @@ public sealed class StringTableIndexComponentTests
             })
             .ToArray();
         var section = TrRmStringTableWriter.EncodeTextRows(rows);
-        var expected = new List<int>(1 + recordCount * 4) { recordCount };
+        var expected = new List<int>(1 + (recordCount * 4)) { recordCount };
         var dataStart = (recordCount + 1) * sizeof(uint);
         for (var row = 1; row <= recordCount; row++)
         {
@@ -268,7 +272,11 @@ public sealed class StringTableIndexComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }

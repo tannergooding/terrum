@@ -5,15 +5,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmNamedTransferTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmNamedTransferTests
 {
     [TestCase("mut int32 x = 0; outer: while (x < 3) { mut int32 y = 0; while (y++ < 2) { x++; if (x == 2) { break outer; } } } return x == 2 ? 42 : 0;")]
     [TestCase("mut int32 x = 0; mut int32 skip = 0; outer: while (x < 3) { mut int32 y = 0; while (y++ < 2) { x++; if (x == 3) { continue outer; } } skip++; } return x == 3 && skip == 1 ? 42 : 0;")]
@@ -41,7 +42,7 @@ public sealed class TrRmNamedTransferTests
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
         var checkedSource = Compile(source, BoundRuntimePolicy.CheckedExceptions);
         Assert.That(NativeJit.Execute(checkedSource, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedSource, "checked"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedSource, "checked"));
     }
     [TestCase("outer: while (true) { while (true) { break outer; } } return 42;")]
     [TestCase("outer: for (;;) { do { continue outer; } while (false); }")]
@@ -63,7 +64,11 @@ public sealed class TrRmNamedTransferTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
     [TestCase(true)]
     [TestCase(false)]
@@ -72,11 +77,11 @@ public sealed class TrRmNamedTransferTests
         var baseline = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(
             Compile(Source(0, 0), BoundRuntimePolicy.FailFast), "routing-budget")).Functions[0].Variables.Length;
         var scopes = (256 - baseline) / 3;
-        var unary = (256 - baseline) % 3 + (supported ? 0 : 1);
+        var unary = ((256 - baseline) % 3) + (supported ? 0 : 1);
         var original = Compile(Source(scopes, unary), BoundRuntimePolicy.FailFast);
         if (!supported)
         {
-            Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "257-routing-values"));
+            _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "257-routing-values"));
             return;
         }
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "256-routing-values"));
@@ -88,11 +93,12 @@ public sealed class TrRmNamedTransferTests
             var source = new StringBuilder("int32 Main() { mut int32 x = 0; outer: while (x < 1) { ");
             for (var index = 0; index < scopes; index++)
             {
-                source.Append($"{{ int32 local = {index}; x = x + 1; }} ");
+                _ = source.Append(System.Globalization.CultureInfo.InvariantCulture,
+                    $"{{ int32 local = {index}; x = x + 1; }} ");
             }
-            source.Append("mut int32 y = 0; while (y < 2) { y++; if (y == 1) { x = x + 1; continue outer; } } } return ");
-            source.Append(string.Concat(Enumerable.Repeat("+(", unary)));
-            source.Append('x').Append(')', unary).Append("; }");
+            _ = source.Append("mut int32 y = 0; while (y < 2) { y++; if (y == 1) { x = x + 1; continue outer; } } } return ");
+            _ = source.Append(string.Concat(Enumerable.Repeat("+(", unary)));
+            _ = source.Append('x').Append(')', unary).Append("; }");
             return source.ToString();
         }
     }
@@ -125,11 +131,17 @@ public sealed class TrRmNamedTransferTests
             [20, 1, 2, 1, 2, 0, 0, 0x83, 2],
         ];
         if (mutation == 0)
-        { blocks[3][10] = 7; }
+        {
+            blocks[3][10] = 7;
+        }
         if (mutation == 1)
-        { blocks[3][10] = 6; }
+        {
+            blocks[3][10] = 6;
+        }
         if (mutation == 2)
-        { blocks[1][14] = 4; }
+        {
+            blocks[1][14] = 4;
+        }
         var bytes = new List<byte> {
             8, 7, 2, 2, 2, 1, 0, 0, 0, 2, 0, 0, 0,
             1, 0, 2, 7, 0, 1, 1, 3, 5, 0,
@@ -146,12 +158,18 @@ public sealed class TrRmNamedTransferTests
         bytes.Add((byte)offset);
         bytes.AddRange([13, 12, 12, 9, 12, 9, 7]);
         foreach (var block in blocks)
-        { bytes.AddRange(block); }
+        {
+            bytes.AddRange(block);
+        }
         if (mutation == 3)
-        { bytes[19] = 0; }
+        {
+            bytes[19] = 0;
+        }
         if (mutation == 4)
-        { bytes[35] = 9; }
-        var artifact = TrRmExecutionAuditTests.Artifact(bytes.ToArray());
+        {
+            bytes[35] = 9;
+        }
+        var artifact = TrRmExecutionAuditTests.Artifact([.. bytes]);
         if (mutation == -1)
         {
             TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
@@ -159,7 +177,7 @@ public sealed class TrRmNamedTransferTests
         }
         else
         {
-            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+            _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
         }
     }
 }

@@ -21,16 +21,15 @@ public static partial class TrRmExecutableCompiler
 
     private static bool HasRootlessNativeValues(BoundFunction function)
     {
-    var found = function.Variables.Take(function.ParameterCount)
-        .Any(static variable => variable.Type == PrimitiveType.NativeRawPointer
-            || NativePointerTypes.IsType(variable.Type));
-    _ = BoundTreeTraversal.RewriteExpressions(function, expression =>
-    {
-        found |= expression.Type == PrimitiveType.NativeRawPointer
-            || NativePointerTypes.IsType(expression.Type)
-            || expression is BoundNativeStorageAddress;
-        return expression;
-    });
+        var found = function.Variables.Take(function.ParameterCount)
+            .Any(static variable => variable.Type == PrimitiveType.NativeRawPointer
+                || NativePointerTypes.IsType(variable.Type));
+        _ = BoundTreeTraversal.RewriteExpressions(function, expression => {
+            found |= expression.Type == PrimitiveType.NativeRawPointer
+                || NativePointerTypes.IsType(expression.Type)
+                || expression is BoundNativeStorageAddress;
+            return expression;
+        });
         return found;
     }
 
@@ -40,8 +39,7 @@ public static partial class TrRmExecutableCompiler
 
     private static bool ContainsOutputFeature(BoundStatement statement, BoundProgram program)
     {
-        return statement switch
-        {
+        return statement switch {
             BoundBlock block => block.Statements.Any(child =>
                 ContainsOutputFeature(child, program)),
             BoundVacantLocal => true,
@@ -65,8 +63,7 @@ public static partial class TrRmExecutableCompiler
 
     private static bool ContainsOutputFeature(BoundExpression expression, BoundProgram program)
     {
-        return expression switch
-        {
+        return expression switch {
             BoundOutArgument or BoundNativeStorageAddress => true,
             BoundBinary binary => ContainsOutputFeature(binary.Left, program)
                 || ContainsOutputFeature(binary.Right, program),
@@ -161,8 +158,8 @@ public static partial class TrRmExecutableCompiler
             var placeType = OutputType(body, types, place.TypeId,
                 nativePointerTypeDefinitions, structureTypeByTypeDef);
             if (!IsOutputScalarType(placeType)
-                || ruleRevision == TrRmProvisionalFeatureRevisions.ScalarInitOutputInitialRuleRevision
-                    && placeType != PrimitiveType.Int32)
+                || (ruleRevision == TrRmProvisionalFeatureRevisions.ScalarInitOutputInitialRuleRevision
+                    && placeType != PrimitiveType.Int32))
             {
                 throw Invalid("The executable place profile has an unsupported referent type.");
             }
@@ -183,8 +180,7 @@ public static partial class TrRmExecutableCompiler
                 placeVariables[index] = variables.Count;
                 var addressableLocal = place.Flags is 5 or 7;
                 variables.Add(new BoundVariable($"place{index + 1}", placeType,
-                    (place.Flags & 2) != 0, default)
-                {
+                    (place.Flags & 2) != 0, default) {
                     IsInitializationLocal = !addressableLocal,
                 });
                 if (!addressableLocal)
@@ -369,8 +365,7 @@ public static partial class TrRmExecutableCompiler
                             throw Invalid("Constant type is outside the executable place profile.");
                         }
 
-                        var constantValue = isNullPointer ? 0 : type switch
-                        {
+                        var constantValue = isNullPointer ? 0 : type switch {
                             PrimitiveType.Int32 or PrimitiveType.UInt32
                                 => unchecked((int)operation.Data),
                             PrimitiveType.Float32 => unchecked((uint)operation.Data),
@@ -424,8 +419,7 @@ public static partial class TrRmExecutableCompiler
 
                         var operand = ReadValue(operation.Operands[0]);
                         var destination = bodyTypes[operation.TypeId - 1];
-                        var valid = operation.Opcode switch
-                        {
+                        var valid = operation.Opcode switch {
                             0x16 => IsOutputIntegerConversionType(operand.Type)
                                 && IsOutputIntegerConversionType(destination),
                             0x1A => IsFloat(operand.Type) && IsFloat(destination)
@@ -502,8 +496,7 @@ public static partial class TrRmExecutableCompiler
                                 {
                                     throw Invalid("Output argument type does not match its formal.");
                                 }
-                                arguments.Add(new BoundOutArgument(place, false, formal.Type, default)
-                                {
+                                arguments.Add(new BoundOutArgument(place, false, formal.Type, default) {
                                     IsInit = true,
                                 });
                             }
@@ -553,8 +546,7 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         var call = new BoundCall(functionIndex,
-                            arguments.MoveToImmutable(), target.ReturnType, default)
-                        {
+                            arguments.MoveToImmutable(), target.ReturnType, default) {
                             IsUnsafeAuthorized = inUnsafeScope,
                         };
                         if (conditionalResult != 0 && operation.Result == conditionalResult)
@@ -572,177 +564,170 @@ public static partial class TrRmExecutableCompiler
                         }
                         break;
                     }
-                case 4:
-                case 0x17:
-                case 0x1C:
-                {
-                    if (operation.Operands.Length != 1)
+                    case 4:
+                    case 0x17:
+                    case 0x1C:
                     {
-                        throw Invalid("Unary requires one value.");
-                    }
-
-                    var operand = ReadValue(operation.Operands[0]);
-                    var isFloatNegation = operation.Opcode == 0x1C;
-                    var isCheckedIntegerNegation = operation.Opcode == 0x17;
-                    var valid = isFloatNegation
-                        ? IsFloat(operand.Type)
-                        : isCheckedIntegerNegation
-                            ? operand.Type is PrimitiveType.Int32 or PrimitiveType.Int64
-                            : operation.Kind switch
-                            {
-                                1 => operand.Type == PrimitiveType.Bool,
-                                2 or 3 => IsInteger(operand.Type),
-                                _ => false,
-                            };
-                    if (!valid)
-                    {
-                        throw Invalid("Unary operand is outside the executable place profile.");
-                    }
-
-                    var token = isFloatNegation || isCheckedIntegerNegation
-                        ? TokenKind.Minus
-                        : operation.Kind switch
+                        if (operation.Operands.Length != 1)
                         {
-                            1 => TokenKind.Bang,
-                            2 => TokenKind.Tilde,
-                            _ => TokenKind.Plus,
-                        };
-                    DefineValue(operation.Result,
-                        new BoundUnary(token, operand, operand.Type, default));
-                    break;
-                }
-                case 0x1D:
-                {
-                    if (operation.Operands.Length != 2)
-                    {
-                        throw Invalid("Floating binary operation requires two values.");
-                    }
-
-                    var floatingLeftValue = ReadValue(operation.Operands[0]);
-                    var floatingRightValue = ReadValue(operation.Operands[1]);
-                    if (floatingLeftValue.Type != floatingRightValue.Type
-                        || !IsFloat(floatingLeftValue.Type)
-                        || operation.Kind is < 1 or > 4)
-                    {
-                        throw Invalid("Floating binary operation is outside the executable place profile.");
-                    }
-
-                    var token = operation.Kind switch
-                    {
-                        1 => TokenKind.Plus,
-                        2 => TokenKind.Minus,
-                        3 => TokenKind.Star,
-                        _ => TokenKind.Slash,
-                    };
-                    DefineValue(operation.Result,
-                        new BoundBinary(token, floatingLeftValue, floatingRightValue,
-                            floatingLeftValue.Type, default));
-                    break;
-                }
-                case 5:
-                case 0x19:
-                {
-                    if (operation.Operands.Length != 2)
-                    {
-                        throw Invalid("Comparison requires two values.");
-                    }
-
-                    var left = ReadValue(operation.Operands[0]);
-                    var right = ReadValue(operation.Operands[1]);
-                    var isFloat = operation.Opcode == 0x19;
-                    if (!isFloat && operation.Kind is >= 10 and <= 12)
-                    {
-                        if (!IsInteger(left.Type) || left.Type != right.Type)
-                        {
-                            throw Invalid("Wrapping Binary requires equal integer operands.");
+                            throw Invalid("Unary requires one value.");
                         }
 
-                        var wrappingToken = operation.Kind switch
+                        var operand = ReadValue(operation.Operands[0]);
+                        var isFloatNegation = operation.Opcode == 0x1C;
+                        var isCheckedIntegerNegation = operation.Opcode == 0x17;
+                        var valid = isFloatNegation
+                            ? IsFloat(operand.Type)
+                            : isCheckedIntegerNegation
+                                ? operand.Type is PrimitiveType.Int32 or PrimitiveType.Int64
+                                : operation.Kind switch {
+                                    1 => operand.Type == PrimitiveType.Bool,
+                                    2 or 3 => IsInteger(operand.Type),
+                                    _ => false,
+                                };
+                        if (!valid)
                         {
-                            10 => TokenKind.Plus,
-                            11 => TokenKind.Minus,
-                            12 => TokenKind.Star,
-                            _ => throw Invalid("Unsupported wrapping Binary kind."),
-                        };
+                            throw Invalid("Unary operand is outside the executable place profile.");
+                        }
+
+                        var token = isFloatNegation || isCheckedIntegerNegation
+                            ? TokenKind.Minus
+                            : operation.Kind switch {
+                                1 => TokenKind.Bang,
+                                2 => TokenKind.Tilde,
+                                _ => TokenKind.Plus,
+                            };
                         DefineValue(operation.Result,
-                            new BoundBinary(wrappingToken, left, right, left.Type, default) {
-                                OverflowBehavior = BoundIntegerOverflowBehavior.Wrapping,
-                            });
+                            new BoundUnary(token, operand, operand.Type, default));
                         break;
                     }
-                    var valid = left.Type == right.Type && (operation.Kind switch
+                    case 0x1D:
                     {
-                        1 or 2 when isFloat => IsFloat(left.Type),
-                        3 or 4 or 5 or 6 when isFloat => IsFloat(left.Type),
-                        1 or 2 or 3 => !isFloat && IsInteger(left.Type),
-                        4 or 5 => left.Type is PrimitiveType.Bool or PrimitiveType.Char16
-                            or PrimitiveType.Int32 or PrimitiveType.UInt32
-                            or PrimitiveType.Int64 or PrimitiveType.UInt64,
-                        6 or 7 or 8 or 9 => IsInteger(left.Type),
-                        _ => false,
-                    });
-                    if (!valid)
-                    {
-                        throw Invalid("Comparison operands are outside the executable place profile.");
-                    }
+                        if (operation.Operands.Length != 2)
+                        {
+                            throw Invalid("Floating binary operation requires two values.");
+                        }
 
-                    var token = (isFloat, operation.Kind) switch
-                    {
-                        (false, 1) => TokenKind.Ampersand,
-                        (false, 2) => TokenKind.Pipe,
-                        (false, 3) => TokenKind.Caret,
-                        (true, 1) or (false, 4) => TokenKind.EqualsEquals,
-                        (true, 2) or (false, 5) => TokenKind.BangEquals,
-                        (true, 3) or (false, 6) => TokenKind.Less,
-                        (true, 4) or (false, 7) => TokenKind.LessEquals,
-                        (true, 5) or (false, 8) => TokenKind.Greater,
-                        (true, 6) or (false, 9) => TokenKind.GreaterEquals,
-                        _ => throw Invalid("Unsupported Binary kind."),
-                    };
-                    DefineValue(operation.Result,
-                        new BoundBinary(token, left, right,
-                            !isFloat && operation.Kind is >= 1 and <= 3
-                                ? left.Type : PrimitiveType.Bool, default));
-                    break;
-                }
-                case 0x15:
-                {
-                    if (operation.Operands.Length != 2)
-                    {
-                        throw Invalid("Binary requires two values.");
-                    }
+                        var floatingLeftValue = ReadValue(operation.Operands[0]);
+                        var floatingRightValue = ReadValue(operation.Operands[1]);
+                        if (floatingLeftValue.Type != floatingRightValue.Type
+                            || !IsFloat(floatingLeftValue.Type)
+                            || operation.Kind is < 1 or > 4)
+                        {
+                            throw Invalid("Floating binary operation is outside the executable place profile.");
+                        }
 
-                    var integerLeft = ReadValue(operation.Operands[0]);
-                    var integerRight = ReadValue(operation.Operands[1]);
-                    var isShift = operation.Kind is 6 or 7;
-                    if (!IsInteger(integerLeft.Type)
-                        || (isShift
-                            ? integerRight.Type != PrimitiveType.UInt32
-                            : integerLeft.Type != integerRight.Type))
-                    {
-                        throw Invalid("Binary operands are outside the executable integer profile.");
+                        var token = operation.Kind switch {
+                            1 => TokenKind.Plus,
+                            2 => TokenKind.Minus,
+                            3 => TokenKind.Star,
+                            _ => TokenKind.Slash,
+                        };
+                        DefineValue(operation.Result,
+                            new BoundBinary(token, floatingLeftValue, floatingRightValue,
+                                floatingLeftValue.Type, default));
+                        break;
                     }
-
-                    var token = operation.Kind switch
+                    case 5:
+                    case 0x19:
                     {
-                        1 => TokenKind.Plus,
-                        2 => TokenKind.Minus,
-                        3 => TokenKind.Star,
-                        4 => TokenKind.Slash,
-                        5 => TokenKind.Percent,
-                        6 => TokenKind.ShiftLeft,
-                        7 => TokenKind.ShiftRight,
-                        _ => throw Invalid("The executable place profile has an unsupported Binary kind."),
-                    };
-                    BoundExpression rightValue = isShift
-                        ? new BoundCast(integerRight, PrimitiveType.Int32, default)
-                        : integerRight;
-                    DefineValue(operation.Result, new BoundBinary(token,
-                        integerLeft, rightValue, integerLeft.Type, default));
-                    break;
-                }
-                default:
-                    throw Invalid($"Operation 0x{operation.Opcode:X2} is outside the executable place profile.");
+                        if (operation.Operands.Length != 2)
+                        {
+                            throw Invalid("Comparison requires two values.");
+                        }
+
+                        var left = ReadValue(operation.Operands[0]);
+                        var right = ReadValue(operation.Operands[1]);
+                        var isFloat = operation.Opcode == 0x19;
+                        if (!isFloat && operation.Kind is >= 10 and <= 12)
+                        {
+                            if (!IsInteger(left.Type) || left.Type != right.Type)
+                            {
+                                throw Invalid("Wrapping Binary requires equal integer operands.");
+                            }
+
+                            var wrappingToken = operation.Kind switch {
+                                10 => TokenKind.Plus,
+                                11 => TokenKind.Minus,
+                                12 => TokenKind.Star,
+                                _ => throw Invalid("Unsupported wrapping Binary kind."),
+                            };
+                            DefineValue(operation.Result,
+                                new BoundBinary(wrappingToken, left, right, left.Type, default) {
+                                    OverflowBehavior = BoundIntegerOverflowBehavior.Wrapping,
+                                });
+                            break;
+                        }
+                        var valid = left.Type == right.Type && (operation.Kind switch {
+                            1 or 2 when isFloat => IsFloat(left.Type),
+                            3 or 4 or 5 or 6 when isFloat => IsFloat(left.Type),
+                            1 or 2 or 3 => !isFloat && IsInteger(left.Type),
+                            4 or 5 => left.Type is PrimitiveType.Bool or PrimitiveType.Char16
+                                or PrimitiveType.Int32 or PrimitiveType.UInt32
+                                or PrimitiveType.Int64 or PrimitiveType.UInt64,
+                            6 or 7 or 8 or 9 => IsInteger(left.Type),
+                            _ => false,
+                        });
+                        if (!valid)
+                        {
+                            throw Invalid("Comparison operands are outside the executable place profile.");
+                        }
+
+                        var token = (isFloat, operation.Kind) switch {
+                            (false, 1) => TokenKind.Ampersand,
+                            (false, 2) => TokenKind.Pipe,
+                            (false, 3) => TokenKind.Caret,
+                            (true, 1) or (false, 4) => TokenKind.EqualsEquals,
+                            (true, 2) or (false, 5) => TokenKind.BangEquals,
+                            (true, 3) or (false, 6) => TokenKind.Less,
+                            (true, 4) or (false, 7) => TokenKind.LessEquals,
+                            (true, 5) or (false, 8) => TokenKind.Greater,
+                            (true, 6) or (false, 9) => TokenKind.GreaterEquals,
+                            _ => throw Invalid("Unsupported Binary kind."),
+                        };
+                        DefineValue(operation.Result,
+                            new BoundBinary(token, left, right,
+                                !isFloat && operation.Kind is >= 1 and <= 3
+                                    ? left.Type : PrimitiveType.Bool, default));
+                        break;
+                    }
+                    case 0x15:
+                    {
+                        if (operation.Operands.Length != 2)
+                        {
+                            throw Invalid("Binary requires two values.");
+                        }
+
+                        var integerLeft = ReadValue(operation.Operands[0]);
+                        var integerRight = ReadValue(operation.Operands[1]);
+                        var isShift = operation.Kind is 6 or 7;
+                        if (!IsInteger(integerLeft.Type)
+                            || (isShift
+                                ? integerRight.Type != PrimitiveType.UInt32
+                                : integerLeft.Type != integerRight.Type))
+                        {
+                            throw Invalid("Binary operands are outside the executable integer profile.");
+                        }
+
+                        var token = operation.Kind switch {
+                            1 => TokenKind.Plus,
+                            2 => TokenKind.Minus,
+                            3 => TokenKind.Star,
+                            4 => TokenKind.Slash,
+                            5 => TokenKind.Percent,
+                            6 => TokenKind.ShiftLeft,
+                            7 => TokenKind.ShiftRight,
+                            _ => throw Invalid("The executable place profile has an unsupported Binary kind."),
+                        };
+                        var rightValue = isShift
+                            ? new BoundCast(integerRight, PrimitiveType.Int32, default)
+                            : integerRight;
+                        DefineValue(operation.Result, new BoundBinary(token,
+                            integerLeft, rightValue, integerLeft.Type, default));
+                        break;
+                    }
+                    default:
+                        throw Invalid($"Operation 0x{operation.Opcode:X2} is outside the executable place profile.");
                 }
             }
         }
@@ -847,8 +832,7 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsOutputIntegerBinary(BoundBinary binary)
         => binary.Type == binary.Left.Type && IsInteger(binary.Left.Type)
-            && (binary.Operator switch
-            {
+            && (binary.Operator switch {
                 TokenKind.Plus or TokenKind.Minus or TokenKind.Star
                     or TokenKind.Slash or TokenKind.Percent => binary.Right.Type == binary.Left.Type,
                 TokenKind.ShiftLeft or TokenKind.ShiftRight =>
@@ -925,8 +909,7 @@ public static partial class TrRmExecutableCompiler
             _placeByVariable = new int[function.Variables.Length];
             _currentValues = new int[function.Variables.Length];
             var addressableVariables = new HashSet<int>();
-            _ = BoundTreeTraversal.RewriteExpressions(function, expression =>
-            {
+            _ = BoundTreeTraversal.RewriteExpressions(function, expression => {
                 if (expression is BoundNativeStorageAddress address)
                 {
                     _ = addressableVariables.Add(address.Variable);
@@ -934,8 +917,8 @@ public static partial class TrRmExecutableCompiler
                 return expression;
             });
             if (function.Variables.Length > SemanticVerifier.MaximumVariables
-                || function.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
-                    && (!HasOutputParameters(function) || !IsOutputReturnType(function.ReturnType)))
+                || (function.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
+                    && (!HasOutputParameters(function) || !IsOutputReturnType(function.ReturnType))))
             {
                 throw Unsupported("Output Bodies support at most 256 variables and scalar results only for output functions.");
             }
@@ -1233,8 +1216,7 @@ public static partial class TrRmExecutableCompiler
 
         private void EmitBranchTerminal(BoundStatement statement)
         {
-            var terminal = statement switch
-            {
+            var terminal = statement switch {
                 BoundBlock { RetiredManagedLocals.IsEmpty: true, Statements.Length: 1 } block
                     => block.Statements[0],
                 _ => statement,
@@ -1245,8 +1227,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundReturn returned:
                     EmitReturn(returned);
                     break;
-                case BoundRequire
-                {
+                case BoundRequire {
                     Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 0 },
                 }:
                     for (var place = 1; place < _places.Count; place++)
@@ -1276,10 +1257,10 @@ public static partial class TrRmExecutableCompiler
 
         private void CaptureBlock(int condition = 0, bool[]? inheritedPlaces = null)
         {
-            _blocks.Add(new OutputBlock(_operations.ToArray(), _operationCount, _returnValue,
+            _blocks.Add(new OutputBlock([.. _operations], _operationCount, _returnValue,
                 _failureReason, condition, new Dictionary<int, int>(_valueLastUses),
                 new Dictionary<int, int>(_placeLastUses),
-                _currentBlock == 0 ? null : inheritedPlaces ?? _placeInitialized.ToArray()));
+                _currentBlock == 0 ? null : inheritedPlaces ?? [.. _placeInitialized]));
             _operations.Clear();
             _valueLastUses.Clear();
             _placeLastUses.Clear();
@@ -1334,21 +1315,21 @@ public static partial class TrRmExecutableCompiler
         {
             switch (expression)
             {
-            case BoundConstant { Value: 0 } constant
+                case BoundConstant { Value: 0 } constant
                 when constant.Type == PrimitiveType.NativeRawPointer
                     || NativePointerTypes.IsType(constant.Type):
-                var pointerResult = _valueTypes.Count + 1;
-                var pointerTypeId = BodyTypeId(BodyTypeRow(constant.Type));
-                var pointerReferenceWidth = Width((ulong)Math.Max(pointerResult, pointerTypeId));
-                var pointerOffset = _operations.Count;
-                WriteInstruction(_operations, 0x01, pointerReferenceWidth, 1);
-                Write(_operations, (ulong)pointerResult, pointerReferenceWidth);
-                Write(_operations, (ulong)pointerTypeId, pointerReferenceWidth);
-                Write(_operations, 0, 1);
-                _ = AddValue(constant.Type, 0, (uint)pointerOffset);
-                _operationCount++;
-                return pointerResult;
-            case BoundRead read:
+                    var pointerResult = _valueTypes.Count + 1;
+                    var pointerTypeId = BodyTypeId(BodyTypeRow(constant.Type));
+                    var pointerReferenceWidth = Width((ulong)Math.Max(pointerResult, pointerTypeId));
+                    var pointerOffset = _operations.Count;
+                    WriteInstruction(_operations, 0x01, pointerReferenceWidth, 1);
+                    Write(_operations, (ulong)pointerResult, pointerReferenceWidth);
+                    Write(_operations, (ulong)pointerTypeId, pointerReferenceWidth);
+                    Write(_operations, 0, 1);
+                    _ = AddValue(constant.Type, 0, (uint)pointerOffset);
+                    _operationCount++;
+                    return pointerResult;
+                case BoundRead read:
                     if ((uint)read.Variable >= (uint)_currentValues.Length)
                     {
                         throw Unsupported("Read is outside the variable inventory.");
@@ -1382,8 +1363,7 @@ public static partial class TrRmExecutableCompiler
                     return current;
                 case BoundConstant constant when IsOutputScalarType(constant.Type):
                     var constResult = _valueTypes.Count + 1;
-                    var bits = constant.Type switch
-                    {
+                    var bits = constant.Type switch {
                         PrimitiveType.Bool or PrimitiveType.Char16 => (ulong)constant.Value,
                         PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Float32
                             => unchecked((uint)constant.Value),
@@ -1408,8 +1388,7 @@ public static partial class TrRmExecutableCompiler
                         return EmitValue(cast.Operand);
                     }
 
-                    var conversionOpcode = (cast.Operand.Type, cast.Type) switch
-                    {
+                    var conversionOpcode = (cast.Operand.Type, cast.Type) switch {
                         (PrimitiveType.Float32 or PrimitiveType.Float64,
                             PrimitiveType.Float32 or PrimitiveType.Float64) => (byte)0x1A,
                         (PrimitiveType.Int32 or PrimitiveType.UInt32
@@ -1448,8 +1427,7 @@ public static partial class TrRmExecutableCompiler
                     var floatingLeft = EmitValue(binary.Left);
                     var floatingRight = EmitValue(binary.Right);
                     var floatingResult = _valueTypes.Count + 1;
-                    var floatingKind = binary.Operator switch
-                    {
+                    var floatingKind = binary.Operator switch {
                         TokenKind.Plus => 1,
                         TokenKind.Minus => 2,
                         TokenKind.Star => 3,
@@ -1470,8 +1448,7 @@ public static partial class TrRmExecutableCompiler
                     return floatingResult;
                 }
                 case BoundUnary unary when unary.Type == unary.Operand.Type
-                    && (unary.Operator switch
-                    {
+                    && (unary.Operator switch {
                         TokenKind.Bang => unary.Type == PrimitiveType.Bool,
                         TokenKind.Tilde or TokenKind.Plus => IsInteger(unary.Type),
                         TokenKind.Minus => IsFloat(unary.Type) || IsInteger(unary.Type),
@@ -1491,8 +1468,7 @@ public static partial class TrRmExecutableCompiler
                     var unaryOpcode = unary.Operator == TokenKind.Minus
                         ? IsFloat(unary.Type) ? (byte)0x1C : (byte)0x17
                         : (byte)4;
-                    var unaryKind = unary.Operator switch
-                    {
+                    var unaryKind = unary.Operator switch {
                         TokenKind.Bang => 1,
                         TokenKind.Tilde => 2,
                         TokenKind.Plus => 3,
@@ -1519,8 +1495,7 @@ public static partial class TrRmExecutableCompiler
                     var bitwiseLeft = EmitValue(binary.Left);
                     var bitwiseRight = EmitValue(binary.Right);
                     var bitwiseResult = _valueTypes.Count + 1;
-                    var bitwiseKind = binary.Operator switch
-                    {
+                    var bitwiseKind = binary.Operator switch {
                         TokenKind.Ampersand => 1,
                         TokenKind.Pipe => 2,
                         _ => 3,
@@ -1548,11 +1523,11 @@ public static partial class TrRmExecutableCompiler
                     var isFloat = IsFloat(binary.Left.Type);
                     var isEquality = binary.Operator is TokenKind.EqualsEquals or TokenKind.BangEquals;
                     if (!IsOutputScalarType(binary.Left.Type)
-                        || !isFloat && (isEquality
+                        || (!isFloat && (isEquality
                             ? binary.Left.Type is not (PrimitiveType.Bool or PrimitiveType.Char16
                                 or PrimitiveType.Int32 or PrimitiveType.UInt32
                                 or PrimitiveType.Int64 or PrimitiveType.UInt64)
-                            : !IsInteger(binary.Left.Type)))
+                            : !IsInteger(binary.Left.Type))))
                     {
                         throw Unsupported("Comparison operands are outside the output Body profile.");
                     }
@@ -1560,8 +1535,7 @@ public static partial class TrRmExecutableCompiler
                     var comparisonLeft = EmitValue(binary.Left);
                     var comparisonRight = EmitValue(binary.Right);
                     var compareResult = _valueTypes.Count + 1;
-                    var compareKind = binary.Operator switch
-                    {
+                    var compareKind = binary.Operator switch {
                         TokenKind.EqualsEquals => isFloat ? 1 : 4,
                         TokenKind.BangEquals => isFloat ? 2 : 5,
                         TokenKind.Less => isFloat ? 3 : 6,
@@ -1592,8 +1566,7 @@ public static partial class TrRmExecutableCompiler
                         ? EmitValue(new BoundCast(binary.Right, PrimitiveType.UInt32, default))
                         : EmitValue(binary.Right);
                     var integerResult = _valueTypes.Count + 1;
-                    var integerKind = binary.Operator switch
-                    {
+                    var integerKind = binary.Operator switch {
                         TokenKind.Plus => 1,
                         TokenKind.Minus => 2,
                         TokenKind.Star => 3,
@@ -1656,8 +1629,8 @@ public static partial class TrRmExecutableCompiler
         private int EmitCall(BoundCall call)
         {
             if ((uint)call.Function >= (uint)_program.Functions.Length
-                || call.ArgumentParameterIndices.IsDefault == false
-                    && call.ArgumentParameterIndices.Length != call.Arguments.Length)
+                || (call.ArgumentParameterIndices.IsDefault == false
+                    && call.ArgumentParameterIndices.Length != call.Arguments.Length))
             {
                 throw Unsupported("Call target or argument mapping is invalid.");
             }
@@ -1697,9 +1670,9 @@ public static partial class TrRmExecutableCompiler
                     outputTarget = true;
                 }
             }
-            if (outputTarget && (!target.IsPrivate && !target.IsInternal
-                || target.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
-                    && !IsOutputReturnType(target.ReturnType)))
+            if (outputTarget && ((!target.IsPrivate && !target.IsInternal)
+                || (target.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
+                    && !IsOutputReturnType(target.ReturnType))))
             {
                 throw Unsupported("Output targets must be non-exported and return void or a scalar.");
             }
@@ -1741,8 +1714,7 @@ public static partial class TrRmExecutableCompiler
                 else if (parameter.IsOut || parameter.IsInit)
                 {
                     if (!parameter.IsOut || !parameter.IsInit || !IsOutputScalarType(parameter.Type)
-                        || value is not BoundOutArgument
-                        {
+                        || value is not BoundOutArgument {
                             IsInit: true,
                             DeclaresVariable: false,
                             Type: var outputType,
@@ -1907,8 +1879,8 @@ public static partial class TrRmExecutableCompiler
                 }
                 _returnValue = EmitValue(result.Value);
                 if (_valueTypes[_returnValue - 1] != BodyTypeRow(_function.ReturnType)
-                    || _function.ReturnType != PrimitiveType.Int32
-                        && (!HasOutputParameters(_function) || !IsOutputReturnType(_function.ReturnType)))
+                    || (_function.ReturnType != PrimitiveType.Int32
+                        && (!HasOutputParameters(_function) || !IsOutputReturnType(_function.ReturnType))))
                 {
                     throw Unsupported("Output-profile return type must match its supported output signature.");
                 }
@@ -1939,17 +1911,16 @@ public static partial class TrRmExecutableCompiler
             for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
             {
                 liveIns[blockIndex] = blockIndex == 0 ? []
-                    : _definitionBlocks
+                    : [.. _definitionBlocks
                         .Select((definitionBlock, index) => (definitionBlock, index))
                         .Where(pair => pair.definitionBlock < blockIndex
                             && _blocks[blockIndex].ValueLastUses.ContainsKey(pair.index + 1))
-                        .Select(static pair => pair.index + 1)
-                        .ToArray();
+                        .Select(static pair => pair.index + 1)];
                 liveOuts[blockIndex] = [];
             }
             if (blockCount == 3)
             {
-                liveOuts[0] = liveIns[1].Concat(liveIns[2]).Distinct().Order().ToArray();
+                liveOuts[0] = [.. liveIns[1].Concat(liveIns[2]).Distinct().Order()];
             }
 
             var maximumStructural = Math.Max(blockCount,
@@ -1959,7 +1930,7 @@ public static partial class TrRmExecutableCompiler
                 maximumStructural = Math.Max(maximumStructural,
                     Math.Max(block.OperationCount, Math.Max(block.ValueLastUses.Count,
                         Math.Max(block.PlaceLastUses.Count,
-                            block.InheritedPlaces?.Length - 1 ?? 0))));
+                            (block.InheritedPlaces?.Length - 1) ?? 0))));
             }
             var localWidth = Width((ulong)maximumStructural);
             if (localWidth > 4)
@@ -2126,10 +2097,12 @@ public static partial class TrRmExecutableCompiler
             {
                 body.AddRange(block);
             }
-            return body.ToArray();
+            return [.. body];
 
             int[] startingPlacesForEnd()
-                => Enumerable.Range(1, _places.Count - 1).ToArray();
+            {
+                return [.. Enumerable.Range(1, _places.Count - 1)];
+            }
         }
 
         private static void WriteConditionalTerminator(List<byte> bytes,

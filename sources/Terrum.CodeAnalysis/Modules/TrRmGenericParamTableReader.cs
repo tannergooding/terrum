@@ -28,6 +28,7 @@ public readonly ref struct TrRmGenericParamTableReader
     /// <param name="types">The validated TypeDef table.</param>
     /// <param name="methods">The validated MethodDef table.</param>
     /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
     /// <param name="constraintCount">The number of Constraint rows.</param>
     /// <param name="constantSourceCount">The number of ConstantSource rows, if available.</param>
     public TrRmGenericParamTableReader(ReadOnlySpan<byte> section, int recordCount,

@@ -134,7 +134,9 @@ public static partial class TrRmExecutableCompiler
             }
 
             static bool IsBackEdge(IndexedBlock block, IndexedEdge edge)
-                => edge.Target.IsLoopHeader && block.Region == edge.Target.Region && block != edge.Target;
+            {
+                return edge.Target.IsLoopHeader && block.Region == edge.Target.Region && block != edge.Target;
+            }
 
             var indegree = new int[source.Count];
             foreach (var block in source)
@@ -154,7 +156,7 @@ public static partial class TrRmExecutableCompiler
             {
                 if (indegree[block.Creation] == 0)
                 {
-                    ready.Add(block.Creation);
+                    _ = ready.Add(block.Creation);
                 }
             }
             while (ordered.Count < source.Count)
@@ -164,7 +166,7 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported("Indexed scalar flow contains a non-loop cycle.");
                 }
                 var first = ready.Min;
-                ready.Remove(first);
+                _ = ready.Remove(first);
                 var next = source[first];
                 next.Id = ordered.Count + 1;
                 ordered.Add(next);
@@ -172,14 +174,14 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (--indegree[trueEdge.Target.Creation] == 0)
                     {
-                        ready.Add(trueEdge.Target.Creation);
+                        _ = ready.Add(trueEdge.Target.Creation);
                     }
                 }
                 if (next.False is { } falseEdge && !IsBackEdge(next, falseEdge))
                 {
                     if (--indegree[falseEdge.Target.Creation] == 0)
                     {
-                        ready.Add(falseEdge.Target.Creation);
+                        _ = ready.Add(falseEdge.Target.Creation);
                     }
                 }
             }
@@ -230,10 +232,14 @@ public static partial class TrRmExecutableCompiler
                 (lastUses[currentBlockIndex] ??= new Dictionary<int, int>())[mapped] = ordinal;
                 if (owner[mapped] != ordered[currentBlockIndex].Id)
                 {
-                    (liveIns[currentBlockIndex] ??= new HashSet<int>()).Add(mapped);
+                    _ = (liveIns[currentBlockIndex] ??= new HashSet<int>()).Add(mapped);
                 }
             }
-            void UseAtOperation(int id) => Use(id, operationOrdinal);
+            void UseAtOperation(int id)
+            {
+                Use(id, operationOrdinal);
+            }
+
             Action<int> operationVisitor = UseAtOperation;
             for (var b = 0; b < ordered.Count; b++)
             {
@@ -275,7 +281,7 @@ public static partial class TrRmExecutableCompiler
                         }
                         foreach (var argument in trueEdge.Arguments)
                         {
-                            (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
+                            _ = (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
                     }
                     if (block.False is { } falseEdge)
@@ -286,7 +292,7 @@ public static partial class TrRmExecutableCompiler
                         }
                         foreach (var argument in falseEdge.Arguments)
                         {
-                            (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
+                            _ = (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
                     }
                     if (liveOuts[b] is HashSet<int> liveOut)
@@ -295,7 +301,7 @@ public static partial class TrRmExecutableCompiler
                         {
                             if (owner[id] != block.Id)
                             {
-                                (liveIns[b] ??= new HashSet<int>()).Add(id);
+                                _ = (liveIns[b] ??= new HashSet<int>()).Add(id);
                             }
                         }
                     }
@@ -323,7 +329,7 @@ public static partial class TrRmExecutableCompiler
                         predecessorCounts[edge.Target.Id - 1]++;
                         foreach (var argument in edge.Arguments)
                         {
-                            (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
+                            _ = (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
                     }
                     if (block.True is { } trueEdge)
@@ -381,7 +387,7 @@ public static partial class TrRmExecutableCompiler
                         for (var index = predecessorStarts[b]; index < predecessorStarts[b + 1]; index++)
                         {
                             var predecessor = predecessors[index];
-                            (liveOuts[predecessor] ??= new HashSet<int>()).Add(id);
+                            _ = (liveOuts[predecessor] ??= new HashSet<int>()).Add(id);
                             if (owner[id] != predecessor + 1)
                             {
                                 var predecessorLiveIn = liveIns[predecessor]
@@ -558,8 +564,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 for (var id = 1; id < types.Length; id++)
                 {
-                    var typeId = types[id] switch
-                    {
+                    var typeId = types[id] switch {
                         PrimitiveType.NativeRawPointer => scalarTypeCount + 1,
                         _ when NativeFunctionPointerTypes.IsType(types[id])
                             => functionPointerTypeIds[types[id]],
@@ -662,8 +667,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         private static bool ContainsNativeFunctionPointerOperation(BoundExpression expression)
-            => expression switch
-            {
+            => expression switch {
                 BoundNativeFunctionAddress or BoundIndirectCall => true,
                 BoundUnsafeExpression unsafeExpression
                     => ContainsNativeFunctionPointerOperation(unsafeExpression.Expression),
@@ -777,8 +781,12 @@ public static partial class TrRmExecutableCompiler
             BoundExpression expression, int[] remap, BoundProgram program,
             bool hasFloatingTypes, int nativeRawPointerTypeId)
         {
-            int ReadOperand(BoundExpression operand) => operand is BoundRead read
+            int ReadOperand(BoundExpression operand)
+            {
+                return operand is BoundRead read
                 ? remap[read.Variable + 1] : throw Unsupported("Indexed scalar operand was not materialized.");
+            }
+
             var opcode = 0;
             var kind = 0;
             var target = 0;
@@ -870,8 +878,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundBinary binary:
                     if (IsFloat(binary.Left.Type))
                     {
-                        (opcode, kind) = binary.Operator switch
-                        {
+                        (opcode, kind) = binary.Operator switch {
                             TokenKind.Plus => (0x1D, 1),
                             TokenKind.Minus => (0x1D, 2),
                             TokenKind.Star => (0x1D, 3),
@@ -889,11 +896,11 @@ public static partial class TrRmExecutableCompiler
                         break;
                     }
                     if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
-                        || binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
-                            && binary.Left.Type == PrimitiveType.Bool
-                        || binary.Operator is TokenKind.Less or TokenKind.LessEquals
+                        || (binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
+                            && binary.Left.Type == PrimitiveType.Bool)
+                        || (binary.Operator is TokenKind.Less or TokenKind.LessEquals
                             or TokenKind.Greater or TokenKind.GreaterEquals
-                            && binary.Left.Type == PrimitiveType.Char16)
+                            && binary.Left.Type == PrimitiveType.Char16))
                     {
                         throw Unsupported($"Binary operator {binary.Operator} has no executable scalar encoding.");
                     }
@@ -957,8 +964,7 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported($"Operation {expression.GetType().Name} is not executable.");
             }
             var maximum = Math.Max(result, target);
-            var argumentExpressions = expression switch
-            {
+            var argumentExpressions = expression switch {
                 BoundCall call => call.Arguments,
                 BoundIndirectCall call => call.Arguments,
                 _ => [],
@@ -1174,10 +1180,7 @@ public static partial class TrRmExecutableCompiler
                     if (variable is null)
                     {
                         variable = new BoundVariable($"value{value + 1}", valueTypes[value], false, default);
-                        if (variablesByValue is not null)
-                        {
-                            variablesByValue[value] = variable;
-                        }
+                        variablesByValue?[value] = variable;
                     }
                     variables.Add(variable);
                 }
@@ -1196,10 +1199,8 @@ public static partial class TrRmExecutableCompiler
                         }
                         if (local.Initializer is BoundCall call)
                         {
-                            local = local with
-                            {
-                                Initializer = call with
-                                {
+                            local = local with {
+                                Initializer = call with {
                                     IsUnsafeAuthorized = functions[call.Function].RequiresUnsafeCaller
                                         && isCallerUnsafeScope,
                                 },
@@ -1211,10 +1212,8 @@ public static partial class TrRmExecutableCompiler
                     {
                         if (discarded.Expression is BoundCall call)
                         {
-                            discarded = discarded with
-                            {
-                                Expression = call with
-                                {
+                            discarded = discarded with {
+                                Expression = call with {
                                     IsUnsafeAuthorized = functions[call.Function].RequiresUnsafeCaller
                                         && isCallerUnsafeScope,
                                 },
@@ -1291,7 +1290,7 @@ public static partial class TrRmExecutableCompiler
                     {
                         var bits = ReadBits(extent, ref cursor, dataWidth);
                         if (!FitsSwitchBits(selectorType, bits)
-                            || caseIndex != 0 && bits <= previous)
+                            || (caseIndex != 0 && bits <= previous))
                         {
                             throw Invalid("Indexed switch cases are not canonical for their selector.");
                         }
@@ -1324,7 +1323,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 if (cursor != extent.Length || referenceWidth != Width((ulong)maximumReference)
                     || countWidth != Width((ulong)maximumCount)
-                    || opcode == 0x82 && dataWidth != Width(maximumBits))
+                    || (opcode == 0x82 && dataWidth != Width(maximumBits)))
                 {
                     throw Invalid("Indexed scalar terminator has trailing bytes.");
                 }
@@ -1375,8 +1374,7 @@ public static partial class TrRmExecutableCompiler
                 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
         private static bool FitsSwitchBits(PrimitiveType type, ulong bits)
-            => type switch
-            {
+            => type switch {
                 PrimitiveType.Bool => bits <= 1,
                 PrimitiveType.Char16 => bits <= ushort.MaxValue,
                 PrimitiveType.Int32 or PrimitiveType.UInt32 => bits <= uint.MaxValue,
@@ -1553,9 +1551,9 @@ public static partial class TrRmExecutableCompiler
             }
             for (var index = 0; index < before.Length; index++)
             {
-                if (before[index] == 0 && (trueSlots[index] != 0 || falseSlots[index] != 0)
-                    || trueEnd is not null && falseEnd is not null
-                        && (trueSlots[index] == 0) != (falseSlots[index] == 0))
+                if ((before[index] == 0 && (trueSlots[index] != 0 || falseSlots[index] != 0))
+                    || (trueEnd is not null && falseEnd is not null
+                        && trueSlots[index] == 0 != (falseSlots[index] == 0)))
                 {
                     throw Unsupported("Scalar merge cannot introduce an uninitialized local.");
                 }
@@ -1563,16 +1561,10 @@ public static partial class TrRmExecutableCompiler
 
             var join = NewBlock(region);
             _slots = Parameters(join, before, resultType);
-            if (trueEnd is not null)
-            {
-                trueEnd.True = new IndexedEdge(join, Arguments(trueSlots, before, trueResult,
+            trueEnd?.True = new IndexedEdge(join, Arguments(trueSlots, before, trueResult,
                     join.Parameters.Count));
-            }
-            if (falseEnd is not null)
-            {
-                falseEnd.True = new IndexedEdge(join, Arguments(falseSlots, before, falseResult,
+            falseEnd?.True = new IndexedEdge(join, Arguments(falseSlots, before, falseResult,
                     join.Parameters.Count));
-            }
             _current = join;
             return resultType is null ? 0 : join.Parameters[0];
         }
@@ -1600,8 +1592,7 @@ public static partial class TrRmExecutableCompiler
                     var visibleSlots = (int[])_slots.Clone();
                     var unsafeHeader = NewBlock(_regions.Count + 1);
                     var unsafeRegion = new IndexedRegion(_regions.Count + 1, unsafeParent,
-                        unsafeHeader, visibleSlots)
-                    {
+                        unsafeHeader, visibleSlots) {
                         Kind = 6,
                     };
                     _regions.Add(unsafeRegion);
@@ -1726,7 +1717,7 @@ public static partial class TrRmExecutableCompiler
                     {
                         arguments[call.ParameterIndex(index)] = Read(Expression(call.Arguments[index]));
                     }
-                    return Add(new BoundCall(call.Function, arguments.ToImmutableArray(), call.Type, default));
+                    return Add(new BoundCall(call.Function, [.. arguments], call.Type, default));
                 case BoundIndirectCall call:
                     if (!call.IsUnsafeAuthorized
                         || !IsCallerUnsafeScope((_current
@@ -1785,8 +1776,7 @@ public static partial class TrRmExecutableCompiler
                     var visibleSlots = (int[])_slots.Clone();
                     var unsafeHeader = NewBlock(_regions.Count + 1);
                     var unsafeRegion = new IndexedRegion(_regions.Count + 1, unsafeParent,
-                        unsafeHeader, visibleSlots)
-                    {
+                        unsafeHeader, visibleSlots) {
                         Kind = 6,
                     };
                     _regions.Add(unsafeRegion);
@@ -1830,8 +1820,7 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundRequire requirement:
                     var requirementCondition = Expression(requirement.Condition);
-                    _ = Merge(requirementCondition, () => 0, () =>
-                    {
+                    _ = Merge(requirementCondition, () => 0, () => {
                         (_current ?? throw Unsupported("Requirement failure did not reach its block."))
                             .FailureReason = 1;
                         _current = null;
@@ -1845,8 +1834,18 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundIf conditional:
                     var condition = Expression(conditional.Condition);
-                    _ = Merge(condition, () => { Statement(conditional.Then); return 0; },
-                        () => { if (conditional.Else is not null) { Statement(conditional.Else); } return 0; },
+                    _ = Merge(condition, () => {
+                        Statement(conditional.Then);
+                        return 0;
+                    },
+                        () => {
+                            if (conditional.Else is not null)
+                            {
+                                Statement(conditional.Else);
+                            }
+
+                            return 0;
+                        },
                         null);
                     break;
                 case BoundWhile loop:
@@ -1937,7 +1936,7 @@ public static partial class TrRmExecutableCompiler
                             Jump(header, _slots, entrySlots);
                         }
                     }
-                    _loops.Pop();
+                    _ = _loops.Pop();
                     if (loop.IsPostTested)
                     {
                         _current = continuation;
@@ -2070,8 +2069,8 @@ public static partial class TrRmExecutableCompiler
             var code = 0;
             if (region != target)
             {
-                code = target.Id * 2 + (isContinue ? 1 : 0);
-                region.Transfers.TryAdd(code, (target, isContinue));
+                code = (target.Id * 2) + (isContinue ? 1 : 0);
+                _ = region.Transfers.TryAdd(code, (target, isContinue));
             }
             var source = _current ?? throw Unsupported("Unreachable source transfer.");
             var deferred = new IndexedBlock(-1, region.Parent);
@@ -2147,8 +2146,7 @@ public static partial class TrRmExecutableCompiler
             !loop.IsPostTested
                 && loop.Condition is BoundConstant { Type: PrimitiveType.Bool, Value: 0 }
                 && loop.Iterator is null
-                && AcyclicLoopBody(loop) is BoundBlock
-                    { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true };
+                && AcyclicLoopBody(loop) is BoundBlock { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true };
 
         private static bool TerminalAcyclicLoop(BoundWhile loop, out BoundStatement body, out bool hasBreak)
         {
@@ -2218,10 +2216,12 @@ public static partial class TrRmExecutableCompiler
             return statement is BoundLocal { Initializer: not null }
                 or BoundAssignment
                 or BoundRequire
-                or BoundExpressionStatement
-                    { Expression: BoundCompoundAssignment
-                        { Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32
-                            or PrimitiveType.Int64 or PrimitiveType.UInt64 } }
+                or BoundExpressionStatement {
+                    Expression: BoundCompoundAssignment {
+                        Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32
+                            or PrimitiveType.Int64 or PrimitiveType.UInt64
+                    }
+                }
                 or BoundExpressionStatement { Expression: BoundUpdate }
                 or BoundExpressionStatement { Expression: BoundCall };
         }
@@ -2280,9 +2280,8 @@ public static partial class TrRmExecutableCompiler
             if (statement is BoundBlock blockWithSingleStatement
                 && blockWithSingleStatement.RetiredManagedLocals.IsEmpty
                 && (blockWithSingleStatement.Statements.Length == 1
-                    || blockWithSingleStatement.Statements.Length == 2
-                        && blockWithSingleStatement.Statements[1] is BoundBlock
-                            { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true }))
+                    || (blockWithSingleStatement.Statements.Length == 2
+                        && blockWithSingleStatement.Statements[1] is BoundBlock { Statements.IsEmpty: true, RetiredManagedLocals.IsEmpty: true })))
             {
                 AcyclicTerminalStatement(blockWithSingleStatement.Statements[0], exit, visible);
                 return;
@@ -2344,9 +2343,9 @@ public static partial class TrRmExecutableCompiler
             }
             foreach (var region in _regions)
             {
-                if (region.Kind == 1
-                    && (!region.HasSourceContinuation || !region.HasHeaderBackedge)
-                    || region.Kind == 6 && region.Exit is null)
+                if ((region.Kind == 1
+                    && (!region.HasSourceContinuation || !region.HasHeaderBackedge))
+                    || (region.Kind == 6 && region.Exit is null))
                 {
                     throw Unsupported("An indexed region is missing its required loop or scope exit.");
                 }

@@ -3,34 +3,44 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmSourceMapTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmSourceMapTableReaderTests
 {
     [Test]
     public void ChecksOneBodyInstructionSpanAgainstItsModulesSourceFile()
     {
         Create(Map());
-        Assert.Throws<InvalidDataException>(() => Create(Map(), crossModule: true));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Map(), crossModule: true));
     }
-    [TestCase(4,(byte)(1))]
-    [TestCase(6,(byte)(0))]
-    [TestCase(8,(byte)(2))]
-    [TestCase(14,(byte)(1))]
-    [TestCase(20,(byte)(0))]
-    [TestCase(24,(byte)(2))]
-    [TestCase(36,(byte)(0))]
-    [TestCase(36,(byte)(2))]
-    [TestCase(40,(byte)(0))]
-    [TestCase(40,(byte)(1))]
+
+    [Test]
+    public void SourceFileAndSourceMapReadersChargeAtExactWorkBoundary()
+    {
+        var section = Map();
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+            Create(section, resourceLedger: ledger));
+    }
+
+    [TestCase(4,(byte)1)]
+    [TestCase(6,(byte)0)]
+    [TestCase(8,(byte)2)]
+    [TestCase(14,(byte)1)]
+    [TestCase(20,(byte)0)]
+    [TestCase(24,(byte)2)]
+    [TestCase(36,(byte)0)]
+    [TestCase(36,(byte)2)]
+    [TestCase(40,(byte)0)]
+    [TestCase(40,(byte)1)]
     public void RejectsInvalidSlotTargetsSelectorsAndRowReferences(int offset, byte value)
     {
         var bytes = Map();
         bytes[offset] = value;
-        Assert.Throws<InvalidDataException>(() => Create(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
     [Test]
@@ -39,12 +49,12 @@ public sealed class TrRmSourceMapTableReaderTests
         var duplicate = new byte[68];
         Map().CopyTo(duplicate, 0);
         Map().AsSpan(36, 16).CopyTo(duplicate.AsSpan(52));
-        Assert.Throws<InvalidDataException>(() => Create(duplicate, recordCount: 2));
+        _ = Assert.Throws<InvalidDataException>(() => Create(duplicate, recordCount: 2));
 
         var overflow = Map();
         Write(overflow, 44, uint.MaxValue);
-        Assert.Throws<InvalidDataException>(() => Create(overflow));
-        Assert.Throws<InvalidDataException>(() => Create(Map()[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => Create(overflow));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Map()[..^1]));
     }
 
     [Test]
@@ -52,7 +62,7 @@ public sealed class TrRmSourceMapTableReaderTests
     {
         var bytes = Map();
         Write(bytes, 36, 2);
-        Assert.Throws<InvalidDataException>(() => Create(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
     [Test]
@@ -73,7 +83,7 @@ public sealed class TrRmSourceMapTableReaderTests
 
         Write(section, 52, 3);
         Write(section, 68, 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(section, recordCount: 2, twoMethods: true));
     }
 
@@ -95,19 +105,19 @@ public sealed class TrRmSourceMapTableReaderTests
     public void WriterRejectsUnboundDuplicateAndOverflowedMappings()
     {
         var entry = new TrRmSourceMapEntry(1, 1, 0, 1, 0, 2);
-        Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry, entry]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 2 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry with { Block = -1 }]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry, entry]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 2 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry with { Block = -1 }]));
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([entry with { Block = ushort.MaxValue + 1 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry with { Ordinal = -1 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 2 }]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry with { Ordinal = -1 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 2 }]));
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([entry with { StartUtf16 = uint.MaxValue }]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry], crossModule: true));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([entry], crossModule: true));
     }
 
     private static byte[] Encode(TrRmSourceMapEntry[] entries, bool crossModule = false)
@@ -135,7 +145,8 @@ public sealed class TrRmSourceMapTableReaderTests
     }
 
     private static void Create(byte[] section, int recordCount = 1,
-        bool crossModule = false, bool twoMethods = false)
+        bool crossModule = false, bool twoMethods = false,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeNames(
             [("Module", 0), ("Run", 0), ("src/file", 0), ("Other", 0)]), 4);
@@ -162,8 +173,10 @@ public sealed class TrRmSourceMapTableReaderTests
             names, modules, types, signatures, 0, twoMethods ? 2 : 1);
         var source = new byte[8];
         Write(source, 0, 3);
-        var files = new TrRmSourceFileTableReader(source, 1, names, modules);
-        _ = new TrRmSourceMapTableReader(section, recordCount, methods, files);
+        var files = new TrRmSourceFileTableReader(source, 1, names, modules,
+            resourceLedger);
+        _ = new TrRmSourceMapTableReader(section, recordCount, methods, files,
+            TrRmArtifactSchema.Standard, resourceLedger);
     }
 
     private static byte[] Modules(bool crossModule)

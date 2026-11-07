@@ -14,6 +14,7 @@ using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class TrRmFieldPlaceNegativeTests
 {
     private const string SchemaIdentity
@@ -138,7 +139,7 @@ internal sealed class TrRmFieldPlaceNegativeTests
 
         Assert.That(compilation.Diagnostics.Select(static diagnostic
                 => diagnostic.Code),
-            Is.EqualTo(new[] { "TRM3030" }));
+            Is.EqualTo(["TRM3030"]));
         Assert.That(compilation.Diagnostics.Single().Message,
             Does.Contain("Fixed-array element index must be in [0, 0)."));
     }
@@ -207,7 +208,7 @@ internal sealed class TrRmFieldPlaceNegativeTests
                 {
                     var baseTypeMapIndex = BinaryPrimitives
                         .ReadUInt16LittleEndian(
-                            body.HomeMap[(baseHomeIndex * 8 + 2)..]);
+                            body.HomeMap[((baseHomeIndex * 8) + 2)..]);
                     var baseTypeSpecRef = BinaryPrimitives
                         .ReadUInt32LittleEndian(body.TypeMap[
                             (baseTypeMapIndex * sizeof(uint))..]);
@@ -402,7 +403,7 @@ internal sealed class TrRmFieldPlaceNegativeTests
             }
             var baseTypeMapIndex = BinaryPrimitives
                 .ReadUInt16LittleEndian(
-                    body.HomeMap[(baseHomeIndex * 8 + 2)..]);
+                    body.HomeMap[((baseHomeIndex * 8) + 2)..]);
             var baseTypeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
                 body.TypeMap[(baseTypeMapIndex * sizeof(uint))..]);
             if ((baseTypeSpecRef >> 24) == 0x11

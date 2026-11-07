@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmModuleTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmModuleTableWriterTests
 {
     [Test]
     public void EmitsOwnedMultiModulePartitionsAndValidatesFraming()
@@ -48,7 +49,7 @@ public sealed class TrRmModuleTableWriterTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(featureBytes.AsSpan(20)), Is.Zero);
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(featureBytes.AsSpan(24)), Is.EqualTo(1u));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(featureBytes.AsSpan(28)), Is.EqualTo(1u));
-        Assert.Throws<InvalidDataException>(() => TrRmModuleTableWriter.Encode(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmModuleTableWriter.Encode(
             [featureRow with { FeatureFirst = 2 }],
             new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1));
 
@@ -68,7 +69,7 @@ public sealed class TrRmModuleTableWriterTests
             new TrRmSection(0x0001, 0, 1, unsupportedEdition),
             new TrRmSection(0x0002, 0, 1, minimalNames),
         ]);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(unsupportedArtifact));
     }
 
@@ -77,21 +78,21 @@ public sealed class TrRmModuleTableWriterTests
     {
         var first = new TrRmModuleRow(1, 0, 0, 1, 1, 1, 1, 1);
         var second = new TrRmModuleRow(2, 0, 0, 0, 2, 1, 2, 1);
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             Encode([]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first with { IdentityStringRow = 0 }, second]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first, second with { IdentityStringRow = 1 }]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first with { RuntimePolicy = 2 }, second]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first with { GoverningRuleEdition = 0 }, second]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first, second with { ModuleRefStart = 0 }]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first with { EntryMethodDefRow = 2 }, second]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([first, second], moduleRefCount: 0));
     }
 

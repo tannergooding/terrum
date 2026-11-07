@@ -21,6 +21,11 @@ public readonly record struct TrRmSourceMapEntry(
 /// <remarks>Instruction block and ordinal existence still require a Body-aware verifier.</remarks>
 public static class TrRmSourceMapTableWriter
 {
+    /// <summary>Encodes ordered mappings from Body operations to source-file spans.</summary>
+    /// <param name="mappings">The mappings in increasing Body instruction-slot order.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="files">The validated SourceFile table.</param>
+    /// <returns>The encoded SourceMap section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmSourceMapEntry> mappings,
         TrRmMethodDefTableReader methods, TrRmSourceFileTableReader files)
     {
@@ -71,7 +76,7 @@ public static class TrRmSourceMapTableWriter
         }
 
         var slotCount = mappings.Count + fileRows.Count;
-        var sectionBytes = 4L + slotCount * 16L + mappings.Count * 16L;
+        var sectionBytes = 4L + (slotCount * 16L) + (mappings.Count * 16L);
         if (sectionBytes > int.MaxValue)
         {
             throw new ArgumentOutOfRangeException(nameof(mappings));
@@ -79,17 +84,17 @@ public static class TrRmSourceMapTableWriter
 
         var result = new byte[(int)sectionBytes];
         Write(result, 0, (uint)slotCount);
-        var rowsStart = 4 + slotCount * 16;
+        var rowsStart = 4 + (slotCount * 16);
         for (var index = 0; index < mappings.Count; index++)
         {
             var mapping = mappings[index];
-            var bodySlot = 4 + index * 16;
+            var bodySlot = 4 + (index * 16);
             WriteU16(result, bodySlot, 0);
             WriteU16(result, bodySlot + 2, 1);
             Write(result, bodySlot + 4, (uint)mapping.BodyRow);
             WriteU16(result, bodySlot + 8, (ushort)mapping.Block);
             Write(result, bodySlot + 12, (uint)mapping.Ordinal);
-            var row = rowsStart + index * 16;
+            var row = rowsStart + (index * 16);
             Write(result, row, (uint)index + 1);
             Write(result, row + 4,
                 (uint)(mappings.Count + fileSlots[mapping.SourceFileRow].Slot + 1));
@@ -99,7 +104,7 @@ public static class TrRmSourceMapTableWriter
 
         for (var index = 0; index < fileRows.Count; index++)
         {
-            var fileSlot = 4 + (mappings.Count + index) * 16;
+            var fileSlot = 4 + ((mappings.Count + index) * 16);
             WriteU16(result, fileSlot, 0x001F);
             Write(result, fileSlot + 4, (uint)fileRows[index]);
         }

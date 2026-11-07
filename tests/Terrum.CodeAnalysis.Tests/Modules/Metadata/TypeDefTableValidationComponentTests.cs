@@ -7,18 +7,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class TypeDefTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TypeDefTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -190,7 +190,11 @@ public sealed class TypeDefTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
         }
@@ -212,7 +216,7 @@ public sealed class TypeDefTableValidationComponentTests
         var missingTypeSpecs = TrRmVariableTableWriter.EncodeBlobs(
             [TrRmTypeSpecTableWriter.Reference(0x02, 2)]);
         var invalidTypeSpecs = (byte[])typeSpecs.Clone();
-        var typeSpecRowStart = sizeof(uint) * 2
+        var typeSpecRowStart = (sizeof(uint) * 2)
             + (int)BinaryPrimitives.ReadUInt32LittleEndian(typeSpecs.AsSpan(0));
         invalidTypeSpecs[typeSpecRowStart + 2] = 0x1A;
         var cases = new[] {
@@ -265,10 +269,10 @@ public sealed class TypeDefTableValidationComponentTests
             }
             """, "type-def-field-typespec-validation.terrum"));
 
-        foreach (var testCase in cases)
+        foreach (var (TypeSpecs, ExpectedValid) in cases)
         {
             Assert.That(ValidateComposedHosted(
-                strings, modules, typeDefs, fieldDefs, testCase.TypeSpecs), Is.EqualTo(testCase.ExpectedValid));
+                strings, modules, typeDefs, fieldDefs, TypeSpecs), Is.EqualTo(ExpectedValid));
 
             var compilation = Compilation.Create(components,
             [
@@ -281,7 +285,7 @@ public sealed class TypeDefTableValidationComponentTests
                 new HostBuffer("FieldDefs", PrimitiveType.Int32,
                     [.. fieldDefs.Select(static value => (int)value)], false),
                 new HostBuffer("TypeSpecs", PrimitiveType.Int32,
-                    [.. testCase.TypeSpecs.Select(static value => (int)value)], false),
+                    [.. TypeSpecs.Select(static value => (int)value)], false),
                 new HostBuffer("IdentitySlots", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, 2)], true),
                 new HostBuffer("FieldOwners", PrimitiveType.Int32,
@@ -289,13 +293,17 @@ public sealed class TypeDefTableValidationComponentTests
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
                     1, 1, 5, 0, 1, 0, 0, -1, 1, 0, 0, 0, 1,
-                    testCase.ExpectedValid ? 1 : 0,
+                    ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
-            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT composition case expected {testCase.ExpectedValid}.");
-            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT composition case expected {testCase.ExpectedValid}.");
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT composition case expected {ExpectedValid}.");
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT composition case expected {ExpectedValid}.");
         }
     }
 

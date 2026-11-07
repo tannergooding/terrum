@@ -304,10 +304,10 @@ internal static class TrRmScalarInitOutputBodyReader
             var regionCount = Local();
             var typeCount = Local();
             if (regionCount != 0 || typeCount > _types.Count
-                || typeCount > Remaining / 4 || valueCount > Remaining / (2 * _width + 1)
-                || placeCount > Remaining / (3 * _width + 1)
-                || (long)typeCount * 4 + (long)valueCount * (2 * _width + 5)
-                    + (long)placeCount * (3 * _width + 1) + 2 * _width + 12 > Remaining)
+                || typeCount > Remaining / 4 || valueCount > Remaining / ((2 * _width) + 1)
+                || placeCount > Remaining / ((3 * _width) + 1)
+                || ((long)typeCount * 4) + ((long)valueCount * ((2 * _width) + 5))
+                    + ((long)placeCount * ((3 * _width) + 1)) + (2 * _width) + 12 > Remaining)
             {
                 throw InvalidBody();
             }
@@ -527,11 +527,11 @@ internal static class TrRmScalarInitOutputBodyReader
             }
 
             var operationList = operations.MoveToImmutable();
-            return new Body(ImmutableArray.CreateRange(_map), places.MoveToImmutable(),
+            return new Body([.. _map], places.MoveToImmutable(),
                 values.MoveToImmutable(), operationList, terminator,
                 starting, ending, effects,
-                [new Block(ImmutableArray<int>.Empty, ImmutableArray<int>.Empty,
-                    ImmutableArray<int>.Empty, ImmutableArray<(int, bool)>.Empty,
+                [new Block([], [],
+                    [], [],
                     starting, ending, operationList, terminator, 0)]);
         }
 
@@ -545,8 +545,8 @@ internal static class TrRmScalarInitOutputBodyReader
                 && _rootlessNativeValuesRuleRevision != 0;
             _allowUnsafeScope = _ruleRevision >= 8;
             if (regionCount != 0 || typeCount > _types.Count
-                || typeCount > Remaining / 4 || valueCount > Remaining / (2 * _width + 1)
-                || placeCount > Remaining / (3 * _width + 1))
+                || typeCount > Remaining / 4 || valueCount > Remaining / ((2 * _width) + 1)
+                || placeCount > Remaining / ((3 * _width) + 1))
             {
                 throw InvalidBody();
             }
@@ -997,7 +997,7 @@ internal static class TrRmScalarInitOutputBodyReader
                     _observedPlaces[index], _initialized[index], _placeFlags[index]));
             }
 
-            return new Body(ImmutableArray.CreateRange(_map), places.MoveToImmutable(),
+            return new Body([.. _map], places.MoveToImmutable(),
                 values.MoveToImmutable(), entryOperations, entryTerminator,
                 blocks[0].StartingPlaces, blocks[0].EndingPlaces, effects,
                 blocks.MoveToImmutable());
@@ -1162,7 +1162,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 }
                 else
                 {
-                    var shift = 64 - dataWidth * 8;
+                    var shift = 64 - (dataWidth * 8);
                     var signed = unchecked((long)(data << shift)) >> shift;
                     if (!Integer(resultType) || !(resultType switch
                     {
@@ -1584,7 +1584,7 @@ internal static class TrRmScalarInitOutputBodyReader
             return UseValue(value);
         }
 
-        private ushort UseValue(int value)
+        private readonly ushort UseValue(int value)
         {
             if (value == 0 || value > _defined || _valueKinds[value - 1] != 0)
             {
@@ -1633,7 +1633,7 @@ internal static class TrRmScalarInitOutputBodyReader
                 && pointee[0] == 1 && pointee[1] == 0 && pointer[3] == pointee[2];
         }
 
-        private int UseHandle(int value)
+        private readonly int UseHandle(int value)
         {
             if (value == 0 || value > _defined || _valueKinds[value - 1] != 1)
             {

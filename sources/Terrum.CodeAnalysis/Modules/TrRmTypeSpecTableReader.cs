@@ -109,6 +109,9 @@ public readonly ref struct TrRmTypeSpecTableReader
         _compactValueTypeKeys = CreateCompactValueTypeKeys();
     }
 
+    /// <summary>Gets the borrowed bytes of a one-based TypeSpec row.</summary>
+    /// <param name="row">The one-based TypeSpec row.</param>
+    /// <returns>The row's validated encoding.</returns>
     public ReadOnlySpan<byte> GetRow(int row)
     {
         return GetRowCore(row);
@@ -219,6 +222,44 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
 
         return bytes;
+    }
+
+    internal bool TryGetImplicitReadonlyReferenceReferentTypeSpecRef(
+        uint typeSpecRef, out uint referentTypeSpecRef)
+    {
+        var reference = GetTypeSpecRef(typeSpecRef);
+        if (reference.Qualifiers != 0)
+        {
+            referentTypeSpecRef = 0;
+            return false;
+        }
+
+        if (reference.Form == 0x07 && reference.IsRow)
+        {
+            var row = GetTypeSpecBytes(typeSpecRef);
+            referentTypeSpecRef
+                = BinaryPrimitives.ReadUInt32LittleEndian(row[2..]);
+            return true;
+        }
+
+        if (reference.Form == 0x0C && reference.TypeCode == 0x8B
+            && reference.IsRow)
+        {
+            var row = GetTypeSpecBytes(typeSpecRef);
+            referentTypeSpecRef
+                = BinaryPrimitives.ReadUInt32LittleEndian(row[3..]);
+            return true;
+        }
+
+        if (reference.Form == 0x01 && reference.TypeCode == 0x8B)
+        {
+            referentTypeSpecRef
+                = 0xF200_0000u | reference.ArgumentCode;
+            return true;
+        }
+
+        referentTypeSpecRef = 0;
+        return false;
     }
 
     internal ushort GetCompactValueTypeKey(uint typeSpecRef)
@@ -598,6 +639,7 @@ public readonly ref struct TrRmTypeSpecTableReader
         return typeDefRow;
     }
 
+    /// <summary>Gets the number of validated TypeSpec rows.</summary>
     public int Count => _recordCount;
     /// <summary>The number of native function-pointer signatures in the table.</summary>
     public int NativeFunctionPointerSignatureCount => _nativeFunctionPointerSignatureCount;

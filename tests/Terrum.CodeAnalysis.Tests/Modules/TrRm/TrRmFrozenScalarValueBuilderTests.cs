@@ -8,7 +8,8 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmFrozenScalarValueBuilderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmFrozenScalarValueBuilderTests
 {
     [Test]
     public void WritesAllRegisteredScalarsWithTypedInterningAndSharedBlobs()
@@ -96,10 +97,10 @@ public sealed class TrRmFrozenScalarValueBuilderTests
         var builder = new TrRmFrozenScalarValueBuilder();
         var unsupported = new BoundConstant(0,
             PrimitiveType.NativeUtf8ZPointer, default);
-        Assert.Throws<NotSupportedException>(() => builder.Add(unsupported));
+        _ = Assert.Throws<NotSupportedException>(() => builder.Add(unsupported));
 
         var noncanonical = new BoundConstant(new ScalarBits(0x100, 0),
             PrimitiveType.Int8, default);
-        Assert.Throws<ArgumentException>(() => builder.Add(noncanonical));
+        _ = Assert.Throws<ArgumentException>(() => builder.Add(noncanonical));
     }
 }

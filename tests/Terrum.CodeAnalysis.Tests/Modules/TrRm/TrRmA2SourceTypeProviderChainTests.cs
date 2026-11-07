@@ -6,11 +6,11 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
@@ -25,6 +25,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
     private const string LocalAggregateLayoutSchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
+    private static readonly string[] s_pairExportKeys = ["PairKey", "PairAlias"];
+    private static readonly string[] s_leafExportKeys = ["LeafKey", "ProviderLeafKey"];
 
     [Test]
     public void StandardA2EConsumerBindsA2TypeProviders()
@@ -104,10 +106,16 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             ],
             ["ContainerKey"]);
 
-        Assert.That(reference.Structures.Single(static structure
-                => structure.Name == "Pair")
-            .StandardTypeOrigin!.Provider.ModuleIdentity,
+        var sourcePairOrigin = reference.Structures.Single(
+            static structure => structure.Name == "Pair")
+            .StandardTypeOrigin!;
+        Assert.That(sourcePairOrigin.Provider.ModuleIdentity,
             Is.EqualTo("Provider"));
+        Assert.That(sourcePairOrigin.Provider.SchemaIdentity,
+            Is.EqualTo(LocalAggregateLayoutSchemaIdentity));
+        Assert.That(sourcePairOrigin.ReferenceRoot!.SchemaIdentity,
+            Is.EqualTo(LocalAggregateLayoutSchemaIdentity));
+        Assert.That(sourcePairOrigin.DefinitionId, Is.EqualTo(0x1300_0001u));
 
         var mixedProviderException = Assert.Throws<NotSupportedException>(
             () => TrRmExecutableCompiler.CreateStandardReference(
@@ -123,6 +131,115 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 ["ContainerKey"]));
         Assert.That(mixedProviderException!.Message,
             Does.Contain("root and every provider artifact"));
+
+        var sourceConsumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Consumer {
+                public Container Value;
+                public [Container; 2] Values;
+            }
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(sourceConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
+        var sourceConsumerProgram = sourceConsumer.Program!;
+        var wrongSchemaException = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(sourceConsumerProgram,
+                "Consumer", SchemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Consumer", "ConsumerKey")]));
+        Assert.That(wrongSchemaException!.Message,
+            Does.Contain("selected provider schema"));
+        var consumerTypeArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceConsumerProgram, "Consumer",
+            LocalAggregateLayoutSchemaIdentity, 1,
+            [new TrRmSourceTypeExport("", "Consumer", "ConsumerKey")]);
+        var consumerTypeReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    LocalAggregateLayoutSchemaIdentity,
+                    consumerTypeArtifact),
+                "Consumer",
+                [
+                    new TrRmStandardArtifactInput(
+                        LocalAggregateLayoutSchemaIdentity, rootArtifact),
+                    new TrRmStandardArtifactInput(
+                        LocalAggregateLayoutSchemaIdentity, providerArtifact),
+                    new TrRmStandardArtifactInput(
+                        LocalAggregateLayoutSchemaIdentity, leafArtifact),
+                ],
+                ["ConsumerKey"]);
+        var reemittedPair = consumerTypeReference.Structures.Single(
+            static structure => structure.Name == "Pair");
+        Assert.That(reemittedPair.StandardTypeOrigin!.Provider.SchemaIdentity,
+            Is.EqualTo(LocalAggregateLayoutSchemaIdentity));
+        Assert.That(reemittedPair.StandardTypeOrigin.ReferenceRoot!
+                .SchemaIdentity,
+            Is.EqualTo(LocalAggregateLayoutSchemaIdentity));
+        Assert.That(reemittedPair.StandardTypeOrigin.DefinitionId,
+            Is.EqualTo(sourcePairOrigin.DefinitionId));
+        Assert.That(reemittedPair.StandardTypeOrigin.Provider
+                .ArtifactSnapshot.AsSpan().SequenceEqual(providerArtifact),
+            Is.True);
+        Assert.That(reemittedPair.StandardTypeOrigin.ExportKeys,
+            Is.EquivalentTo(s_pairExportKeys));
+        Assert.That(reemittedPair.StandardTypeOrigin.Expectations,
+            Has.Length.EqualTo(sourcePairOrigin.Expectations.Length));
+        Assert.That(reemittedPair.StandardTypeOrigin.Expectations.Count(
+            static expectation
+                => expectation.UsingModule.ModuleIdentity == "Consumer"),
+            Is.EqualTo(2));
+        Assert.That(reemittedPair.StandardTypeOrigin.Expectations.All(
+            static expectation
+                => expectation.UsingModule.SchemaIdentity
+                        == LocalAggregateLayoutSchemaIdentity
+                    && expectation.Provider.SchemaIdentity
+                        == LocalAggregateLayoutSchemaIdentity), Is.True);
+        Assert.That(reemittedPair.StandardTypeOrigin.ExpectedDeclaration!
+                .Name,
+            Is.EqualTo("Pair"));
+        Assert.That(reemittedPair.StandardTypeOrigin.ExpectedFixedArrayTypes
+                .IsDefault,
+            Is.False);
+        Assert.That(reemittedPair.StandardTypeOrigin
+                .ExpectedNativePointerTypes.IsDefault,
+            Is.False);
+        Assert.That(reemittedPair.StandardTypeOrigin.Expectations.Any(
+            static expectation
+                => expectation.UsingModule.ModuleIdentity == "Provider"
+                    && expectation.ExportKey == "ProviderLeafKey"), Is.True);
+
+        var executableConsumer = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Consumer {
+                public Container Value;
+                public [Container; 2] Values;
+            }
+            int32 Main() { return int32(0); }
+            """), reference, new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(executableConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                executableConsumer.Diagnostics));
+        var executableConsumerArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                executableConsumer.Program!, "Consumer",
+                LocalAggregateLayoutSchemaIdentity, 1);
+        var executableConsumerIndex
+            = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(
+                executableConsumerArtifact);
+        var executableConsumerTables
+            = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    executableConsumerIndex);
+        Assert.That(executableConsumerTables.Imports.Count,
+            Is.GreaterThan(0));
+        Assert.That(executableConsumerTables.Methods.Count,
+            Is.EqualTo(1));
+        executableConsumerTables.ValidateRegisterBodyMapsForMethod(1);
     }
 
     [Test]
@@ -154,7 +271,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var retainedPair = retainedAliasReference.Structures.Single(
             static structure => structure.Name == "Pair");
         Assert.That(retainedPair.StandardTypeOrigin!.ExportKeys,
-            Is.EquivalentTo(new[] { "PairKey", "PairAlias" }));
+            Is.EquivalentTo(s_pairExportKeys));
         Assert.That(retainedPair.StandardTypeOrigin.Expectations.Any(
             static expectation
                 => expectation.UsingModule.ModuleIdentity == "Provider"
@@ -182,7 +299,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         Assert.That(pairOrigin.DefinitionId, Is.EqualTo(0x1300_0001u));
         Assert.That(pairOrigin.ExportKeys, Has.Length.EqualTo(2));
         Assert.That(pairOrigin.ExportKeys,
-            Is.EquivalentTo(new[] { "PairKey", "PairAlias" }));
+            Is.EquivalentTo(s_pairExportKeys));
         Assert.That(pairOrigin.Expectations, Has.Length.EqualTo(3));
         Assert.That(pairOrigin.Expectations.Any(static expectation
             => expectation.UsingModule.ModuleIdentity == "Root"
@@ -408,7 +525,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var reencodedPair = consumerReference.Structures.Single(
             static structure => structure.Name == "Pair");
         Assert.That(reencodedPair.StandardTypeOrigin!.ExportKeys,
-            Is.EquivalentTo(new[] { "PairKey", "PairAlias" }));
+            Is.EquivalentTo(s_pairExportKeys));
         Assert.That(reencodedPair.StandardTypeOrigin.Expectations.Count(
             static expectation
                 => expectation.UsingModule.ModuleIdentity == "Consumer"),
@@ -416,7 +533,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var reencodedLeaf = consumerReference.Structures.Single(
             static structure => structure.Name == "Leaf");
         Assert.That(reencodedLeaf.StandardTypeOrigin!.ExportKeys,
-            Is.EquivalentTo(new[] { "LeafKey", "ProviderLeafKey" }));
+            Is.EquivalentTo(s_leafExportKeys));
         var hiddenReencodedDependency = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 [Blittable] [Layout(LayoutKind.Sequential)]
@@ -464,7 +581,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var secondReencodedLeaf = secondConsumerReference.Structures.Single(
             static structure => structure.Name == "Leaf");
         Assert.That(secondReencodedLeaf.StandardTypeOrigin!.ExportKeys,
-            Is.EquivalentTo(new[] { "LeafKey", "ProviderLeafKey" }));
+            Is.EquivalentTo(s_leafExportKeys));
 
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
@@ -555,7 +672,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         Assert.That(reencodedPairs.All(static structure
             => structure.StandardTypeOrigin!.ExportKeys.ToHashSet(
                 StringComparer.Ordinal).SetEquals(
-                new[] { "PairKey", "PairAlias" })), Is.True);
+                s_pairExportKeys)), Is.True);
         Assert.That(reencodedPairs.SelectMany(static structure
                 => structure.StandardTypeOrigin!.Expectations)
             .Where(static expectation
@@ -1034,7 +1151,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var typeSpecPermutedProvider = ReverseTypeSpecRows(originalProvider);
         var arrayPermutedProvider
             = ReverseFixedArrayLayoutRows(originalProvider);
-        var originalRows = GetContainerARows(originalProvider);
+        var (TypeDefRow, FieldDefRow, TypeSpecRow, ElementTypeSpecRow, LayoutRow, FixedArrayLayoutRow) = GetContainerARows(originalProvider);
         var replacementRows = GetContainerARows(replacementProvider);
         var fieldPermutedRows = GetContainerARows(fieldPermutedProvider);
         var layoutPermutedRows = GetContainerARows(layoutPermutedProvider);
@@ -1042,65 +1159,65 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             typeSpecPermutedProvider);
         var arrayPermutedRows = GetContainerARows(arrayPermutedProvider);
         Assert.That(replacementRows.TypeDefRow,
-            Is.Not.EqualTo(originalRows.TypeDefRow));
+            Is.Not.EqualTo(TypeDefRow));
         Assert.That(replacementRows.FieldDefRow,
-            Is.Not.EqualTo(originalRows.FieldDefRow));
+            Is.Not.EqualTo(FieldDefRow));
         Assert.That(replacementRows.TypeSpecRow,
-            Is.Not.EqualTo(originalRows.TypeSpecRow));
+            Is.Not.EqualTo(TypeSpecRow));
         Assert.That(replacementRows.ElementTypeSpecRow,
-            Is.EqualTo(originalRows.ElementTypeSpecRow));
+            Is.EqualTo(ElementTypeSpecRow));
         Assert.That(replacementRows.LayoutRow,
-            Is.Not.EqualTo(originalRows.LayoutRow));
+            Is.Not.EqualTo(LayoutRow));
         Assert.That(replacementRows.FixedArrayLayoutRow,
-            Is.Not.EqualTo(originalRows.FixedArrayLayoutRow));
+            Is.Not.EqualTo(FixedArrayLayoutRow));
         Assert.That(fieldPermutedRows.TypeDefRow,
-            Is.EqualTo(originalRows.TypeDefRow));
+            Is.EqualTo(TypeDefRow));
         Assert.That(fieldPermutedRows.FieldDefRow,
-            Is.Not.EqualTo(originalRows.FieldDefRow));
+            Is.Not.EqualTo(FieldDefRow));
         Assert.That(fieldPermutedRows.TypeSpecRow,
-            Is.EqualTo(originalRows.TypeSpecRow));
+            Is.EqualTo(TypeSpecRow));
         Assert.That(fieldPermutedRows.ElementTypeSpecRow,
-            Is.EqualTo(originalRows.ElementTypeSpecRow));
+            Is.EqualTo(ElementTypeSpecRow));
         Assert.That(fieldPermutedRows.LayoutRow,
-            Is.EqualTo(originalRows.LayoutRow));
+            Is.EqualTo(LayoutRow));
         Assert.That(fieldPermutedRows.FixedArrayLayoutRow,
-            Is.EqualTo(originalRows.FixedArrayLayoutRow));
+            Is.EqualTo(FixedArrayLayoutRow));
         Assert.That(layoutPermutedRows.TypeDefRow,
-            Is.EqualTo(originalRows.TypeDefRow));
+            Is.EqualTo(TypeDefRow));
         Assert.That(layoutPermutedRows.FieldDefRow,
-            Is.EqualTo(originalRows.FieldDefRow));
+            Is.EqualTo(FieldDefRow));
         Assert.That(layoutPermutedRows.TypeSpecRow,
-            Is.EqualTo(originalRows.TypeSpecRow));
+            Is.EqualTo(TypeSpecRow));
         Assert.That(layoutPermutedRows.ElementTypeSpecRow,
-            Is.EqualTo(originalRows.ElementTypeSpecRow));
+            Is.EqualTo(ElementTypeSpecRow));
         Assert.That(layoutPermutedRows.LayoutRow,
-            Is.Not.EqualTo(originalRows.LayoutRow));
+            Is.Not.EqualTo(LayoutRow));
         Assert.That(layoutPermutedRows.FixedArrayLayoutRow,
-            Is.EqualTo(originalRows.FixedArrayLayoutRow));
+            Is.EqualTo(FixedArrayLayoutRow));
         Assert.That(typeSpecPermutedRows.TypeDefRow,
-            Is.EqualTo(originalRows.TypeDefRow));
+            Is.EqualTo(TypeDefRow));
         Assert.That(typeSpecPermutedRows.FieldDefRow,
-            Is.EqualTo(originalRows.FieldDefRow));
+            Is.EqualTo(FieldDefRow));
         Assert.That(typeSpecPermutedRows.TypeSpecRow,
-            Is.EqualTo(originalRows.TypeSpecRow));
+            Is.EqualTo(TypeSpecRow));
         Assert.That(typeSpecPermutedRows.ElementTypeSpecRow,
-            Is.Not.EqualTo(originalRows.ElementTypeSpecRow));
+            Is.Not.EqualTo(ElementTypeSpecRow));
         Assert.That(typeSpecPermutedRows.LayoutRow,
-            Is.EqualTo(originalRows.LayoutRow));
+            Is.EqualTo(LayoutRow));
         Assert.That(typeSpecPermutedRows.FixedArrayLayoutRow,
-            Is.EqualTo(originalRows.FixedArrayLayoutRow));
+            Is.EqualTo(FixedArrayLayoutRow));
         Assert.That(arrayPermutedRows.TypeDefRow,
-            Is.EqualTo(originalRows.TypeDefRow));
+            Is.EqualTo(TypeDefRow));
         Assert.That(arrayPermutedRows.FieldDefRow,
-            Is.EqualTo(originalRows.FieldDefRow));
+            Is.EqualTo(FieldDefRow));
         Assert.That(arrayPermutedRows.TypeSpecRow,
-            Is.EqualTo(originalRows.TypeSpecRow));
+            Is.EqualTo(TypeSpecRow));
         Assert.That(arrayPermutedRows.ElementTypeSpecRow,
-            Is.EqualTo(originalRows.ElementTypeSpecRow));
+            Is.EqualTo(ElementTypeSpecRow));
         Assert.That(arrayPermutedRows.LayoutRow,
-            Is.EqualTo(originalRows.LayoutRow));
+            Is.EqualTo(LayoutRow));
         Assert.That(arrayPermutedRows.FixedArrayLayoutRow,
-            Is.Not.EqualTo(originalRows.FixedArrayLayoutRow));
+            Is.Not.EqualTo(FixedArrayLayoutRow));
 
         var coLocatedProvider = CreateProviderArtifact(
             coLocateLeafProvider: true);
@@ -1322,7 +1439,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var layoutFieldCount = multiplePairViews ? 10 : 6;
         var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
             typeDefs, targetProfiles, layoutFieldCount);
-        var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
+
+        _ = new TrRmLayoutFieldTableReader(layoutFieldBytes,
             layoutFieldCount,
             layouts, typeDefs, fields);
         var secondPairExpected = multiplePairViews
@@ -1464,7 +1582,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 typeDefCount);
         var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
             typeDefs, targetProfiles, layoutCount);
-        var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
+
+        _ = new TrRmLayoutFieldTableReader(layoutFieldBytes,
             layoutCount, layouts, typeDefs, fields);
         var importsBytes = TrRmImportTableWriter.Encode([
             new TrRmImportRow(1, 11,
@@ -1550,7 +1669,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 pack);
         var layouts = new TrRmLayoutTableReader(layoutBytes, 2, typeDefs,
             targetProfiles, 2);
-        var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes, 2,
+
+        _ = new TrRmLayoutFieldTableReader(layoutFieldBytes, 2,
             layouts, typeDefs, fields);
         var exportsBytes = TrRmExportTableWriter.Encode([
             new TrRmExportRow(0x1300_0001, 5),

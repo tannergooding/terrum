@@ -7,18 +7,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class BlobTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class BlobTableValidationComponentTests
 {
     private const string BatchVerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -97,7 +97,7 @@ public sealed class BlobTableValidationComponentTests
         cases.Add(Rejected(blobs[..^sizeof(uint)], 4, 1));
 
         var pastEnd = blobs.ToArray();
-        int finalOffset = 4 * sizeof(uint);
+        var finalOffset = 4 * sizeof(uint);
         BinaryPrimitives.WriteUInt32LittleEndian(pastEnd.AsSpan(finalOffset),
             BinaryPrimitives.ReadUInt32LittleEndian(pastEnd.AsSpan(finalOffset)) + 1);
         cases.Add(Rejected(pastEnd, 4, 4));
@@ -136,7 +136,11 @@ public sealed class BlobTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true), Is.EqualTo(0));
@@ -149,7 +153,7 @@ public sealed class BlobTableValidationComponentTests
         var rows = Enumerable.Range(0, 512)
             .Select(static index => index % 3 == 0
                 ? ReadOnlyMemory<byte>.Empty
-                : new ReadOnlyMemory<byte>(new byte[] { (byte)(index & 0xFF), (byte)(index >> 8) }))
+                : new ReadOnlyMemory<byte>([(byte)(index & 0xFF), (byte)(index >> 8)]))
             .ToArray();
         var section = TrRmVariableTableWriter.EncodeBlobs(rows);
         var expected = new List<int> { rows.Length };
@@ -180,7 +184,11 @@ public sealed class BlobTableValidationComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -212,7 +220,7 @@ public sealed class BlobTableValidationComponentTests
     }
 
     private static byte[] ToBytes(int[] values)
-        => values.Select(static value => checked((byte)value)).ToArray();
+        => [.. values.Select(static value => checked((byte)value))];
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {

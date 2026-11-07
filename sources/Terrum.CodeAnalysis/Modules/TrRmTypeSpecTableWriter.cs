@@ -9,9 +9,18 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <summary>Emits indexed TypeSpec rows checked against referenced table counts.</summary>
 public static class TrRmTypeSpecTableWriter
 {
+    /// <summary>Creates a built-in type TypeSpec row.</summary>
+    /// <param name="code">The built-in type code.</param>
+    /// <param name="qualifiers">The TypeSpec qualifier bits.</param>
+    /// <returns>The encoded TypeSpec row.</returns>
     public static byte[] Builtin(byte code, byte qualifiers = 0)
         => [0x01, qualifiers, code];
 
+    /// <summary>Creates an inline-family TypeSpec row.</summary>
+    /// <param name="familyCode">The family type code.</param>
+    /// <param name="argumentCode">The family's inline argument type code.</param>
+    /// <param name="qualifiers">The TypeSpec qualifier bits.</param>
+    /// <returns>The encoded TypeSpec row.</returns>
     public static byte[] InlineFamily(byte familyCode, byte argumentCode, byte qualifiers = 0)
         => [0x01, qualifiers, familyCode, argumentCode];
 
@@ -28,6 +37,11 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
+    /// <summary>Creates a row-reference TypeSpec.</summary>
+    /// <param name="form">The assigned TypeSpec reference form.</param>
+    /// <param name="row">The referenced one-based table row.</param>
+    /// <param name="qualifiers">The TypeSpec qualifier bits.</param>
+    /// <returns>The encoded TypeSpec row.</returns>
     public static byte[] Reference(byte form, uint row, byte qualifiers = 0)
     {
         if (form is not (0x02 or 0x03 or 0x04))
@@ -76,6 +90,11 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
+    /// <summary>Creates a constructed TypeSpec with one or more argument references.</summary>
+    /// <param name="genericTypeSpec">The TypeSpec reference for the generic definition.</param>
+    /// <param name="argumentReferences">The type or constant argument references.</param>
+    /// <param name="qualifiers">The TypeSpec qualifier bits.</param>
+    /// <returns>The encoded TypeSpec row.</returns>
     public static byte[] Constructed(uint genericTypeSpec,
         ReadOnlySpan<uint> argumentReferences, byte qualifiers = 0)
     {
@@ -98,6 +117,11 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
+    /// <summary>Creates a wrapper TypeSpec that refers to an inner type.</summary>
+    /// <param name="form">The assigned wrapper form.</param>
+    /// <param name="innerTypeSpec">The inner TypeSpec reference.</param>
+    /// <param name="qualifiers">The TypeSpec qualifier bits.</param>
+    /// <returns>The encoded TypeSpec row.</returns>
     public static byte[] Wrapped(byte form, uint innerTypeSpec, byte qualifiers = 0)
     {
         if (form is < 0x06 or > 0x0B)
@@ -112,6 +136,11 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
+    /// <summary>Creates an indexed-family TypeSpec that refers to an argument type.</summary>
+    /// <param name="familyCode">The indexed family type code.</param>
+    /// <param name="argumentTypeSpec">The argument TypeSpec reference.</param>
+    /// <param name="qualifiers">The TypeSpec qualifier bits.</param>
+    /// <returns>The encoded TypeSpec row.</returns>
     public static byte[] IndexedFamily(byte familyCode, uint argumentTypeSpec,
         byte qualifiers = 0)
     {

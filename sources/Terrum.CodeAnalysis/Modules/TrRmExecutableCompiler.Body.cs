@@ -32,8 +32,7 @@ public static partial class TrRmExecutableCompiler
 
     private static (int Opcode, int Kind) IntegerArithmeticEncoding(TokenKind operation,
         BoundIntegerOverflowBehavior overflowBehavior)
-        => (operation, overflowBehavior) switch
-        {
+        => (operation, overflowBehavior) switch {
             (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) => (0x15, 1),
             (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) => (0x15, 2),
             (TokenKind.Star, BoundIntegerOverflowBehavior.Checked) => (0x15, 3),
@@ -57,7 +56,7 @@ public static partial class TrRmExecutableCompiler
         {
             current[parameter] = parameter + 1;
         }
-        int returnValue = -1;
+        var returnValue = -1;
         var ended = false;
 
         int BodyTypeIndex(PrimitiveType type)
@@ -68,12 +67,12 @@ public static partial class TrRmExecutableCompiler
         int EmitExpression(BoundExpression expression)
         {
             int opcode;
-            int kind = 0;
-            int type = 0;
-            int left = 0;
-            int right = 0;
+            var kind = 0;
+            var type = 0;
+            var left = 0;
+            var right = 0;
             ulong data = 0;
-            int dataWidth = 0;
+            var dataWidth = 0;
             switch (expression)
             {
                 case BoundRead read:
@@ -86,8 +85,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundConstant constant:
                     opcode = 1;
                     type = BodyTypeIndex(constant.Type);
-                    data = constant.Type switch
-                    {
+                    data = constant.Type switch {
                         PrimitiveType.Int32 or PrimitiveType.UInt32 => unchecked((uint)constant.Value),
                         PrimitiveType.Bool or PrimitiveType.Char16 => (ulong)constant.Value,
                         _ => unchecked((ulong)constant.Value),
@@ -113,8 +111,7 @@ public static partial class TrRmExecutableCompiler
                     }
                     else
                     {
-                        (opcode, kind) = unary.Operator switch
-                        {
+                        (opcode, kind) = unary.Operator switch {
                             TokenKind.Bang => (4, 1),
                             TokenKind.Tilde => (4, 2),
                             TokenKind.Plus => (4, 3),
@@ -127,8 +124,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundBinary binary:
                     if (IsFloat(binary.Left.Type))
                     {
-                        (opcode, kind) = binary.Operator switch
-                        {
+                        (opcode, kind) = binary.Operator switch {
                             TokenKind.Plus => (0x1D, 1),
                             TokenKind.Minus => (0x1D, 2),
                             TokenKind.Star => (0x1D, 3),
@@ -150,11 +146,11 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Unsupported($"Lazy or shift operator {binary.Operator} is outside the linear TRRM profile.");
                     }
-                    if (binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
-                        && binary.Left.Type == PrimitiveType.Bool
-                        || binary.Operator is TokenKind.Less or TokenKind.LessEquals
+                    if ((binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
+                        && binary.Left.Type == PrimitiveType.Bool)
+                        || (binary.Operator is TokenKind.Less or TokenKind.LessEquals
                             or TokenKind.Greater or TokenKind.GreaterEquals
-                            && binary.Left.Type == PrimitiveType.Char16)
+                            && binary.Left.Type == PrimitiveType.Char16))
                     {
                         throw Unsupported("Boolean bitwise and char16 ordering have no executable TRRM scalar operation.");
                     }
@@ -171,8 +167,7 @@ public static partial class TrRmExecutableCompiler
                     }
                     else
                     {
-                        (opcode, kind) = binary.Operator switch
-                        {
+                        (opcode, kind) = binary.Operator switch {
                             TokenKind.Ampersand => (5, 1),
                             TokenKind.Pipe => (5, 2),
                             TokenKind.Caret => (5, 3),
@@ -455,10 +450,10 @@ public static partial class TrRmExecutableCompiler
                 arguments.Add(new BoundRead(id - 1, variables[id - 1].Type, default));
             }
             if (width != Width((ulong)maximum) || countWidth != Width((ulong)argumentCount)
-                || opcode == 1 && dataWidth != Width(bits)
-                || opcode == 2 && dataWidth != SignedWidth(
+                || (opcode == 1 && dataWidth != Width(bits))
+                || (opcode == 2 && dataWidth != SignedWidth(
                     dataWidth == 8 ? unchecked((long)bits)
-                        : unchecked((long)(bits << (64 - dataWidth * 8))) >> (64 - dataWidth * 8)))
+                        : unchecked((long)(bits << (64 - (dataWidth * 8)))) >> (64 - (dataWidth * 8)))))
             {
                 throw Invalid("Nonminimal instruction width.");
             }
@@ -494,7 +489,7 @@ public static partial class TrRmExecutableCompiler
                 }
                 var type = mappedTypes[typeId];
                 var signed = dataWidth == 8 ? unchecked((long)bits)
-                    : unchecked((long)(bits << (64 - dataWidth * 8))) >> (64 - dataWidth * 8);
+                    : unchecked((long)(bits << (64 - (dataWidth * 8)))) >> (64 - (dataWidth * 8));
                 var value = opcode == 2 ? signed : unchecked((long)bits);
                 if (type is PrimitiveType.Int32 or PrimitiveType.UInt32)
                 {
@@ -579,8 +574,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("FloatCompare requires equal float32 or float64 operands.");
                 }
-                var token = kind switch
-                {
+                var token = kind switch {
                     1 => TokenKind.EqualsEquals,
                     2 => TokenKind.BangEquals,
                     3 => TokenKind.Less,
@@ -598,8 +592,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("FloatBinary requires equal float32 or float64 operands.");
                 }
-                var token = kind switch
-                {
+                var token = kind switch {
                     1 => TokenKind.Plus,
                     2 => TokenKind.Minus,
                     3 => TokenKind.Star,
@@ -739,9 +732,10 @@ public static partial class TrRmExecutableCompiler
             else if (opcode == 4)
             {
                 var operand = Operand(left);
-                var token = kind switch
-                {
-                    1 => TokenKind.Bang, 2 => TokenKind.Tilde, 3 => TokenKind.Plus,
+                var token = kind switch {
+                    1 => TokenKind.Bang,
+                    2 => TokenKind.Tilde,
+                    3 => TokenKind.Plus,
                     _ => throw Invalid("Unsupported unary kind."),
                 };
                 expression = new BoundUnary(token, operand, operand.Type, default);
@@ -754,8 +748,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("Wrapping Binary requires equal integer operands.");
                 }
-                var token = kind switch
-                {
+                var token = kind switch {
                     10 => TokenKind.Plus,
                     11 => TokenKind.Minus,
                     12 => TokenKind.Star,
@@ -783,15 +776,20 @@ public static partial class TrRmExecutableCompiler
             {
                 var first = Operand(left);
                 var second = Operand(right);
-                var token = (opcode, kind) switch
-                {
-                    (5, 1) => TokenKind.Ampersand, (5, 2) => TokenKind.Pipe,
-                    (5, 3) => TokenKind.Caret, (5, 4) => TokenKind.EqualsEquals,
-                    (5, 5) => TokenKind.BangEquals, (5, 6) => TokenKind.Less,
-                    (5, 7) => TokenKind.LessEquals, (5, 8) => TokenKind.Greater,
+                var token = (opcode, kind) switch {
+                    (5, 1) => TokenKind.Ampersand,
+                    (5, 2) => TokenKind.Pipe,
+                    (5, 3) => TokenKind.Caret,
+                    (5, 4) => TokenKind.EqualsEquals,
+                    (5, 5) => TokenKind.BangEquals,
+                    (5, 6) => TokenKind.Less,
+                    (5, 7) => TokenKind.LessEquals,
+                    (5, 8) => TokenKind.Greater,
                     (5, 9) => TokenKind.GreaterEquals,
-                    (0x15, 1) => TokenKind.Plus, (0x15, 2) => TokenKind.Minus,
-                    (0x15, 3) => TokenKind.Star, (0x15, 4) => TokenKind.Slash,
+                    (0x15, 1) => TokenKind.Plus,
+                    (0x15, 2) => TokenKind.Minus,
+                    (0x15, 3) => TokenKind.Star,
+                    (0x15, 4) => TokenKind.Slash,
                     (0x15, 5) => TokenKind.Percent,
                     (0x15, 6) => TokenKind.ShiftLeft,
                     (0x15, 7) => TokenKind.ShiftRight,

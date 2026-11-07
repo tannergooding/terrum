@@ -22,7 +22,8 @@ using Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmExecutableCompilerTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmExecutableCompilerTests
 {
     private const uint ScalarInitOutputInitialRuleRevision = 1;
     private const uint ScalarInitOutputRuleRevision = 8;
@@ -54,7 +55,11 @@ public sealed class TrRmExecutableCompilerTests
         var syntax = SyntaxTree.Parse(source);
         var compilation = library ? Compilation.CreateLibrary(syntax) : Compilation.Create(syntax);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
     [TestCase("int32 Main() { return 42; }",42)]
     [TestCase("int32 Main() { mut int32 x = 10; x = x + 20; x = x ^ 12; return x; }",18)]
@@ -90,7 +95,7 @@ public sealed class TrRmExecutableCompilerTests
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var noTargetProgram = Compile("int32 Main() { return 42; }");
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(noTargetProgram, "portable",
                 "trrm/1-draft-layout-queries-1", 0));
 
@@ -98,11 +103,11 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(TrRmArtifactIndex.ForDevelopment(development).Schema,
             Is.EqualTo(TrRmArtifactSchema.Development));
 
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.EmitStandard(program, "sample",
                 "TRRM/1-draft-layout-queries-1",
                 TrRmModuleTableReader.WindowsX64NativeTargetRequirement));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmExecutableCompiler.EmitStandard(program, "sample",
                 "trrm/1-draft-layout-queries-1", 2));
     }
@@ -135,12 +140,12 @@ public sealed class TrRmExecutableCompilerTests
             static function => function.Name == "Add").ReturnType,
             Is.EqualTo(PrimitiveType.Int32));
 
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(
                     "TRRM/1-draft-register-exception-regions-1", artifact),
                 "sample", Array.Empty<TrRmStandardArtifactInput>()));
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.LoadStandard(input, "sample",
                 [new TrRmStandardArtifactInput(
                     "trrm/1-draft-foreign-invocation-contracts-1",
@@ -164,24 +169,24 @@ public sealed class TrRmExecutableCompilerTests
 
         var unknownUsingModule = new CoreExceptionIdentitySelection(
             "unknown-using", "core", "Add", "core", "Add");
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.LoadStandard(input, "core", providers,
-                ImmutableArray.Create(unknownUsingModule)));
+                [unknownUsingModule]));
 
         var unknownProducerModule = new CoreExceptionIdentitySelection(
             "core", "missing-provider", "MissingInterface",
             "core", "Add");
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.LoadStandard(input, "core", providers,
-                ImmutableArray.Create(unknownProducerModule)));
+                [unknownProducerModule]));
 
         var methodExportIsNotATypeDef = new CoreExceptionIdentitySelection(
             "core", "core", "Add", "core", "Add");
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler
                 .CreateStandardReferenceWithCoreExceptionIdentitySelections(
                     input, "core", providers,
-                    ImmutableArray.Create(methodExportIsNotATypeDef)));
+                    [methodExportIsNotATypeDef]));
     }
 
     [Test]
@@ -223,10 +228,10 @@ public sealed class TrRmExecutableCompilerTests
             program, ["Remainder"], NativeRuntimePolicy.FailFast);
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-register-remainder-{Guid.NewGuid():N}.dll");
-        IntPtr handle = IntPtr.Zero;
+        var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             if (typeCode == 0x14)
             {
@@ -285,10 +290,10 @@ public sealed class TrRmExecutableCompilerTests
             program, ["Remainder"], NativeRuntimePolicy.FailFast);
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-register-remainder-special-{Guid.NewGuid():N}.dll");
-        IntPtr handle = IntPtr.Zero;
+        var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             if (typeCode == 0x14)
             {
@@ -335,10 +340,10 @@ public sealed class TrRmExecutableCompilerTests
             program, ["Compute"], NativeRuntimePolicy.FailFast);
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-register-float-{Guid.NewGuid():N}.dll");
-        IntPtr handle = IntPtr.Zero;
+        var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             var expected = operationCode switch {
                 0x26 => -1.5,
@@ -378,13 +383,13 @@ public sealed class TrRmExecutableCompilerTests
         var mismatchedTypes = TrRmRegisterBodyTestData.StandardFloatingRemainderLibraryArtifact(
             0x14, secondParameterTypeCode: 0x15);
         TrRmStructuralMetadataValidator.Validate(mismatchedTypes);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(mismatchedTypes));
 
         var invalidFormal = TrRmRegisterBodyTestData.StandardFloatingRemainderLibraryArtifact(
             0x14, firstFormalOrdinal: 2);
         TrRmStructuralMetadataValidator.Validate(invalidFormal);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(invalidFormal));
     }
 
@@ -462,10 +467,10 @@ public sealed class TrRmExecutableCompilerTests
             program, ["Remainder"], NativeRuntimePolicy.FailFast);
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-register-remainder-writer-{Guid.NewGuid():N}.dll");
-        IntPtr handle = IntPtr.Zero;
+        var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             if (typeCode == 0x14)
             {
@@ -568,10 +573,10 @@ public sealed class TrRmExecutableCompilerTests
             program, ["Remainder"], NativeRuntimePolicy.FailFast);
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-register-int-remainder-writer-{Guid.NewGuid():N}.dll");
-        IntPtr handle = IntPtr.Zero;
+        var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             var remainder = Marshal.GetDelegateForFunctionPointer<Int32Binary>(
                 NativeLibrary.GetExport(handle, "Remainder"));
@@ -644,7 +649,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmRegisterBodyTestData.StandardIntegerOperationLibraryArtifact(
             0x08, 0x21, secondParameterTypeCode: 0x09);
         TrRmStructuralMetadataValidator.Validate(artifact);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandardIntegerScalarFunction(artifact));
     }
 
@@ -681,10 +686,10 @@ public sealed class TrRmExecutableCompilerTests
             program, ["Compute"], NativeRuntimePolicy.FailFast);
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-register-int-{Guid.NewGuid():N}.dll");
-        IntPtr handle = IntPtr.Zero;
+        var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             var operation = Marshal.GetDelegateForFunctionPointer<Int32Binary>(
                 NativeLibrary.GetExport(handle, "Compute"));
@@ -1039,7 +1044,7 @@ public sealed class TrRmExecutableCompilerTests
             }
             else
             {
-                Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
+                _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
             }
         }
 
@@ -1076,7 +1081,7 @@ public sealed class TrRmExecutableCompilerTests
         foreach (var revision in new uint[] { 1, 2, 3 })
         {
             var legacyArtifact = SetScalarInitOutputRuleRevision(artifact, revision);
-            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
+            _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(legacyArtifact));
         }
 
         var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
@@ -1196,15 +1201,15 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
         var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(revisionFourArtifact));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(revisionFourArtifact));
         var revisionFiveArtifact = SetScalarInitOutputRuleRevision(artifact, 5);
         Assert.That(NativeJit.Execute(
             TrRmExecutableCompiler.Load(revisionFiveArtifact), NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
         var forgedTrueState = SetConditionalInheritedPlaceState(artifact, 1, false);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
         var forgedFalseState = SetConditionalInheritedPlaceState(artifact, 2, true);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
     }
     [TestCase(true,true,true)]
     [TestCase(true,false,true)]
@@ -1240,15 +1245,15 @@ public sealed class TrRmExecutableCompilerTests
         var original = Compile(source);
         var artifact = TrRmExecutableCompiler.Emit(original, "conditional-output-failure");
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             SetScalarInitOutputRuleRevision(artifact, 5)));
 
         var forgedTrueState = SetConditionalInheritedPlaceState(
             artifact, blockIndex: 1, initialized: false);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
         var forgedFalseState = SetConditionalInheritedPlaceState(
             artifact, blockIndex: 2, initialized: true, placeId: 2);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
 
         if (expected == 42)
         {
@@ -1305,10 +1310,10 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(program, "conditional-value-call-state");
 
         _ = TrRmExecutableCompiler.Load(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             SetConditionalInheritedPlaceState(artifact, blockIndex: 1,
                 initialized: true, placeId: 2)));
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             SetConditionalInheritedPlaceState(artifact, blockIndex: 2,
                 initialized: false, placeId: 1)));
     }
@@ -1327,7 +1332,7 @@ public sealed class TrRmExecutableCompilerTests
             }
             """);
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "conditional-nondirect-condition"));
     }
 
@@ -1347,7 +1352,7 @@ public sealed class TrRmExecutableCompilerTests
             }
             """);
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "conditional-nested-split"));
     }
 
@@ -1465,7 +1470,7 @@ public sealed class TrRmExecutableCompilerTests
         var unsupportedArtifact = TrRmExecutableCompiler.Emit(Compile(boolSource), "legacy-output-bool");
         unsupportedArtifact = SetScalarInitOutputRuleRevision(unsupportedArtifact,
             ScalarInitOutputInitialRuleRevision);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(unsupportedArtifact));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(unsupportedArtifact));
     }
 
     [Test]
@@ -1511,11 +1516,11 @@ public sealed class TrRmExecutableCompilerTests
             }
 
             var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(
-                artifact.AsSpan(32 + section * 16 + 8));
+                artifact.AsSpan(32 + (section * 16) + 8));
             BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 16), 0);
             BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 24), 0);
             BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 28), 0);
-            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+            _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
             return;
         }
 
@@ -1534,7 +1539,7 @@ public sealed class TrRmExecutableCompilerTests
             }
             """;
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(Compile(source), "exported-output"));
     }
     [TestCase("float32","1.5","<","2.0")]
@@ -1622,10 +1627,10 @@ public sealed class TrRmExecutableCompilerTests
             """;
         var oneBits = type == "float32"
             ? new byte[] { 0x00, 0x00, 0x80, 0x3F }
-            : new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F };
+            : [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F];
         var nanBits = type == "float32"
             ? new byte[] { 0x01, 0x00, 0xC0, 0x7F }
-            : new byte[] { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x7F };
+            : [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x7F];
         var artifact = TrRmExecutableCompiler.Emit(Compile(source), "float-nan");
         var loaded = TrRmExecutableCompiler.Load(
             ReplaceBodyConstant(artifact, 1, oneBits, nanBits));
@@ -1640,11 +1645,11 @@ public sealed class TrRmExecutableCompilerTests
             "public float32 Remainder(float32 left, float32 right) { return left % right; }",
             library: true);
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "float-remainder"));
     }
-    [TestCase((byte)(0))]
-    [TestCase((byte)(7))]
+    [TestCase((byte)0)]
+    [TestCase((byte)7)]
     public void InvalidFloatingComparisonKindsAreRejected(byte kind)
     {
         const string source = """
@@ -1654,20 +1659,20 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(Compile(source), "invalid-float-compare");
         var malformed = ReplaceBodyOperationByte(artifact, 2, 0x19, 2, kind);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
-    [TestCase((byte)(0))]
-    [TestCase((byte)(1))]
-    [TestCase((byte)(2))]
-    [TestCase((byte)(3))]
-    [TestCase((byte)(7))]
+    [TestCase((byte)0)]
+    [TestCase((byte)1)]
+    [TestCase((byte)2)]
+    [TestCase((byte)3)]
+    [TestCase((byte)7)]
     public void FloatConvertRejectsInvalidDestinationTypeSpecs(byte destinationTypeId)
     {
         const string source = "public float64 Widen(float32 value) { return float64(value); }";
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-convert");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1A, 2, destinationTypeId);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -1717,7 +1722,7 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(conversionOffset >= 0, Is.True);
         var destinationTypeId = body[conversionOffset + 2];
         Assert.That(destinationTypeId, Is.InRange(1, typeMapCount));
-        var typeMapOffset = 1 + localWidth + (destinationTypeId - 1) * sizeof(int);
+        var typeMapOffset = 1 + localWidth + ((destinationTypeId - 1) * sizeof(int));
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(body.AsSpan(typeMapOffset)), Is.EqualTo(float64Row));
         BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(typeMapOffset), constructedTypeRow);
         bodyRows[0] = body;
@@ -1736,7 +1741,7 @@ public sealed class TrRmExecutableCompilerTests
         }
         var malformed = TrRmArtifactWriter.EncodeDevelopment(sections);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -1749,7 +1754,7 @@ public sealed class TrRmExecutableCompilerTests
             optionalInt32: false,
             optionalFloat32: true);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
     [Test]
@@ -2102,8 +2107,8 @@ public sealed class TrRmExecutableCompilerTests
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-float-to-integer-{Guid.NewGuid():N}.trrm");
         try
         {
-            File.WriteAllBytes(path, malformed);
-            var (exitCode, output, error) = await RunTrRmAsync(path);
+            await File.WriteAllBytesAsync(path, malformed).ConfigureAwait(true);
+            var (exitCode, output, error) = await RunTrRmAsync(path).ConfigureAwait(false);
 
             Assert.That(exitCode, Is.EqualTo(unchecked((int)0xE0540001)));
             Assert.That(output, Is.Empty);
@@ -2122,7 +2127,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-integer");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1F, 2, 0);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -2154,7 +2159,7 @@ public sealed class TrRmExecutableCompilerTests
         var program = BoundProgramTestHelpers.MarkNoFailureProof(
             Compile(source, true), "Convert", "ConvertIf");
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "retired-float-to-integer-nothrow"));
     }
 
@@ -2165,7 +2170,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-integer-float");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1B, 2, 1);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -2268,7 +2273,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-char16-float");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1E, 2, 1);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -2375,18 +2380,31 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-negate");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 0x17, 0, 0x1C);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
     public void FloatingArithmeticExecutesThroughLinearAndIndexedBodies()
     {
-        static float Single(uint bits) =>
-            BitConverter.Int32BitsToSingle(unchecked((int)bits));
-        static int SingleBits(float value) => BitConverter.SingleToInt32Bits(value);
-        static double Double(ulong bits) =>
-            BitConverter.Int64BitsToDouble(unchecked((long)bits));
-        static long DoubleBits(double value) => BitConverter.DoubleToInt64Bits(value);
+        static float Single(uint bits)
+        {
+            return BitConverter.Int32BitsToSingle(unchecked((int)bits));
+        }
+
+        static int SingleBits(float value)
+        {
+            return BitConverter.SingleToInt32Bits(value);
+        }
+
+        static double Double(ulong bits)
+        {
+            return BitConverter.Int64BitsToDouble(unchecked((long)bits));
+        }
+
+        static long DoubleBits(double value)
+        {
+            return BitConverter.DoubleToInt64Bits(value);
+        }
 
         const string source = """
              public float32 Add32(float32 left, float32 right) { return left + right; }
@@ -2528,17 +2546,17 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-integer-float-binary");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 4, 0, 0x1D);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
-    [TestCase((byte)(0))]
-    [TestCase((byte)(5))]
+    [TestCase((byte)0)]
+    [TestCase((byte)5)]
     public void InvalidFloatingArithmeticKindsAreRejected(byte kind)
     {
         const string source = "public float32 Add(float32 left, float32 right) { return left + right; }";
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "invalid-float-binary");
         var malformed = ReplaceBodyOperationByte(artifact, 1, 0x1D, 2, kind);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -2563,7 +2581,7 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(program.Functions[5].ReturnType, Is.EqualTo(PrimitiveType.UInt64));
         Assert.That(NativeEmitter.EmitLibrary(program,
             ["B", "C", "I", "U", "L", "W"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
-        Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program,
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program,
             ["Hidden"], NativeRuntimePolicy.FailFast));
     }
     [TestCase("int32 Main() { return Helper(); } int32 Helper() { return 42; }",42)]
@@ -2581,7 +2599,7 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "source-free"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "source-free"));
     }
 
     [Test]
@@ -2605,7 +2623,7 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         Assert.That(loaded.Functions[2].Body.Statements, Is.Empty);
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "not-source"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "not-source"));
     }
 
     [Test]
@@ -2639,7 +2657,7 @@ public sealed class TrRmExecutableCompilerTests
         var program = BoundProgramTestHelpers.MarkNoFailureProof(
             Compile("void Halt() { } int32 Main() { return 42; }"), "Halt");
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "retired-nothrow"));
     }
     [TestCase("out int32 value")]
@@ -2649,11 +2667,11 @@ public sealed class TrRmExecutableCompilerTests
             + "int32 Main() { return 42; }";
         var program = Compile(source);
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "output-parameters"));
     }
-    [TestCase((byte)(1))]
-    [TestCase((byte)(2))]
+    [TestCase((byte)1)]
+    [TestCase((byte)2)]
     public void ExecutableLoaderRejectsOutputModesInUncalledIndexedMethods(byte mode)
     {
         const string source = """
@@ -2666,7 +2684,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(Compile(source), "output-mode");
         var malformed = ReplaceParameterMode(artifact, mode);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -2697,7 +2715,11 @@ public sealed class TrRmExecutableCompilerTests
         {
             var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(expected));
             if (policy == BoundRuntimePolicy.FailFast)
             {
@@ -2707,7 +2729,7 @@ public sealed class TrRmExecutableCompilerTests
             }
             else
             {
-                Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "policies"));
+                _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "policies"));
             }
         }
     }
@@ -2824,7 +2846,11 @@ public sealed class TrRmExecutableCompilerTests
     {
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(Compile(source, true), "void"));
         Assert.That(loaded.Functions[0].Body.Statements, Has.Exactly(1).Items);
-        Assert.That(((global::System.Func<BoundReturn>)(() => { var __nunitActual2 = loaded.Functions[0].Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual2!; }))().Value, Is.Null);
+        Assert.That(((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual2 = loaded.Functions[0].Body.Statements[0];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual2!;
+        }))().Value, Is.Null);
     }
 
     [Test]
@@ -2888,14 +2914,14 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(await StaticProtocolTests.RunAsync(
             NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(42));
     }
-    [TestCase((byte)(0x01),true,42)]
-    [TestCase((byte)(0x01),false,0)]
-    [TestCase((byte)(0x08),true,42)]
-    [TestCase((byte)(0x08),false,0)]
-    [TestCase((byte)(0x0D),true,42)]
-    [TestCase((byte)(0x0D),false,0)]
-    [TestCase((byte)(0x0E),true,42)]
-    [TestCase((byte)(0x0E),false,0)]
+    [TestCase((byte)0x01,true,42)]
+    [TestCase((byte)0x01,false,0)]
+    [TestCase((byte)0x08,true,42)]
+    [TestCase((byte)0x08,false,0)]
+    [TestCase((byte)0x0D,true,42)]
+    [TestCase((byte)0x0D,false,0)]
+    [TestCase((byte)0x0E,true,42)]
+    [TestCase((byte)0x0E,false,0)]
     public async Task SourceFreeOptionalScalarPayloadTypesPreservePresenceInAotAndJit(
         byte payloadTypeCode, bool present, int expected)
     {
@@ -3054,7 +3080,7 @@ public sealed class TrRmExecutableCompilerTests
     {
         var source = "int32 Main() { mut int32 x = 0; "
             + string.Concat(Enumerable.Repeat("x = x + 1; ", 128)) + "return x; }";
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(Compile(source), "too-many-values"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(Compile(source), "too-many-values"));
     }
 
     [Test]
@@ -3063,9 +3089,9 @@ public sealed class TrRmExecutableCompilerTests
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; ");
         for (var i = 0; i < 127; i++)
         {
-            source.Append("x = x + 1; ");
+            _ = source.Append("x = x + 1; ");
         }
-        source.Append("x = +x; return x; }");
+        _ = source.Append("x = +x; return x; }");
         var artifact = TrRmExecutableCompiler.Emit(Compile(source.ToString()), "wide-values");
         var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
@@ -3081,7 +3107,7 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = OptionalScalarArtifact(SignedInt32LinearBody(value),
             optionalChar16: false, optionalInt32: false);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
     [TestCase(int.MinValue)]
     [TestCase(int.MaxValue)]
@@ -3106,12 +3132,12 @@ public sealed class TrRmExecutableCompilerTests
             {
                 continue;
             }
-            var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(32 + i * 16 + 8));
+            var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(32 + (i * 16) + 8));
             bytes[offset + 8] = 2;
-            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(bytes));
+            _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(bytes));
             bytes[offset + 8] = 0;
             bytes[offset + 4] = 0;
-            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(bytes));
+            _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(bytes));
             return;
         }
         throw new InvalidOperationException("Module section missing.");
@@ -3170,7 +3196,7 @@ public sealed class TrRmExecutableCompilerTests
         body.AddRange(operations);
         body.Add(0x83);
         body.Add((byte)returnValue);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] IndexedOptionalTransferBody()
@@ -3209,7 +3235,7 @@ public sealed class TrRmExecutableCompilerTests
         body.AddRange([17, 31]);
         body.AddRange(firstBlock);
         body.AddRange(secondBlock);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] IndexedOptionalChar16Body(bool selectPresent)
@@ -3292,7 +3318,7 @@ public sealed class TrRmExecutableCompilerTests
         body.AddRange(operationOffsets);
         body.AddRange([0, (byte)block.Count, terminatorOffset]);
         body.AddRange(block);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] IndexedOptionalChar16SelectionBody(bool selectFirst)
@@ -3351,7 +3377,7 @@ public sealed class TrRmExecutableCompilerTests
         body.AddRange(operationOffsets);
         body.AddRange([0, (byte)block.Count, terminatorOffset]);
         body.AddRange(block);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] IndexedOptionalPresenceBody(int payloadTypeSpecRow,
@@ -3418,7 +3444,7 @@ public sealed class TrRmExecutableCompilerTests
         body.AddRange(operationOffsets);
         body.AddRange([0, (byte)block.Count, terminatorOffset]);
         body.AddRange(block);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] OptionalScalarArtifact(byte[] body, bool optionalChar16,
@@ -3430,7 +3456,7 @@ public sealed class TrRmExecutableCompilerTests
             Compile("int32 Main() { return 0; }"), "optional-body");
         var index = TrRmArtifactIndex.ForDevelopment(original);
         var rows = new List<ReadOnlyMemory<byte>>();
-        index.TryGetSection(0x11, out var typeBytes, out var typeCount);
+        _ = index.TryGetSection(0x11, out var typeBytes, out var typeCount);
         var existingTypes = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
         for (var row = 1; row <= typeCount; row++)
         {
@@ -3574,13 +3600,13 @@ public sealed class TrRmExecutableCompilerTests
             _ = ReadLocal(body, ref position, width);
             var typeCount = ReadLocal(body, ref position, width);
             position += checked(typeCount * 4);
-            position += checked(placeCount * (3 * width + 1));
-            position += checked(valueCount * (2 * width + 1));
+            position += checked(placeCount * ((3 * width) + 1));
+            position += checked(valueCount * ((2 * width) + 1));
             position += checked((4 * width) + (valueCount * 4));
             var blockOffsetsPosition = position;
             var blockDataStart = checked(blockOffsetsPosition + (4 * 4) + (3 * 4));
             var blockOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-                body.AsSpan(blockOffsetsPosition + blockIndex * 4)));
+                body.AsSpan(blockOffsetsPosition + (blockIndex * 4))));
             position = checked(blockDataStart + blockOffset);
             _ = ReadLocal(body, ref position, width);
             SkipIndexList(body, ref position, width);
@@ -3592,7 +3618,7 @@ public sealed class TrRmExecutableCompilerTests
                 throw new InvalidOperationException("Conditional block has no requested inherited place.");
             }
 
-            position += checked((placeId - 1) * (width + 1) + width);
+            position += checked(((placeId - 1) * (width + 1)) + width);
             body[position] = initialized ? (byte)1 : (byte)0;
             bodyRows[row] = body;
             found = true;
@@ -3666,8 +3692,8 @@ public sealed class TrRmExecutableCompilerTests
         _ = ReadLocal(body, ref position, width);
         var typeCount = ReadLocal(body, ref position, width);
         position += checked(typeCount * 4);
-        position += checked(placeCount * (3 * width + 1));
-        position += checked(valueCount * (2 * width + 1));
+        position += checked(placeCount * ((3 * width) + 1));
+        position += checked(valueCount * ((2 * width) + 1));
         if (ReadLocal(body, ref position, width) != 0
             || ReadLocal(body, ref position, width) != valueCount)
         {
@@ -3850,7 +3876,7 @@ public sealed class TrRmExecutableCompilerTests
             ?? throw new InvalidOperationException("TRRM runner process was not started.");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        return (process.ExitCode, await output, await error);
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        return (process.ExitCode, await output.ConfigureAwait(false), await error.ConfigureAwait(false));
     }
 }

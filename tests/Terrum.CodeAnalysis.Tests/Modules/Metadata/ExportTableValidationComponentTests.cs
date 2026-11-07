@@ -5,18 +5,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed partial class ImportTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed partial class ImportTableValidationComponentTests
 {
     private const string ExportVerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -152,7 +152,7 @@ public sealed partial class ImportTableValidationComponentTests
                     $"Hosted differential case {caseIndex}");
             }
 
-            int outputCapacity = testCase.ExportCount + 1;
+            var outputCapacity = testCase.ExportCount + 1;
             var compilation = Compilation.Create(components,
             [
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Tables.Strings], false),
@@ -161,11 +161,11 @@ public sealed partial class ImportTableValidationComponentTests
                     [.. testCase.Tables.ModuleRefs], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.Tables.TypeDefs], false),
                 new HostBuffer("FieldDefs", PrimitiveType.Int32,
-                    [.. (testCase.Tables.FieldDefs ?? [])], false),
+                    [.. testCase.Tables.FieldDefs ?? []], false),
                 new HostBuffer("InterfaceDefs", PrimitiveType.Int32,
-                    [.. (testCase.Tables.InterfaceDefs ?? [])], false),
+                    [.. testCase.Tables.InterfaceDefs ?? []], false),
                 new HostBuffer("AssociatedTypeDefs", PrimitiveType.Int32,
-                    [.. (testCase.Tables.AssociatedTypeDefs ?? [])], false),
+                    [.. testCase.Tables.AssociatedTypeDefs ?? []], false),
                 new HostBuffer("Methods", PrimitiveType.Int32, [.. testCase.Tables.Methods], false),
                 new HostBuffer("Properties", PrimitiveType.Int32,
                     [.. testCase.Tables.Properties], false),
@@ -210,10 +210,14 @@ public sealed partial class ImportTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-            int jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
+            var jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
             Assert.That(jitResult == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {jitResult}.");
-            int aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            var aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true);
             Assert.That(aotResult == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {aotResult}.");
         }
@@ -272,7 +276,7 @@ public sealed partial class ImportTableValidationComponentTests
 
     private static TableCase CreatePropertyExportCase(TableCase tables)
     {
-        int[] methods = SetWord(SetWord(tables.Methods, 0, 1), 24, 0);
+        var methods = SetWord(SetWord(tables.Methods, 0, 1), 24, 0);
         var properties = new byte[20];
         WriteWord(properties, 0, 1);
         WriteWord(properties, 4, 7);
@@ -297,7 +301,7 @@ public sealed partial class ImportTableValidationComponentTests
         for (var index = 0; index < rows.Length; index++)
         {
             WriteWord(bytes, index * 8, rows[index].Definition);
-            WriteWord(bytes, index * 8 + 4, rows[index].Key);
+            WriteWord(bytes, (index * 8) + 4, rows[index].Key);
         }
         return [.. bytes.Select(static value => (int)value)];
     }
@@ -338,7 +342,6 @@ public sealed partial class ImportTableValidationComponentTests
             StringCount = names.Length,
         }, ExportRows(exports));
     }
-
 
     private sealed record ExportCase(
         TableCase Tables,

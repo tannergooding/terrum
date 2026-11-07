@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmArtifactWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmArtifactWriterTests
 {
     [Test]
     public void FramesAndOwnsTheWorkedMinimalModuleAndStringSections()
@@ -62,7 +63,7 @@ public sealed class TrRmArtifactWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
 
         Write(extension, 8, 2);
-        Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
+        _ = Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, Module()),
             new TrRmSection(0x0002, 0, 1, TrRmStringTableWriter.EncodeNames([("A", 0)])),
             new TrRmSection(0x8000, 2, 1, extension),
@@ -89,21 +90,21 @@ public sealed class TrRmArtifactWriterTests
             new TrRmSection(0x0004, 0, 2, features),
         ]);
         Assert.That(new TrRmArtifactIndex(artifact).TryGetSection(0x0004, out _, out _), Is.True);
-        Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
+        _ = Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, Module()),
             new TrRmSection(0x0002, 0, 1, strings),
             new TrRmSection(0x0004, 1, 2, features),
         ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(8, 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(0, 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 0)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1,
                 TrRmFeatureTableReader.RuleRevision + 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([
                 new TrRmFeatureRow(1, 1), new TrRmFeatureRow(1, 2),
             ]));
@@ -115,17 +116,17 @@ public sealed class TrRmArtifactWriterTests
         var module = new TrRmSection(0x0001, 0, 1, Module());
         var strings = new TrRmSection(0x0002, 0, 1,
             TrRmStringTableWriter.EncodeNames([("A", 0)]));
-        Assert.Throws<ArgumentOutOfRangeException>(() => TrRmArtifactWriter.Encode([]));
-        Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([strings, module]));
-        Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([module, module]));
-        Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => TrRmArtifactWriter.Encode([]));
+        _ = Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([strings, module]));
+        _ = Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([module, module]));
+        _ = Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([
             module with { RecordCount = 0 }, strings,
         ]));
-        Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([
+        _ = Assert.Throws<ArgumentException>(() => TrRmArtifactWriter.Encode([
             module with { Bytes = ReadOnlyMemory<byte>.Empty }, strings,
         ]));
-        Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([strings]));
-        Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
+        _ = Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([strings]));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
             module, strings with { Flags = 1 },
         ]));
     }

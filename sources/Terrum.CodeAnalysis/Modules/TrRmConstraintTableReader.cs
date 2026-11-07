@@ -7,7 +7,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Validates Constraint row framing, ownership, flags and assigned payload forms.</summary>
-/// <remarks>Associated-relation payload semantics and generic execution remain unsupported. Borrowed sections must remain unchanged.</remarks>
+/// <remarks>Kind-3 payloads select AssociatedRelation rows; relation satisfaction and generic execution remain unsupported. Borrowed sections must remain unchanged.</remarks>
 public readonly ref struct TrRmConstraintTableReader
 {
     private const int RowSize = 12;
@@ -22,15 +22,18 @@ public readonly ref struct TrRmConstraintTableReader
     /// <param name="recordCount">The number of 12-byte Constraint rows.</param>
     /// <param name="formals">The validated GenericParam table.</param>
     /// <param name="types">The validated TypeSpec table for type-valued payloads.</param>
+    /// <param name="associatedRelations">The validated table selected by kind-3 payloads.</param>
     public TrRmConstraintTableReader(ReadOnlySpan<byte> section, int recordCount,
-        TrRmGenericParamTableReader formals, TrRmTypeSpecTableReader types)
-        : this(section, recordCount, formals, types, null)
+        TrRmGenericParamTableReader formals, TrRmTypeSpecTableReader types,
+        TrRmAssociatedRelationTableReader associatedRelations)
+        : this(section, recordCount, formals, types, associatedRelations, null)
     {
     }
 
     internal TrRmConstraintTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmGenericParamTableReader formals,
         TrRmTypeSpecTableReader types,
+        TrRmAssociatedRelationTableReader associatedRelations,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
         resourceLedger?.ConsumeWork(3);
@@ -49,6 +52,7 @@ public readonly ref struct TrRmConstraintTableReader
             _resourceLedger?.ConsumeWork();
             var data = section.Slice((row - 1) * RowSize, RowSize);
             var owner = Read(data, 0);
+            var ownerRow = checked((int)owner);
             _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
             _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
@@ -58,6 +62,8 @@ public readonly ref struct TrRmConstraintTableReader
             if (owner != formals.GetConstraintOwner(row)
                 || flags != 0 || payload == 0
                 || (kind == 2 && payload > 3)
+                || (kind == 3 && (formals.GetFormalKind(ownerRow) != 1
+                    || payload > (uint)associatedRelations.Count))
                 || (kind is not (1 or 2 or 3)))
             {
                 throw InvalidConstraint();

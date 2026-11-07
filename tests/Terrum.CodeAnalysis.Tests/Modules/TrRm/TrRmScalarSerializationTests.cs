@@ -8,17 +8,17 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmScalarSerializationTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmScalarSerializationTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong ScalarUInt64(ulong value);
@@ -101,7 +101,7 @@ public sealed class TrRmScalarSerializationTests
         var checkedSource = Compile(source, BoundRuntimePolicy.CheckedExceptions);
         Assert.That(NativeJit.Execute(checkedSource, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
         // The persisted scalar contract remains fail-fast; serialization does not add a policy.
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedSource, "checked"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedSource, "checked"));
     }
     [TestCase(1,"EF")]
     [TestCase(2,"EFCD")]
@@ -116,10 +116,10 @@ public sealed class TrRmScalarSerializationTests
             return (MethodInfo)__nunitActual0!;
         }))();
         var bytes = new List<byte>();
-        write.Invoke(null, [bytes, 0x0123456789ABCDEFUL, width]);
+        _ = write.Invoke(null, [bytes, 0x0123456789ABCDEFUL, width]);
         Assert.That(bytes.ToArray(), Is.EqualTo(Convert.FromHexString(hex)));
         bytes.Clear();
-        write.Invoke(null, [bytes, ulong.MaxValue, width]);
+        _ = write.Invoke(null, [bytes, ulong.MaxValue, width]);
         Assert.That(bytes, Is.EqualTo(Enumerable.Repeat(byte.MaxValue, width)));
     }
     [TestCase(-1L,1,"FF")]
@@ -144,15 +144,23 @@ public sealed class TrRmScalarSerializationTests
         }
         bytes.AddRange([2, 1, 1]);
         var start = bytes.Count;
-        write.Invoke(null, [bytes, unchecked((ulong)value), width]);
+        _ = write.Invoke(null, [bytes, unchecked((ulong)value), width]);
         Assert.That(bytes.Skip(start).ToArray(), Is.EqualTo(Convert.FromHexString(hex)));
         bytes.AddRange([0x83, 1]);
-        var artifact = TrRmExecutionAuditTests.Artifact(bytes.ToArray(),
+        var artifact = TrRmExecutionAuditTests.Artifact([.. bytes],
             resultRow: width == 8 ? 5 : 1, entry: width != 8, exported: width == 8);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = loaded.Functions[0].Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))();
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual3 = local.Initializer; Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual3!; }))().Value, Is.EqualTo(value));
+        var local = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual2 = loaded.Functions[0].Body.Statements[0];
+            Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual2!;
+        }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual3 = local.Initializer;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual3!;
+        }))().Value, Is.EqualTo(value));
         if (width != 8)
         {
             Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo((int)value));
@@ -171,7 +179,7 @@ public sealed class TrRmScalarSerializationTests
         var original = Compile(source, BoundRuntimePolicy.FailFast);
         if (!supported)
         {
-            Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "limit"));
+            _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "limit"));
             return;
         }
         var artifact = TrRmExecutableCompiler.Emit(original, "limit");
@@ -193,7 +201,11 @@ public sealed class TrRmScalarSerializationTests
             : "public uint64 Value(uint64 x) { return x ^ 18446744073709551615; }";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(program, "scalar-service"));
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-scalar-{Guid.NewGuid():N}.dll");
@@ -210,10 +222,14 @@ public sealed class TrRmScalarSerializationTests
                 {
                     var peer = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                     Assert.That(peer.HasErrors, Is.False, string.Join(Environment.NewLine, peer.Diagnostics));
-                    executable = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = peer.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
-                    Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(executable, "checked"));
+                    executable = ((global::System.Func<BoundProgram>)(() => {
+                        var __nunitActual5 = peer.Program;
+                        Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                        return (BoundProgram)__nunitActual5!;
+                    }))();
+                    _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(executable, "checked"));
                 }
-                await File.WriteAllBytesAsync(path, NativeEmitter.EmitLibrary(executable, ["Value"], policy));
+                await File.WriteAllBytesAsync(path, NativeEmitter.EmitLibrary(executable, ["Value"], policy)).ConfigureAwait(false);
                 var handle = NativeLibrary.Load(path);
                 try
                 {
@@ -241,7 +257,7 @@ public sealed class TrRmScalarSerializationTests
     public void FullWidthWriteDoesNotRelaxPublicMagnitudeTruncationOrCanonicalWidthAudits(byte[] body)
     {
         var resultRow = body[2];
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body, resultRow: resultRow,
                 entry: resultRow == 1, exported: resultRow != 1)));
     }
@@ -257,7 +273,11 @@ public sealed class TrRmScalarSerializationTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
     }
 
     private static byte[] Body(byte[] artifact, int method)
@@ -277,7 +297,7 @@ public sealed class TrRmScalarSerializationTests
         var regions = Read();
         var types = Read();
         Assert.That(regions, Is.EqualTo(0));
-        at += types * 4 + values * 2 * width + (blocks + 1 + values) * width;
+        at += (types * 4) + (values * 2 * width) + ((blocks + 1 + values) * width);
         var offsets = new int[blocks + 1];
         for (var block = 0; block <= blocks; block++)
         {
@@ -291,7 +311,9 @@ public sealed class TrRmScalarSerializationTests
             at = start + offsets[block];
             var presence = body[at++];
             if ((presence & 1) != 0)
-            { _ = Read(); }
+            {
+                _ = Read();
+            }
             foreach (var bit in new[] { 2, 4, 8, 16 })
             {
                 if ((presence & bit) != 0)
@@ -302,7 +324,9 @@ public sealed class TrRmScalarSerializationTests
             }
             var operations = Read();
             if (operations == 0)
-            { continue; }
+            {
+                continue;
+            }
             Assert.That(operations, Is.EqualTo(1));
             if (payload.Length != 1)
             {

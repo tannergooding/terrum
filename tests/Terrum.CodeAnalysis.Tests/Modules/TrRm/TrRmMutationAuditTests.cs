@@ -3,15 +3,16 @@
 using System;
 using System.IO;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmMutationAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmMutationAuditTests
 {
     // One indexed block: signed -1 and count 1, two uint32 reinterpretations,
     // unsigned right shift, signed result reinterpretation. All inventories are handwritten.
@@ -33,35 +34,35 @@ public sealed class TrRmMutationAuditTests
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(int.MaxValue));
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             TrRmExecutionAuditTests.Artifact(ShiftBody(), effect: 1)));
     }
-    [TestCase(5,(byte)(2))]   // bool source mapping
-    [TestCase(9,(byte)(6))]   // uint64 destination mapping
-    [TestCase(18,(byte)(2))]  // forged use-block count
-    [TestCase(26,(byte)(5))]  // incomplete definition range
-    [TestCase(29,(byte)(24))] // conversion's definition offset
-    [TestCase(34,(byte)(44))] // block extent
-    [TestCase(35,(byte)(42))] // terminator offset
-    [TestCase(39,(byte)(3))]  // false last-use ordinal
-    [TestCase(62,(byte)(0))]  // unassigned conversion policy
-    [TestCase(62,(byte)(4))]  // unassigned conversion policy
-    [TestCase(63,(byte)(3))]  // self-dependent conversion definition
-    [TestCase(71,(byte)(8))]  // no logical-right kind exists
-    [TestCase(73,(byte)(2))]  // int32 count is not a TRRM shift operand
-    [TestCase(76,(byte)(2))]  // conversion result disagrees with indexed type
+    [TestCase(5,(byte)2)]   // bool source mapping
+    [TestCase(9,(byte)6)]   // uint64 destination mapping
+    [TestCase(18,(byte)2)]  // forged use-block count
+    [TestCase(26,(byte)5)]  // incomplete definition range
+    [TestCase(29,(byte)24)] // conversion's definition offset
+    [TestCase(34,(byte)44)] // block extent
+    [TestCase(35,(byte)42)] // terminator offset
+    [TestCase(39,(byte)3)]  // false last-use ordinal
+    [TestCase(62,(byte)0)]  // unassigned conversion policy
+    [TestCase(62,(byte)4)]  // unassigned conversion policy
+    [TestCase(63,(byte)3)]  // self-dependent conversion definition
+    [TestCase(71,(byte)8)]  // no logical-right kind exists
+    [TestCase(73,(byte)2)]  // int32 count is not a TRRM shift operand
+    [TestCase(76,(byte)2)]  // conversion result disagrees with indexed type
     public void HandwrittenIndexedTamperingRejects(int offset, byte value)
     {
         var body = ShiftBody();
         body[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
-    [TestCase((byte)(1),int.MaxValue)]
-    [TestCase((byte)(2),0)]
+    [TestCase((byte)1,int.MaxValue)]
+    [TestCase((byte)2,0)]
     public void HandwrittenIndexedIntegerConvertPolicyExecutes(byte policy, int expected)
     {
         var body = ShiftBody();
@@ -76,7 +77,7 @@ public sealed class TrRmMutationAuditTests
         var body = ShiftBody();
         for (var length = 1; length < body.Length; length++)
         {
-            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
                 TrRmExecutionAuditTests.Artifact(body[..length])));
         }
     }
@@ -105,7 +106,11 @@ public sealed class TrRmMutationAuditTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var original = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var original = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "audit"));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
@@ -117,15 +122,19 @@ public sealed class TrRmMutationAuditTests
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; ");
         for (var index = 0; index < updates; index++)
         {
-            source.Append("x++; ");
+            _ = source.Append("x++; ");
         }
-        source.Append("return +x; }");
+        _ = source.Append("return +x; }");
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var original = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var original = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         if (!supported)
         {
-            Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "limit"));
+            _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "limit"));
             return;
         }
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "limit"));

@@ -326,19 +326,38 @@ public static partial class TrRmExecutableCompiler
             var parameterTypes
                 = ImmutableArray.CreateBuilder<PrimitiveType>(
                     parameterCount);
+            var implicitReferenceParameters = new bool[parameterCount];
             for (var ordinal = 0; ordinal < parameterCount; ordinal++)
             {
                 var parameterRow = parameterStart + ordinal;
                 if (tables.Parameters.GetMode(parameterRow) != 0
-                    || tables.Parameters.GetFlags(parameterRow) != 0)
+                    || (tables.Parameters.GetFlags(parameterRow) & ~1) != 0)
                 {
                     throw Unsupported(
-                        "L1 executable local methods require ordinary value parameters.");
+                        "L1 executable local methods require ordinary value or implicit-reference parameters.");
                 }
 
-                parameterTypes.Add(ReadLocalAggregateType(tables,
-                    tables.Parameters.GetTypeSpec(parameterRow),
-                    typeEnvironment));
+                implicitReferenceParameters[ordinal]
+                    = (tables.Parameters.GetFlags(parameterRow) & 1) != 0;
+                var parameterTypeSpec = tables.Parameters.GetTypeSpec(
+                    parameterRow);
+                if (implicitReferenceParameters[ordinal])
+                {
+                    parameterTypeSpec
+                        = GetLocalAggregateImplicitReferenceReferentTypeSpec(
+                            tables.TypeSpecs, parameterTypeSpec);
+                }
+
+                var parameterType = ReadLocalAggregateType(tables,
+                    parameterTypeSpec, typeEnvironment);
+                if (implicitReferenceParameters[ordinal]
+                    && parameterType == PrimitiveType.Void)
+                {
+                    throw Unsupported(
+                        "L1 implicit-reference parameters require a non-unit referent.");
+                }
+
+                parameterTypes.Add(parameterType);
             }
 
             var returnType = ReadLocalAggregateType(tables,
@@ -349,7 +368,9 @@ public static partial class TrRmExecutableCompiler
             for (var ordinal = 0; ordinal < parameterCount; ordinal++)
             {
                 variables.Add(new BoundVariable($"arg{ordinal}",
-                    parameterTypes[ordinal], false, default));
+                    parameterTypes[ordinal], false, default) {
+                    IsImplicitRef = implicitReferenceParameters[ordinal],
+                });
             }
 
             var methodFlags = tables.Methods.GetFlags(methodRow);
@@ -744,6 +765,20 @@ public static partial class TrRmExecutableCompiler
             nativePointerTypes, signatureIndexByAnchorMethod,
             typeEnvironment.StructureTypeByTypeDef, tables.Imports,
             typeEnvironment.ArrayTypeByTypeSpecRow);
+    }
+
+    private static uint
+        GetLocalAggregateImplicitReferenceReferentTypeSpec(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        if (!typeSpecs.TryGetImplicitReadonlyReferenceReferentTypeSpecRef(
+                typeSpecRef, out var referentTypeSpecRef))
+        {
+            throw Unsupported(
+                "L1 implicit-reference parameters require an ordinary reference TypeSpec.");
+        }
+
+        return referentTypeSpecRef;
     }
 
     private static BoundFunction DecodeLocalAggregateLayoutBody(
@@ -3206,14 +3241,16 @@ public static partial class TrRmExecutableCompiler
                         record[(inputOffset + 2)..]);
                 inputOffset += 4;
                 BoundExpression argument;
+                var implicitReference
+                    = targetFunction.Variables[ordinal].IsImplicitRef;
                 if (selectorKind == 2)
                 {
-                    if (sourceUse != 1
+                    if (sourceUse != (implicitReference ? 3 : 1)
                         || selectorIndex >= state.HomeVariable.Length
                         || state.HomeVariable[selectorIndex] < 0)
                     {
                         throw Invalid(
-                            "An L1 CallSite formal input does not select a CopyRead Home.");
+                            "An L1 CallSite formal input does not select a Home with the selected source-use.");
                     }
 
                     var argumentVariable = state.HomeVariable[selectorIndex];
@@ -3222,12 +3259,31 @@ public static partial class TrRmExecutableCompiler
                 }
                 else if (selectorKind == 1)
                 {
-                    if (sourceUse != 1 || selectorIndex > 13
-                        || !state.RegisterValues.TryGetValue(selectorIndex,
-                            out argument!))
+                    if (selectorIndex > 13)
                     {
                         throw Invalid(
-                            "An L1 CallSite register input is undefined or has an invalid source-use.");
+                            "An L1 CallSite register input exceeds the general register domain.");
+                    }
+
+                    if (implicitReference && sourceUse == 3
+                        && state.Selections.TryGetValue(selectorIndex,
+                            out var selection)
+                        && selection.AccessKind is 1 or 2
+                        && selection.ReferentType
+                            == targetFunction.Variables[ordinal].Type)
+                    {
+                        argument = ReadSelection(selection);
+                    }
+                    else if (!implicitReference && sourceUse == 1
+                        && state.RegisterValues.TryGetValue(selectorIndex,
+                            out var value))
+                    {
+                        argument = value;
+                    }
+                    else
+                    {
+                        throw Invalid(
+                            "An L1 CallSite register input is undefined or does not match its selected formal source-use.");
                     }
                 }
                 else if (selectorKind == 0)
@@ -4710,7 +4766,7 @@ public static partial class TrRmExecutableCompiler
             return distances;
         }
 
-        int FindCommonJoin(int first, int second)
+        int FindCommonJoin(int first, int second, int stop)
         {
             if (first == second)
             {
@@ -4741,7 +4797,13 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            return join;
+            if (join >= 0)
+            {
+                return join;
+            }
+            return stop >= 0
+                && (left.ContainsKey(stop) || right.ContainsKey(stop))
+                ? stop : -1;
         }
 
         ImmutableArray<BoundStatement> BuildPath(int start, int stop,
@@ -4751,15 +4813,19 @@ public static partial class TrRmExecutableCompiler
             {
                 return [];
             }
-            if ((uint)start >= (uint)blocks.Length
-                || depth > SemanticVerifier.MaximumDepth
-                || visitBudget-- <= 0
-                || !activeBlocks.Add(start)
-                || !visitedBlocks.Add(start))
+            var invalidBlock = (uint)start >= (uint)blocks.Length;
+            var excessiveDepth = depth > SemanticVerifier.MaximumDepth;
+            var exhaustedVisits = visitBudget-- <= 0;
+            var activeCycle = activeBlocks.Contains(start);
+            var repeatedBlock = visitedBlocks.Contains(start);
+            if (invalidBlock || excessiveDepth || exhaustedVisits
+                || activeCycle || repeatedBlock)
             {
                 throw Unsupported(
                     "The L1 control-flow graph is cyclic, irreducible or exceeds structured reconstruction bounds.");
             }
+            _ = activeBlocks.Add(start);
+            _ = visitedBlocks.Add(start);
 
             var block = blocks[start];
             var statements = ImmutableArray.CreateBuilder<BoundStatement>(
@@ -4786,7 +4852,7 @@ public static partial class TrRmExecutableCompiler
             if (block.Condition is BoundExpression condition)
             {
                 var join = FindCommonJoin(block.TrueTarget,
-                    block.FalseTarget);
+                    block.FalseTarget, stop);
                 var whenTrue = BuildPath(block.TrueTarget, join,
                     depth + 1);
                 var whenFalse = BuildPath(block.FalseTarget, join,

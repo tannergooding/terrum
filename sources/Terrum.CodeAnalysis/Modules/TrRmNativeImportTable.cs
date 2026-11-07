@@ -71,6 +71,55 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
+    internal static bool IsNativeOutputCellType(TrRmTypeSpecTableReader types,
+        uint typeSpecRef, TrRmLayoutTableReader layouts)
+    {
+        if (TryGetWritableOutputPointee(types, typeSpecRef, out _)
+            || TryGetBlittableAggregateParameterTypeDef(types, typeSpecRef,
+                layouts, writableRequired: true, out _))
+        {
+            return true;
+        }
+
+        var type = types.GetTypeSpecBytes(typeSpecRef);
+        if (type.Length == 7 && type[0] == 0x0C && type[1] == 1
+            && type[2] == 0x8C)
+        {
+            var pointeeRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            return IsNativeAbiValueType(types, pointeeRef);
+        }
+
+        return false;
+    }
+
+    internal static bool TryGetNativeOutputCellPointeeTypeSpecRef(
+        TrRmTypeSpecTableReader types, uint typeSpecRef,
+        out uint pointeeTypeSpecRef)
+    {
+        var type = types.GetTypeSpecBytes(typeSpecRef);
+        if (type.Length == 4 && type[0] == 1 && type[1] == 1
+            && type[2] == 0x8C
+            && TryGetWritableOutputPointee(types, typeSpecRef, out _))
+        {
+            pointeeTypeSpecRef = 0xF200_0000u | type[3];
+            return true;
+        }
+
+        if (type.Length == 7 && type[0] == 0x0C && type[1] == 1
+            && type[2] == 0x8C)
+        {
+            var pointeeRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            if (types.GetTypeSpecBytes(pointeeRef) is not [1, 0, 0])
+            {
+                pointeeTypeSpecRef = pointeeRef;
+                return true;
+            }
+        }
+
+        pointeeTypeSpecRef = 0;
+        return false;
+    }
+
     internal static bool TryGetNativeParameterPointee(TrRmTypeSpecTableReader types,
         uint typeSpecRef, out PrimitiveType pointeeType)
     {
@@ -325,6 +374,11 @@ internal static class TrRmNativeImportTypeContract
 public readonly record struct TrRmDevelopmentNativeImportRow(
     int MethodDefRow, int LibraryNameStringRow, int ExportNameStringRow, uint ResolutionPolicy);
 
+internal readonly record struct TrRmDevelopmentNativeImportResolutionRow(
+    int MethodDefRow, int LibraryNameStringRow, int ExportNameStringRow,
+    NativeImportResolutionMode ResolutionMode,
+    NativeImportResolutionPolicy ResolutionPolicy);
+
 /// <summary>Emits rows for the development-only four-word NativeImport prototype.</summary>
 public static class TrRmDevelopmentNativeImportTableWriter
 {
@@ -483,7 +537,7 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
                 ? contracts.GetEffectsMask((int)method) : 0;
             if (method is 0 or > 0xFF_FFFF || method > methods.Count
                 || library is 0 or > 0xFF_FFFF || export is 0 or > 0xFF_FFFF
-                || policy != WindowsSystem32ResolutionPolicy
+                || !validResolution
                 || _rowByMethod[method] != 0
                 || methods.GetOwnerType((int)method) != 0
                 || methods.GetBodyRow((int)method) != 0
@@ -506,6 +560,8 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
             }
 
             _rowByMethod[method] = row;
+            _resolutionModeByMethod[method] = resolutionMode;
+            _resolutionPolicyByMethod[method] = resolutionPolicy;
             TrRmNativeImportSignatureValidator.Validate(method, methods, signatures, parameters, types,
                 contracts.GetNativeOutputs((int)method), contracts.GetNativeParameters((int)method),
                 layouts, validateNativeParameterAccess: true);
@@ -584,13 +640,23 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
     /// <param name="methodDefRow">The 1-based method-definition row.</param>
     /// <returns>The decoded library name.</returns>
     public string GetLibraryName(int methodDefRow)
-        => _strings.DecodeName(GetImportForMethod(methodDefRow).LibraryNameStringRow);
+        => _strings.DecodeName(GetImportNameStringRow(methodDefRow, 4));
 
     /// <summary>Gets the export name associated with a method's import.</summary>
     /// <param name="methodDefRow">The 1-based method-definition row.</param>
     /// <returns>The decoded export name.</returns>
     public string GetExportName(int methodDefRow)
-        => _strings.DecodeName(GetImportForMethod(methodDefRow).ExportNameStringRow);
+        => _strings.DecodeName(GetImportNameStringRow(methodDefRow, 8));
+
+    private int GetImportNameStringRow(int methodDefRow, int offset)
+    {
+        if (!HasImportForMethod(methodDefRow))
+        {
+            throw InvalidNativeImport();
+        }
+
+        return checked((int)Read(GetRow(_rowByMethod[methodDefRow]), offset));
+    }
 
     private ReadOnlySpan<byte> GetRow(int row)
     {

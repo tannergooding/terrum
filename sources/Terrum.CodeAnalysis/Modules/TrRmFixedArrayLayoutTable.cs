@@ -33,13 +33,17 @@ internal readonly ref struct TrRmFixedArrayLayoutTableReader
         TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         resourceLedger?.ConsumeWork(3);
+        if (recordCount is < 0 or > 0xFF_FFFF)
+        {
+            throw new InvalidDataException(
+                "TRRM FixedArrayLayout row count exceeds its 24-bit table limit.");
+        }
         var hasWindowsProfile = targetProfiles.TryGetProfile(
             TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
             TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
             out var expectedProfile);
         resourceLedger?.ConsumeWork(3);
         if (!schema.UsesForeignInvocationStorageFixedArrays()
-            || recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
             || (recordCount == 0 && !section.IsEmpty)
             || (recordCount != 0 && !hasWindowsProfile))

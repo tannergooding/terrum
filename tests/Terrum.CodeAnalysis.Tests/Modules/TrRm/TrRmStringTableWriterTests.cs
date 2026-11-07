@@ -2,12 +2,13 @@
 
 using System;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmStringTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmStringTableWriterTests
 {
     [Test]
     public void EmitsIndexedWorkedExampleExactly()
@@ -57,11 +58,11 @@ public sealed class TrRmStringTableWriterTests
         for (var row = 1; row <= 4; row++)
         {
             Assert.That(reader.DecodeNamespace(row), Is.EqualTo(""));
-            Assert.Throws<InvalidDataException>(() => DecodeName(section, row));
+            _ = Assert.Throws<InvalidDataException>(() => DecodeName(section, row));
         }
 
         Assert.That(reader.DecodeName(5), Is.EqualTo("Widget"));
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmStringTableWriter.EncodeTextRows([("X\0Y", 1)]));
     }
 
@@ -80,7 +81,7 @@ public sealed class TrRmStringTableWriterTests
     [TestCase("\u00E9",0)]
     public void RejectsInvalidOrUnencodableNames(string text, int encoding)
     {
-        Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(text, encoding)]));
+        _ = Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(text, encoding)]));
     }
 
     [Test]
@@ -88,23 +89,23 @@ public sealed class TrRmStringTableWriterTests
     {
         var high = new string('\uD800', 1);
         var low = new string('\uDC00', 1);
-        Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(high, 1)]));
-        Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(low, 2)]));
-        Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(high, 3)]));
+        _ = Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(high, 1)]));
+        _ = Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(low, 2)]));
+        _ = Assert.Throws<ArgumentException>(() => TrRmStringTableWriter.EncodeNames([(high, 3)]));
     }
 
     [Test]
     public void RejectsAbsentAndUnassignedTableFormats()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => TrRmStringTableWriter.EncodeNames([]));
-        Assert.Throws<ArgumentOutOfRangeException>(() => TrRmStringTableWriter.EncodeNames([("A", 4)]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => TrRmStringTableWriter.EncodeNames([]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => TrRmStringTableWriter.EncodeNames([("A", 4)]));
     }
 
     [Test]
     public void UnitLimitIsPerEncodingNotPerScalar()
     {
         var text = new string('\u00E9', 8_388_608);
-        Assert.Throws<ArgumentOutOfRangeException>(() => TrRmStringTableWriter.EncodeNames([(text, 1)]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => TrRmStringTableWriter.EncodeNames([(text, 1)]));
         var section = TrRmStringTableWriter.EncodeNames([(text, 2)]);
         Assert.That(section[8], Is.EqualTo((byte)2));
         Assert.That(section[9], Is.EqualTo((byte)0));

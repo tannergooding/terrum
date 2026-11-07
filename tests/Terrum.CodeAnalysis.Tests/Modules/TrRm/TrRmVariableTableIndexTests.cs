@@ -5,7 +5,8 @@ using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmVariableTableIndexTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmVariableTableIndexTests
 {
     [Test]
     public void A3VariableIndexConstructorAndRowSelectionReserveExactWork()

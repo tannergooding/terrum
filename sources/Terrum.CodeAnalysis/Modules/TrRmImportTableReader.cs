@@ -180,19 +180,29 @@ public readonly ref struct TrRmImportTableReader
                 throw InvalidImport();
             }
             _resourceLedger?.ConsumeWork(2);
+            var definitionKind = expected >> 24;
+            var missingLayoutQueriesFeature = profileAware
+                && definitionKind == 0x14
+                && TrRmFeatureTableReader.TryGetRuleRevision(
+                    TrRmFeatureTableReader.LayoutQueriesFeatureId, schema,
+                    out _)
+                && !TrRmFeatureManifestValidator.Requires(features, modules,
+                    module, TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                    schema);
+            if (missingLayoutQueriesFeature)
+            {
+                throw InvalidImport();
+            }
+
             if (profileAware && schema.UsesCopyOrigin())
             {
-                var definitionKind = expected >> 24;
                 var contractOnlyIdentity = definitionKind is 0x13 or 0x14
                     && (visibility != 2 || (owner != 0
                         && (types.GetFlags(owner) & 3) != 2));
-                if ((definitionKind == 0x14
+                if (contractOnlyIdentity
                     && !TrRmFeatureManifestValidator.Requires(features, modules,
-                        module, TrRmFeatureTableReader.LayoutQueriesFeatureId, schema))
-                    || (contractOnlyIdentity
-                        && !TrRmFeatureManifestValidator.Requires(features, modules,
-                            module, TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId,
-                            schema)))
+                        module, TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId,
+                        schema))
                 {
                     throw InvalidImport();
                 }
@@ -268,12 +278,19 @@ public readonly ref struct TrRmImportTableReader
         }
     }
 
+    /// <summary>Checks whether an import records an expectation for a definition reference.</summary>
+    /// <param name="reference">The expected local or imported definition identifier.</param>
+    /// <returns><see langword="true"/> when at least one Import row expects the reference.</returns>
     public bool IsExpectedDefinition(uint reference)
     {
         _resourceLedger?.ConsumeWork();
         return _expected is not null && _expected.ContainsKey(reference);
     }
 
+    /// <summary>Gets the unique target and runtime requirements expected for a definition.</summary>
+    /// <param name="reference">The expected definition identifier.</param>
+    /// <param name="requirements">The requirements recorded for that definition.</param>
+    /// <returns><see langword="true"/> when the reference has one unambiguous expectation.</returns>
     public bool TryGetExpectedRequirements(uint reference,
         out (uint TargetRequirement, uint RuntimePolicy) requirements)
     {

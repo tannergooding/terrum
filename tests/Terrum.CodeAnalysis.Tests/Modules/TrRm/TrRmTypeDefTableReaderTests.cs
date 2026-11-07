@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmTypeDefTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmTypeDefTableReaderTests
 {
     [Test]
     public void DecodesEmptyNamespaceAndOwnedFieldRange()
@@ -20,25 +21,25 @@ public sealed class TrRmTypeDefTableReaderTests
         Assert.That(types.GetName(1), Is.EqualTo("Widget"));
         Assert.That(types.GetFieldRange(1), Is.EqualTo((1, 2)));
         Assert.That(types.GetOwnerModule(1), Is.EqualTo(1));
-        Assert.Throws<InvalidDataException>(() => GetName(Type(), 0));
-        Assert.Throws<InvalidDataException>(() => GetName(Type(), 2));
+        _ = Assert.Throws<InvalidDataException>(() => GetName(Type(), 0));
+        _ = Assert.Throws<InvalidDataException>(() => GetName(Type(), 2));
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(4,(byte)(0))]
-    [TestCase(8,(byte)(0))]
-    [TestCase(8,(byte)(3))]
-    [TestCase(8,(byte)(0x40))]
-    [TestCase(12,(byte)(0))]
-    [TestCase(12,(byte)(2))]
-    [TestCase(16,(byte)(0))]
-    [TestCase(20,(byte)(1))]
-    [TestCase(28,(byte)(1))]
-    [TestCase(32,(byte)(1))]
+    [TestCase(0,(byte)0)]
+    [TestCase(4,(byte)0)]
+    [TestCase(8,(byte)0)]
+    [TestCase(8,(byte)3)]
+    [TestCase(8,(byte)0x40)]
+    [TestCase(12,(byte)0)]
+    [TestCase(12,(byte)2)]
+    [TestCase(16,(byte)0)]
+    [TestCase(20,(byte)1)]
+    [TestCase(28,(byte)1)]
+    [TestCase(32,(byte)1)]
     public void RejectsMalformedReferencesFlagsAndRanges(int offset, byte replacement)
     {
         var bytes = Type();
         bytes[offset] = replacement;
-        Assert.Throws<InvalidDataException>(() => Create(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
     [Test]
@@ -53,7 +54,7 @@ public sealed class TrRmTypeDefTableReaderTests
         Write(bytes, 28, 1);
         Write(bytes, 32, 1);
 
-        Assert.Throws<InvalidDataException>(() => CreateStandardEnumType(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => CreateStandardEnumType(bytes));
         var enums = new TrRmTypeDefTableReader(bytes, 1, names, modules,
             0, 0, 1, 0, TrRmArtifactSchema.NominalEnumsDraft);
         Assert.That(enums.GetKind(1), Is.EqualTo(4));
@@ -70,8 +71,8 @@ public sealed class TrRmTypeDefTableReaderTests
     [Test]
     public void RejectsTruncatedRowsAndMismatchedOwnerCounts()
     {
-        Assert.Throws<InvalidDataException>(() => Create(Type()[..^1]));
-        Assert.Throws<InvalidDataException>(() => Create(Type(), fieldCount: 0));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Type()[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Type(), fieldCount: 0));
     }
 
     [Test]
@@ -79,7 +80,7 @@ public sealed class TrRmTypeDefTableReaderTests
     {
         var bytes = Type();
         Write(bytes, 28, 1);
-        Assert.Throws<InvalidDataException>(() => CreateWithLayout(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => CreateWithLayout(bytes));
     }
 
     [Test]
@@ -88,12 +89,12 @@ public sealed class TrRmTypeDefTableReaderTests
         var duplicate = new byte[88];
         Type().CopyTo(duplicate, 0);
         Type().CopyTo(duplicate, 44);
-        Assert.Throws<InvalidDataException>(() => Create(duplicate, typeCount: 2));
+        _ = Assert.Throws<InvalidDataException>(() => Create(duplicate, typeCount: 2));
 
         var unowned = Type();
         Write(unowned, 12, 0);
         Write(unowned, 16, 0);
-        Assert.Throws<InvalidDataException>(() => Create(unowned));
+        _ = Assert.Throws<InvalidDataException>(() => Create(unowned));
     }
 
     [Test]
@@ -101,8 +102,8 @@ public sealed class TrRmTypeDefTableReaderTests
     {
         var bytes = Field();
         Assert.That(GetFieldName(bytes, 1), Is.EqualTo("Widget"));
-        Assert.Throws<InvalidDataException>(() => GetFieldName(bytes, 0));
-        Assert.Throws<InvalidDataException>(() => GetFieldName(bytes, 2));
+        _ = Assert.Throws<InvalidDataException>(() => GetFieldName(bytes, 0));
+        _ = Assert.Throws<InvalidDataException>(() => GetFieldName(bytes, 2));
 
         foreach (var (offset, replacement) in new (int, byte)[] {
             (0, 0), (0, 2), (4, 0), (8, 0), (8, 2), (12, 3),
@@ -110,11 +111,11 @@ public sealed class TrRmTypeDefTableReaderTests
         {
             var invalid = Field();
             invalid[offset] = replacement;
-            Assert.Throws<InvalidDataException>(() => GetFieldName(invalid, 1));
+            _ = Assert.Throws<InvalidDataException>(() => GetFieldName(invalid, 1));
         }
 
-        Assert.Throws<InvalidDataException>(() => GetFieldName(Field()[..^1], 1));
-        Assert.Throws<InvalidDataException>(() => GetFieldName(Field(), 1, fieldCount: 0));
+        _ = Assert.Throws<InvalidDataException>(() => GetFieldName(Field()[..^1], 1));
+        _ = Assert.Throws<InvalidDataException>(() => GetFieldName(Field(), 1, fieldCount: 0));
     }
 
     private static void Create(byte[] bytes, int fieldCount = 1, int typeCount = 1)

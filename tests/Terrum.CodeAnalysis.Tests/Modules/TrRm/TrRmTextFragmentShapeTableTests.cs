@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmTextFragmentShapeTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmTextFragmentShapeTableTests
 {
     [Test]
     public void ValidatesLiteralAndFormattedRowsWithOpenConstraintEvidence()
@@ -45,6 +46,38 @@ public sealed class TrRmTextFragmentShapeTableTests
     }
 
     [Test]
+    public void TextFragmentReaderChargesLiteralAndFormattedEvidenceAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        var setup = CreateReaders(fixture);
+        var setupInputs = CreateTextInputs(fixture, setup);
+        var fragments = TrRmTextFragmentShapeTableWriter.Encode([
+            new TrRmTextFragmentShapeRow(1, 0, 0,
+                0, 0, 0, 0, 0, 0, 2),
+            new TrRmTextFragmentShapeRow(1, 1, 1,
+                1, 2, 3, 0, 1, 1, 4),
+        ], setupInputs.Shapes, setupInputs.Captures, setup.TypeDefs,
+            setup.Methods, setup.Formals, setup.Constraints, setup.TypeSpecs,
+            setup.Interfaces, setup.InterfaceBases, setup.InterfaceMethods,
+            setup.Witnesses, setup.WitnessMembers, setup.Imports);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var textInputs = CreateTextInputs(fixture, readers);
+            var textFragments = new TrRmTextFragmentShapeTableReader(
+                fragments, 2, textInputs.Shapes, textInputs.Captures,
+                readers.TypeDefs, readers.Methods, readers.Formals,
+                readers.Constraints, readers.TypeSpecs, readers.Interfaces,
+                readers.InterfaceBases, readers.InterfaceMethods,
+                readers.Witnesses, readers.WitnessMembers, readers.Imports,
+                ledger);
+            Assert.That(textFragments.GetKind(1), Is.Zero);
+            Assert.That(textFragments.GetKind(2), Is.EqualTo((byte)1));
+        });
+    }
+
+    [Test]
     public void AcceptsClosedWitnessEvidenceWithinTheSelectedWitnessTable()
     {
         var fixture = CreateFixture(closedWitness: true);
@@ -71,37 +104,37 @@ public sealed class TrRmTextFragmentShapeTableTests
     public void RejectsInvalidConditionalReferencesAndConstraintOwners()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 0,
                     1, 0, 0, 0, 0, 0, 2),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 0, 0, 1, 2),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 1, 1, 1, 2),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 0, 2, 1, 2),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 1, 3, 0, 1, 1, 2),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(CreateFixture(constraintKind: 2), [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 0, 1, 1, 4),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 0, 1, 3, 2),
@@ -124,7 +157,7 @@ public sealed class TrRmTextFragmentShapeTableTests
         BinaryPrimitives.WriteUInt32LittleEndian(fragments.AsSpan(28), 2);
         var shapeBytes = textInputs.ShapeBytes;
         var captureBytes = textInputs.CaptureBytes;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(shapeBytes, captureBytes, fragments)));
     }
@@ -133,17 +166,17 @@ public sealed class TrRmTextFragmentShapeTableTests
     public void RejectsMethodRowsOutsideTheInterfaceRequirementTables()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 0, 1, 3, 2),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(fixture, [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 0, 1, 1, 3),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(CreateFixture(constraintTypeSpecRef: 4), [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 0, 1, 1, 2),
@@ -160,23 +193,23 @@ public sealed class TrRmTextFragmentShapeTableTests
 
         TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(artifact, [profile]);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(artifact, []));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(artifact, [
                 profile with { WriterTryWriteFormattedMethodDefRow = 2 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(artifact, [
                 profile with { FormatterTryFormatMethodDefRow = 2 },
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(artifact, [
                 profile with { TextSpanTypeSpecRef = 1 },
             ]));
         foreach (var effectsMask in new uint[] { 0x02, 0x04 })
         {
-            Assert.Throws<InvalidDataException>(() =>
+            _ = Assert.Throws<InvalidDataException>(() =>
                 TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(
                     CreateProfileArtifact(CreateFixture(formatterEffectsMask: effectsMask)),
                     [profile]));
@@ -184,14 +217,14 @@ public sealed class TrRmTextFragmentShapeTableTests
 
         var wrongResult = (byte[])fixture.Signatures.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(wrongResult, 0xF200_0008);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(
                 CreateProfileArtifact(fixture with { Signatures = wrongResult }), [profile]));
 
         var wrongFormalConstraint = (byte[])fixture.Constraints.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             wrongFormalConstraint.AsSpan(20), 3);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.ValidateTextConstructionProfile(
                 CreateProfileArtifact(fixture with { Constraints = wrongFormalConstraint }),
                 [profile]));
@@ -200,13 +233,13 @@ public sealed class TrRmTextFragmentShapeTableTests
     [Test]
     public void ClosedFormatterWitnessMustMatchTheCaptureAndExactRequirement()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(CreateFixture(closedWitness: true,
                 witnessImplementingTypeSpecRef: 3), [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
                     1, 2, 3, 1, 0, 1, 4),
             ]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeFragments(CreateFixture(closedWitness: true,
                 witnessRequirementMethodDef: 2), [
                 new TrRmTextFragmentShapeRow(1, 0, 1,
@@ -401,7 +434,7 @@ public sealed class TrRmTextFragmentShapeTableTests
             new TrRmConstraintRow(1, constraintKind, constraintTypeSpecRef),
             new TrRmConstraintRow(2, 1, 4),
             new TrRmConstraintRow(3, 1, 3),
-        ], formals, typeSpecs);
+        ], formals, typeSpecs, default);
 
         var interfaceDefRows = new System.Collections.Generic.List<TrRmInterfaceDefRow> {
             new TrRmInterfaceDefRow(2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0),
@@ -420,7 +453,8 @@ public sealed class TrRmTextFragmentShapeTableTests
             inheritedFormatter
                 ? [new TrRmInterfaceBaseRow(3, 0, 3)]
                 : Array.Empty<TrRmInterfaceBaseRow>(), typeSpecs, interfaces);
-        var interfaceBases = new TrRmInterfaceBaseTableReader(interfaceBaseBytes,
+
+        _ = new TrRmInterfaceBaseTableReader(interfaceBaseBytes,
             interfaceBaseCount,
             typeSpecs, interfaces);
         var interfaceMethodBytes = TrRmInterfaceMethodTableWriter.Encode([
@@ -429,26 +463,28 @@ public sealed class TrRmTextFragmentShapeTableTests
             new TrRmInterfaceMethodRow(2, 1, 4),
             new TrRmInterfaceMethodRow(2, 2, 5),
         ], interfaces, methods, signatures);
-        var interfaceMethods = new TrRmInterfaceMethodTableReader(
+
+        _ = new TrRmInterfaceMethodTableReader(
             interfaceMethodBytes, 4, interfaces, methods, signatures);
         var witnessRows = closedWitness
-            ? new[] {
+            ? [
                 new TrRmInterfaceWitnessRow(
                     witnessImplementingTypeSpecRef, inheritedFormatter ? 13u : 3u,
                     1, 1, 0, 0, 0, 0),
-            }
+            ]
             : Array.Empty<TrRmInterfaceWitnessRow>();
         var witnessBytes = TrRmInterfaceWitnessTableWriter.Encode(
             witnessRows, typeSpecs, closedWitness ? 1 : 0, 0, 0);
         var witnesses = new TrRmInterfaceWitnessTableReader(
             witnessBytes, witnessRows.Length, typeSpecs, closedWitness ? 1 : 0, 0, 0);
         var witnessMemberRows = closedWitness
-            ? new[] { new TrRmWitnessMemberRow(
-                1, 3, witnessRequirementMethodDef, 2, 3) }
+            ? [ new TrRmWitnessMemberRow(
+                1, 3, witnessRequirementMethodDef, 2, 3) ]
             : Array.Empty<TrRmWitnessMemberRow>();
         var witnessMemberBytes = TrRmWitnessMemberTableWriter.Encode(
             witnessMemberRows, witnesses, typeSpecs, methods);
-        var witnessMembers = new TrRmWitnessMemberTableReader(
+
+        _ = new TrRmWitnessMemberTableReader(
             witnessMemberBytes, witnessMemberRows.Length, witnesses, typeSpecs, methods);
 
         return new Fixture(stringBytes, moduleBytes, typeSpecBytes,
@@ -486,7 +522,7 @@ public sealed class TrRmTextFragmentShapeTableTests
         var formals = new TrRmGenericParamTableReader(fixture.GenericParams, 3,
             strings, typeDefs, methods, signatures, typeSpecs, 3);
         var constraints = new TrRmConstraintTableReader(
-            fixture.Constraints, 3, formals, typeSpecs);
+            fixture.Constraints, 3, formals, typeSpecs, default);
         var interfaces = new TrRmInterfaceDefTableReader(fixture.InterfaceDefs,
             interfaceDefCount, typeDefs, formals, interfaceBaseCount,
             interfaceMethodCount, 0, 0, 0);

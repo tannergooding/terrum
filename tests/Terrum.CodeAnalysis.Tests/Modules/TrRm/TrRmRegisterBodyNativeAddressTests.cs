@@ -4,12 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmRegisterBodyNativeAddressTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmRegisterBodyNativeAddressTests
 {
     [Test]
     public void AcceptsRegisterHomeAndDiscardNativeAddressResults()
@@ -77,8 +78,8 @@ public sealed class TrRmRegisterBodyNativeAddressTests
             [0x0D, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
             [0xE9, 0, 1, 0, 0x17, 0]);
 
-        Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(body));
-        Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(
+        _ = Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(body));
+        _ = Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(
             body, schema: TrRmArtifactSchema.RootPinRuntimeDraft));
     }
 

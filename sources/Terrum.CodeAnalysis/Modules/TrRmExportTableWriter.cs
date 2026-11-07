@@ -6,6 +6,9 @@ using System.Collections.Generic;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Describes a local definition published under an ExportKey.</summary>
+/// <param name="LocalDefId">The local definition identifier to export.</param>
+/// <param name="ExportKeyStringRow">The String row containing its ExportKey.</param>
 public readonly record struct TrRmExportRow(uint LocalDefId, int ExportKeyStringRow);
 
 /// <summary>Emits public export keys after checking ownership, visibility and uniqueness.</summary>

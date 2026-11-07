@@ -6,6 +6,10 @@ using System.Collections.Generic;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Describes a producer reference and its target and runtime requirements.</summary>
+/// <param name="ProducerIdentityStringRow">The String row containing the producer identity.</param>
+/// <param name="TargetRequirement">The producer's target requirement.</param>
+/// <param name="RuntimePolicy">The producer's runtime policy.</param>
 public readonly record struct TrRmModuleRefRow(
     int ProducerIdentityStringRow, uint TargetRequirement, uint RuntimePolicy);
 
@@ -13,6 +17,11 @@ public readonly record struct TrRmModuleRefRow(
 /// <remarks>External producers remain unresolved until import binding.</remarks>
 public static class TrRmModuleRefTableWriter
 {
+    /// <summary>Encodes ModuleRef rows and validates their owning Module partitions.</summary>
+    /// <param name="rows">The ModuleRef rows in table order.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="modules">The validated Module table.</param>
+    /// <returns>The encoded ModuleRef section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmModuleRefRow> rows,
         TrRmStringTableReader strings, TrRmModuleTableReader modules)
         => Encode(rows, strings, modules, null);

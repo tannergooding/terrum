@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmCompactLinearBodyReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmCompactLinearBodyReaderTests
 {
     [Test]
     public void ReconstructsCheckedAddDefinitionsAndLastUses()
@@ -21,23 +22,24 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x15, 5, 1, 3, 4,
             0x83, 5,
         ];
-        var index = Inspect(row, 2);
-        Assert.That(index.Operations, Is.EqualTo(3));
-        Assert.That(index.ValueCount, Is.EqualTo(5));
-        Assert.That(index.Definitions, Is.EqualTo([-1, -1, 7, 12, 16]));
-        Assert.That(index.LastUses, Is.EqualTo([0, 0, 2, 2, 3]));
-        Assert.That(index.UseBlocks, Is.EqualTo([1, 1, 1, 1, 1]));
+
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, _, _) = Inspect(row, 2);
+        Assert.That(Operations, Is.EqualTo(3));
+        Assert.That(ValueCount, Is.EqualTo(5));
+        Assert.That(Definitions, Is.EqualTo([-1, -1, 7, 12, 16]));
+        Assert.That(LastUses, Is.EqualTo([0, 0, 2, 2, 3]));
+        Assert.That(UseBlocks, Is.EqualTo([1, 1, 1, 1, 1]));
     }
     [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1 },0)]
     [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 2, 1, 1, 0xFF, 0x83, 1 },0)]
     [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x83, 1 },1)]
     public void ReadsConstantAndParameterReturns(byte[] row, int parameterCount)
     {
-        var index = Inspect(row, parameterCount);
-        Assert.That(index.ValueCount, Is.EqualTo(1));
-        Assert.That(index.Definitions[0], Is.EqualTo(parameterCount == 0 ? 7 : -1));
-        Assert.That(index.LastUses[0], Is.EqualTo(index.Operations));
-        Assert.That(index.UseBlocks, Is.EqualTo([1]));
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, _, _) = Inspect(row, parameterCount);
+        Assert.That(ValueCount, Is.EqualTo(1));
+        Assert.That(Definitions[0], Is.EqualTo(parameterCount == 0 ? 7 : -1));
+        Assert.That(LastUses[0], Is.EqualTo(Operations));
+        Assert.That(UseBlocks, Is.EqualTo([1]));
     }
     [TestCase(new byte[] { 0x05, 1, 0, 1, 0, 0, 0, 0, 0, 0x83, 1 })]
     [TestCase(new byte[] { 0x06, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0x83, 1 })]
@@ -48,9 +50,10 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void ReadsWideSignedConstantWithoutChangingBodyLocalWidth()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 2, 1, 1, 200, 0, 0x83, 1];
-        var index = Inspect(row, 0);
-        Assert.That(index.Definitions, Is.EqualTo([7]));
-        Assert.That(index.LastUses, Is.EqualTo([1]));
+
+        var (_, _, Definitions, LastUses, _, _, _) = Inspect(row, 0);
+        Assert.That(Definitions, Is.EqualTo([7]));
+        Assert.That(LastUses, Is.EqualTo([1]));
     }
     [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
         0xF0, 0x20, 1, 1, 1, 0, 0, 1, 0, 0x83, 1 },(byte)9)]
@@ -69,31 +72,32 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void RejectsNegativeSignedLiteralForUnsignedType(byte typeCode)
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 2, 1, 1, 0xFF, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 0, typeCode: typeCode));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 0, typeCode: typeCode));
     }
 
     [Test]
     public void AcceptsValueFreeFailWithoutTypeMap()
     {
         byte[] row = [0x04, 0, 0, 0x87, 1];
-        var index = Inspect(row, 0);
-        Assert.That(index.ValueCount, Is.EqualTo(0));
-        Assert.That(index.Operations, Is.EqualTo(0));
-        Assert.That(index.Definitions, Is.Empty);
+
+        var (Operations, ValueCount, Definitions, _, _, _, _) = Inspect(row, 0);
+        Assert.That(ValueCount, Is.EqualTo(0));
+        Assert.That(Operations, Is.EqualTo(0));
+        Assert.That(Definitions, Is.Empty);
     }
 
     [Test]
     public void ReturnZeroRequiresVoidResultAndNoValueDefinition()
     {
         byte[] row = [0x04, 0, 0, 0x83, 0];
-        var index = Inspect(row, 0, typeCode: 0);
-        Assert.That(index.ValueCount, Is.EqualTo(0));
-        Assert.That(index.Operations, Is.EqualTo(0));
-        Assert.That(index.UseBlocks, Is.Empty);
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = Inspect(row, 0, typeCode: 0);
+        Assert.That(ValueCount, Is.EqualTo(0));
+        Assert.That(Operations, Is.EqualTo(0));
+        Assert.That(UseBlocks, Is.Empty);
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
 
         byte[] invalid = [0x04, 0, 0, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => Inspect(invalid, 0, typeCode: 0));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(invalid, 0, typeCode: 0));
     }
 
     [Test]
@@ -104,11 +108,12 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1,
             8, 2, 2, 1, 0x83, 2,
         ];
-        var wrapped = Inspect(make, 1, secondTypeCode: 1, secondTypeOptional: true,
+
+        var (_, _, _, LastUses, _, TypeCodes, Optional) = Inspect(make, 1, secondTypeCode: 1, secondTypeOptional: true,
             resultUsesSecondType: true, typeCode: 1);
-        Assert.That(wrapped.Optional, Is.EqualTo([false, true]));
-        Assert.That(wrapped.TypeCodes, Is.EqualTo([1, 1]));
-        Assert.That(wrapped.LastUses, Is.EqualTo([0, 1]));
+        Assert.That(Optional, Is.EqualTo([false, true]));
+        Assert.That(TypeCodes, Is.EqualTo([1, 1]));
+        Assert.That(LastUses, Is.EqualTo([0, 1]));
 
         byte[] none = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 9, 1, 2, 0x83, 1];
         Assert.That(Inspect(none, 0, typeCode: 1, secondTypeCode: 1,
@@ -125,10 +130,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void OptionalCopyAndSelectKeepPresenceQualified()
     {
         byte[] copied = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 3, 2, 1, 0x83, 2];
-        var copy = Inspect(copied, 1, typeCode: 8, secondTypeCode: 8,
+
+        var (_, _, _, _, _, TypeCodes, Optional) = Inspect(copied, 1, typeCode: 8, secondTypeCode: 8,
             secondTypeOptional: true, parameterUsesSecondType: true, resultUsesSecondType: true);
-        Assert.That(copy.Optional, Is.EqualTo([true, true]));
-        Assert.That(copy.TypeCodes, Is.EqualTo([8, 8]));
+        Assert.That(Optional, Is.EqualTo([true, true]));
+        Assert.That(TypeCodes, Is.EqualTo([8, 8]));
 
         byte[] selected =
         [
@@ -150,24 +156,24 @@ public sealed class TrRmCompactLinearBodyReaderTests
     {
         byte[] header = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1];
         byte[] invalidNone = [.. header, 9, 1, 1, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => Inspect(invalidNone, 0, typeCode: 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(invalidNone, 0, typeCode: 1,
             secondTypeCode: 1, secondTypeOptional: true));
 
         byte[] invalidPresent = [.. header, 0x0A, 2, 1, 0x83, 2];
-        Assert.Throws<InvalidDataException>(() => Inspect(invalidPresent, 1, typeCode: 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(invalidPresent, 1, typeCode: 1,
             secondTypeCode: 1, secondTypeOptional: true));
 
         byte[] invalidConstant = [.. header, 1, 1, 2, 1, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => Inspect(invalidConstant, 0, typeCode: 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(invalidConstant, 0, typeCode: 1,
             secondTypeCode: 1, secondTypeOptional: true, resultUsesSecondType: true));
 
         byte[] nested = [.. header, 8, 2, 2, 1, 0x83, 2];
-        Assert.Throws<InvalidDataException>(() => Inspect(nested, 1, typeCode: 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(nested, 1, typeCode: 1,
             secondTypeCode: 1, secondTypeOptional: true, parameterUsesSecondType: true,
             resultUsesSecondType: true));
 
         byte[] comparison = [.. header, 5, 3, 4, 1, 2, 0x83, 3];
-        Assert.Throws<InvalidDataException>(() => Inspect(comparison, 2, typeCode: 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(comparison, 2, typeCode: 1,
             secondTypeCode: 1, secondTypeOptional: true, parameterUsesSecondType: true));
     }
     [TestCase(new byte[] { 3, 2, 1 },(byte)8)]
@@ -179,10 +185,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void ScalarCopyUnaryAndNegateRetainType(byte[] operation, byte typeCode)
     {
         var row = OneParameterOperation(operation);
-        var index = Inspect(row, 1, typeCode: typeCode);
-        Assert.That(index.TypeCodes, Is.EqualTo([typeCode, typeCode]));
-        Assert.That(index.UseBlocks, Is.EqualTo([1, 1]));
-        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
+
+        var (_, _, _, LastUses, UseBlocks, TypeCodes, _) = Inspect(row, 1, typeCode: typeCode);
+        Assert.That(TypeCodes, Is.EqualTo([typeCode, typeCode]));
+        Assert.That(UseBlocks, Is.EqualTo([1, 1]));
+        Assert.That(LastUses, Is.EqualTo([0, 1]));
     }
     [TestCase(new byte[] { 4, 2, 1, 1 },(byte)8)]
     [TestCase(new byte[] { 4, 2, 2, 1 },(byte)1)]
@@ -203,11 +210,12 @@ public sealed class TrRmCompactLinearBodyReaderTests
         var returnsBool = operation[2] is >= 4 and <= 9;
         var differentResult = returnsBool && sourceType != 1;
         var row = TwoParameterOperation(operation, differentResult);
-        var index = Inspect(row, 2, typeCode: sourceType,
+
+        var (_, _, _, LastUses, _, TypeCodes, _) = Inspect(row, 2, typeCode: sourceType,
             secondTypeCode: differentResult ? (byte)1 : null,
             resultUsesSecondType: differentResult);
-        Assert.That(index.TypeCodes[2], Is.EqualTo(returnsBool ? (byte)1 : sourceType));
-        Assert.That(index.LastUses, Is.EqualTo([0, 0, 1]));
+        Assert.That(TypeCodes[2], Is.EqualTo(returnsBool ? (byte)1 : sourceType));
+        Assert.That(LastUses, Is.EqualTo([0, 0, 1]));
     }
     [TestCase(new byte[] { 5, 3, 0, 1, 2 },(byte)8)]
     [TestCase(new byte[] { 5, 3, 1, 1, 2 },(byte)1)]
@@ -221,7 +229,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void ComparisonMustMapItsImplicitBooleanResult()
     {
         byte[] operation = [5, 3, 4, 1, 2];
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Inspect(TwoParameterOperation(operation, false), 2));
     }
 
@@ -237,12 +245,12 @@ public sealed class TrRmCompactLinearBodyReaderTests
             7, 4, 1, 2, 3,
             0x83, 4,
         ];
-        var index = Inspect(row, 0, secondTypeCode: 1);
-        Assert.That(index.TypeCodes, Is.EqualTo([1, 8, 8, 8]));
-        Assert.That(index.LastUses, Is.EqualTo([3, 3, 3, 4]));
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = Inspect(row, 0, secondTypeCode: 1);
+        Assert.That(TypeCodes, Is.EqualTo([1, 8, 8, 8]));
+        Assert.That(LastUses, Is.EqualTo([3, 3, 3, 4]));
 
         row[25] = 2;
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 0, secondTypeCode: 1));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 0, secondTypeCode: 1));
     }
 
     [Test]
@@ -256,7 +264,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x83, 3,
         ];
         Assert.That(Inspect(row, 1, secondTypeCode: 0x0D).TypeCodes, Is.EqualTo([8, 0x0D, 8]));
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondTypeCode: 1));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondTypeCode: 1));
     }
     [TestCase(new byte[] { 6, 2, 2, 1, 1 },(byte)8,(byte)0x0D)]
     [TestCase(new byte[] { 6, 2, 2, 2, 1 },(byte)9,(byte)0x0D)]
@@ -267,10 +275,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
         byte[] operation, byte sourceType, byte destinationType)
     {
         var row = OneParameterMappedOperation(operation);
-        var index = Inspect(row, 1, typeCode: sourceType,
+
+        var (_, _, _, LastUses, _, TypeCodes, _) = Inspect(row, 1, typeCode: sourceType,
             secondTypeCode: destinationType, resultUsesSecondType: true);
-        Assert.That(index.TypeCodes, Is.EqualTo([sourceType, destinationType]));
-        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
+        Assert.That(TypeCodes, Is.EqualTo([sourceType, destinationType]));
+        Assert.That(LastUses, Is.EqualTo([0, 1]));
     }
 
     [Test]
@@ -282,15 +291,15 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x18, 3, 4, 1, 2,
             0x83, 4,
         ];
-        var index = Inspect(row, 2);
-        Assert.That(index.ValueCount, Is.EqualTo(4));
-        Assert.That(index.Definitions, Is.EqualTo([-1, -1, 7, 7]));
-        Assert.That(index.LastUses, Is.EqualTo([0, 0, 0, 1]));
-        Assert.That(index.UseBlocks, Is.EqualTo([1, 1, 0, 1]));
-        Assert.That(index.TypeCodes, Is.EqualTo([8, 8, 8, 8]));
+        var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = Inspect(row, 2);
+        Assert.That(ValueCount, Is.EqualTo(4));
+        Assert.That(Definitions, Is.EqualTo([-1, -1, 7, 7]));
+        Assert.That(LastUses, Is.EqualTo([0, 0, 0, 1]));
+        Assert.That(UseBlocks, Is.EqualTo([1, 1, 0, 1]));
+        Assert.That(TypeCodes, Is.EqualTo([8, 8, 8, 8]));
 
         row[9] = 5;
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 2));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 2));
     }
 
     [Test]
@@ -303,10 +312,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x18, 5, 6, 3, 4,
             0x83, 6,
         ];
-        var index = Inspect(row, 2);
-        Assert.That(index.ValueCount, Is.EqualTo(6));
-        Assert.That(index.Definitions, Is.EqualTo([-1, -1, 7, 7, 12, 12]));
-        Assert.That(index.LastUses, Is.EqualTo([0, 0, 1, 1, 0, 2]));
+
+        var (_, ValueCount, Definitions, LastUses, _, _, _) = Inspect(row, 2);
+        Assert.That(ValueCount, Is.EqualTo(6));
+        Assert.That(Definitions, Is.EqualTo([-1, -1, 7, 7, 12, 12]));
+        Assert.That(LastUses, Is.EqualTo([0, 0, 1, 1, 0, 2]));
     }
     [TestCase(new byte[] { 6, 2, 2, 0, 1 },(byte)8,(byte)0x0D)]
     [TestCase(new byte[] { 6, 2, 2, 4, 1 },(byte)8,(byte)0x0D)]
@@ -324,9 +334,10 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void UnusedParameterHasNoUseBlock()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 1, 2, 1, 42, 0x83, 2];
-        var index = Inspect(row, 1);
-        Assert.That(index.UseBlocks, Is.EqualTo([0, 1]));
-        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
+
+        var (_, _, _, LastUses, UseBlocks, _, _) = Inspect(row, 1);
+        Assert.That(UseBlocks, Is.EqualTo([0, 1]));
+        Assert.That(LastUses, Is.EqualTo([0, 1]));
     }
 
     [Test]
@@ -351,22 +362,22 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void RejectsCheckedExceptionPolicyAndNonValueParameters()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 0, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 1, runtimePolicy: 1));
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 1, parameterMode: 2));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1, runtimePolicy: 1));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1, parameterMode: 2));
     }
 
     [Test]
     public void RejectsUnknownTypeMapReference()
     {
         byte[] row = [0x04, 1, 2, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
     }
 
     [Test]
     public void RejectsDuplicateResolvedTypesInTypeMap()
     {
         byte[] row = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 0, secondTypeCode: 8));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 0, secondTypeCode: 8));
     }
     [TestCase(new byte[] { 0x12, 2, 2, 1, 1 })]
     [TestCase(new byte[] { 0xF0, 0x04, 0x12, 2, 2, 1, 0, 1 })]
@@ -374,21 +385,23 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void InspectsLocalStaticScalarCall(byte[] operation)
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, .. operation, 0x83, 2];
-        var index = Inspect(row, 1, secondMethod: true);
-        Assert.That(index.ValueCount, Is.EqualTo(2));
-        Assert.That(index.Definitions, Is.EqualTo([-1, 7]));
-        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
-        Assert.That(index.UseBlocks, Is.EqualTo([1, 1]));
+
+        var (_, ValueCount, Definitions, LastUses, UseBlocks, _, _) = Inspect(row, 1, secondMethod: true);
+        Assert.That(ValueCount, Is.EqualTo(2));
+        Assert.That(Definitions, Is.EqualTo([-1, 7]));
+        Assert.That(LastUses, Is.EqualTo([0, 1]));
+        Assert.That(UseBlocks, Is.EqualTo([1, 1]));
     }
 
     [Test]
     public void InspectsVoidLocalCallWithoutValueDefinition()
     {
         byte[] row = [0x04, 0, 1, 0x12, 0, 2, 0, 0x83, 0];
-        var index = Inspect(row, 0, typeCode: 0, secondMethod: true);
-        Assert.That(index.Operations, Is.EqualTo(1));
-        Assert.That(index.ValueCount, Is.EqualTo(0));
-        Assert.That(index.Definitions, Is.Empty);
+
+        var (Operations, ValueCount, Definitions, _, _, _, _) = Inspect(row, 0, typeCode: 0, secondMethod: true);
+        Assert.That(Operations, Is.EqualTo(1));
+        Assert.That(ValueCount, Is.EqualTo(0));
+        Assert.That(Definitions, Is.Empty);
     }
     [TestCase(new byte[] { 0x12, 2, 0, 1, 1 })]
     [TestCase(new byte[] { 0x12, 2, 3, 1, 1 })]
@@ -400,23 +413,23 @@ public sealed class TrRmCompactLinearBodyReaderTests
     public void RejectsMalformedLocalCalls(byte[] operation)
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, .. operation, 0x83, 2];
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondMethod: true));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondMethod: true));
     }
 
     [Test]
     public void RejectsLocalCallToMethodWithoutBodyOrMatchingParameterMode()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
             secondMethod: true, secondBody: false));
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
             secondMethod: true, parameterMode: 2));
     }
-    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(2),true)]
-    [TestCase((byte)(0),(byte)(0),(byte)(0),(byte)(2),true)]
-    [TestCase((byte)(0),(byte)(1),(byte)(0),(byte)(2),false)]
-    [TestCase((byte)(1),(byte)(0),(byte)(1),(byte)(2),false)]
-    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(0),false)]
+    [TestCase((byte)1,(byte)0,(byte)0,(byte)2,true)]
+    [TestCase((byte)0,(byte)0,(byte)0,(byte)2,true)]
+    [TestCase((byte)0,(byte)1,(byte)0,(byte)2,false)]
+    [TestCase((byte)1,(byte)0,(byte)1,(byte)2,false)]
+    [TestCase((byte)1,(byte)0,(byte)0,(byte)0,false)]
     public void ChecksPackedPublicGlobalCall(byte callerRequirement,
         byte targetRequirement, byte targetPolicy, byte targetVisibility, bool valid)
     {
@@ -427,24 +440,24 @@ public sealed class TrRmCompactLinearBodyReaderTests
         ];
         if (valid)
         {
-            var index = Inspect(row, 1, secondMethod: true, packedTarget: true,
+            var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = Inspect(row, 1, secondMethod: true, packedTarget: true,
                 callerRequirement: callerRequirement, targetRequirement: targetRequirement,
                 targetPolicy: targetPolicy, targetVisibility: targetVisibility);
-            Assert.That(index.ValueCount, Is.EqualTo(2));
-            Assert.That(index.LastUses, Is.EqualTo([0, 1]));
+            Assert.That(ValueCount, Is.EqualTo(2));
+            Assert.That(LastUses, Is.EqualTo([0, 1]));
         }
         else
         {
-            Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+            _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
                 secondMethod: true, packedTarget: true,
                 callerRequirement: callerRequirement, targetRequirement: targetRequirement,
                 targetPolicy: targetPolicy, targetVisibility: targetVisibility));
         }
     }
-    [TestCase((byte)(0),(byte)(0x15))]
-    [TestCase((byte)(0),(byte)(0x17))]
-    [TestCase((byte)(1),(byte)(0x16))]
-    [TestCase((byte)(3),(byte)(0x16))]
+    [TestCase((byte)0,(byte)0x15)]
+    [TestCase((byte)0,(byte)0x17)]
+    [TestCase((byte)1,(byte)0x16)]
+    [TestCase((byte)3,(byte)0x16)]
     public void RejectsMalformedPackedCallTarget(byte targetRow, byte kind)
     {
         byte[] row =
@@ -452,45 +465,45 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x04, 1, 1, 0, 0, 0, 1,
             0x12, 2, 0, targetRow, 0, 0, kind, 1, 1, 0x83, 2,
         ];
-        Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
             secondMethod: true, packedTarget: true));
     }
-    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(2),true)]
-    [TestCase((byte)(0),(byte)(0),(byte)(0),(byte)(2),true)]
-    [TestCase((byte)(0),(byte)(1),(byte)(0),(byte)(2),false)]
-    [TestCase((byte)(1),(byte)(0),(byte)(1),(byte)(2),false)]
-    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(0),false)]
+    [TestCase((byte)1,(byte)0,(byte)0,(byte)2,true)]
+    [TestCase((byte)0,(byte)0,(byte)0,(byte)2,true)]
+    [TestCase((byte)0,(byte)1,(byte)0,(byte)2,false)]
+    [TestCase((byte)1,(byte)0,(byte)1,(byte)2,false)]
+    [TestCase((byte)1,(byte)0,(byte)0,(byte)0,false)]
     public void ChecksRetainedImportedGlobalCall(byte callerRequirement,
         byte targetRequirement, byte targetPolicy, byte targetVisibility, bool valid)
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
         if (valid)
         {
-            var index = Inspect(row, 1, secondMethod: true, secondBody: false,
+            var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = Inspect(row, 1, secondMethod: true, secondBody: false,
                 expectedTarget: true, callerRequirement: callerRequirement,
                 targetRequirement: targetRequirement, targetPolicy: targetPolicy,
                 targetVisibility: targetVisibility);
-            Assert.That(index.ValueCount, Is.EqualTo(2));
-            Assert.That(index.LastUses, Is.EqualTo([0, 1]));
+            Assert.That(ValueCount, Is.EqualTo(2));
+            Assert.That(LastUses, Is.EqualTo([0, 1]));
         }
         else
         {
-            Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+            _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
                 secondMethod: true, secondBody: false, expectedTarget: true,
                 callerRequirement: callerRequirement, targetRequirement: targetRequirement,
                 targetPolicy: targetPolicy, targetVisibility: targetVisibility));
         }
     }
-    [TestCase(false,false,(byte)(2),(byte)(6),false,true)]
-    [TestCase(true,false,(byte)(2),(byte)(6),false,true)]
-    [TestCase(false,true,(byte)(2),(byte)(6),false,true)]
-    [TestCase(false,false,(byte)(0),(byte)(6),false,true)]
-    [TestCase(true,false,(byte)(0),(byte)(6),false,false)]
-    [TestCase(false,true,(byte)(0),(byte)(6),false,false)]
-    [TestCase(true,false,(byte)(2),(byte)(4),false,false)]
-    [TestCase(false,true,(byte)(2),(byte)(4),false,false)]
-    [TestCase(true,false,(byte)(2),(byte)(6),true,false)]
-    [TestCase(false,true,(byte)(2),(byte)(6),true,false)]
+    [TestCase(false,false,(byte)2,(byte)6,false,true)]
+    [TestCase(true,false,(byte)2,(byte)6,false,true)]
+    [TestCase(false,true,(byte)2,(byte)6,false,true)]
+    [TestCase(false,false,(byte)0,(byte)6,false,true)]
+    [TestCase(true,false,(byte)0,(byte)6,false,false)]
+    [TestCase(false,true,(byte)0,(byte)6,false,false)]
+    [TestCase(true,false,(byte)2,(byte)4,false,false)]
+    [TestCase(false,true,(byte)2,(byte)4,false,false)]
+    [TestCase(true,false,(byte)2,(byte)6,true,false)]
+    [TestCase(false,true,(byte)2,(byte)6,true,false)]
     public void ChecksTypeOwnedStaticCall(bool packedTarget, bool expectedTarget,
         byte targetVisibility, byte ownerFlags, bool genericOwner, bool valid)
     {
@@ -500,27 +513,27 @@ public sealed class TrRmCompactLinearBodyReaderTests
             : [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
         if (valid)
         {
-            var index = Inspect(row, 1, secondMethod: true, packedTarget: packedTarget,
+            var (Operations, ValueCount, Definitions, LastUses, UseBlocks, TypeCodes, Optional) = Inspect(row, 1, secondMethod: true, packedTarget: packedTarget,
                 secondBody: !expectedTarget, expectedTarget: expectedTarget,
                 targetVisibility: targetVisibility, ownerFlags: ownerFlags,
                 genericOwner: genericOwner);
-            Assert.That(index.ValueCount, Is.EqualTo(2));
+            Assert.That(ValueCount, Is.EqualTo(2));
         }
         else
         {
-            Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+            _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
                 secondMethod: true, packedTarget: packedTarget,
                 secondBody: !expectedTarget, expectedTarget: expectedTarget,
                 targetVisibility: targetVisibility, ownerFlags: ownerFlags,
                 genericOwner: genericOwner));
         }
     }
-    [TestCase(true,(byte)(1),(byte)(0),(byte)(0),true)]
-    [TestCase(true,(byte)(0),(byte)(1),(byte)(0),false)]
-    [TestCase(true,(byte)(1),(byte)(0),(byte)(1),false)]
-    [TestCase(false,(byte)(1),(byte)(0),(byte)(0),true)]
-    [TestCase(false,(byte)(0),(byte)(1),(byte)(0),false)]
-    [TestCase(false,(byte)(1),(byte)(0),(byte)(1),false)]
+    [TestCase(true,(byte)1,(byte)0,(byte)0,true)]
+    [TestCase(true,(byte)0,(byte)1,(byte)0,false)]
+    [TestCase(true,(byte)1,(byte)0,(byte)1,false)]
+    [TestCase(false,(byte)1,(byte)0,(byte)0,true)]
+    [TestCase(false,(byte)0,(byte)1,(byte)0,false)]
+    [TestCase(false,(byte)1,(byte)0,(byte)1,false)]
     public void ChecksTypeOwnedExternalCallRequirements(bool packedTarget,
         byte callerRequirement, byte targetRequirement, byte targetPolicy, bool valid)
     {
@@ -538,7 +551,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         }
         else
         {
-            Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+            _ = Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
                 secondMethod: true, packedTarget: packedTarget, expectedTarget: !packedTarget,
                 secondBody: packedTarget, ownerFlags: 6,
                 callerRequirement: callerRequirement, targetRequirement: targetRequirement,
@@ -584,7 +597,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         var modules = new TrRmModuleTableReader(moduleBytes, packedTarget ? 2 : 1,
             names, expectedTarget ? 1 : 0, ownerFlags is null ? 0 : 1,
             secondMethod ? 2 : 1, 0);
-        byte[] reference = new byte[12];
+        var reference = new byte[12];
         Write(reference, 0, 2);
         Write(reference, 4, targetRequirement);
         Write(reference, 8, targetPolicy);
@@ -625,13 +638,14 @@ public sealed class TrRmCompactLinearBodyReaderTests
         for (var index = 0; index < parameterCount; index++)
         {
             Write(paramBytes, index * 16, 1);
-            Write(paramBytes, index * 16 + 4, (uint)index);
-            Write(paramBytes, index * 16 + 8, parameterType);
-            paramBytes[index * 16 + 12] = parameterMode;
+            Write(paramBytes, (index * 16) + 4, (uint)index);
+            Write(paramBytes, (index * 16) + 8, parameterType);
+            paramBytes[(index * 16) + 12] = parameterMode;
         }
 
         var parameters = parameterCount == 0 ? default
-            : new TrRmParamTableReader(paramBytes, parameterCount, signatures, types);
+            : new TrRmParamTableReader(paramBytes, parameterCount, signatures,
+                types, TrRmArtifactSchema.Development);
         var methodBytes = new byte[secondMethod ? 56 : 28];
         Write(methodBytes, 4, 2);
         Write(methodBytes, 8, 1);
@@ -659,7 +673,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
             ? TrRmVariableTableWriter.EncodeBodies([row, targetRow])
             : TrRmVariableTableWriter.EncodeBodies([row]);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
-        byte[] import = new byte[12];
+        var import = new byte[12];
         Write(import, 0, 1);
         Write(import, 4, 2);
         Write(import, 8, 0x1600_0002);

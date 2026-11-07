@@ -6,6 +6,11 @@ using System.Collections.Generic;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Describes one section to frame in a TRRM artifact.</summary>
+/// <param name="Kind">The assigned section kind.</param>
+/// <param name="Flags">The section flags.</param>
+/// <param name="RecordCount">The section's row count.</param>
+/// <param name="Bytes">The section payload.</param>
 public readonly record struct TrRmSection(
     ushort Kind, ushort Flags, uint RecordCount, ReadOnlyMemory<byte> Bytes);
 
@@ -13,6 +18,9 @@ public readonly record struct TrRmSection(
 /// <remarks>Does not replace the semantic-module writer or establish executable metadata validity.</remarks>
 public static class TrRmArtifactWriter
 {
+    /// <summary>Frames ordered, nonempty sections as a validated standard TRRM artifact.</summary>
+    /// <param name="sections">The uniquely ordered section descriptions.</param>
+    /// <returns>The complete TRRM artifact.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmSection> sections)
         => Encode(sections, TrRmArtifactSchema.Standard);
 
@@ -31,7 +39,7 @@ public static class TrRmArtifactWriter
         }
 
         resourceLedger?.ConsumeWork(2);
-        var size = 32L + sections.Count * 16L;
+        var size = 32L + (sections.Count * 16L);
         var previousKind = 0;
         for (var index = 0; index < sections.Count; index++)
         {
@@ -88,7 +96,7 @@ public static class TrRmArtifactWriter
         resourceLedger?.ConsumeWork();
         Write(result, 20, 32);
         resourceLedger?.ConsumeWork(2);
-        var offset = 32L + sections.Count * 16L;
+        var offset = 32L + (sections.Count * 16L);
         for (var index = 0; index < sections.Count; index++)
         {
             resourceLedger?.ConsumeWork();
@@ -101,7 +109,7 @@ public static class TrRmArtifactWriter
             }
 
             resourceLedger?.ConsumeWork(2);
-            var directory = 32 + index * 16;
+            var directory = 32 + (index * 16);
             resourceLedger?.ConsumeWork();
             WriteU16(result, directory, section.Kind);
             resourceLedger?.ConsumeWork();

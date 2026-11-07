@@ -25,10 +25,15 @@ public readonly ref struct TrRmModuleTableReader
     private readonly Dictionary<string, int> _identities;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Gets the number of Module rows.</summary>
     public int Count => _recordCount;
+    /// <summary>Gets the number of ModuleRef rows in the artifact.</summary>
     public int ModuleRefCount => _moduleRefCount;
+    /// <summary>Gets the number of TypeDef rows in the artifact.</summary>
     public int TypeDefCount => _typeDefCount;
+    /// <summary>Gets the number of MethodDef rows in the artifact.</summary>
     public int MethodDefCount => _methodDefCount;
+    /// <summary>Gets the number of SourceFile rows in the artifact.</summary>
     public int SourceFileCount => _sourceFileCount;
 
     /// <summary>Validates fixed Module rows and their cross-table ranges.</summary>
@@ -124,6 +129,9 @@ public readonly ref struct TrRmModuleTableReader
         }
     }
 
+    /// <summary>Gets the producer identity selected by a Module row.</summary>
+    /// <param name="row">The one-based Module row.</param>
+    /// <returns>The decoded producer identity.</returns>
     public string GetIdentity(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -149,6 +157,8 @@ public readonly ref struct TrRmModuleTableReader
         return checked((int)Read(row - 1, 16));
     }
 
+    /// <summary>Gets the one-based half-open ModuleRef row range owned by a Module.</summary>
+    /// <param name="row">The one-based Module row.</param>
     public (int Start, int End) GetModuleRefRange(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -167,6 +177,8 @@ public readonly ref struct TrRmModuleTableReader
         return (start, end);
     }
 
+    /// <summary>Gets the one-based half-open SourceFile row range owned by a Module.</summary>
+    /// <param name="row">The one-based Module row.</param>
     public (int Start, int End) GetSourceFileRange(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -185,6 +197,8 @@ public readonly ref struct TrRmModuleTableReader
         return (start, end);
     }
 
+    /// <summary>Gets the one-based half-open TypeDef row range owned by a Module.</summary>
+    /// <param name="row">The one-based Module row.</param>
     public (int Start, int End) GetTypeDefRange(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -203,6 +217,8 @@ public readonly ref struct TrRmModuleTableReader
         return (start, end);
     }
 
+    /// <summary>Gets the one-based half-open MethodDef row range owned by a Module.</summary>
+    /// <param name="row">The one-based Module row.</param>
     public (int Start, int End) GetMethodDefRange(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -221,6 +237,8 @@ public readonly ref struct TrRmModuleTableReader
         return (start, end);
     }
 
+    /// <summary>Gets the target and runtime requirements selected by a Module.</summary>
+    /// <param name="row">The one-based Module row.</param>
     public (uint TargetRequirement, uint RuntimePolicy) GetRequirements(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -264,6 +282,10 @@ public readonly ref struct TrRmModuleTableReader
         return ((int)Read(row - 1, 24), (int)Read(row - 1, 28));
     }
 
+    /// <summary>Finds the Module row with the exact producer identity.</summary>
+    /// <param name="identity">The producer identity to find.</param>
+    /// <param name="row">Receives the one-based Module row when found.</param>
+    /// <returns><see langword="true"/> when the identity is present.</returns>
     public bool TryFindModule(string identity, out int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -283,7 +305,7 @@ public readonly ref struct TrRmModuleTableReader
     private string ReadIdentity(int row)
     {
         var reference = Read(row, 0);
-        if (reference == 0 || reference > 0xFF_FFFF)
+        if (reference is 0 or > 0xFF_FFFF)
         {
             throw InvalidModule();
         }
@@ -295,7 +317,7 @@ public readonly ref struct TrRmModuleTableReader
     {
         _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
         return BinaryPrimitives.ReadUInt32LittleEndian(
-            _rows.Slice(row * RowSize + offset, sizeof(uint)));
+            _rows.Slice((row * RowSize) + offset, sizeof(uint)));
     }
 
     private static bool ValidCount(int count)

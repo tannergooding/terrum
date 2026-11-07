@@ -8,18 +8,18 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class ModuleTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ModuleTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -56,7 +56,7 @@ public sealed class ModuleTableValidationComponentTests
         var manyNames = TrRmStringTableWriter.EncodeNames(Enumerable.Range(0, 512)
             .Select(static index => ("M" + index.ToString("D4", CultureInfo.InvariantCulture), 0))
             .ToArray());
-        cases.Add(Valid(manyNames, Enumerable.Range(1, 512).Reverse().ToArray(), 512));
+        cases.Add(Valid(manyNames, [.. Enumerable.Range(1, 512).Reverse()], 512));
 
         AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 4, 2);
         AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 8, 2);
@@ -181,7 +181,11 @@ public sealed class ModuleTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
         }

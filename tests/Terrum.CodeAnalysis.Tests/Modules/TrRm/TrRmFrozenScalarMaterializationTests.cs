@@ -7,8 +7,8 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
-using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -16,7 +16,8 @@ using Terrum.CodeAnalysis.Tests.Native.Jit;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmFrozenScalarMaterializationTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmFrozenScalarMaterializationTests
 {
     [Test]
     public void MaterializesWindowsX64ScalarsWithoutChangingDeclaredBits()
@@ -101,7 +102,7 @@ public sealed class TrRmFrozenScalarMaterializationTests
             Assert.That(constant.Type, Is.EqualTo(value.Type));
             if (value.Payload.Length > sizeof(ulong))
             {
-                Assert.Throws<InvalidOperationException>(() => _ = constant.Value);
+                _ = Assert.Throws<InvalidOperationException>(() => _ = constant.Value);
                 var changedHighBits = (byte[])value.Payload.Clone();
                 changedHighBits[^1] ^= 0x80;
                 var changedArtifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
@@ -349,7 +350,7 @@ public sealed class TrRmFrozenScalarMaterializationTests
             var payload = new byte[PrimitiveTypeFacts.ScalarWidth(type)];
             for (var index = 0; index < payload.Length; index++)
             {
-                payload[index] = unchecked((byte)(typeCode * 17 + index + 1));
+                payload[index] = unchecked((byte)((typeCode * 17) + index + 1));
             }
             if (type == PrimitiveType.Bool)
             {
@@ -580,7 +581,7 @@ public sealed class TrRmFrozenScalarMaterializationTests
         var artifact = TrRmRegisterBodyTestData.StandardScalarReturnArtifact(
             0x0F, 0x05, isEntryPoint: false, methodName: "Value");
 
-        Assert.Throws<NotSupportedException>(
+        _ = Assert.Throws<NotSupportedException>(
             () => TrRmExecutableCompiler.LoadStandardScalarReturn(artifact));
     }
 
@@ -623,7 +624,7 @@ public sealed class TrRmFrozenScalarMaterializationTests
             tables.TypeSpecs, tables.Features, tables.Modules);
 
         Assert.That(constant.Type, Is.EqualTo(PrimitiveType.Int128));
-        Assert.Throws<InvalidOperationException>(() => _ = constant.Value);
+        _ = Assert.Throws<InvalidOperationException>(() => _ = constant.Value);
     }
 
     [Test]

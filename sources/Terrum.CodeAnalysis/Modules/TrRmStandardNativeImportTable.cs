@@ -321,9 +321,40 @@ public readonly ref struct TrRmNativeImportTableReader
             throw InvalidNativeImport();
         }
 
+        var nativeParameters = contracts.GetNativeParameters(ownerRef);
+        var (first, _) = signatures.GetParamRange(signature);
+        foreach (var outputState in contracts.GetOutputStateContracts(ownerRef))
+        {
+            if (!contracts.IsNativeOutputCellParameter(ownerRef,
+                outputState.ParameterOrdinal))
+            {
+                continue;
+            }
+
+            var conflictsWithNativeParameter = false;
+            foreach (var nativeParameter in nativeParameters)
+            {
+                if (nativeParameter.ParameterOrdinal
+                    == outputState.ParameterOrdinal)
+                {
+                    conflictsWithNativeParameter = true;
+                    break;
+                }
+            }
+
+            var typeSpecRef = parameters.GetTypeSpec(
+                first + outputState.ParameterOrdinal);
+            if (!TrRmNativeImportTypeContract.IsNativeOutputCellType(types,
+                    typeSpecRef, layouts)
+                || conflictsWithNativeParameter)
+            {
+                throw InvalidNativeImport();
+            }
+        }
+
         TrRmNativeImportSignatureValidator.Validate((uint)ownerRef, methods,
             signatures, parameters, types, contracts.GetNativeOutputs(ownerRef),
-            contracts.GetNativeParameters(ownerRef), layouts,
+            nativeParameters, layouts,
             validateNativeParameterAccess: true);
     }
 

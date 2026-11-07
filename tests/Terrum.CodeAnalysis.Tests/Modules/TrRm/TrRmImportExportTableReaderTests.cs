@@ -4,12 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmImportExportTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmImportExportTableReaderTests
 {
     [Test]
     public void RetainedExpectationsAndPublishedDefinitionsUseDistinctModules()
@@ -36,55 +37,55 @@ public sealed class TrRmImportExportTableReaderTests
         {
             var import = Import();
             Write(import, 8, reference);
-            Assert.Throws<InvalidDataException>(() => Read(import, []));
+            _ = Assert.Throws<InvalidDataException>(() => Read(import, []));
         }
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(0x1600_0001), [], producerOwnsRef: true));
         var duplicate = new byte[24];
         Import().CopyTo(duplicate, 0);
         Import().CopyTo(duplicate, 12);
-        Assert.Throws<InvalidDataException>(() => Read(duplicate, []));
+        _ = Assert.Throws<InvalidDataException>(() => Read(duplicate, []));
 
         var missingModuleRef = Import();
         Write(missingModuleRef, 0, 0);
-        Assert.Throws<InvalidDataException>(() => Read(missingModuleRef, []));
+        _ = Assert.Throws<InvalidDataException>(() => Read(missingModuleRef, []));
         var missingKey = Import();
         Write(missingKey, 4, 1);
-        Assert.Throws<InvalidDataException>(() => Read(missingKey, []));
+        _ = Assert.Throws<InvalidDataException>(() => Read(missingKey, []));
     }
 
     [Test]
     public void RejectsUnpublishedVisibilityImportedExportsAndDuplicateKeys()
     {
-        Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0002)));
-        Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0001),
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0002)));
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0001),
             producerVisibility: 1));
-        Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1300_0001),
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1300_0001),
             producerTypeVisibility: 1));
-        Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0001),
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0001),
             producerTypeVisibility: 1, producerMethodOwned: true));
         Assert.That(Read(Import(), Export(0x1600_0001), producerMethodOwned: true), Is.True);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1300_0001, 0x1600_0001)));
         var sameTextDifferentEncoding = Export(0x1300_0001, 0x1600_0001);
         Write(sameTextDifferentEncoding, 12, 8);
-        Assert.Throws<InvalidDataException>(() => Read(Import(), sameTextDifferentEncoding));
-        Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1500_0001)));
-        Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0)));
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), sameTextDifferentEncoding));
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1500_0001)));
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0)));
         var absentKey = Export(0x1600_0001);
         Write(absentKey, 4, 0);
-        Assert.Throws<InvalidDataException>(() => Read(Import(), absentKey));
-        Assert.Throws<InvalidDataException>(() => Read(Import()[..^1], []));
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import(), absentKey));
+        _ = Assert.Throws<InvalidDataException>(() => Read(Import()[..^1], []));
     }
 
     [Test]
     public void PropertyExportRequiresPublicPropertyAndOwner()
     {
         Assert.That(Read(Import(), Export(0x1E00_0001), propertyFlags: 2), Is.True);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1E00_0001), propertyFlags: 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1E00_0001), propertyFlags: 2,
                 producerTypeVisibility: 1));
     }
@@ -104,15 +105,15 @@ public sealed class TrRmImportExportTableReaderTests
             frameArtifact: true, writeRows: true), Is.True);
         Assert.That(Read(Import(), Export(0x1E00_0001),
             propertyFlags: 2, frameArtifact: true, writeRows: true), Is.True);
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             Read(Import(), [], writeRows: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(0x1600_0001), Export(0x1300_0001), writeRows: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1600_0002), writeRows: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1600_0001, 0x1300_0001), writeRows: true));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1300_0001), producerTypeVisibility: 1, writeRows: true));
     }
 
@@ -280,7 +281,7 @@ public sealed class TrRmImportExportTableReaderTests
         for (var index = 0; index < definitions.Length; index++)
         {
             Write(rows, index * 8, definitions[index]);
-            Write(rows, index * 8 + 4, 5);
+            Write(rows, (index * 8) + 4, 5);
         }
 
         return rows;

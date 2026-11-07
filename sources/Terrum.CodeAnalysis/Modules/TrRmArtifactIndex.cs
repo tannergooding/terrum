@@ -164,9 +164,12 @@ public readonly ref struct TrRmArtifactIndex
     private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Gets the number of indexed sections.</summary>
     public int SectionCount => _entryCount;
     internal TrRmArtifactSchema Schema => _schema;
 
+    /// <summary>Validates and indexes a standard TRRM artifact.</summary>
+    /// <param name="artifact">The borrowed artifact bytes, which must remain unchanged while this index is in use.</param>
     public TrRmArtifactIndex(ReadOnlySpan<byte> artifact)
         : this(artifact, TrRmArtifactSchema.Standard)
     {
@@ -591,6 +594,11 @@ public readonly ref struct TrRmArtifactIndex
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.RegisterExceptionRegionsDraft);
 
+    /// <summary>Finds a section by kind without throwing when it is absent.</summary>
+    /// <param name="kind">The assigned section kind to find.</param>
+    /// <param name="section">The borrowed section bytes, or an empty span when not found.</param>
+    /// <param name="recordCount">The section's row count, or zero when not found.</param>
+    /// <returns><see langword="true"/> when the section is present.</returns>
     public bool TryGetSection(ushort kind, out ReadOnlySpan<byte> section, out int recordCount)
     {
         var low = 0;
@@ -643,6 +651,12 @@ public readonly ref struct TrRmArtifactIndex
         return false;
     }
 
+    /// <summary>Gets the section at a zero-based directory index.</summary>
+    /// <param name="entry">The zero-based section-directory index.</param>
+    /// <param name="kind">The assigned section kind.</param>
+    /// <param name="flags">The section flags.</param>
+    /// <param name="section">The borrowed section bytes.</param>
+    /// <param name="recordCount">The section's row count.</param>
     public void GetSection(int entry, out ushort kind, out ushort flags,
         out ReadOnlySpan<byte> section, out int recordCount)
     {

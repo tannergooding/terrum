@@ -1,12 +1,13 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmStringTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmStringTableReaderTests
 {
     [Test]
     public void IndexesNamesByOneBasedRowWithoutScanningPreviousRows()
@@ -14,20 +15,20 @@ public sealed class TrRmStringTableReaderTests
         var table = new TrRmStringTableReader(TwoRowSection(), 2);
         Assert.That(table.DecodeName(2), Is.EqualTo("Example"));
         Assert.That(table.DecodeName(1), Is.EqualTo("Answer"));
-        Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 0));
-        Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 3));
+        _ = Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 0));
+        _ = Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 3));
     }
-    [TestCase(0,(byte)(1))]
-    [TestCase(4,(byte)(0))]
-    [TestCase(4,(byte)(11))]
-    [TestCase(4,(byte)(20))]
-    [TestCase(8,(byte)(20))]
-    [TestCase(8,(byte)(28))]
+    [TestCase(0,(byte)1)]
+    [TestCase(4,(byte)0)]
+    [TestCase(4,(byte)11)]
+    [TestCase(4,(byte)20)]
+    [TestCase(8,(byte)20)]
+    [TestCase(8,(byte)28)]
     public void RejectsMalformedOffsets(int byteIndex, byte replacement)
     {
         var bytes = TwoRowSection();
         bytes[byteIndex] = replacement;
-        Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(bytes, 2));
+        _ = Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(bytes, 2));
     }
     [TestCase(0)]
     [TestCase(-1)]
@@ -35,7 +36,7 @@ public sealed class TrRmStringTableReaderTests
     [TestCase(0x1_000000)]
     public void RejectsInvalidRecordCounts(int recordCount)
     {
-        Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(TwoRowSection(), recordCount));
+        _ = Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(TwoRowSection(), recordCount));
     }
 
     [Test]
@@ -45,14 +46,14 @@ public sealed class TrRmStringTableReaderTests
         bytes[24] = 4;
         var table = new TrRmStringTableReader(bytes, 2);
         Assert.That(table.DecodeName(1), Is.EqualTo("Answer"));
-        Assert.Throws<InvalidDataException>(() => DecodeName(bytes, 2, 2));
+        _ = Assert.Throws<InvalidDataException>(() => DecodeName(bytes, 2, 2));
     }
 
     [Test]
     public void RejectsAnIndexDamagedAfterConstruction()
     {
         var bytes = TwoRowSection();
-        Assert.Throws<InvalidDataException>(() => DecodeNameAfterMutation(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => DecodeNameAfterMutation(bytes));
     }
 
     private static string DecodeNameAfterMutation(byte[] section)

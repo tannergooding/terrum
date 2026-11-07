@@ -62,7 +62,7 @@ internal readonly record struct TrRmStandardNativeProviderClosureValidation(
     ImmutableArray<TrRmStandardNativeProviderBinding> RootProviderBindings,
     ImmutableArray<TrRmStandardNativeDependencyBinding> DependencyBindings);
 
-internal sealed class TrRmStandardNativeBindingPlan
+internal sealed partial class TrRmStandardNativeBindingPlan
 {
     private const string ForeignInvocationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-contracts-1";
@@ -78,8 +78,12 @@ internal sealed class TrRmStandardNativeBindingPlan
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
     private const string ForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
+    private const string ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
     private const string ForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+    private const string LocalAggregateLayoutSchemaIdentity
+        = "trrm/1-draft-local-aggregate-layout-execution-1";
     private readonly TrRmA3LayoutResourceLedger? _a3LayoutResourceLedger;
     private readonly ImmutableArray<TrRmStandardTypeProviderBinding>
         _typeProviderBindings;
@@ -153,12 +157,34 @@ internal sealed class TrRmStandardNativeBindingPlan
     internal int RootModuleRow { get; }
     internal TrRmStandardNativeOperation Operation { get; }
     internal NativeRuntimePolicy RuntimePolicy { get; }
+    internal bool IsLocalAggregateLayoutPlan
+        => IsExactLocalAggregateLayoutSchemaSet(_schemaIdentities);
     internal TrRmA3AdmissionScope? A3AdmissionScope
         => _a3LayoutResourceLedger?.AdmissionScope;
 
     internal void ValidateLibraryExports(IReadOnlyList<string> exports)
     {
         ArgumentNullException.ThrowIfNull(exports);
+        if (IsLocalAggregateLayoutPlan)
+        {
+            foreach (var export in exports)
+            {
+                if (!RootProgram.Functions.Any(function =>
+                        StringComparer.Ordinal.Equals(function.Name, export)
+                        && !function.IsExternal
+                        && !function.IsModuleReference
+                        && function.ModuleImport is null
+                        && !function.IsPrivate && !function.IsInternal))
+                {
+                    throw new ArgumentException(
+                        "A selected L1 library export must be a public root-owned implementation.",
+                        nameof(exports));
+                }
+            }
+
+            return;
+        }
+
         foreach (var binding in _providerBindings)
         {
             for (var index = 0; index < exports.Count; index++)
@@ -214,6 +240,18 @@ internal sealed class TrRmStandardNativeBindingPlan
         {
             throw new InvalidDataException(
                 "The Standard native binding plan has invalid operation or Module context.");
+        }
+
+        var includesLocalAggregateLayoutSchema
+            = _schemaIdentities.Contains(LocalAggregateLayoutSchemaIdentity,
+                StringComparer.Ordinal);
+        var isLocalAggregateLayoutSchemaSet
+            = IsExactLocalAggregateLayoutSchemaSet(_schemaIdentities);
+        if (includesLocalAggregateLayoutSchema
+            && !isLocalAggregateLayoutSchemaSet)
+        {
+            throw new InvalidDataException(
+                "The L1 native operation requires exact L1 selection for every supplied artifact.");
         }
 
         _a3LayoutResourceLedger?.ConsumeWork(
@@ -283,6 +321,17 @@ internal sealed class TrRmStandardNativeBindingPlan
                     "The Standard native binding plan changed its complete provider closure.");
             }
         }
+        else if (isLocalAggregateLayoutSchemaSet)
+        {
+            if (!_providerBindings.IsDefaultOrEmpty
+                || !_providerDependencyBindings.IsDefaultOrEmpty)
+            {
+                throw new InvalidDataException(
+                    "The L1 native operation cannot use F NativeImport bindings.");
+            }
+
+            return (CreateLocalAggregateLayoutLoweringProgram(), []);
+        }
         else if (!_providerDependencyBindings.IsDefaultOrEmpty)
         {
             throw new InvalidDataException(
@@ -303,15 +352,26 @@ internal sealed class TrRmStandardNativeBindingPlan
             _a3LayoutResourceLedger?.ConsumeWork(2);
             var rootIndex = new TrRmArtifactIndex(_artifacts[0],
                 rootSchema, _a3LayoutResourceLedger);
-            var rootTables = rootSchema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
-                ? TrRmStructuralMetadataValidator
-                    .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
-                        rootIndex, _a3LayoutResourceLedger,
-                        createA3ResourceLedger: _a3LayoutResourceLedger is null)
-                : TrRmStructuralMetadataValidator
+            var rootTables = rootSchema switch {
+                TrRmArtifactSchema.LocalAggregateLayoutDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                    => TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                            rootIndex),
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                    => TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                            rootIndex),
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                    => TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                            rootIndex, _a3LayoutResourceLedger,
+                            createA3ResourceLedger:
+                                _a3LayoutResourceLedger is null),
+                _ => TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
-                        rootIndex);
+                        rootIndex),
+            };
             _a3LayoutResourceLedger?.ConsumeWork(checked(
                 (ulong)_artifacts.Length + (ulong)_schemaIdentities.Length
                 + 2UL));
@@ -473,7 +533,18 @@ internal sealed class TrRmStandardNativeBindingPlan
         var program = RootProgram with {
             Functions = functions.ToImmutable(),
         };
-        if (program.EntryPoint < 0)
+        if (isLocalAggregateLayoutSchemaSet)
+        {
+            if (program.EntryPoint < 0)
+            {
+                SemanticVerifier.VerifyLibrary(program);
+            }
+            else
+            {
+                SemanticVerifier.Verify(program);
+            }
+        }
+        else if (program.EntryPoint < 0)
         {
             SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
         }
@@ -509,7 +580,8 @@ internal sealed class TrRmStandardNativeBindingPlan
             }
         }
 
-        if (nativeBindings.Count == 0)
+        if (nativeBindings.Count == 0
+            && !isLocalAggregateLayoutSchemaSet)
         {
             var exception = new NotSupportedException(
                 "The Standard native binding plan contains no direct NativeImport.");
@@ -536,7 +608,18 @@ internal sealed class TrRmStandardNativeBindingPlan
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
-                ForeignInvocationStorageGenericFixedArraySchemaIdentity);
+                ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageGenericFixedArraySchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                LocalAggregateLayoutSchemaIdentity);
+
+    private static bool IsExactLocalAggregateLayoutSchemaSet(
+        IReadOnlyList<string> schemaIdentities)
+        => schemaIdentities.Count != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    LocalAggregateLayoutSchemaIdentity));
 
     private bool IsFixedArraySchemaIdentity(string? schemaIdentity)
         => AreEqualOrdinal(schemaIdentity,
@@ -548,7 +631,13 @@ internal sealed class TrRmStandardNativeBindingPlan
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
-                ForeignInvocationStorageGenericFixedArraySchemaIdentity);
+                ForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageGenericFixedArraySchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                LocalAggregateLayoutSchemaIdentity);
 
     private TrRmArtifactSchema GetFixedArraySchema(string? schemaIdentity)
     {
@@ -556,6 +645,12 @@ internal sealed class TrRmStandardNativeBindingPlan
                 ForeignInvocationStorageGenericFixedArraySchemaIdentity))
         {
             return TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+        }
+
+        if (AreEqualOrdinal(schemaIdentity,
+                LocalAggregateLayoutSchemaIdentity))
+        {
+            return TrRmArtifactSchema.LocalAggregateLayoutDraft;
         }
 
         if (AreEqualOrdinal(schemaIdentity,
@@ -590,6 +685,13 @@ internal sealed class TrRmStandardNativeBindingPlan
         {
             return TrRmArtifactSchema
                 .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft;
+        }
+
+        if (AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity))
+        {
+            return TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft;
         }
 
         throw new InvalidDataException(

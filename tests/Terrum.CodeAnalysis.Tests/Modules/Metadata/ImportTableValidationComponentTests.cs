@@ -7,18 +7,17 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed partial class ImportTableValidationComponentTests
+internal sealed partial class ImportTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -203,28 +202,28 @@ public sealed partial class ImportTableValidationComponentTests
                 ImportCount = 2,
                 ExpectedValid = false,
             },
+            valid with {
+                Imports = Import(0x1600_0002, key: 0),
+                ExpectedValid = false,
+            },
+            valid with {
+                Imports = Import(0x1600_0002, key: 1),
+                ExpectedValid = false,
+            },
+            valid with {
+                Imports = Import(0x1600_0002, key: 99),
+                ExpectedValid = false,
+            },
+            valid with {
+                Strings = SetStringByte(valid.Strings, 8, 5, 0x80),
+                ExpectedValid = false,
+            },
+            valid with {
+                Imports = Import()[..^1],
+                ExpectedValid = false,
+                HasHostedOracle = false,
+            }
         };
-        cases.Add(valid with {
-            Imports = Import(0x1600_0002, key: 0),
-            ExpectedValid = false,
-        });
-        cases.Add(valid with {
-            Imports = Import(0x1600_0002, key: 1),
-            ExpectedValid = false,
-        });
-        cases.Add(valid with {
-            Imports = Import(0x1600_0002, key: 99),
-            ExpectedValid = false,
-        });
-        cases.Add(valid with {
-            Strings = SetStringByte(valid.Strings, 8, 5, 0x80),
-            ExpectedValid = false,
-        });
-        cases.Add(valid with {
-            Imports = Import()[..^1],
-            ExpectedValid = false,
-            HasHostedOracle = false,
-        });
         var invalidByte = Import();
         invalidByte[0] = 256;
         cases.Add(valid with {
@@ -280,23 +279,23 @@ public sealed partial class ImportTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                var hosted = ValidateHosted(testCase);
-                Assert.That(hosted.Valid, Is.EqualTo(testCase.ExpectedValid),
+                var (Valid, Found, Target, Policy) = ValidateHosted(testCase);
+                Assert.That(Valid, Is.EqualTo(testCase.ExpectedValid),
                     $"Hosted differential case {caseIndex}");
-                if (hosted.Valid)
+                if (Valid)
                 {
-                    Assert.That(hosted.Found, Is.EqualTo(testCase.ExpectedFound));
-                    if (hosted.Found)
+                    Assert.That(Found, Is.EqualTo(testCase.ExpectedFound));
+                    if (Found)
                     {
-                        Assert.That(hosted.Target, Is.EqualTo(testCase.ExpectedTarget),
+                        Assert.That(Target, Is.EqualTo(testCase.ExpectedTarget),
                             $"Hosted differential case {caseIndex}");
-                        Assert.That(hosted.Policy, Is.EqualTo(testCase.ExpectedPolicy),
+                        Assert.That(Policy, Is.EqualTo(testCase.ExpectedPolicy),
                             $"Hosted differential case {caseIndex}");
                     }
                 }
             }
 
-            int outputCapacity = testCase.OutputCapacity < 0
+            var outputCapacity = testCase.OutputCapacity < 0
                 ? testCase.ImportCount + 1
                 : testCase.OutputCapacity;
             var compilation = Compilation.Create(components,
@@ -306,11 +305,11 @@ public sealed partial class ImportTableValidationComponentTests
                 new HostBuffer("ModuleRefs", PrimitiveType.Int32, [.. testCase.ModuleRefs], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
                 new HostBuffer("FieldDefs", PrimitiveType.Int32,
-                    [.. (testCase.FieldDefs ?? [])], false),
+                    [.. testCase.FieldDefs ?? []], false),
                 new HostBuffer("InterfaceDefs", PrimitiveType.Int32,
-                    [.. (testCase.InterfaceDefs ?? [])], false),
+                    [.. testCase.InterfaceDefs ?? []], false),
                 new HostBuffer("AssociatedTypeDefs", PrimitiveType.Int32,
-                    [.. (testCase.AssociatedTypeDefs ?? [])], false),
+                    [.. testCase.AssociatedTypeDefs ?? []], false),
                 new HostBuffer("Methods", PrimitiveType.Int32, [.. testCase.Methods], false),
                 new HostBuffer("Properties", PrimitiveType.Int32, [.. testCase.Properties], false),
                 new HostBuffer("Signatures", PrimitiveType.Int32, [.. testCase.Signatures], false),
@@ -356,10 +355,14 @@ public sealed partial class ImportTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-            int jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
+            var jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
             Assert.That(jitResult == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {jitResult}.");
-            int aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            var aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true);
             Assert.That(aotResult == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {aotResult}.");
         }
@@ -367,7 +370,7 @@ public sealed partial class ImportTableValidationComponentTests
 
     private static TableCase CreateValidCase()
     {
-        byte[] strings = TrRmStringTableWriter.EncodeTextRows([
+        var strings = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Producer", 0), ("Consumer", 0), ("Widget", 0),
             ("Key", 0), ("Execute", 0), ("Value", 0), ("Key", 1),
         ]);
@@ -381,7 +384,7 @@ public sealed partial class ImportTableValidationComponentTests
         var typeDefs = new byte[88];
         for (var row = 0; row < 2; row++)
         {
-            int offset = row * 44;
+            var offset = row * 44;
             WriteWord(typeDefs, offset, 1);
             WriteWord(typeDefs, offset + 4, 4);
             WriteWord(typeDefs, offset + 8, 6);
@@ -415,7 +418,7 @@ public sealed partial class ImportTableValidationComponentTests
 
     private static TableCase CreatePropertyCase(TableCase testCase)
     {
-        int[] methods = SetWord(SetWord(testCase.Methods, 0, 1), 24, 0);
+        var methods = SetWord(SetWord(testCase.Methods, 0, 1), 24, 0);
         var properties = new byte[20];
         WriteWord(properties, 0, 1);
         WriteWord(properties, 4, 7);
@@ -479,7 +482,7 @@ public sealed partial class ImportTableValidationComponentTests
 
     private static TableCase CreateExternalRequirementsCase(TableCase testCase)
     {
-        byte[] strings = TrRmStringTableWriter.EncodeTextRows([
+        var strings = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Producer", 0), ("Consumer", 0), ("Widget", 0),
             ("Key", 0), ("Execute", 0), ("Value", 0), ("Key", 1),
             ("ExternalA", 0), ("ExternalB", 0),
@@ -543,7 +546,7 @@ public sealed partial class ImportTableValidationComponentTests
                     : testCase.DeclaredImportCount,
                 strings, references, types, methods, properties,
                 interfaces, associatedTypeDefs, fields);
-            bool found = imports.TryGetExpectedRequirements(testCase.QueryReference,
+            var found = imports.TryGetExpectedRequirements(testCase.QueryReference,
                 out var requirements);
             return (true, found, requirements.TargetRequirement, requirements.RuntimePolicy);
         }
@@ -595,17 +598,17 @@ public sealed partial class ImportTableValidationComponentTests
 
     private static int[] SetWord(int[] bytes, int offset, uint value)
     {
-        byte[] result = ToBytes(bytes);
+        var result = ToBytes(bytes);
         WriteWord(result, offset, value);
         return [.. result.Select(static item => (int)item)];
     }
 
     private static int[] SetStringByte(int[] bytes, int stringCount, int row, byte value)
     {
-        byte[] result = ToBytes(bytes);
-        uint rowOffset = BinaryPrimitives.ReadUInt32LittleEndian(
+        var result = ToBytes(bytes);
+        var rowOffset = BinaryPrimitives.ReadUInt32LittleEndian(
             result.AsSpan((row - 1) * sizeof(uint)));
-        int rowStart = (stringCount + 1) * sizeof(uint) + checked((int)rowOffset);
+        var rowStart = ((stringCount + 1) * sizeof(uint)) + checked((int)rowOffset);
         result[rowStart + 4] = value;
         return [.. result.Select(static item => (int)item)];
     }
@@ -614,7 +617,7 @@ public sealed partial class ImportTableValidationComponentTests
         => [.. first, .. second];
 
     private static byte[] ToBytes(int[] values)
-        => values.Select(static value => checked((byte)value)).ToArray();
+        => [.. values.Select(static value => checked((byte)value))];
 
     private static void WriteWord(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);

@@ -12,8 +12,12 @@ public readonly ref struct TrRmBodyTableReader
     private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Gets the number of validated Body rows.</summary>
     public int Count => _rows.Count;
 
+    /// <summary>Validates and indexes the borrowed Body section.</summary>
+    /// <param name="section">The Body section bytes, which must remain unchanged while this reader is in use.</param>
+    /// <param name="recordCount">The number of Body rows.</param>
     public TrRmBodyTableReader(ReadOnlySpan<byte> section, int recordCount)
         : this(section, recordCount, TrRmArtifactSchema.Standard)
     {
@@ -53,6 +57,9 @@ public readonly ref struct TrRmBodyTableReader
         _resourceLedger = resourceLedger;
     }
 
+    /// <summary>Gets the borrowed bytes of a one-based Body row without interpreting its instructions.</summary>
+    /// <param name="row">The one-based row number.</param>
+    /// <returns>The row's bytes.</returns>
     public ReadOnlySpan<byte> GetRow(int row)
     {
         _resourceLedger?.ConsumeWork();

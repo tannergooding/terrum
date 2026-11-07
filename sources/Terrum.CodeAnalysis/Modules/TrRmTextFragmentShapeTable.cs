@@ -47,6 +47,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated TextFragmentShape rows.</summary>
     public int Count => _recordCount;
@@ -79,6 +80,25 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         TrRmInterfaceWitnessTableReader witnesses,
         TrRmWitnessMemberTableReader witnessMembers,
         TrRmImportTableReader imports)
+        : this(section, recordCount, shapes, captures, types, methods,
+            formals, constraints, typeSpecs, interfaces, interfaceBases,
+            interfaceMethods, witnesses, witnessMembers, imports, null)
+    {
+    }
+
+    internal TrRmTextFragmentShapeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTextContentShapeTableReader shapes,
+        TrRmTextCaptureShapeTableReader captures,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmGenericParamTableReader formals, TrRmConstraintTableReader constraints,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmInterfaceWitnessTableReader witnesses,
+        TrRmWitnessMemberTableReader witnessMembers,
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount)
             || recordCount != shapes.FragmentCount
@@ -89,24 +109,28 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var shape = 1; shape <= shapes.Count; shape++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = shapes.GetFragmentRange(shape);
             var generatedTypeDef = shapes.GetGeneratedTypeDef(shape);
             var generatedModule = types.GetOwnerModule(generatedTypeDef);
             var writerInterfaceTypeDef = 0;
             var formatterInterfaceTypeDef = 0;
             uint formatterMethodDef = 0;
+            _resourceLedger?.ConsumeWork();
             var formatterInterfaceClosure = new Dictionary<int, bool>();
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
+                _resourceLedger?.ConsumeWork();
                 var row = first + ordinal;
                 var data = GetRow(row);
                 var ownerShape = Read(data, 0);
                 var fragmentOrdinal = Read(data, 4);
-                var kind = data[8];
-                var flags = data[9];
-                var reserved = BinaryPrimitives.ReadUInt16LittleEndian(data[10..]);
+                var kind = ReadByte(data, 8);
+                var flags = ReadByte(data, 9);
+                var reserved = ReadUInt16(data, 10);
                 var valueCapture = Read(data, 12);
                 var alignmentCapture = Read(data, 16);
                 var formatCapture = Read(data, 20);
@@ -116,6 +140,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
                 var writerRequirement = Read(data, 36);
                 var hasFormatterWitness = formatterWitness != 0;
                 var hasFormatterConstraint = formatterConstraint != 0;
+                _resourceLedger?.ConsumeWork(3);
                 if (ownerShape != (uint)shape || fragmentOrdinal != (uint)ordinal
                     || kind is not (0 or 1) || flags != 0 || reserved != 0)
                 {
@@ -140,6 +165,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
 
                 if (kind == 0)
                 {
+                    _resourceLedger?.ConsumeWork();
                     if (valueCapture != 0 || alignmentCapture != 0 || formatCapture != 0
                         || formatterWitness != 0 || formatterConstraint != 0
                         || formatterMethod != 0)
@@ -150,6 +176,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
                     continue;
                 }
 
+                _resourceLedger?.ConsumeWork();
                 if (valueCapture == 0 || alignmentCapture == 0 || formatCapture == 0
                     || valueCapture == alignmentCapture || valueCapture == formatCapture
                     || alignmentCapture == formatCapture
@@ -207,7 +234,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
 
     /// <summary>Gets the assigned literal/formatted kind.</summary>
     public byte GetKind(int row)
-        => GetRow(row)[8];
+        => ReadByte(GetRow(row), 8);
 
     /// <summary>Gets the one-based value capture, or zero for a literal.</summary>
     public uint GetValueCaptureRow(int row)
@@ -237,9 +264,10 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
     public uint GetWriterRequirementMethodDefRow(int row)
         => Read(GetRow(row), 36);
 
-    private static void ValidateCapture(uint capture, int shape,
+    private void ValidateCapture(uint capture, int shape,
         TrRmTextCaptureShapeTableReader captures)
     {
+        _resourceLedger?.ConsumeWork();
         if (!ValidRowReference(capture, captures.Count)
             || captures.GetShapeRow((int)capture) != shape)
         {
@@ -247,10 +275,11 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         }
     }
 
-    private static int ValidateFormatterConstraint(uint constraint,
+    private int ValidateFormatterConstraint(uint constraint,
         int generatedTypeDef, TrRmGenericParamTableReader formals,
         TrRmConstraintTableReader constraints)
     {
+        _resourceLedger?.ConsumeWork();
         if (!ValidRowReference(constraint, constraints.Count)
             || constraints.GetKind((int)constraint) != 1)
         {
@@ -267,7 +296,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         return formal;
     }
 
-    private static void ValidateFormatterWitness(uint witness, uint valueCapture,
+    private void ValidateFormatterWitness(uint witness, uint valueCapture,
         uint formatterMethod, int formatterInterface, int formatterInterfaceTypeDef,
         TrRmTextCaptureShapeTableReader captures, TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader types, TrRmInterfaceDefTableReader interfaces,
@@ -276,13 +305,15 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         TrRmWitnessMemberTableReader witnessMembers,
         TrRmImportTableReader imports, Dictionary<int, bool> formatterInterfaceClosure)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (!ValidRowReference(witness, witnesses.Count)
             || !typeSpecs.AreEquivalentTypeSpecRefs(
                 captures.GetTypeSpecRef(checked((int)valueCapture)),
                 witnesses.GetImplementingTypeSpecRef(checked((int)witness)))
             || !SuppliesInterface(witnesses.GetInterfaceTypeSpecRef(checked((int)witness)),
                 formatterInterfaceTypeDef, typeSpecs, types, interfaces,
-                interfaceBases, imports, formatterInterfaceClosure))
+                interfaceBases, imports, formatterInterfaceClosure,
+                _resourceLedger))
         {
             throw InvalidTextFragmentShape();
         }
@@ -291,6 +322,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         var (first, count) = witnesses.GetMemberRange(checked((int)witness));
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
+            _resourceLedger?.ConsumeWork();
             var member = first + ordinal;
             if (witnessMembers.GetRequirementMethodDef(member) != formatterMethod)
             {
@@ -313,7 +345,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         }
     }
 
-    private static void ValidateOpenFormatterEvidence(uint valueCapture, int formal,
+    private void ValidateOpenFormatterEvidence(uint valueCapture, int formal,
         int formatterInterfaceTypeDef, TrRmTextCaptureShapeTableReader captures,
         TrRmTypeSpecTableReader typeSpecs, TrRmTypeDefTableReader types,
         TrRmInterfaceDefTableReader interfaces,
@@ -321,6 +353,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         TrRmImportTableReader imports, TrRmConstraintTableReader constraints,
         uint formatterConstraint, Dictionary<int, bool> formatterInterfaceClosure)
     {
+        _resourceLedger?.ConsumeWork();
         var captureType = typeSpecs.GetTypeSpecRef(
             captures.GetTypeSpecRef(checked((int)valueCapture)));
         if (!captureType.IsRow || captureType.Form != 0x04
@@ -329,17 +362,19 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
             || !SuppliesInterface(
                 constraints.GetPayload(checked((int)formatterConstraint)),
                 formatterInterfaceTypeDef, typeSpecs, types, interfaces,
-                interfaceBases, imports, formatterInterfaceClosure))
+                interfaceBases, imports, formatterInterfaceClosure,
+                _resourceLedger))
         {
             throw InvalidTextFragmentShape();
         }
     }
 
-    private static int GetRequirementInterface(uint method,
+    private int GetRequirementInterface(uint method,
         TrRmInterfaceDefTableReader interfaces,
         TrRmInterfaceMethodTableReader interfaceMethods,
         TrRmMethodDefTableReader methods)
     {
+        _resourceLedger?.ConsumeWork();
         var result = interfaceMethods.GetOwnerInterfaceDefForMethod(checked((int)method));
         if (result == 0 || methods.GetOwnerType(checked((int)method))
             != interfaces.GetOwnerTypeDef(result))
@@ -354,32 +389,42 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         int requiredInterfaceTypeDef, TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader types, TrRmInterfaceDefTableReader interfaces,
         TrRmInterfaceBaseTableReader interfaceBases,
-        TrRmImportTableReader imports, Dictionary<int, bool> cache)
+        TrRmImportTableReader imports, Dictionary<int, bool> cache,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var rootTypeDef = typeSpecs.GetNominalTypeDefRow(
             interfaceTypeSpecRef, types, imports);
+        resourceLedger?.ConsumeWork(2);
         if (cache.TryGetValue(rootTypeDef, out var cachedResult))
         {
             return cachedResult;
         }
 
-        var pending = new Stack<int>();
+        resourceLedger?.ConsumeWork(2);
+        var pending = new Stack<(int TypeDefRow, ulong Depth)>();
         var visited = new HashSet<int>();
-        pending.Push(rootTypeDef);
-        while (pending.TryPop(out var typeDef))
+        resourceLedger?.ReserveWorkAtDepth(1, 1);
+        pending.Push((rootTypeDef, 1));
+        while (pending.TryPop(out var current))
         {
-            if (!visited.Add(typeDef))
+            resourceLedger?.ConsumeWork();
+            resourceLedger?.CheckDepthFromCurrent(current.Depth);
+            resourceLedger?.ConsumeWork(2);
+            if (!visited.Add(current.TypeDefRow))
             {
                 continue;
             }
 
-            if (typeDef == requiredInterfaceTypeDef)
+            resourceLedger?.ConsumeWork();
+            if (current.TypeDefRow == requiredInterfaceTypeDef)
             {
+                resourceLedger?.ConsumeWork(2);
                 cache[rootTypeDef] = true;
                 return true;
             }
 
-            var interfaceDef = interfaces.GetInterfaceDefForTypeDef(typeDef);
+            var interfaceDef = interfaces.GetInterfaceDefForTypeDef(
+                current.TypeDefRow);
             if (interfaceDef == 0)
             {
                 throw InvalidTextFragmentShape();
@@ -388,11 +433,17 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
             var (first, count) = interfaces.GetBaseRange(interfaceDef);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
-                pending.Push(typeSpecs.GetNominalTypeDefRow(
-                    interfaceBases.GetBaseTypeSpecRef(first + ordinal), types, imports));
+                resourceLedger?.ConsumeWork();
+                var baseTypeDef = typeSpecs.GetNominalTypeDefRow(
+                    interfaceBases.GetBaseTypeSpecRef(first + ordinal),
+                    types, imports);
+                var childDepth = checked(current.Depth + 1);
+                resourceLedger?.ReserveWorkAtDepth(1, childDepth);
+                pending.Push((baseTypeDef, childDepth));
             }
         }
 
+        resourceLedger?.ConsumeWork(2);
         cache[rootTypeDef] = false;
         return false;
     }
@@ -407,6 +458,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidTextFragmentShape();
@@ -418,8 +470,25 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
+
+    private byte ReadByte(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(byte) + 1);
+        return data[offset];
+    }
+
+    private ushort ReadUInt16(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
+        return BinaryPrimitives.ReadUInt16LittleEndian(
+            data.Slice(offset, sizeof(ushort)));
+    }
 
     private static InvalidDataException InvalidTextFragmentShape()
         => new("Invalid TRRM TextFragmentShape table.");

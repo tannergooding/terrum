@@ -8,7 +8,8 @@ using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmRegisterBodyWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmRegisterBodyWriterTests
 {
     [Test]
     public void WritesPresentMapsBlocksRecordOffsetsAndCode()
@@ -85,11 +86,11 @@ public sealed class TrRmRegisterBodyWriterTests
     [Test]
     public void TypedRecordsRejectInvalidResultAndInputSelectors()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmRegisterBodyRecordWriter.EncodeNativeAddress(1, 14, 0, 0));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmRegisterBodyRecordWriter.EncodeCallSite(2, 0, 14, 0, [], []));
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmRegisterBodyRecordWriter.EncodeCallSite(2, 0, 0, 0,
                 [new TrRmRegisterBodyCallInput(0, 1, 0)], []));
     }
@@ -164,7 +165,7 @@ public sealed class TrRmRegisterBodyWriterTests
 
         Assert.That(maps.TypeMap.Length, Is.EqualTo(65_536 * sizeof(uint)));
         Assert.That(maps.GetTypeMapIndex(65_535), Is.EqualTo(ushort.MaxValue));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmRegisterBodyMapBuilder.Create(
                 Enumerable.Range(0, 65_537).Select(static index => (uint)index), []));
     }
@@ -176,10 +177,10 @@ public sealed class TrRmRegisterBodyWriterTests
         entryState[0] = 0x01;
         byte[] code = [0x17, 0x0F];
 
-        Assert.Throws<ArgumentException>(() => TrRmRegisterBodyWriter.Encode(
+        _ = Assert.Throws<ArgumentException>(() => TrRmRegisterBodyWriter.Encode(
             default, new byte[3], default, default, default,
             [new TrRmRegisterBodyBlock(0, 2, 0)], [entryState], code));
-        Assert.Throws<ArgumentException>(() => TrRmRegisterBodyWriter.Encode(
+        _ = Assert.Throws<ArgumentException>(() => TrRmRegisterBodyWriter.Encode(
             default, default, default, default, default,
             [new TrRmRegisterBodyBlock(1, 1, 0)], [entryState], code));
     }

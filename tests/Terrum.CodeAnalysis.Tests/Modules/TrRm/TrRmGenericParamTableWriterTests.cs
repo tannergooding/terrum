@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmGenericParamTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmGenericParamTableWriterTests
 {
     private static readonly TrRmGenericParamRow TypeFormal =
         new(0x1300_0001, 0, 5, 1, 1, 1, 3, 1, 0, 0);
@@ -38,10 +39,11 @@ public sealed class TrRmGenericParamTableWriterTests
         var formals = new TrRmGenericParamTableReader(formalBytes, 2,
             strings, types, methods, signatures, specs, 1);
         var constraintRows = new[] { Constraint };
-        var constraintBytes = TrRmConstraintTableWriter.Encode(constraintRows, formals, specs);
+        var constraintBytes = TrRmConstraintTableWriter.Encode(
+            constraintRows, formals, specs, default);
         var inlineTypeConstraint = TrRmConstraintTableWriter.Encode([
             Constraint with { Kind = 1, Payload = 0xF2000008 },
-        ], formals, specs);
+        ], formals, specs, default);
         Assert.That(formalBytes.Length, Is.EqualTo(64));
         Assert.That(constraintBytes.Length, Is.EqualTo(12));
         Assert.That(formals.GetConstraintOwner(1), Is.EqualTo(1));
@@ -76,31 +78,31 @@ public sealed class TrRmGenericParamTableWriterTests
     [Test]
     public void RejectsUnownedOrMalformedFormalsAndConstraints()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => EncodeFormals([]));
-        Assert.Throws<InvalidDataException>(() => EncodeFormals([TypeFormal with { OwnerDefId = 0 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeFormals([
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => EncodeFormals([]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFormals([TypeFormal with { OwnerDefId = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFormals([
             TypeFormal with { Ordinal = 1 }, MethodFormal,
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeFormals([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFormals([
             TypeFormal with { NameStringRow = 0 }, MethodFormal,
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeFormals([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFormals([
             TypeFormal with { ConstraintFirst = 0 }, MethodFormal,
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeFormals([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFormals([
             TypeFormal with { ConstraintCount = 0 }, MethodFormal,
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeFormals([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFormals([
             TypeFormal, MethodFormal with { OwnerDefId = 0x1300_0001 },
         ]));
-        Assert.Throws<ArgumentOutOfRangeException>(() => EncodeConstraints([]));
-        Assert.Throws<InvalidDataException>(() => EncodeConstraints([
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => EncodeConstraints([]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeConstraints([
             Constraint with { OwnerGenericParamRow = 2 },
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeConstraints([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeConstraints([
             Constraint with { Payload = 0 },
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeConstraints([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeConstraints([
             Constraint with { Kind = 1, Payload = 0xF4000008 },
         ]));
     }
@@ -149,7 +151,7 @@ public sealed class TrRmGenericParamTableWriterTests
         var formals = new TrRmGenericParamTableReader(
             EncodeFormals([TypeFormal, MethodFormal]), 2,
             strings, types, methods, signatures, specs, 1);
-        return TrRmConstraintTableWriter.Encode(rows, formals, specs);
+        return TrRmConstraintTableWriter.Encode(rows, formals, specs, default);
     }
 
     private static byte[] Names()

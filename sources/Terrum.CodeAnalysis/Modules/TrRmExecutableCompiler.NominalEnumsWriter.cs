@@ -86,6 +86,7 @@ public static partial class TrRmExecutableCompiler
         {
             EnumDefinitions = program.EnumDefinitions,
             NativeCoreRegistration = coreRegistration,
+            LayoutCoreRegistration = program.LayoutCoreRegistration,
             RuntimePolicy = program.RuntimePolicy,
         };
         var declarationArtifact = EmitNominalEnumsDraftDeclarationLibrary(
@@ -368,6 +369,7 @@ public static partial class TrRmExecutableCompiler
         {
             EnumDefinitions = program.EnumDefinitions,
             NativeCoreRegistration = coreRegistration,
+            LayoutCoreRegistration = program.LayoutCoreRegistration,
             RuntimePolicy = program.RuntimePolicy,
         };
         var declarationArtifact = EmitNominalEnumsDraftDeclarationLibrary(

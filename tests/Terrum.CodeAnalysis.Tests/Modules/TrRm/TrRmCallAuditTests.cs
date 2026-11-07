@@ -4,15 +4,16 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmCallAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmCallAuditTests
 {
     internal static byte[] IndexedCallBody() =>
     [
@@ -23,22 +24,22 @@ public sealed class TrRmCallAuditTests
     ];
 
     internal static byte[] IdentityBody() => [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
-    [TestCase(12,(byte)(0))] // wrong call result use count
-    [TestCase(14,(byte)(1))] // missing call definition
-    [TestCase(16,(byte)(12))] // wrong call definition offset
-    [TestCase(18,(byte)(17))] // truncated block extent
-    [TestCase(19,(byte)(15))] // wrong terminator boundary
-    [TestCase(23,(byte)(0))] // argument's final use excludes the call
-    [TestCase(25,(byte)(1))] // call result's last use is not its return
-    [TestCase(32,(byte)(0))] // value-returning callee cannot have result zero
-    [TestCase(33,(byte)(3))] // nonexistent module ordinal
-    [TestCase(34,(byte)(0))] // missing argument
-    [TestCase(35,(byte)(2))] // self-dependent call result
+    [TestCase(12,(byte)0)] // wrong call result use count
+    [TestCase(14,(byte)1)] // missing call definition
+    [TestCase(16,(byte)12)] // wrong call definition offset
+    [TestCase(18,(byte)17)] // truncated block extent
+    [TestCase(19,(byte)15)] // wrong terminator boundary
+    [TestCase(23,(byte)0)] // argument's final use excludes the call
+    [TestCase(25,(byte)1)] // call result's last use is not its return
+    [TestCase(32,(byte)0)] // value-returning callee cannot have result zero
+    [TestCase(33,(byte)3)] // nonexistent module ordinal
+    [TestCase(34,(byte)0)] // missing argument
+    [TestCase(35,(byte)2)] // self-dependent call result
     public void IndexedCallInventoriesAndOperandsAreAudited(int offset, byte value)
     {
         var body = IndexedCallBody();
         body[offset] = value;
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             TrRmExecutionAuditTests.LocalCallArtifact(body, IdentityBody())));
     }
 
@@ -52,12 +53,12 @@ public sealed class TrRmCallAuditTests
         var body = IndexedCallBody();
         for (var length = 1; length < body.Length; length++)
         {
-            Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
                 TrRmExecutionAuditTests.LocalCallArtifact(body[..length], IdentityBody())));
         }
     }
-    [TestCase((byte)(1))]
-    [TestCase((byte)(4))]
+    [TestCase((byte)1)]
+    [TestCase((byte)4)]
     public void NonminimalCallReferenceOrArgumentCountWidthRejects(byte layout)
     {
         byte[] caller = layout == 1
@@ -67,7 +68,7 @@ public sealed class TrRmCallAuditTests
                 0xF0, 4, 0x12, 2, 2, 1, 0, 1, 0x83, 2];
         var artifact = TrRmExecutionAuditTests.LocalCallArtifact(caller, IdentityBody());
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
     [TestCase(255)]
     [TestCase(256)]
@@ -112,7 +113,7 @@ public sealed class TrRmCallAuditTests
             bytes.AddRange([0x12, 0, 2, 1, 1]);
         }
         bytes.AddRange([0x83, 0]);
-        return bytes.ToArray();
+        return [.. bytes];
     }
 
     [Test]
@@ -186,7 +187,11 @@ public sealed class TrRmCallAuditTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var original = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var original = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "calls-audit"));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));

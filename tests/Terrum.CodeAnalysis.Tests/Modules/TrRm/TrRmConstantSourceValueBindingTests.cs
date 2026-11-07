@@ -7,7 +7,8 @@ using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmConstantSourceValueBindingTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmConstantSourceValueBindingTests
 {
     [Test]
     public void SelectedConstantMapBindsExactFrozenScalarTypeAndPayload()
@@ -24,7 +25,7 @@ public sealed class TrRmConstantSourceValueBindingTests
         var artifact = CreateArtifact(includeFeature11: false, includeConstant: true,
             mapTypeSpecRef: 0xF200_0008, nodeTypeSpecRef: 0xF200_0008);
 
-        Assert.Throws<NotSupportedException>(() => ValidateRegisterBodyMaps(artifact));
+        _ = Assert.Throws<NotSupportedException>(() => ValidateRegisterBodyMaps(artifact));
     }
 
     [Test]
@@ -33,7 +34,7 @@ public sealed class TrRmConstantSourceValueBindingTests
         var artifact = CreateArtifact(includeFeature11: true, includeConstant: true,
             mapTypeSpecRef: 0xF200_000D, nodeTypeSpecRef: 0xF200_0008);
 
-        Assert.Throws<InvalidDataException>(() => ValidateRegisterBodyMaps(artifact));
+        _ = Assert.Throws<InvalidDataException>(() => ValidateRegisterBodyMaps(artifact));
     }
 
     [Test]
@@ -58,14 +59,14 @@ public sealed class TrRmConstantSourceValueBindingTests
             CreateArtifact(includeFeature11: false, includeConstant: false,
                 mapTypeSpecRef: 0, nodeTypeSpecRef: 0xF200_0008),
             0xF200_0008);
-        Assert.Throws<NotSupportedException>(
+        _ = Assert.Throws<NotSupportedException>(
             () => TrRmStructuralMetadataValidator.Validate(missingFeature));
 
         var mismatchedType = AddConstantFormalDefault(
             CreateArtifact(includeFeature11: true, includeConstant: false,
                 mapTypeSpecRef: 0, nodeTypeSpecRef: 0xF200_0008),
             0xF200_000D);
-        Assert.Throws<InvalidDataException>(
+        _ = Assert.Throws<InvalidDataException>(
             () => TrRmStructuralMetadataValidator.Validate(mismatchedType));
     }
 

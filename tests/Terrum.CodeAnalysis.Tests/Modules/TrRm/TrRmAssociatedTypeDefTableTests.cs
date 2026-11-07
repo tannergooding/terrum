@@ -4,12 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmAssociatedTypeDefTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmAssociatedTypeDefTableTests
 {
     [Test]
     public void ValidatesInterfaceOwnershipSelfFormalAndCompleteDefault()
@@ -27,15 +28,15 @@ public sealed class TrRmAssociatedTypeDefTableTests
 
         TrRmStructuralMetadataValidator.Validate(artifact);
 
-        var tables = ReadTables(
+        var (OwnerTypeDef, SelfGenericParam, AssociatedTypeFirst, AssociatedTypeCount, AssociatedTypeOwner, AssociatedTypeName, DefaultTypeSpecRef) = ReadTables(
             fixture, interfaceBytes, associatedTypeBytes);
-        Assert.That(tables.OwnerTypeDef, Is.EqualTo(1));
-        Assert.That(tables.SelfGenericParam, Is.EqualTo(1));
-        Assert.That((tables.AssociatedTypeFirst, tables.AssociatedTypeCount),
+        Assert.That(OwnerTypeDef, Is.EqualTo(1));
+        Assert.That(SelfGenericParam, Is.EqualTo(1));
+        Assert.That((AssociatedTypeFirst, AssociatedTypeCount),
             Is.EqualTo((1, 1)));
-        Assert.That(tables.AssociatedTypeOwner, Is.EqualTo(1));
-        Assert.That(tables.AssociatedTypeName, Is.EqualTo(4));
-        Assert.That(tables.DefaultTypeSpecRef, Is.EqualTo(1u));
+        Assert.That(AssociatedTypeOwner, Is.EqualTo(1));
+        Assert.That(AssociatedTypeName, Is.EqualTo(4));
+        Assert.That(DefaultTypeSpecRef, Is.EqualTo(1u));
     }
 
     [Test]
@@ -44,22 +45,22 @@ public sealed class TrRmAssociatedTypeDefTableTests
         var fixture = CreateFixture();
         var interfaceRow = new TrRmInterfaceDefRow(1, 1, 0, 0, 0, 0, 1, 1,
             0, 0, 0, 0);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             CreateInterfaceDefs(CreateFixture(typeFlags: 4), [interfaceRow], 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             CreateInterfaceDefs(fixture, [interfaceRow with { SelfGenericParamRow = 2 }], 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             CreateInterfaceDefs(fixture, [interfaceRow with {
                 AssociatedTypeFirst = 0,
                 AssociatedTypeCount = 0,
             }], 1));
 
         var interfaceBytes = CreateInterfaceDefs(fixture, [interfaceRow], 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             CreateAssociatedTypeDefs(fixture, interfaceBytes, [new(2, 4, 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             CreateAssociatedTypeDefs(fixture, interfaceBytes, [new(1, 0, 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             CreateAssociatedTypeDefs(fixture, interfaceBytes, [new(1, 4, 0xFF00_0001)]));
     }
 
@@ -76,20 +77,20 @@ public sealed class TrRmAssociatedTypeDefTableTests
         var malformedInterface = (byte[])interfaceBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformedInterface.AsSpan(sizeof(uint)), 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(fixture, malformedInterface, associatedTypeBytes)));
 
         var malformedAssociatedType = (byte[])associatedTypeBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformedAssociatedType, 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(fixture, interfaceBytes, malformedAssociatedType)));
 
         malformedAssociatedType = (byte[])associatedTypeBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformedAssociatedType.AsSpan(2 * sizeof(uint)), 0xFF00_0001);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(fixture, interfaceBytes, malformedAssociatedType)));
     }
@@ -148,7 +149,7 @@ public sealed class TrRmAssociatedTypeDefTableTests
     }
 
     private static byte[] CreateAssociatedTypeDefs(Fixture fixture,
-        byte[] interfaceBytes, IReadOnlyList<TrRmAssociatedTypeDefRow> rows)
+        byte[] interfaceBytes, TrRmAssociatedTypeDefRow[] rows)
     {
         var strings = new TrRmStringTableReader(fixture.Strings, 4);
         var modules = new TrRmModuleTableReader(fixture.Modules, 1, strings,
@@ -162,7 +163,7 @@ public sealed class TrRmAssociatedTypeDefTableTests
         var formals = new TrRmGenericParamTableReader(fixture.GenericParams, 1,
             strings, types, methods, signatures, typeSpecs, 0);
         var interfaces = new TrRmInterfaceDefTableReader(interfaceBytes, 1,
-            types, formals, 0, 0, rows.Count, 0, 0);
+            types, formals, 0, 0, rows.Length, 0, 0);
         return TrRmAssociatedTypeDefTableWriter.Encode(rows,
             strings, typeSpecs, interfaces);
     }
@@ -200,9 +201,9 @@ public sealed class TrRmAssociatedTypeDefTableTests
             types, formals, 0, 0, 1, 0, 0);
         var associatedTypes = new TrRmAssociatedTypeDefTableReader(
             associatedTypeBytes, 1, strings, typeSpecs, interfaces);
-        var range = interfaces.GetAssociatedTypeRange(1);
+        var (First, Count) = interfaces.GetAssociatedTypeRange(1);
         return (interfaces.GetOwnerTypeDef(1), interfaces.GetSelfGenericParam(1),
-            range.First, range.Count, interfaces.GetAssociatedTypeOwner(1),
+            First, Count, interfaces.GetAssociatedTypeOwner(1),
             associatedTypes.GetNameStringRow(1),
             associatedTypes.GetDefaultTypeSpecRef(1));
     }

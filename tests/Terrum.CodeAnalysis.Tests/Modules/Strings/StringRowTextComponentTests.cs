@@ -5,18 +5,18 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Strings;
 
-public sealed class StringRowTextComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringRowTextComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -163,14 +163,18 @@ public sealed class StringRowTextComponentTests
             new HostBuffer("Expected", PrimitiveType.Int32, [.. fixtures.Expected.SelectMany(static item => item)], false),
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static byte[] EncodeText(string value, int encoding)
     {
-        byte[] table = TrRmStringTableWriter.EncodeTextRows([(value, encoding)]);
+        var table = TrRmStringTableWriter.EncodeTextRows([(value, encoding)]);
         var index = new TrRmVariableTableIndex(table, 1, 8, 4);
         return index.GetRow(1).ToArray();
     }
@@ -223,14 +227,14 @@ public sealed class StringRowTextComponentTests
 
     private static void AddInvalidText(FixtureSet fixtures, byte[] row, bool isName)
     {
-        Assert.Throws<InvalidDataException>(() => {
+        _ = Assert.Throws<InvalidDataException>(() => {
             if (isName)
             {
-                TrRmStringRowReader.DecodeName(row);
+                _ = TrRmStringRowReader.DecodeName(row);
             }
             else
             {
-                TrRmStringRowReader.DecodeNamespace(row);
+                _ = TrRmStringRowReader.DecodeNamespace(row);
             }
         });
 

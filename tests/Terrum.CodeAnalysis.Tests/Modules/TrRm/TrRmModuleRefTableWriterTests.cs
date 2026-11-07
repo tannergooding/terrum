@@ -1,12 +1,13 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmModuleRefTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmModuleRefTableWriterTests
 {
     [Test]
     public void ComposesPackedAndExternalReferencesWithModulePartitions()
@@ -44,17 +45,17 @@ public sealed class TrRmModuleRefTableWriterTests
     {
         var packed = new TrRmModuleRefRow(2, 1, 1);
         var external = new TrRmModuleRefRow(3, 0, 0);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([packed with { ProducerIdentityStringRow = 0 }, external]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([packed with { ProducerIdentityStringRow = 4 }, external]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([packed with { RuntimePolicy = 0 }, external]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([packed with { TargetRequirement = 0 }, external]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Encode([packed, external with { TargetRequirement = 2 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([packed]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([packed]));
     }
 
     private static byte[] Encode(TrRmModuleRefRow[] rows)

@@ -2,22 +2,27 @@
 
 using System;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmScopedLocalTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmScopedLocalTests
 {
     private static BoundProgram Compile(string source,
         BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static void RoundTrip(string source, int expected = 42)
@@ -49,7 +54,7 @@ public sealed class TrRmScopedLocalTests
     [TestCase("int32 Main() { mut int32 result = 0; bool take = result == 0; { mut int32 local = 1; result = Take(local, take ? local++ : 1 / 0, local); } return result == 112 ? 42 : 0; } int32 Take(int32 a, int32 b, int32 c) { return a * 100 + b * 10 + c; }")]
     [TestCase("int32 Main() { if (false) { int32 local = 42; Fail(local); } return 42; } void Fail(int32 value) { int32 fault = value / 0; }")]
     [TestCase("int32 Main() { mut int32 total = 0; { mut int32 outer = 0; while (outer++ < 3) { mut int32 inner = 0; while (inner < 3) { int32 saved = inner++; if (saved == 1) { continue; } total++; } } } return total == 6 ? 42 : 0; }")]
-    [TestCase("[NoThrow] int32 Main() { if (true) { bool local = true; return local ? 42 : 0; } return 0; }")]
+    [TestCase(" int32 Main() { if (true) { bool local = true; return local ? 42 : 0; } return 0; }")]
     public void LexicalMembershipAndValuesSurviveSourceFreeExecution(string source)
         => RoundTrip(source);
     [TestCase("bool","true")]
@@ -72,15 +77,16 @@ public sealed class TrRmScopedLocalTests
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; while (x < 1) { ");
         for (var index = 0; index < blocks; index++)
         {
-            source.Append($"{{ int32 local = {index}; x = x + 1; }} ");
+            _ = source.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"{{ int32 local = {index}; x = x + 1; }} ");
         }
-        source.Append("} return ");
+        _ = source.Append("} return ");
         // Five fixed definitions plus three per scope; two unary values fill the positive case to 256.
-        source.Append(supported ? "+(+x); }" : "x; }");
+        _ = source.Append(supported ? "+(+x); }" : "x; }");
         var original = Compile(source.ToString());
         if (!supported)
         {
-            Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "over-limit"));
+            _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "over-limit"));
             return;
         }
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "at-limit"));
@@ -92,14 +98,14 @@ public sealed class TrRmScopedLocalTests
     public void UnsupportedBodyInUnusedFunctionIsStillRejected()
     {
         var source = "int32 Main() { if (true) { int32 x = 42; return x; } return 0; } int32 Unused() { mut int32 x = 0; outer: while (x < 2) { do { break outer; } while (x < 1); } return x; }";
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(Compile(source), "unused-body"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(Compile(source), "unused-body"));
     }
 
     [Test]
     public void CheckedExceptionPolicyIsNotPersistedForScopedLocals()
     {
         var source = "int32 Main() { if (true) { int32 x = 42; return x; } return 0; }";
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
             Compile(source, BoundRuntimePolicy.CheckedExceptions), "checked-scope"));
     }
 }

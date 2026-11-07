@@ -7,18 +7,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class PropertyDefTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class PropertyDefTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -58,7 +58,7 @@ public sealed class PropertyDefTableValidationComponentTests
             valid with { MethodSigCount = 0, Signatures = [], ExpectedValid = false },
         };
 
-        byte[] oneTypeSpec = TrRmTypeSpecTableWriter.Encode([
+        var oneTypeSpec = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
         ], 1, 0, 0, 0);
         var outOfRangeType = valid with {
@@ -141,7 +141,11 @@ public sealed class PropertyDefTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true), Is.EqualTo(0));
@@ -150,10 +154,10 @@ public sealed class PropertyDefTableValidationComponentTests
 
     private static TableCase CreateValidCase()
     {
-        byte[] strings = TrRmStringTableWriter.EncodeTextRows([
+        var strings = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Module", 0), ("Widget", 0), ("Read", 0), ("Value", 0),
         ]);
-        byte[] typeSpecs = TrRmTypeSpecTableWriter.Encode([
+        var typeSpecs = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
             TrRmTypeSpecTableWriter.Builtin(9),
         ], 1, 0, 0, 0);
@@ -260,7 +264,7 @@ public sealed class PropertyDefTableValidationComponentTests
     }
 
     private static byte[] ToBytes(int[] values)
-        => values.Select(static value => checked((byte)value)).ToArray();
+        => [.. values.Select(static value => checked((byte)value))];
 
     private static void WriteWord(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);

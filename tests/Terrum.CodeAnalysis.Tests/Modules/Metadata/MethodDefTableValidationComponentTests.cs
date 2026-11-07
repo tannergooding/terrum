@@ -5,18 +5,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class MethodDefTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class MethodDefTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -153,10 +153,10 @@ public sealed class MethodDefTableValidationComponentTests
                 new HostBuffer("FieldOwners", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.FieldCount + 1)], true),
                 new HostBuffer("BodyOwners", PrimitiveType.Int32,
-                    [.. Enumerable.Repeat(123, testCase.BodyOwnerLength ?? testCase.BodyCount + 1)], true),
+                    [.. Enumerable.Repeat(123, testCase.BodyOwnerLength ?? (testCase.BodyCount + 1))], true),
                 new HostBuffer("GenericSignatureOwners", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123,
-                        testCase.GenericSignatureOwnerLength ?? testCase.MethodSigCount + 1)], true),
+                        testCase.GenericSignatureOwnerLength ?? (testCase.MethodSigCount + 1))], true),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
                     testCase.RecordCount,
@@ -181,7 +181,11 @@ public sealed class MethodDefTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
@@ -402,13 +406,13 @@ public sealed class MethodDefTableValidationComponentTests
     }
 
     private static byte[] ToBytes(int[] values)
-        => values.Select(static value => checked((byte)value)).ToArray();
+        => [.. values.Select(static value => checked((byte)value))];
 
     private static int[] ChangeMethodWord(int[] data, int row, int offset, uint value)
-        => ChangeWord(data, (row - 1) * 28 + offset, value);
+        => ChangeWord(data, ((row - 1) * 28) + offset, value);
 
     private static int[] ChangeSignatureWord(int[] data, int row, int offset, uint value)
-        => ChangeWord(data, (row - 1) * 24 + offset, value);
+        => ChangeWord(data, ((row - 1) * 24) + offset, value);
 
     private static int[] ChangeWord(int[] data, int offset, uint value)
     {

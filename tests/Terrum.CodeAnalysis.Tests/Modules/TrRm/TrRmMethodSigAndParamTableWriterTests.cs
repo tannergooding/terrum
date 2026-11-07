@@ -2,12 +2,13 @@
 
 using System;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmMethodSigAndParamTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmMethodSigAndParamTableWriterTests
 {
     [Test]
     public void EmitsCallableRowsInAFramedArtifact()
@@ -103,12 +104,12 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
     public void RejectsBadSignatureReferencesRangesAndMissingParams()
     {
         var row = new TrRmMethodSigRow(1, 0, 1, 2, 0, 0);
-        Assert.Throws<ArgumentOutOfRangeException>(() => EncodeSignature([]));
-        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ResultTypeSpecRef = 2 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ReceiverTypeSpecRef = 2 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ParamFirst = 0 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ParamCount = 1 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { GenericFirst = 1 }]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => EncodeSignature([]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ResultTypeSpecRef = 2 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ReceiverTypeSpecRef = 2 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ParamFirst = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ParamCount = 1 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { GenericFirst = 1 }]));
     }
 
     [Test]
@@ -116,15 +117,15 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
     {
         var first = new TrRmParamRow(1, 0, 1, 0);
         var second = new TrRmParamRow(1, 1, 1, 0);
-        Assert.Throws<ArgumentOutOfRangeException>(() => EncodeParams([]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { OwnerMethodSigRow = 2 }, second]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { Ordinal = 0 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { TypeSpecRef = 0 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Mode = 1 }, second]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Mode = 4 }, second]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Flags = 2 }, second]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Flags = 1 }, second]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => EncodeParams([]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first with { OwnerMethodSigRow = 2 }, second]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { Ordinal = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { TypeSpecRef = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Mode = 1 }, second]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Mode = 4 }, second]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Flags = 2 }, second]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Flags = 1 }, second]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeParams([first]));
     }
 
     [Test]
@@ -135,7 +136,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         _ = EncodeParams([first, second]);
 
         first = first with { TypeSpecRef = 0xF301_8B08 };
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeParams([first, second]));
     }
 
@@ -150,7 +151,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         var bytes = EncodeParams(rows, schema: TrRmArtifactSchema.Development);
         Assert.That(bytes[12], Is.EqualTo((byte)1));
         Assert.That(bytes[28], Is.EqualTo((byte)4));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateParams(bytes, TrRmArtifactSchema.Standard));
     }
 
@@ -158,14 +159,14 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
     public void RejectsBadMethodNamesSignaturesAndUnownedBodies()
     {
         var row = new TrRmMethodDefRow(0, 2, 1, 0, 0, 0, 0);
-        Assert.Throws<ArgumentOutOfRangeException>(() => EncodeMethods([]));
-        Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { OwnerTypeDefRow = 1 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { NameStringRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { SignatureRow = 2 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { Flags = 3 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { ContractFirst = 1 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { BodyRow = 1 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeMethods([row, row]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => EncodeMethods([]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { OwnerTypeDefRow = 1 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { NameStringRow = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { SignatureRow = 2 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { Flags = 3 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { ContractFirst = 1 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMethods([row with { BodyRow = 1 }]));
+        _ = Assert.Throws<InvalidDataException>(() => EncodeMethods([row, row]));
     }
 
     private static byte[] EncodeSignature(TrRmMethodSigRow[] rows)

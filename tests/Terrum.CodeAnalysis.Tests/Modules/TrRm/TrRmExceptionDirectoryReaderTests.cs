@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmExceptionDirectoryReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmExceptionDirectoryReaderTests
 {
     [Test]
     public void ReadsRootOnlyDirectory()
@@ -100,17 +101,17 @@ public sealed class TrRmExceptionDirectoryReaderTests
     {
         var rootOnly = CreateRootOnlyDirectory();
         rootOnly[16] = 1;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             new TrRmExceptionDirectoryReader(rootOnly, 1, 0, 0));
 
         rootOnly = CreateRootOnlyDirectory();
         Write(rootOnly, 12, 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             new TrRmExceptionDirectoryReader(rootOnly, 1, 0, 0));
 
         rootOnly = CreateRootOnlyDirectory();
         rootOnly[1] = 1;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             new TrRmExceptionDirectoryReader(rootOnly, 1, 0, 0));
     }
 
@@ -139,7 +140,7 @@ public sealed class TrRmExceptionDirectoryReaderTests
 
         var invalidPath = LeaveRecord(0, 0);
         records[3] = invalidPath;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmRegisterBodyWriter.Encode(ReadOnlyMemory<byte>.Empty,
                 ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
                 ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty, blocks,
@@ -158,7 +159,7 @@ public sealed class TrRmExceptionDirectoryReaderTests
             new TrRmRegisterBodyBlock(2, 2, 2),
             new TrRmRegisterBodyBlock(4, 2, 3),
         ];
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmRegisterBodyWriter.Encode(ReadOnlyMemory<byte>.Empty,
                 ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
                 ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty, blocks,

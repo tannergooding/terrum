@@ -658,6 +658,8 @@ public static class TrRmStructuralMetadataValidator
         CompactMixed,
     }
 
+    /// <summary>Validates the structural metadata of a standard TRRM artifact.</summary>
+    /// <param name="artifact">The artifact bytes to validate.</param>
     public static void Validate(ReadOnlySpan<byte> artifact)
         => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.None,
             developmentProfile: false);
@@ -864,16 +866,22 @@ public static class TrRmStructuralMetadataValidator
             consumer, providerArtifacts);
     }
 
+    /// <summary>Validates structural metadata and linear compact bodies in a Development artifact.</summary>
+    /// <param name="artifact">The Development artifact bytes to validate.</param>
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
         => _ = ValidateCore(new TrRmArtifactIndex(artifact,
                 TrRmArtifactSchema.Development), BodyInspection.CompactLinear,
             developmentProfile: true);
 
+    /// <summary>Validates structural metadata and indexed compact bodies in a Development artifact.</summary>
+    /// <param name="artifact">The Development artifact bytes to validate.</param>
     public static void ValidateCompactIndexed(ReadOnlySpan<byte> artifact)
         => _ = ValidateCore(new TrRmArtifactIndex(artifact,
                 TrRmArtifactSchema.Development), BodyInspection.CompactIndexed,
             developmentProfile: true);
 
+    /// <summary>Validates structural metadata and compact bodies in a Development artifact.</summary>
+    /// <param name="artifact">The Development artifact bytes to validate.</param>
     public static void ValidateCompact(ReadOnlySpan<byte> artifact)
         => _ = ValidateCore(new TrRmArtifactIndex(artifact,
                 TrRmArtifactSchema.Development), BodyInspection.CompactMixed,
@@ -1098,6 +1106,7 @@ public static class TrRmStructuralMetadataValidator
         BodyInspection inspection, bool developmentProfile,
         bool copyOriginDraft = false, bool foreignInvocationDraft = false,
         bool developmentFunctionPointerEffectsDraft = false,
+        bool developmentNativeConventionsDraft = false,
         bool nominalEnumsDraft = false, bool scalarFrozenValuesDraft = false,
         bool rootPinRuntimeDraft = false, bool generalPredicateGraphsDraft = false,
         bool foreignInvocationStorageAddressDraft = false,
@@ -1165,8 +1174,6 @@ public static class TrRmStructuralMetadataValidator
         foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft
             |= foreignInvocationStorageFixedArrayCopyReturnCoverageDraft
                 || foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft;
-        scalarFrozenValuesDraft
-            |= foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft;
         foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft
             |= foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft;
         foreignInvocationStorageFixedArrayEmptyInitializationDraft
@@ -1705,6 +1712,10 @@ public static class TrRmStructuralMetadataValidator
                 index.Schema, associatedConstDefs, staticFields,
                 staticFieldContracts, intrinsicRegistrations,
                 selectedA3LayoutResourceLedger);
+            associatedRelations = new TrRmAssociatedRelationTableReader(
+                associatedRelationBytes, associatedRelationCount, typeSpecs,
+                associatedTypeDefs.Count, imports,
+                selectedA3LayoutResourceLedger);
             for (var formal = 1; formal <= generics.Count; formal++)
             {
                 if (generics.GetFormalKind(formal) != 2
@@ -1784,7 +1795,8 @@ public static class TrRmStructuralMetadataValidator
 
         var constraints = constraintCount == 0 ? default
             : new TrRmConstraintTableReader(constraintBytes, constraintCount,
-                generics, typeSpecs, selectedA3LayoutResourceLedger);
+                generics, typeSpecs, associatedRelations,
+                selectedA3LayoutResourceLedger);
         var contracts = developmentProfile
             ? new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs,
@@ -1894,10 +1906,6 @@ public static class TrRmStructuralMetadataValidator
         }
         if (!developmentProfile)
         {
-            associatedRelations = new TrRmAssociatedRelationTableReader(
-                associatedRelationBytes, associatedRelationCount, typeSpecs,
-                associatedTypeDefs.Count, imports,
-                selectedA3LayoutResourceLedger);
             textFragmentShapes = new TrRmTextFragmentShapeTableReader(
                 textFragmentShapeBytes, textFragmentShapeCount, textContentShapes,
                 textCaptureShapes, types, methods, generics, constraints,
@@ -2039,8 +2047,8 @@ public static class TrRmStructuralMetadataValidator
         {
             TrRmCopyOriginContractValidator.Validate(contracts, types, fields,
                 methods, signatures, parameters, typeSpecs, fieldPaths, imports,
-                unionCaseDefs, layouts, copyOriginNativeImportBytes,
-                copyOriginNativeImportCount);
+                features, modules, index.Schema, unionCaseDefs, layouts,
+                copyOriginNativeImportBytes, copyOriginNativeImportCount);
         }
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports,
@@ -2105,6 +2113,8 @@ public static class TrRmStructuralMetadataValidator
         if (foreignInvocationDraft)
         {
             ValidateForeignInvocationContractOwners(contracts, imports,
+                standardNativeImports, nativeFunctionPointerAnchors, methods);
+            ValidateStandardNativeOutputCellImports(contracts,
                 standardNativeImports, nativeFunctionPointerAnchors, methods);
         }
         if (developmentProfile)
@@ -2449,14 +2459,14 @@ public static class TrRmStructuralMetadataValidator
             {
                 var profile = targetProfiles.GetProfile(
                     coverage.TargetProfileRow);
-                var requirements
-                    = modules.GetRequirements(methods.GetOwnerModule(method));
+                var (targetRequirement, _) = modules.GetRequirements(
+                    methods.GetOwnerModule(method));
                 if (profile.ProfileId
                         != TrRmTargetProfileTableReader.WindowsX64NativeProfileId
                     || profile.RuleRevision
                         != TrRmTargetProfileTableReader
                             .WindowsX64NativeProfileRuleRevision
-                    || requirements.TargetRequirement
+                    || targetRequirement
                         != TrRmModuleTableReader
                             .WindowsX64NativeTargetRequirement)
                 {
@@ -2706,6 +2716,27 @@ public static class TrRmStructuralMetadataValidator
             }
 
             throw InvalidMetadata();
+        }
+    }
+
+    private static void ValidateStandardNativeOutputCellImports(
+        TrRmContractTableReader contracts,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeFunctionPointerAnchorTableReader anchors,
+        TrRmMethodDefTableReader methods)
+    {
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            foreach (var outputState in contracts.GetOutputStateContracts(method))
+            {
+                if (contracts.IsNativeOutputCellParameter(method,
+                        outputState.ParameterOrdinal)
+                    && !nativeImports.HasImportForMethod(method)
+                    && !anchors.IsAnchorMethodDef(method))
+                {
+                    throw InvalidMetadata();
+                }
+            }
         }
     }
 

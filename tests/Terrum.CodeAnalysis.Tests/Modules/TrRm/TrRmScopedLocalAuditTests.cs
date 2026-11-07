@@ -1,13 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.IO;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmScopedLocalAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmScopedLocalAuditTests
 {
     // Each arm defines its own value; only the selected value reaches the join parameter.
     // Copy-local source scopes require no lexical region or mutable place in this Body.
@@ -25,39 +26,37 @@ public sealed class TrRmScopedLocalAuditTests
         0x18, 1, 3, 1, 3, 1, 1, 1, 3, 1, 42, 0x80, 4, 1, 3,
         0x12, 1, 4, 1, 4, 0, 0, 0x83, 4,
     ];
-    [TestCase(true,null,20)]
-    [TestCase(false,null,42)]
-    [TestCase(true,1u,20)]
-    [TestCase(false,1u,42)]
-    public void HandwrittenArmDefinitionsExecuteWithoutSourceScopes(bool chooseFirst, uint? effect, int expected)
+    [TestCase(true,20)]
+    [TestCase(false,42)]
+    public void HandwrittenArmDefinitionsExecuteWithoutSourceScopes(bool chooseFirst, int expected)
     {
-        var artifact = TrRmExecutionAuditTests.Artifact(ArmLocalBody(chooseFirst), effect: effect);
+        var artifact = TrRmExecutionAuditTests.Artifact(ArmLocalBody(chooseFirst));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.That(loaded.Functions[0].Variables.Length, Is.EqualTo(4));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-    [TestCase(15,(byte)(2))] // Arm result type.
-    [TestCase(16,(byte)(2))] // Exact use inventory.
-    [TestCase(23,(byte)(1))] // Definition ownership.
-    [TestCase(27,(byte)(8))] // Definition offset.
-    [TestCase(29,(byte)(0))] // Block parameter sentinel.
-    [TestCase(32,(byte)(31))] // Block extent.
-    [TestCase(36,(byte)(10))] // Terminator boundary.
-    [TestCase(49,(byte)(2))] // Branch condition type/dominance.
-    [TestCase(56,(byte)(3))] // Arm live-out inventory.
-    [TestCase(59,(byte)(0))] // Last-use ordinal.
-    [TestCase(62,(byte)(3))] // Result identity.
-    [TestCase(67,(byte)(0))] // Missing join argument.
-    [TestCase(68,(byte)(3))] // Sibling definition on the true edge.
-    [TestCase(83,(byte)(2))] // Sibling definition on the false edge.
-    [TestCase(86,(byte)(2))] // Reused parameter identity.
+    [TestCase(15,(byte)2)] // Arm result type.
+    [TestCase(16,(byte)2)] // Exact use inventory.
+    [TestCase(23,(byte)1)] // Definition ownership.
+    [TestCase(27,(byte)8)] // Definition offset.
+    [TestCase(29,(byte)0)] // Block parameter sentinel.
+    [TestCase(32,(byte)31)] // Block extent.
+    [TestCase(36,(byte)10)] // Terminator boundary.
+    [TestCase(49,(byte)2)] // Branch condition type/dominance.
+    [TestCase(56,(byte)3)] // Arm live-out inventory.
+    [TestCase(59,(byte)0)] // Last-use ordinal.
+    [TestCase(62,(byte)3)] // Result identity.
+    [TestCase(67,(byte)0)] // Missing join argument.
+    [TestCase(68,(byte)3)] // Sibling definition on the true edge.
+    [TestCase(83,(byte)2)] // Sibling definition on the false edge.
+    [TestCase(86,(byte)2)] // Reused parameter identity.
     public void ForgedScopedValueFlowDoesNotBypassAuditing(int offset, byte value)
     {
         var body = ArmLocalBody(true);
         body[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -80,7 +79,7 @@ public sealed class TrRmScopedLocalAuditTests
             0x18, 1, 3, 1, 3, 1, 1, 1, 3, 1, 42, 0x80, 4, 1, 3,
             0x12, 1, 4, 1, 4, 0, 0, 0x83, 4,
         ];
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -89,7 +88,7 @@ public sealed class TrRmScopedLocalAuditTests
     {
         var body = TrRmIndexedExecutionAuditTests.LoopBody(3);
         body[13] = 2;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -100,7 +99,7 @@ public sealed class TrRmScopedLocalAuditTests
         for (var length = 1; length < body.Length; length++)
         {
             var truncated = body[..length];
-            Assert.Throws<InvalidDataException>(() =>
+            _ = Assert.Throws<InvalidDataException>(() =>
                 TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(truncated)));
         }
     }

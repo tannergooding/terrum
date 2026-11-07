@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmSourceFileTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmSourceFileTableWriterTests
 {
     [Test]
     public void EmitsOwnedSourcePathsForTwoModulesInOneArtifact()
@@ -44,13 +45,13 @@ public sealed class TrRmSourceFileTableWriterTests
     [Test]
     public void RejectsMissingEmptyAndOutOfRangePathsAndWrongPartitions()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
-        Assert.Throws<InvalidDataException>(() => Encode([0, 4]));
-        Assert.Throws<InvalidDataException>(() => Encode([3, 5]));
-        Assert.Throws<InvalidDataException>(() => Encode([3]));
-        Assert.Throws<InvalidDataException>(() => Encode([3, 4, 4]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([0, 4]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([3, 5]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([3]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([3, 4, 4]));
 
-        Assert.Throws<InvalidDataException>(() => EncodeEmptyPath());
+        _ = Assert.Throws<InvalidDataException>(() => EncodeEmptyPath());
     }
 
     private static byte[] Encode(int[] paths)

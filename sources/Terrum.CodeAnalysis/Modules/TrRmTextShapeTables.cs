@@ -32,6 +32,7 @@ public readonly ref struct TrRmTextContentShapeTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated TextContentShape rows.</summary>
     public int Count => _recordCount;
@@ -51,6 +52,15 @@ public readonly ref struct TrRmTextContentShapeTableReader
     public TrRmTextContentShapeTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmTypeDefTableReader typeDefs,
         int captureCount, int fragmentCount)
+        : this(section, recordCount, typeDefs, captureCount, fragmentCount,
+            null)
+    {
+    }
+
+    internal TrRmTextContentShapeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeDefTableReader typeDefs,
+        int captureCount, int fragmentCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(captureCount)
             || !ValidCount(fragmentCount)
@@ -63,8 +73,12 @@ public readonly ref struct TrRmTextContentShapeTableReader
         _recordCount = recordCount;
         CaptureCount = captureCount;
         FragmentCount = fragmentCount;
+        var storageWork = checked((ulong)captureCount
+            + (ulong)fragmentCount + 2UL);
+        resourceLedger?.ConsumeWork(storageWork);
         var ownedCaptures = new bool[captureCount + 1];
         var ownedFragments = new bool[fragmentCount + 1];
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
@@ -81,11 +95,13 @@ public readonly ref struct TrRmTextContentShapeTableReader
                 throw InvalidTextContentShape();
             }
 
-            MarkRange(ownedCaptures, captureFirst, captures);
-            MarkRange(ownedFragments, fragmentFirst, fragments);
+            MarkRange(ownedCaptures, captureFirst, captures, _resourceLedger);
+            MarkRange(ownedFragments, fragmentFirst, fragments,
+                _resourceLedger);
         }
 
-        if (HasUnownedRows(ownedCaptures) || HasUnownedRows(ownedFragments))
+        if (HasUnownedRows(ownedCaptures, _resourceLedger)
+            || HasUnownedRows(ownedFragments, _resourceLedger))
         {
             throw InvalidTextContentShape();
         }
@@ -111,6 +127,7 @@ public readonly ref struct TrRmTextContentShapeTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidTextContentShape();
@@ -119,10 +136,12 @@ public readonly ref struct TrRmTextContentShapeTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static void MarkRange(bool[] owners, uint first, uint count)
+    private static void MarkRange(bool[] owners, uint first, uint count,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         for (var row = first; row < first + count; row++)
         {
+            resourceLedger?.ConsumeWork(2);
             if (owners[row])
             {
                 throw InvalidTextContentShape();
@@ -132,10 +151,12 @@ public readonly ref struct TrRmTextContentShapeTableReader
         }
     }
 
-    private static bool HasUnownedRows(bool[] owners)
+    private static bool HasUnownedRows(bool[] owners,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         for (var row = 1; row < owners.Length; row++)
         {
+            resourceLedger?.ConsumeWork();
             if (!owners[row])
             {
                 return true;
@@ -153,8 +174,12 @@ public readonly ref struct TrRmTextContentShapeTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidTextContentShape()
         => new("Invalid TRRM TextContentShape table.");
@@ -167,6 +192,7 @@ public readonly ref struct TrRmTextCaptureShapeTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated TextCaptureShape rows.</summary>
     public int Count => _recordCount;
@@ -179,6 +205,14 @@ public readonly ref struct TrRmTextCaptureShapeTableReader
     public TrRmTextCaptureShapeTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmTypeSpecTableReader types,
         TrRmTextContentShapeTableReader shapes)
+        : this(section, recordCount, types, shapes, null)
+    {
+    }
+
+    internal TrRmTextCaptureShapeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeSpecTableReader types,
+        TrRmTextContentShapeTableReader shapes,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || recordCount != shapes.CaptureCount
             || (long)recordCount * RowSize != section.Length)
@@ -188,19 +222,22 @@ public readonly ref struct TrRmTextCaptureShapeTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var shape = 1; shape <= shapes.Count; shape++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = shapes.GetCaptureRange(shape);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
+                _resourceLedger?.ConsumeWork();
                 var row = first + ordinal;
                 var data = GetRow(row);
                 var owner = Read(data, 0);
                 var captureOrdinal = Read(data, 4);
                 var typeSpecRef = Read(data, 8);
-                var mode = data[12];
-                var flags = data[13];
-                var reserved = BinaryPrimitives.ReadUInt16LittleEndian(data[14..]);
+                var mode = ReadByte(data, 12);
+                var flags = ReadByte(data, 13);
+                var reserved = ReadUInt16(data, 14);
                 if (owner != (uint)shape || captureOrdinal != (uint)ordinal
                     || typeSpecRef == 0 || mode is not (1 or 2)
                     || flags != 0 || reserved != 0)
@@ -227,10 +264,11 @@ public readonly ref struct TrRmTextCaptureShapeTableReader
 
     /// <summary>Gets the assigned copy or ownership-transfer mode.</summary>
     public byte GetMode(int row)
-        => GetRow(row)[12];
+        => ReadByte(GetRow(row), 12);
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidTextCaptureShape();
@@ -242,8 +280,25 @@ public readonly ref struct TrRmTextCaptureShapeTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
+
+    private byte ReadByte(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(byte) + 1);
+        return data[offset];
+    }
+
+    private ushort ReadUInt16(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
+        return BinaryPrimitives.ReadUInt16LittleEndian(
+            data.Slice(offset, sizeof(ushort)));
+    }
 
     private static InvalidDataException InvalidTextCaptureShape()
         => new("Invalid TRRM TextCaptureShape table.");

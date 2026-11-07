@@ -3,34 +3,35 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmPropertyDefTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmPropertyDefTableReaderTests
 {
     [Test]
     public void GetterResultAndDeclaringTypeMatchWithoutNameInference()
     {
         Assert.That(ReadName(Property(), 1), Is.EqualTo("Value"));
-        Assert.Throws<InvalidDataException>(() => ReadName(Property(), 0));
-        Assert.Throws<InvalidDataException>(() => ReadName(Property(), 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadName(Property(), 0));
+        _ = Assert.Throws<InvalidDataException>(() => ReadName(Property(), 2));
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(0,(byte)(2))]
-    [TestCase(4,(byte)(0))]
-    [TestCase(8,(byte)(0))]
-    [TestCase(8,(byte)(2))]
-    [TestCase(12,(byte)(0))]
-    [TestCase(12,(byte)(2))]
-    [TestCase(16,(byte)(3))]
-    [TestCase(16,(byte)(4))]
+    [TestCase(0,(byte)0)]
+    [TestCase(0,(byte)2)]
+    [TestCase(4,(byte)0)]
+    [TestCase(8,(byte)0)]
+    [TestCase(8,(byte)2)]
+    [TestCase(12,(byte)0)]
+    [TestCase(12,(byte)2)]
+    [TestCase(16,(byte)3)]
+    [TestCase(16,(byte)4)]
     public void RejectsBadPropertyReferencesAndFlags(int offset, byte replacement)
     {
         var bytes = Property();
         bytes[offset] = replacement;
-        Assert.Throws<InvalidDataException>(() => ReadName(bytes, 1));
+        _ = Assert.Throws<InvalidDataException>(() => ReadName(bytes, 1));
     }
 
     [Test]
@@ -40,13 +41,13 @@ public sealed class TrRmPropertyDefTableReaderTests
         Write(moduleLevel, 0, 0);
         var moduleLevelSignature = Signature();
         Write(moduleLevelSignature, 4, 0);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ReadName(Property(), 1, method: moduleLevel, signature: moduleLevelSignature));
 
         var wrongResult = Signature();
         Write(wrongResult, 0, 2);
-        Assert.Throws<InvalidDataException>(() => ReadName(Property(), 1, signature: wrongResult));
-        Assert.Throws<InvalidDataException>(() => ReadName(Property()[..^1], 1));
+        _ = Assert.Throws<InvalidDataException>(() => ReadName(Property(), 1, signature: wrongResult));
+        _ = Assert.Throws<InvalidDataException>(() => ReadName(Property()[..^1], 1));
     }
 
     private static string ReadName(byte[] property, int row, byte[]? method = null,

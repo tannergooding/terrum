@@ -3,13 +3,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmIndexedExecutionAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmIndexedExecutionAuditTests
 {
     private static byte[] SelectBody(bool chooseFirst) =>
     [
@@ -77,12 +78,12 @@ public sealed class TrRmIndexedExecutionAuditTests
 
     private static byte[] SwitchBody(ushort selector)
     {
-        var blocks = new[]
+        var blocks = new List<byte>[]
         {
-            new List<byte> { 16, 1, 1, 1, 1 },
-            new List<byte> { 16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2 },
-            new List<byte> { 16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3 },
-            new List<byte> { 16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4 },
+            [16, 1, 1, 1, 1],
+            [16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2],
+            [16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3],
+            [16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4],
         };
         var definitions = new List<byte> { 5, 5, 5, 5 };
         var terminators = new List<byte>();
@@ -120,7 +121,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         body.AddRange(offsets);
         body.AddRange(terminators);
         body.AddRange(bodyData);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] WideSwitchBody(ulong selector)
@@ -133,12 +134,12 @@ public sealed class TrRmIndexedExecutionAuditTests
             }
         }
 
-        var blocks = new[]
+        var blocks = new List<byte>[]
         {
-            new List<byte> { 16, 1, 1, 1, 1 },
-            new List<byte> { 16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2 },
-            new List<byte> { 16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3 },
-            new List<byte> { 16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4 },
+            [16, 1, 1, 1, 1],
+            [16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2],
+            [16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3],
+            [16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4],
         };
         blocks[0].AddRange([0xF0, 0x30, 1, 1, 2]);
         AddUInt64(blocks[0], selector);
@@ -164,19 +165,19 @@ public sealed class TrRmIndexedExecutionAuditTests
         body.AddRange(offsets);
         body.AddRange(terminators);
         body.AddRange(bodyData);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] SmallScalarSwitchBody(byte selectorTypeRow, byte selector)
     {
         var firstPattern = selectorTypeRow == 2 ? (byte)0 : (byte)65;
         var secondPattern = selectorTypeRow == 2 ? (byte)1 : (byte)66;
-        var blocks = new[]
+        var blocks = new List<byte>[]
         {
-            new List<byte> { 16, 1, 1, 1, 1, 1, 1, 2, selector },
-            new List<byte> { 16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2 },
-            new List<byte> { 16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3 },
-            new List<byte> { 16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4 },
+            [16, 1, 1, 1, 1, 1, 1, 2, selector],
+            [16, 1, 2, 1, 1, 1, 2, 1, 20, 0x83, 2],
+            [16, 1, 3, 1, 1, 1, 3, 1, 42, 0x83, 3],
+            [16, 1, 4, 1, 1, 1, 4, 1, 99, 0x83, 4],
         };
         blocks[0].AddRange([0x82, 1, 2, firstPattern, 2, 0, secondPattern, 3, 0, 4, 0]);
         var bodyData = new List<byte>();
@@ -194,7 +195,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         body.AddRange(offsets);
         body.AddRange([9, 9, 9, 9]);
         body.AddRange(bodyData);
-        return body.ToArray();
+        return [.. body];
     }
 
     private static byte[] EmptySwitchBody =>
@@ -336,9 +337,9 @@ public sealed class TrRmIndexedExecutionAuditTests
     }
 
     [Test]
-    public void NoThrowSwitchRemainsExecutable()
+    public void IndexedSwitchExecutesWithoutNoThrowEffect()
     {
-        var artifact = TrRmExecutionAuditTests.Artifact(SwitchBody(256), effect: 1);
+        var artifact = TrRmExecutionAuditTests.Artifact(SwitchBody(256));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
@@ -354,7 +355,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         body[53] = secondLow;
         body[54] = secondHigh;
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -365,7 +366,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         body[53] = 1;
         body[54] = 0;
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -375,7 +376,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         var body = SelectBody(true);
         body[23] = 0;
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -385,7 +386,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         var body = SmallScalarSwitchBody(selectorTypeRow: 2, selector: 0);
         body[54] = 2;
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -396,17 +397,17 @@ public sealed class TrRmIndexedExecutionAuditTests
         for (var length = 44; length < 59; length++)
         {
             var truncated = body[..length];
-            Assert.Throws<InvalidDataException>(() =>
+            _ = Assert.Throws<InvalidDataException>(() =>
                 TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(truncated)));
         }
     }
 
     [Test]
-    public void IndexedNoThrowAuditRejectsCheckedDivRem()
+    public void RetiredNoThrowEffectRejectsIndexedCheckedDivRem()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(CheckedDivRemBody, effect: 1);
-        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact));
     }
     [TestCase((byte)0,1)]
     [TestCase((byte)1,2)]
@@ -418,46 +419,46 @@ public sealed class TrRmIndexedExecutionAuditTests
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
-    [TestCase(5,(byte)(8))]
-    [TestCase(9,(byte)(1))]
-    [TestCase(13,(byte)(1))]
-    [TestCase(14,(byte)(2))]
-    [TestCase(19,(byte)(2))]
-    [TestCase(22,(byte)(2))]
-    [TestCase(26,(byte)(9))]
-    [TestCase(29,(byte)(7))]
-    [TestCase(30,(byte)(1))]
-    [TestCase(34,(byte)(60))]
-    [TestCase(35,(byte)(21))]
-    [TestCase(41,(byte)(4))]
-    [TestCase(60,(byte)(2))]
-    [TestCase(77,(byte)(3))]
+    [TestCase(5,(byte)8)]
+    [TestCase(9,(byte)1)]
+    [TestCase(13,(byte)1)]
+    [TestCase(14,(byte)2)]
+    [TestCase(19,(byte)2)]
+    [TestCase(22,(byte)2)]
+    [TestCase(26,(byte)9)]
+    [TestCase(29,(byte)7)]
+    [TestCase(30,(byte)1)]
+    [TestCase(34,(byte)60)]
+    [TestCase(35,(byte)21)]
+    [TestCase(41,(byte)4)]
+    [TestCase(60,(byte)2)]
+    [TestCase(77,(byte)3)]
     public void RejectsForgedMapsDefinitionsOffsetsUsesLivenessAndBranchTypes(int offset, byte value)
     {
         var body = MergeBody(true);
         body[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
-    [TestCase(13,(byte)(2))]
-    [TestCase(14,(byte)(1))]
-    [TestCase(15,(byte)(3))]
-    [TestCase(16,(byte)(3))]
-    [TestCase(17,(byte)(1))]
+    [TestCase(13,(byte)2)]
+    [TestCase(14,(byte)1)]
+    [TestCase(15,(byte)3)]
+    [TestCase(16,(byte)3)]
+    [TestCase(17,(byte)1)]
     public void RejectsInvalidLoopKindParentHeaderExitAndCleanup(int offset, byte value)
     {
         var body = LoopBody(3);
         body[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
     [Test]
-    public void NoThrowIsAuditedAcrossLoopBodies()
+    public void RetiredNoThrowEffectRejectsIndexedLoopBodies()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(LoopBody(0), effect: 1);
-        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact));
     }
 
     [Test]
@@ -477,7 +478,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         for (var length = 1; length < body.Length; length++)
         {
             var truncated = body[..length];
-            Assert.Throws<InvalidDataException>(() =>
+            _ = Assert.Throws<InvalidDataException>(() =>
                 TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(truncated)));
         }
     }
@@ -496,7 +497,7 @@ public sealed class TrRmIndexedExecutionAuditTests
             0x10, 1, 2, 1, 1, 1, 2, 1, 42, 0x83, 2,
             0x14, 1, 2, 1, 2, 0, 0, 0x83, 2,
         ];
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 }

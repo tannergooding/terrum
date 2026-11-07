@@ -21,6 +21,7 @@ public readonly ref struct TrRmInterfaceBaseTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int[] _rowOwners;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated InterfaceBase rows.</summary>
     public int Count { get; }
@@ -32,6 +33,14 @@ public readonly ref struct TrRmInterfaceBaseTableReader
     /// <param name="interfaces">The validated InterfaceDef table.</param>
     public TrRmInterfaceBaseTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeSpecTableReader types, TrRmInterfaceDefTableReader interfaces)
+        : this(section, recordCount, types, interfaces, null)
+    {
+    }
+
+    internal TrRmInterfaceBaseTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeSpecTableReader types,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != interfaces.InterfaceBaseCount
@@ -42,13 +51,17 @@ public readonly ref struct TrRmInterfaceBaseTableReader
 
         _rows = section;
         Count = recordCount;
+        resourceLedger?.ConsumeWork(checked((ulong)recordCount + 2UL));
         _rowOwners = new int[recordCount + 1];
+        _resourceLedger = resourceLedger;
         for (var interfaceDef = 1; interfaceDef <= interfaces.Count; interfaceDef++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = interfaces.GetBaseRange(interfaceDef);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
                 var row = first + ordinal;
+                _resourceLedger?.ConsumeWork(2);
                 if (_rowOwners[row] != 0)
                 {
                     throw InvalidInterfaceBase();
@@ -71,6 +84,7 @@ public readonly ref struct TrRmInterfaceBaseTableReader
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_rowOwners[row] == 0)
             {
                 throw InvalidInterfaceBase();
@@ -92,6 +106,7 @@ public readonly ref struct TrRmInterfaceBaseTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > Count)
         {
             throw InvalidInterfaceBase();
@@ -103,8 +118,12 @@ public readonly ref struct TrRmInterfaceBaseTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidInterfaceBase()
         => new("Invalid TRRM InterfaceBase table.");

@@ -5,12 +5,13 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmBodyExampleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmBodyExampleTests
 {
     [TestCase("GeneralCheckedAdd",105,5,false,38,36,3)]
     [TestCase("## Value and place state through checked arithmetic",122,5,true,51,49,7)]
@@ -288,10 +289,10 @@ public sealed class TrRmBodyExampleTests
         Assert.That(position, Is.EqualTo(bytes.Length));
         Assert.That(definitions, Is.EqualTo(valueCount == 5
             ? new[] { -1, -1, -1, 15, 20, 24 }
-            : parameterCount == 1 ? new[] { -1, -1 } : new[] { -1, 15 }));
+            : parameterCount == 1 ? [-1, -1] : [-1, 15]));
         Assert.That(lastUses, Is.EqualTo(valueCount == 5
             ? new[] { -1, 0, 0, 2, 2, 3 }
-            : new[] { -1, operationCount }));
+            : [-1, operationCount]));
     }
 
     [Test]
@@ -442,8 +443,8 @@ public sealed class TrRmBodyExampleTests
             Assert.That(cursor, Is.EqualTo(terminators[blockId - 1]));
             Assert.That(block[cursor..].ToArray(), Is.EqualTo(blockId == 1
                 ? new byte[] { 0x81, 1, 2, 0, 3, 0 }
-                : blockId == 2 ? new byte[] { 0x83, 4 }
-                : new byte[] { 0x83, 2 }));
+                : blockId == 2 ? [0x83, 4]
+                : [0x83, 2]));
         }
     }
 
@@ -460,29 +461,29 @@ public sealed class TrRmBodyExampleTests
         var section = ReadExample("#### Compact indexed conditional merge");
         Assert.That(InspectIndexed(section), Is.EqualTo((4, 4)));
     }
-    [TestCase(75,(byte)(3))]
-    [TestCase(77,(byte)(1))]
-    [TestCase(89,(byte)(2))]
-    [TestCase(93,(byte)(3))]
+    [TestCase(75,(byte)3)]
+    [TestCase(77,(byte)1)]
+    [TestCase(89,(byte)2)]
+    [TestCase(93,(byte)3)]
     public void CompactIndexedReaderRejectsInvalidMergeEdges(int offset, byte value)
     {
         var section = ReadExample("#### Compact indexed conditional merge");
         section[offset] = value;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
     }
-    [TestCase(24,(byte)(1))]
-    [TestCase(36,(byte)(13))]
-    [TestCase(41,(byte)(11))]
-    [TestCase(44,(byte)(0x3A))]
-    [TestCase(58,(byte)(1))]
-    [TestCase(60,(byte)(2))]
-    [TestCase(77,(byte)(4))]
-    [TestCase(76,(byte)(8))]
+    [TestCase(24,(byte)1)]
+    [TestCase(36,(byte)13)]
+    [TestCase(41,(byte)11)]
+    [TestCase(44,(byte)0x3A)]
+    [TestCase(58,(byte)1)]
+    [TestCase(60,(byte)2)]
+    [TestCase(77,(byte)4)]
+    [TestCase(76,(byte)8)]
     public void CompactIndexedReaderRejectsInvalidIndexesAndEdges(int offset, byte value)
     {
         var section = ReadExample("#### Compact indexed conditional sum");
         section[offset] = value;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
     }
 
     [Test]
@@ -493,7 +494,7 @@ public sealed class TrRmBodyExampleTests
         {
             var section = example[..length];
             BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(4), (uint)(length - 8));
-            Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+            _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
         }
 
         for (var offset = 8; offset < example.Length; offset++)
@@ -530,7 +531,7 @@ public sealed class TrRmBodyExampleTests
         section[35] = 2;
         section[38] = 0xFF;
         Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 0, secondTypeCode: 0x0D));
     }
 
@@ -547,15 +548,15 @@ public sealed class TrRmBodyExampleTests
         original.AsSpan(17).CopyTo(section.AsSpan(21));
 
         Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 0, firstTypeCode: 8, secondTypeCode: 8));
     }
-    [TestCase(13,(byte)(0))]
-    [TestCase(23,(byte)(0))]
-    [TestCase(35,(byte)(0xF0))]
-    [TestCase(37,(byte)(0))]
-    [TestCase(41,(byte)(2))]
-    [TestCase(38,(byte)(0xFF))]
+    [TestCase(13,(byte)0)]
+    [TestCase(23,(byte)0)]
+    [TestCase(35,(byte)0xF0)]
+    [TestCase(37,(byte)0)]
+    [TestCase(41,(byte)2)]
+    [TestCase(38,(byte)0xFF)]
     public void CompactIndexedReaderRejectsInvalidScalarOperations(int offset, byte value)
     {
         var section = IndexedConstantCopy();
@@ -563,12 +564,12 @@ public sealed class TrRmBodyExampleTests
         if (offset == 38)
         {
             section[13] = 1;
-            Assert.Throws<InvalidDataException>(() =>
+            _ = Assert.Throws<InvalidDataException>(() =>
                 InspectIndexed(section, 0, resultTypeSpec: 1));
             return;
         }
 
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
     [Test]
@@ -576,17 +577,17 @@ public sealed class TrRmBodyExampleTests
     {
         var section = WideIndexedConstant();
         Assert.That(InspectIndexed(section, 0, secondTypeCode: 9), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
 
         section[37] = 2;
         BinaryPrimitives.WriteUInt64LittleEndian(section.AsSpan(40), 1UL << 63);
         Assert.That(InspectIndexed(section, 0, secondTypeCode: 9), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 0, secondTypeCode: 0x0E));
 
         section[36] = 0x3C;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 0, secondTypeCode: 9));
     }
 
@@ -605,9 +606,9 @@ public sealed class TrRmBodyExampleTests
         Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
 
         section[40] = 3;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
         section[40] = 0x31;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
     [Test]
@@ -623,7 +624,7 @@ public sealed class TrRmBodyExampleTests
         Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
 
         section[43] = 5;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
     [Test]
@@ -645,7 +646,7 @@ public sealed class TrRmBodyExampleTests
         Assert.That(InspectIndexed(section), Is.EqualTo((3, 4)));
 
         section[57] = 0x25;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
     }
     [TestCase(new byte[] { 0x82, 1, 1, 0, 3, 0, 2, 0 })]
     [TestCase(new byte[] { 0x82, 1, 2, 0, 3, 0, 1, 2, 0, 2, 0 })]
@@ -663,7 +664,7 @@ public sealed class TrRmBodyExampleTests
             firstTypeCode: 3), Is.EqualTo((3, 4)));
 
         byte[] invalid = [0xF0, 0x20, 0x82, 1, 1, 0, 0, 1, 0, 3, 0, 2, 0];
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedBoolSwitch(invalid), firstTypeCode: 3));
     }
 
@@ -677,7 +678,7 @@ public sealed class TrRmBodyExampleTests
 
         byte[] invalid = [0xF0, 0x30, 0x82, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0,
             3, 0, 2, 0];
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedBoolSwitch(invalid),
                 firstTypeCode: 8, secondTypeCode: 0x0D));
     }
@@ -741,10 +742,10 @@ public sealed class TrRmBodyExampleTests
             InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeCode: 0x0D));
-    [TestCase((byte)(1),(byte)0x0E,(byte)8)]
-    [TestCase((byte)(2),(byte)0x0E,(byte)8)]
-    [TestCase((byte)(3),(byte)0x0D,(byte)8)]
-    [TestCase((byte)(3),(byte)0x0E,(byte)9)]
+    [TestCase((byte)1,(byte)0x0E,(byte)8)]
+    [TestCase((byte)2,(byte)0x0E,(byte)8)]
+    [TestCase((byte)3,(byte)0x0D,(byte)8)]
+    [TestCase((byte)3,(byte)0x0E,(byte)9)]
     public void CompactIndexedReaderAcceptsIntegerConvertPolicies(byte policy,
         byte destinationType, byte sourceType)
     {
@@ -836,7 +837,7 @@ public sealed class TrRmBodyExampleTests
     public void CompactIndexedReaderRejectsUnsignedCheckedNegate()
     {
         var section = IndexedScalarOperation([0x17, 2, 1], [2], 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 1, secondTypeCode: 0x0D,
                 parameterTypeIds: [2]));
     }
@@ -864,7 +865,7 @@ public sealed class TrRmBodyExampleTests
 
         var optionalIntegerEquality = IndexedScalarOperation(
             [5, 3, 4, 1, 2], [3, 3], 1);
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(optionalIntegerEquality, 2,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(optionalIntegerEquality, 2,
             resultTypeSpec: 1, parameterTypeIds: [3, 3], secondTypeCode: 8,
             thirdTypeOptional: true));
     }
@@ -883,7 +884,7 @@ public sealed class TrRmBodyExampleTests
     public void CompactIndexedReaderRejectsCheckedExceptionPolicy()
     {
         var section = IndexedScalarOperation([0x15, 3, 1, 1, 2], [2, 2], 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 2, parameterTypeIds: [2, 2],
                 runtimePolicy: 1));
     }
@@ -894,15 +895,15 @@ public sealed class TrRmBodyExampleTests
         Assert.That(InspectIndexed(IndexedDivRem(), 2,
             parameterTypeIds: [2, 2]), Is.EqualTo((1, 4)));
     }
-    [TestCase(26,(byte)(1))]
-    [TestCase(34,(byte)(13))]
-    [TestCase(52,(byte)(3))]
-    [TestCase(53,(byte)(3))]
+    [TestCase(26,(byte)1)]
+    [TestCase(34,(byte)13)]
+    [TestCase(52,(byte)3)]
+    [TestCase(53,(byte)3)]
     public void CompactIndexedReaderRejectsMalformedDualResults(int offset, byte value)
     {
         var section = IndexedDivRem();
         section[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 2, parameterTypeIds: [2, 2]));
     }
     [TestCase(new byte[] { 0x12, 1, 1, 0 },new byte[0],1)]
@@ -930,7 +931,7 @@ public sealed class TrRmBodyExampleTests
             parameterTypeIds: [2], secondMethod: true), Is.EqualTo((1, 2)));
         Assert.That(InspectIndexed(section, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, ownedTarget: true), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             importedTarget: true));
         Assert.That(InspectIndexed(section, parameterCount: 1,
@@ -939,11 +940,11 @@ public sealed class TrRmBodyExampleTests
         Assert.That(InspectIndexed(section, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true,
             importedTarget: true, expectedTarget: true, ownedTarget: true), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             importedTarget: true, expectedTarget: true, ownedTarget: true,
             privateOwner: true));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             expectedTarget: true));
     }
@@ -958,10 +959,10 @@ public sealed class TrRmBodyExampleTests
         Assert.That(InspectIndexed(body, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, packedTarget: true,
             callerTargetRequirement: 1), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             packedTarget: true, packedTargetRuntimePolicy: 1));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             packedTarget: true, packedTargetRequirement: 1));
         Assert.That(InspectIndexed(body, parameterCount: 1,
@@ -970,7 +971,7 @@ public sealed class TrRmBodyExampleTests
         Assert.That(InspectIndexed(body, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, packedTarget: true,
             ownedTarget: true), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             packedTarget: true, ownedTarget: true, privateOwner: true));
         var wide = IndexedScalarOperation(
@@ -990,11 +991,11 @@ public sealed class TrRmBodyExampleTests
             var direct = invalid.AsSpan().IndexOf(new byte[] { 0x12, 2, 0, 2, 0, 0, 0x16, 1, 1 });
             Assert.That(direct >= 0, Is.True);
             invalid[direct + offset] = value;
-            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+            _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
                 parameterCount: 1, parameterTypeIds: [2],
                 secondMethod: true, packedTarget: true));
         }
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true));
     }
     [TestCase(false)]
@@ -1009,7 +1010,7 @@ public sealed class TrRmBodyExampleTests
             parameterTypeIds: [2], secondMethod: true, ownedTarget: true,
             packedTarget: packedTarget, importedTarget: !packedTarget,
             expectedTarget: !packedTarget), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             ownedTarget: true, packedTarget: packedTarget, importedTarget: !packedTarget,
             expectedTarget: !packedTarget, genericOwner: true));
@@ -1060,7 +1061,7 @@ public sealed class TrRmBodyExampleTests
         {
             var invalid = (byte[])body.Clone();
             invalid[region + offset] = replacement;
-            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+            _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
                 parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
         }
 
@@ -1068,13 +1069,13 @@ public sealed class TrRmBodyExampleTests
         Assert.That(backedge >= 0, Is.True);
         var wrongTarget = (byte[])body.Clone();
         wrongTarget[backedge + 1] = 1;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongTarget,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongTarget,
             parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
         var missingBackedge = (byte[])body.Clone();
         missingBackedge[backedge + 1] = 4;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(missingBackedge,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(missingBackedge,
             parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(
             IndexedScalarLoop(ghostLiveness: true), parameterCount: 1,
             resultTypeSpec: 2, parameterTypeIds: [2]));
     }
@@ -1090,7 +1091,7 @@ public sealed class TrRmBodyExampleTests
         {
             var invalid = (byte[])body.Clone();
             invalid[region + offset] = replacement;
-            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+            _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
                 parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
         }
 
@@ -1098,7 +1099,7 @@ public sealed class TrRmBodyExampleTests
         Assert.That(backedge >= 0, Is.True);
         var noSecondBackedge = (byte[])body.Clone();
         noSecondBackedge[backedge + 1] = 7;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(noSecondBackedge,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(noSecondBackedge,
             parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
     }
 
@@ -1116,7 +1117,7 @@ public sealed class TrRmBodyExampleTests
         {
             var invalid = (byte[])body.Clone();
             invalid[innerRegion + offset] = replacement;
-            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+            _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
                 parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
         }
 
@@ -1124,21 +1125,21 @@ public sealed class TrRmBodyExampleTests
         Assert.That(outerRegion >= 0, Is.True);
         var wrongOuterExit = (byte[])body.Clone();
         wrongOuterExit[outerRegion + 3] = 5;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongOuterExit,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongOuterExit,
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
 
         var skipInnerHeader = (byte[])body.Clone();
         var outerBranch = body.AsSpan().IndexOf(new byte[] { 0x81, 1, 2, 0, 6, 0 });
         Assert.That(outerBranch >= 0, Is.True);
         skipInnerHeader[outerBranch + 2] = 3;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerHeader,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerHeader,
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
 
         var skipInnerExit = (byte[])body.Clone();
         var innerBranch = body.AsSpan().IndexOf(new byte[] { 0x81, 1, 3, 0, 4, 0 });
         Assert.That(innerBranch >= 0, Is.True);
         skipInnerExit[innerBranch + 4] = 5;
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerExit,
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerExit,
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
     }
     [TestCase(true,false)]
@@ -1154,7 +1155,7 @@ public sealed class TrRmBodyExampleTests
     {
         Assert.That(InspectIndexed(IndexedNestedLoop(unusedValue: true),
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]), Is.EqualTo((6, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectIndexed(
+        _ = Assert.Throws<InvalidDataException>(() => InspectIndexed(
             IndexedNestedLoop(ghostLiveness: true), parameterCount: 1,
             resultTypeSpec: 1, parameterTypeIds: [1]));
     }
@@ -1242,7 +1243,7 @@ public sealed class TrRmBodyExampleTests
         var blocks = new List<byte[]>();
         var definitions = siblingLoop
             ? new byte[] { 0xFF, 0, 0xFF, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF }
-            : new byte[] { 0xFF, 0, 0xFF, 0, 0, 0, 0xFF };
+            : [0xFF, 0, 0xFF, 0, 0, 0, 0xFF];
         var terminators = new List<byte>();
         void AddBlock(byte[] header, byte[][] operations, byte[] terminator, params int[] results)
         {
@@ -1305,10 +1306,10 @@ public sealed class TrRmBodyExampleTests
         }
         var types = siblingLoop
             ? new byte[] { 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1 }
-            : new byte[] { 1, 1, 1, 2, 1, 1, 1 };
+            : [1, 1, 1, 2, 1, 1, 1];
         var uses = siblingLoop
             ? new byte[] { 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1 }
-            : new byte[] { 1, 1, 2, 1, 1, 1, 1 };
+            : [1, 1, 2, 1, 1, 1, 1];
         for (var value = 0; value < types.Length; value++)
         {
             row.Add(types[value]);
@@ -1524,11 +1525,11 @@ public sealed class TrRmBodyExampleTests
             names, expectedTarget ? 1 : 0,
             ownedTarget ? 1 : 0,
             secondMethod ? 2 : 1, 0);
-        byte[] reference = new byte[12];
+        var reference = new byte[12];
         BinaryPrimitives.WriteUInt32LittleEndian(reference, 2);
         var references = new TrRmModuleRefTableReader(expectedTarget ? reference : [],
             expectedTarget ? 1 : 0, names, modules);
-        byte[] typeDef = new byte[44];
+        var typeDef = new byte[44];
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(4), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(8),
@@ -1560,19 +1561,20 @@ public sealed class TrRmBodyExampleTests
         for (var index = 0; index < parameterCount; index++)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16), 1);
-            BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16 + 4), (uint)index);
-            BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16 + 8),
+            BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan((index * 16) + 4), (uint)index);
+            BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan((index * 16) + 8),
                 parameterTypeIds is null ? (index == 0 ? 1u : 2u) : parameterTypeIds[index]);
         }
 
         var parameters = parameterCount == 0 ? default
-            : new TrRmParamTableReader(paramBytes, parameterCount, signatures, types);
+            : new TrRmParamTableReader(paramBytes, parameterCount, signatures,
+                types, TrRmArtifactSchema.Development);
         var method = new byte[28];
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(4), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(8), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(12), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(24), 1);
-        byte[] methodRows = secondMethod ? new byte[56] : method;
+        var methodRows = secondMethod ? new byte[56] : method;
         if (secondMethod)
         {
             method.CopyTo(methodRows, 0);
@@ -1587,7 +1589,7 @@ public sealed class TrRmBodyExampleTests
                 importedTarget ? 0u : 2u);
         }
         var bodyCount = secondMethod && !importedTarget ? 2 : 1;
-        byte[] bodyRows = section;
+        var bodyRows = section;
         if (bodyCount == 2)
         {
             var length = section.Length - 8;
@@ -1604,7 +1606,7 @@ public sealed class TrRmBodyExampleTests
         }
         var methods = new TrRmMethodDefTableReader(methodRows, secondMethod ? 2 : 1,
             names, modules, defs, signatures, 0, bodyCount);
-        byte[] import = new byte[12];
+        var import = new byte[12];
         BinaryPrimitives.WriteUInt32LittleEndian(import, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(4), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(8), 0x1600_0002);

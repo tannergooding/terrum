@@ -17,8 +17,14 @@ public readonly ref struct TrRmModuleRefTableReader
     private readonly int _recordCount;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Gets the number of validated ModuleRef rows.</summary>
     public int Count => _recordCount;
 
+    /// <summary>Validates ModuleRef rows against their owning Module partitions.</summary>
+    /// <param name="section">The borrowed ModuleRef section bytes.</param>
+    /// <param name="recordCount">The number of ModuleRef rows.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="modules">The validated Module table.</param>
     public TrRmModuleRefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules)
         : this(section, recordCount, strings, modules, null)
@@ -61,9 +67,9 @@ public readonly ref struct TrRmModuleRefTableReader
 
                 if (modules.TryFindModule(producer, out var selected))
                 {
-                    var selectedRequirements = modules.GetRequirements(selected);
-                    if (target != selectedRequirements.TargetRequirement
-                        || policy != selectedRequirements.RuntimePolicy)
+                    var (TargetRequirement, RuntimePolicy) = modules.GetRequirements(selected);
+                    if (target != TargetRequirement
+                        || policy != RuntimePolicy)
                     {
                         throw InvalidRef();
                     }
@@ -72,6 +78,9 @@ public readonly ref struct TrRmModuleRefTableReader
         }
     }
 
+    /// <summary>Gets the external producer identity named by a ModuleRef row.</summary>
+    /// <param name="row">The one-based ModuleRef row.</param>
+    /// <returns>The producer identity string.</returns>
     public string GetProducerIdentity(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -83,6 +92,9 @@ public readonly ref struct TrRmModuleRefTableReader
         return ReadIdentity(row - 1);
     }
 
+    /// <summary>Gets the target requirement and runtime policy recorded for a producer.</summary>
+    /// <param name="row">The one-based ModuleRef row.</param>
+    /// <returns>The target requirement and runtime policy values.</returns>
     public (uint TargetRequirement, uint RuntimePolicy) GetRequirements(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -94,6 +106,9 @@ public readonly ref struct TrRmModuleRefTableReader
         return (Read(row - 1, 4), Read(row - 1, 8));
     }
 
+    /// <summary>Gets the Module row that owns a ModuleRef row.</summary>
+    /// <param name="row">The one-based ModuleRef row.</param>
+    /// <returns>The one-based owning Module row.</returns>
     public int GetOwnerModule(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -107,7 +122,7 @@ public readonly ref struct TrRmModuleRefTableReader
         while (low <= high)
         {
             _resourceLedger?.ConsumeWork();
-            var middle = low + (high - low) / 2;
+            var middle = low + ((high - low) / 2);
             var (start, end) = _modules.GetModuleRefRange(middle);
             if (row < start)
             {
@@ -129,7 +144,7 @@ public readonly ref struct TrRmModuleRefTableReader
     private string ReadIdentity(int row)
     {
         var reference = Read(row, 0);
-        if (reference == 0 || reference > 0xFF_FFFF)
+        if (reference is 0 or > 0xFF_FFFF)
         {
             throw InvalidRef();
         }
@@ -141,7 +156,7 @@ public readonly ref struct TrRmModuleRefTableReader
     {
         _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
         return BinaryPrimitives.ReadUInt32LittleEndian(
-            _rows.Slice(row * RowSize + offset, sizeof(uint)));
+            _rows.Slice((row * RowSize) + offset, sizeof(uint)));
     }
 
     private static InvalidDataException InvalidRef()

@@ -3,22 +3,27 @@
 using System;
 using System.Buffers.Binary;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmDoForTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmDoForTests
 {
     private static BoundProgram Compile(string source,
         BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
     [TestCase("int32 Main() { mut int32 x = 0; do { x++; } while (false); return x == 1 ? 42 : 0; }")]
     [TestCase("int32 Main() { mut int32 x = 0; do { int32 local = x++; if (local == 0) { continue; } } while (x < 2); return x == 2 ? 42 : 0; }")]
@@ -52,7 +57,7 @@ public sealed class TrRmDoForTests
     [TestCase("int32 Main() { mut int64 x = -9223372036854775808; do { x++; } while (x < -9223372036854775806); return x == -9223372036854775806 ? 42 : 0; }")]
     [TestCase("int32 Main() { mut uint32 x = 4294967293; for (; x < 4294967295; x++) { continue; } return x == 4294967295 ? 42 : 0; }")]
     [TestCase("int32 Main() { for (mut bool flag = true; flag; flag = false) { continue; } return 42; }")]
-    [TestCase("[NoThrow] int32 Main() { mut bool flag = true; do { flag = false; } while (flag); return 42; }")]
+    [TestCase(" int32 Main() { mut bool flag = true; do { flag = false; } while (flag); return 42; }")]
     public void LoopsPreserveNativeAndLoadedScalarBehavior(string source)
     {
         var original = Compile(source);
@@ -69,7 +74,7 @@ public sealed class TrRmDoForTests
     {
         var original = Compile("int32 Main() { mut int32 x = 0; do { x++; } while (x < 1); return x; }",
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "checked-do"));
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(original, "checked-do"));
     }
     [TestCase(42,"int32 Main() { while (false) { } return 42; }")]
     [TestCase(42,"int32 Main() { mut int32 result = 0; for (result = Start(); false; result = Fail()) { } return result; } int32 Start() { return 42; } int32 Fail() { require false; return 0; }")]
@@ -285,23 +290,24 @@ public sealed class TrRmDoForTests
     {
         var count = iterator ? 82 : 83;
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; ");
-        source.Append(iterator ? "for (; x < 1; x++) { " : "do { ");
+        _ = source.Append(iterator ? "for (; x < 1; x++) { " : "do { ");
         for (var index = 0; index < count; index++)
         {
-            source.Append($"{{ int32 local = {index}; x = x + 1; }} ");
+            _ = source.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"{{ int32 local = {index}; x = x + 1; }} ");
         }
-        source.Append(iterator ? "continue; } return " : "} while (x < 1); return ");
+        _ = source.Append(iterator ? "continue; } return " : "} while (x < 1); return ");
         // The do graph has six fixed values; the separate iterator graph has eight.
         var unaryCount = (iterator ? 2 : 1) + (supported ? 0 : 1);
         for (var index = 0; index < unaryCount; index++)
         {
-            source.Append("+(");
+            _ = source.Append("+(");
         }
-        source.Append('x').Append(')', unaryCount).Append("; }");
+        _ = source.Append('x').Append(')', unaryCount).Append("; }");
         var original = Compile(source.ToString());
         if (!supported)
         {
-            Assert.Throws<NotSupportedException>(() =>
+            _ = Assert.Throws<NotSupportedException>(() =>
                 TrRmExecutableCompiler.Emit(original, "257-values"));
             return;
         }

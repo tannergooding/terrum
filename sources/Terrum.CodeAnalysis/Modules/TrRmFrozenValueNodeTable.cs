@@ -32,6 +32,7 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
     private readonly int _recordCount;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
     private readonly int _blobCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
     /// <summary>Gets the number of validated FrozenValueNode rows.</summary>
     public int Count => _recordCount;
 
@@ -45,6 +46,15 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
     public TrRmFrozenValueNodeTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeSpecTableReader typeSpecs, int blobCount, int childCount,
         int unionCaseDefCount)
+        : this(section, recordCount, typeSpecs, blobCount, childCount,
+            unionCaseDefCount, null)
+    {
+    }
+
+    internal TrRmFrozenValueNodeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeSpecTableReader typeSpecs, int blobCount,
+        int childCount, int unionCaseDefCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(blobCount) || !ValidCount(childCount)
             || !ValidCount(unionCaseDefCount)
@@ -57,13 +67,14 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
         _recordCount = recordCount;
         _typeSpecs = typeSpecs;
         _blobCount = blobCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
             _ = _typeSpecs.GetTypeSpecRef(Read(data, 0));
-            if (data[4] is < 1 or > 6
-                || data[5] != 0
-                || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0)
+            var kind = ReadByte(data, 4);
+            if (kind is < 1 or > 6 || ReadByte(data, 5) != 0
+                || ReadUInt16(data, 6) != 0)
             {
                 throw InvalidFrozenValueNode();
             }
@@ -98,7 +109,7 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
 
     /// <summary>Gets the assigned kind tag for a one-based FrozenValueNode row.</summary>
     public byte GetKind(int row)
-        => GetRow(row)[4];
+        => ReadByte(GetRow(row), 4);
 
     /// <summary>Gets the complete TypeSpecRef for a one-based FrozenValueNode row.</summary>
     public uint GetTypeSpecRef(int row)
@@ -119,9 +130,9 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
         }
 
         var data = GetRow(row);
-        if (data[4] != 1
-            || data[5] != 0
-            || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0
+        if (ReadByte(data, 4) != 1
+            || ReadByte(data, 5) != 0
+            || ReadUInt16(data, 6) != 0
             || Read(data, 12) != 0
             || Read(data, 16) != 0
             || Read(data, 20) != 0)
@@ -163,6 +174,53 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
         return payload;
     }
 
+    internal ReadOnlySpan<byte> GetNominalEnumScalarPayload(int row,
+        TrRmBlobTableReader blobs, uint expectedTypeSpecRef,
+        int expectedTypeDefRow, TrRmTypeDefTableReader typeDefs,
+        TrRmEnumDefTableReader enumDefs, TrRmImportTableReader imports)
+    {
+        if (blobs.Count != _blobCount)
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        var data = GetRow(row);
+        var typeSpecRef = Read(data, 0);
+        var reference = _typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (ReadByte(data, 4) != 1
+            || ReadByte(data, 5) != 0
+            || ReadUInt16(data, 6) != 0
+            || Read(data, 12) != 0
+            || Read(data, 16) != 0
+            || Read(data, 20) != 0
+            || !reference.IsRow || reference.Form is not (0x02 or 0x03)
+            || reference.Qualifiers != 0
+            || !_typeSpecs.AreEquivalentTypeSpecRefs(
+                expectedTypeSpecRef, typeSpecRef)
+            || _typeSpecs.GetNominalTypeDefRow(
+                typeSpecRef, typeDefs, imports) != expectedTypeDefRow
+            || typeDefs.GetKind(expectedTypeDefRow) != 4)
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        _ = enumDefs.GetRowForTypeDef(expectedTypeDefRow);
+        var scalarBlobRef = Read(data, 8);
+        if (scalarBlobRef == 0 || scalarBlobRef > (uint)_blobCount
+            || scalarBlobRef > 0xFF_FFFF)
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        var payload = blobs.GetRow(checked((int)scalarBlobRef));
+        if (payload.Length != sizeof(int))
+        {
+            throw InvalidFrozenValueNode();
+        }
+
+        return payload;
+    }
+
     /// <summary>Validates the selected row as a complete scalar value without copying its payload.</summary>
     public void ValidateScalarValue(int row, TrRmBlobTableReader blobs)
         => _ = GetScalarPayload(row, blobs);
@@ -172,6 +230,7 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidFrozenValueNode();
@@ -181,7 +240,7 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
     }
 
     private static bool IsRegisteredScalar(byte typeCode)
-        => typeCode <= 0x0F || typeCode is >= 0x12 and <= 0x19;
+        => typeCode is <= 0x0F or (>= 0x12 and <= 0x19);
 
     private static int ScalarWidth(byte typeCode) => typeCode switch
     {
@@ -195,10 +254,27 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
     };
 
     private static bool IsUnicodeScalar(uint value)
-        => value <= 0x10_FFFF && value is not (>= 0xD800 and <= 0xDFFF);
+        => value is <= 0x10_FFFF and not (>= 0xD800 and <= 0xDFFF);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
+
+    private byte ReadByte(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(byte) + 1);
+        return data[offset];
+    }
+
+    private ushort ReadUInt16(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
+        return BinaryPrimitives.ReadUInt16LittleEndian(
+            data.Slice(offset, sizeof(ushort)));
+    }
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
@@ -240,6 +316,67 @@ public static class TrRmFrozenValueNodeTableWriter
                 reader.ValidateScalarValue(row, blobs);
             }
         }
+        return result;
+    }
+
+    internal static byte[] EncodeNominalEnumsDraft(
+        IReadOnlyList<TrRmFrozenValueNodeRow> rows,
+        TrRmTypeSpecTableReader typeSpecs, TrRmBlobTableReader blobs,
+        int childCount, int unionCaseDefCount,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
+        TrRmImportTableReader imports)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (typeSpecs.Schema != TrRmArtifactSchema.NominalEnumsDraft
+            && typeSpecs.Count != 0)
+        {
+            throw new NotSupportedException(
+                "NominalEnumsDraft values require the exact candidate TypeSpec profile.");
+        }
+        if (rows.Count > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows));
+        }
+
+        var result = EncodeRows(rows, typeSpecs, blobs.Count, childCount,
+            unionCaseDefCount);
+        var reader = new TrRmFrozenValueNodeTableReader(result, rows.Count,
+            typeSpecs, blobs.Count, childCount, unionCaseDefCount);
+        for (var row = 1; row <= rows.Count; row++)
+        {
+            if (reader.GetKind(row) != 1)
+            {
+                continue;
+            }
+
+            var typeSpecRef = reader.GetTypeSpecRef(row);
+            var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+            if (type.Form == 0x01)
+            {
+                reader.ValidateScalarValue(row, blobs);
+                continue;
+            }
+
+            if (!type.IsRow || type.Form is not (0x02 or 0x03)
+                || type.Qualifiers != 0)
+            {
+                throw new NotSupportedException(
+                    "NominalEnumsDraft frozen scalar values require an unqualified builtin or enum TypeSpec.");
+            }
+
+            var typeDefRow = typeSpecs.GetNominalTypeDefRow(typeSpecRef,
+                typeDefs, imports);
+            if (typeDefs.GetKind(typeDefRow) != 4)
+            {
+                throw new NotSupportedException(
+                    "NominalEnumsDraft frozen scalar values support only builtin scalars and nominal enums.");
+            }
+
+            _ = enumDefs.GetRowForTypeDef(typeDefRow);
+            _ = reader.GetNominalEnumScalarPayload(row, blobs, typeSpecRef,
+                typeDefRow, typeDefs, enumDefs, imports);
+        }
+
         return result;
     }
 

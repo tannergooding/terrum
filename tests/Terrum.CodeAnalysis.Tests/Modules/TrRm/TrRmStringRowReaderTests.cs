@@ -1,12 +1,13 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmStringRowReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmStringRowReaderTests
 {
     [TestCase(new byte[] { 0, 6, 0, 0, 65, 110, 115, 119, 101, 114, 0, 0 },"Answer")]
     [TestCase(new byte[] { 0, 1, 0, 0, 65, 0, 0, 0 },"A")]
@@ -35,8 +36,8 @@ public sealed class TrRmStringRowReaderTests
     {
         byte[] empty = [0, 0, 0, 0, 0, 0, 0, 0];
         Assert.That(TrRmStringRowReader.DecodeNamespace(empty), Is.EqualTo(""));
-        Assert.Throws<InvalidDataException>(() => TrRmStringRowReader.DecodeName(empty));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() => TrRmStringRowReader.DecodeName(empty));
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStringRowReader.DecodeNamespace([0, 1, 0, 0, 0, 0, 0, 0]));
     }
     [TestCase(new byte[] { 0, 1, 0, 0, 65, 0, 0 })]
@@ -54,6 +55,6 @@ public sealed class TrRmStringRowReaderTests
     [TestCase(new byte[] { 3, 1, 0, 0, 0, 0xD8, 0, 0, 0, 0, 0 })]
     public void RejectsMalformedAndNonNameRows(byte[] row)
     {
-        Assert.Throws<InvalidDataException>(() => TrRmStringRowReader.DecodeName(row));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmStringRowReader.DecodeName(row));
     }
 }

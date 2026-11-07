@@ -317,7 +317,8 @@ internal static class TrRmRegisterBodyRecordWriter
         ushort targetIndex, ushort resultIndex,
         IReadOnlyList<TrRmRegisterBodyCallInput> inputs,
         IReadOnlyList<ushort> preparations,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
     {
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(preparations);
@@ -353,7 +354,10 @@ internal static class TrRmRegisterBodyRecordWriter
             if (input.SelectorKind > 2
                 || (input.SelectorKind == 0
                     ? input.SourceUse != 0 || input.SelectorIndex != 0
-                    : input.SourceUse is < 1 or > 5)
+                    : (input.SourceUse is < 1 or > 5)
+                        && !(input.SourceUse == 6
+                            && input.SelectorKind == 2
+                            && schema.UsesForeignInvocationContracts()))
                 || (input.SelectorKind == 1 && input.SelectorIndex > 15))
             {
                 throw new ArgumentException("Invalid CallSite input selector.", nameof(inputs));
@@ -393,6 +397,20 @@ internal static class TrRmRegisterBodyRecordWriter
             payloadOffset += sizeof(ushort);
         }
 
+        return result;
+    }
+
+    internal static byte[] EncodeNativeOutputReservation(
+        ushort callSiteRecordIndex, ushort destinationHomeIndex,
+        uint formalOrdinal,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        resourceLedger?.ConsumeWork(1 + 8UL);
+        var result = new byte[12];
+        result[0] = 0x0C;
+        Write(result, RecordHeaderSize, callSiteRecordIndex);
+        Write(result, RecordHeaderSize + 2, destinationHomeIndex);
+        Write(result, RecordHeaderSize + 4, formalOrdinal);
         return result;
     }
 

@@ -6,12 +6,13 @@ using System.Collections;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmScalarInitOutputBodyReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmScalarInitOutputBodyReaderTests
 {
     private const uint ScalarInitOutputRuleRevision = 8;
 
@@ -21,7 +22,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contracts,
         TrRmContractTableReader contractTable,
-        TrRmNativeImportTableReader nativeImports,
+        TrRmDevelopmentNativeImportTableReader nativeImports,
         TrRmNativeVTableTableReader nativeVTables, uint ruleRevision,
         uint rootlessNativeValuesRuleRevision);
 
@@ -51,7 +52,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     public void RetiringVacantFormalDoesNotDischargePublication()
     {
         var fixture = Encode([[0x0B, 1, 1]], [1], [-1], [1], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -63,14 +64,14 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.That(Property<bool>(place, "Initialized"), Is.False);
         Assert.That(Property<int>(place, "LastUseOrdinal"), Is.EqualTo(0));
     }
-    [TestCase((byte)(2))]
-    [TestCase((byte)(3))]
-    [TestCase((byte)(4))]
+    [TestCase((byte)2)]
+    [TestCase((byte)3)]
+    [TestCase((byte)4)]
     public void FailureReasonsWithoutFaithfulNativeLoweringReject(byte reason)
     {
         var fixture = Encode([[0x0B, 1, 1]], [1], [-1], [0],
             ending: [], terminator: [0x87, reason]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -86,7 +87,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.That(Items(body, "EndingPlaces"), Is.Empty);
 
         fixture.Bytes[fixture.PlaceUses] = 0;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -96,7 +97,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var local = Items(Inspect(fixture.Bytes, []), "Places").Single();
         Assert.That(Property<int>(local, "LastUseOrdinal"), Is.EqualTo(0));
         Assert.That(Property<bool>(local, "Initialized"), Is.False);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -112,7 +113,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.That(Items(decoded, "Types"), Is.Empty);
         Assert.That(Items(decoded, "Places"), Is.Empty);
         Assert.That(Items(decoded, "Values"), Is.Empty);
-        Assert.Throws<InvalidDataException>(() => Inspect(
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(
             Encode([], [], [], [], terminator: [0x87, 1]).Bytes, []));
     }
 
@@ -135,14 +136,14 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             [1, 0], [2, 2], [3], terminator: [0x83, 0],
             valueTypeIds: [2, 2], placeTypeIds: [2], typeMapRows: [1, 3]);
 
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
     public void WidenedResultsRequireAnOutputFormalEvenAtRuleRevisionThree()
     {
         var fixture = InitializedOutput();
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
             resultTypeSpecRow: 4));
     }
 
@@ -154,7 +155,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             [1, 0, 0], [2, -1, -1], [2], valueTypeIds: [1, 2, 1],
             typeMapRows: [1, 3], terminator: [0x83, 3]);
 
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
             voidResult: false, targetModes: [2], targetResultTypeSpecRow: 3));
     }
 
@@ -166,7 +167,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             [1, 0], [2, 2], [3], terminator: [0x83, 0],
             valueTypeIds: [1, 2], placeTypeIds: [1], typeMapRows: [1, 3]);
 
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -192,7 +193,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     {
         var fixture = Encode([[0x02, 1, 1, 42]], [0], [1], [],
             terminator: [0x83, 1], width: width);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], voidResult: false));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], voidResult: false));
     }
     [TestCase(255,1)]
     [TestCase(256,2)]
@@ -200,9 +201,9 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     {
         var operations = Enumerable.Range(1, count).Select(value => value <= 255
             ? new byte[] { 2, (byte)value, 1, 42 }
-            : new byte[] { 0xF0, 1, 2, (byte)(value & 255), (byte)(value >> 8), 1, 0, 42 })
+            : [0xF0, 1, 2, (byte)(value & 255), (byte)(value >> 8), 1, 0, 42])
             .ToArray();
-        var fixture = Encode(operations, new byte[count], Enumerable.Repeat(-1, count).ToArray(),
+        var fixture = Encode(operations, new byte[count], [.. Enumerable.Repeat(-1, count)],
             [], terminator: [0x83, 0], width: width);
         var body = Inspect(fixture.Bytes, []);
         Assert.That(Items(body, "Values").Length, Is.EqualTo(count));
@@ -210,13 +211,13 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     }
 
     [Test]
-    public void ExistingEffectsClauseIsPreservedForSemanticVerification()
+    public void ExplicitZeroEffectsClauseRemainsInspectable()
         => Assert.That(Property<uint>(Inspect(InitializedOutput().Bytes, [2],
-            contractKind: 1), "Effects"), Is.EqualTo(1u));
-    [TestCase((byte)(2))]
-    [TestCase((byte)(3))]
-    [TestCase((byte)(4))]
-    [TestCase((byte)(5))]
+            contractKind: 1), "Effects"), Is.Zero);
+    [TestCase((byte)2)]
+    [TestCase((byte)3)]
+    [TestCase((byte)4)]
+    [TestCase((byte)5)]
     public void NonEffectsContractsReject(byte kind)
         => Assert.Throws<InvalidDataException>(() => Inspect(InitializedOutput().Bytes, [2],
             contractKind: kind));
@@ -238,25 +239,31 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var fixture = Encode([[0x0B, 1, 1], [0x0B, 2, 2], [0x12, 0, 2, 2, 1, 2]],
             [1, 1], [2, 2], [3, 3], terminator: [0x83, 0]);
         var places = Items(Inspect(fixture.Bytes, [], targetModes: [2, 2]), "Places");
-        {var __nunitItems0 = places;        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(Property<bool>(__nunitItem0, "Initialized"), Is.True); } });}
+        {
+            var __nunitItems0 = places;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem0 in __nunitItems0)
+    {
+        Assert.That(Property<bool>(__nunitItem0, "Initialized"), Is.True); } });
+        }
     }
-    [TestCase((byte)(1),false)]
-    [TestCase((byte)(2),true)]
-    [TestCase((byte)(3),false)]
+    [TestCase((byte)1,false)]
+    [TestCase((byte)2,true)]
+    [TestCase((byte)3,false)]
     public void OutputCallUsesHandleValueIdRatherThanPlaceDescriptorId(byte argument, bool valid)
     {
         var fixture = Encode([[0x02, 1, 1, 42], [0x0B, 2, 1], [0x12, 0, 2, 1, argument]],
             [0, 1], [-1, 2], [3], terminator: [0x83, 0]);
         if (!valid)
         {
-            Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2]));
+            _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2]));
             return;
         }
 
         var body = Inspect(fixture.Bytes, [], targetModes: [2]);
         var handle = Items(body, "Values")[1];
         Assert.That(Property<int>(handle, "PlaceId"), Is.EqualTo(1));
-        Assert.That(Items(Items(body, "Operations")[2], "Operands").Cast<int>(), Is.EqualTo(new[] { 2 }));
+        Assert.That(Items(Items(body, "Operations")[2], "Operands").Cast<int>(), Is.EqualTo([2]));
         Assert.That(Property<bool>(Items(body, "Places").Single(), "Initialized"), Is.True);
     }
     [TestCase(true)]
@@ -272,38 +279,38 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.That(Items(call, "Operands").Cast<int>(), Is.EqualTo(arguments.Select(id => (int)id)));
         Assert.That(Property<bool>(Items(body, "Places").Single(), "Initialized"), Is.True);
     }
-    [TestCase(true,(byte)(0),(byte)(2))]
-    [TestCase(true,(byte)(1),(byte)(0))]
-    [TestCase(true,(byte)(2),(byte)(1))]
-    [TestCase(false,(byte)(0),(byte)(1))]
-    [TestCase(false,(byte)(2),(byte)(0))]
-    [TestCase(false,(byte)(1),(byte)(2))]
+    [TestCase(true,(byte)0,(byte)2)]
+    [TestCase(true,(byte)1,(byte)0)]
+    [TestCase(true,(byte)2,(byte)1)]
+    [TestCase(false,(byte)0,(byte)1)]
+    [TestCase(false,(byte)2,(byte)0)]
+    [TestCase(false,(byte)1,(byte)2)]
     public void CallRejectsZeroAndWrongDescriptorKindAtEachModePosition(
         bool valueFirst, byte firstArgument, byte secondArgument)
     {
         byte[] targetModes = valueFirst ? [0, 2] : [2, 0];
         var fixture = Encode([[0x0B, 2, 1], [0x12, 0, 2, 2, firstArgument, secondArgument]],
             [0, 1], [1, 1], [2], entry: [1], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
             targetModes: targetModes));
     }
-    [TestCase((byte)(1))]
-    [TestCase((byte)(3))]
+    [TestCase((byte)1)]
+    [TestCase((byte)3)]
     public void CallRequiresExactSignatureArgumentCount(byte argumentCount)
     {
         var fixture = Encode([[0x0B, 2, 1], [0x12, 0, 2, argumentCount, 1, 2]],
             [0, 1], [1, 1], [2], entry: [1], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
             targetModes: [0, 2]));
     }
-    [TestCase((byte)(0x04))]
-    [TestCase((byte)(0x08))]
+    [TestCase((byte)0x04)]
+    [TestCase((byte)0x08)]
     public void OutputBearingCallsCannotUseCompactLayouts(byte layout)
     {
         var fixture = Encode([[0x0B, 2, 1], [0x12, 0, 2, 2, 1, 2]],
             [0, 1], [1, 1], [2], entry: [1], terminator: [0x83, 0]);
         fixture.Bytes[0] = layout;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
             targetModes: [0, 2]));
     }
 
@@ -312,7 +319,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     {
         var fixture = Encode([[0x0B, 1, 1], [0x0B, 2, 1], [0x12, 0, 2, 2, 1, 2]],
             [1, 1], [2, 2], [3], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2, 2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2, 2]));
     }
 
     [Test]
@@ -320,7 +327,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     {
         var fixture = Encode([[0x0B, 1, 1], [0x12, 0, 2, 1, 1]],
             [1], [1], [2], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2], targetModes: [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2], targetModes: [2]));
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -329,36 +336,36 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         byte[] repeated = throughCall ? [0x12, 0, 2, 1, 1] : [0x0E, 1, 2];
         var fixture = Encode([[0x0B, 1, 1], [0x02, 2, 1, 42], [0x0E, 1, 2], repeated],
             [1, 0], [3, throughCall ? 2 : 3], [4], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2]));
     }
-    [TestCase((byte)(0x03))]
-    [TestCase((byte)(0x0D))]
+    [TestCase((byte)0x03)]
+    [TestCase((byte)0x0D)]
     public void HandleCopyAndVacantLoadReject(byte opcode)
     {
         var fixture = Encode([[0x0B, 1, 1], [opcode, 2, 1]], [1, 0],
             [1, -1], [2], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, []));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, []));
     }
-    [TestCase((byte)(0x0C))]
-    [TestCase((byte)(0x0F))]
-    [TestCase((byte)(0x10))]
-    [TestCase((byte)(0x11))]
-    [TestCase((byte)(0x13))]
-    [TestCase((byte)(0x14))]
+    [TestCase((byte)0x0C)]
+    [TestCase((byte)0x0F)]
+    [TestCase((byte)0x10)]
+    [TestCase((byte)0x11)]
+    [TestCase((byte)0x13)]
+    [TestCase((byte)0x14)]
     public void UnsupportedPlaceAndAggregateOperationsReject(byte opcode)
     {
         var fixture = InitializedOutput();
         fixture.Bytes[fixture.OperationStart] = opcode;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
-    [TestCase((byte)(1))]
-    [TestCase((byte)(3))]
-    [TestCase((byte)(4))]
+    [TestCase((byte)1)]
+    [TestCase((byte)3)]
+    [TestCase((byte)4)]
     public void OtherParameterModesReject(byte mode)
         => Assert.Throws<InvalidDataException>(() => Inspect(InitializedOutput().Bytes, [mode]));
-    [TestCase((byte)(0))]
-    [TestCase((byte)(1))]
-    [TestCase((byte)(2))]
+    [TestCase((byte)0)]
+    [TestCase((byte)1)]
+    [TestCase((byte)2)]
     public void CallModeAndArityMismatchesReject(byte variant)
     {
         byte[] call = variant switch {
@@ -367,29 +374,29 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             _ => [0x12, 0, 0, 1, 1],
         };
         var fixture = Encode([[0x0B, 1, 1], call], [1], [1], [2], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
             targetModes: variant == 0 ? [0] : [2]));
     }
-    [TestCase((byte)(0x04))]
-    [TestCase((byte)(0x08))]
-    [TestCase((byte)(0x03))]
-    [TestCase((byte)(0x10))]
+    [TestCase((byte)0x04)]
+    [TestCase((byte)0x08)]
+    [TestCase((byte)0x03)]
+    [TestCase((byte)0x10)]
     public void OtherBodyLayoutsReject(byte layout)
     {
         var fixture = InitializedOutput();
         fixture.Bytes[0] = layout;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
-    [TestCase(1,(byte)(2))]
-    [TestCase(2,(byte)(255))]
-    [TestCase(3,(byte)(255))]
-    [TestCase(4,(byte)(1))]
-    [TestCase(5,(byte)(255))]
+    [TestCase(1,(byte)2)]
+    [TestCase(2,(byte)255)]
+    [TestCase(3,(byte)255)]
+    [TestCase(4,(byte)1)]
+    [TestCase(5,(byte)255)]
     public void UnsupportedAndUnboundedHeaderCountsReject(int offset, byte value)
     {
         var fixture = InitializedOutput();
         fixture.Bytes[offset] = value;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -397,15 +404,15 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     {
         var fixture = InitializedOutput();
         fixture.Bytes[fixture.Definition]++;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
 
         fixture = InitializedOutput();
         fixture.Bytes[fixture.TerminatorOffset]++;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
 
         fixture = InitializedOutput();
         fixture.Bytes[^2] = 0x80;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -413,26 +420,26 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     {
         var fixture = Encode([[0x0B, 1, 1], [0x12, 0, 2, 1, 1]],
             [1], [1], [2], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
             targetModes: [2], targetLayout: 4));
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
             targetModes: [2], targetFlags: 2));
     }
-    [TestCase("PlaceFlags",(byte)(0))]
-    [TestCase("PlaceFlags",(byte)(6))]
-    [TestCase("PlaceRegion",(byte)(1))]
-    [TestCase("PlaceUses",(byte)(0))]
-    [TestCase("ValueKind",(byte)(0))]
-    [TestCase("ValueUses",(byte)(0))]
-    [TestCase("ValueLastUse",(byte)(1))]
-    [TestCase("PlaceLastUse",(byte)(2))]
-    [TestCase("Definition",(byte)(0))]
-    [TestCase("TerminatorOffset",(byte)(0))]
+    [TestCase("PlaceFlags",(byte)0)]
+    [TestCase("PlaceFlags",(byte)6)]
+    [TestCase("PlaceRegion",(byte)1)]
+    [TestCase("PlaceUses",(byte)0)]
+    [TestCase("ValueKind",(byte)0)]
+    [TestCase("ValueUses",(byte)0)]
+    [TestCase("ValueLastUse",(byte)1)]
+    [TestCase("PlaceLastUse",(byte)2)]
+    [TestCase("Definition",(byte)0)]
+    [TestCase("TerminatorOffset",(byte)0)]
     public void ForgedInventoriesAndIndexesReject(string field, byte value)
     {
         var fixture = InitializedOutput();
         fixture.Bytes[Property<int>(fixture, field)] = value;
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
     [Test]
@@ -442,10 +449,10 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         for (var length = 0; length < fixture.Bytes.Length; length++)
         {
             var truncated = fixture.Bytes[..length];
-            Assert.Throws<InvalidDataException>(() => Inspect(truncated, [2]));
+            _ = Assert.Throws<InvalidDataException>(() => Inspect(truncated, [2]));
         }
 
-        Assert.Throws<InvalidDataException>(() => Inspect([.. fixture.Bytes, 0], [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect([.. fixture.Bytes, 0], [2]));
     }
 
     [Test]
@@ -453,8 +460,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     {
         var fixture = Encode([[0x0B, 1, 1], [0x02, 2, 1, 42], [0x0E, 1, 2]],
             [1, 0], [2, 2], [2], ending: [], terminator: [0x83, 0]);
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
-        Assert.Throws<InvalidDataException>(() => Inspect(InitializedOutput().Bytes, [2],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(InitializedOutput().Bytes, [2],
             voidResult: false));
     }
 
@@ -465,7 +472,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             entry: [1], terminator: [0x83, 1], valueTypeIds: [2, 1],
             typeMapRows: [1, 3]);
 
-        Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
+        _ = Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
             resultTypeSpecRow: 3, paramTypeSpecRows: [3]));
     }
 
@@ -483,16 +490,16 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         int[]? typeMapRows = null)
     {
         entry ??= [];
-        ending ??= Enumerable.Range(1, placeLastUses.Length).ToArray();
-        valueTypeIds ??= Enumerable.Repeat(1, kinds.Length).ToArray();
-        placeTypeIds ??= Enumerable.Repeat(1, placeLastUses.Length).ToArray();
+        ending ??= [.. Enumerable.Range(1, placeLastUses.Length)];
+        valueTypeIds ??= [.. Enumerable.Repeat(1, kinds.Length)];
+        placeTypeIds ??= [.. Enumerable.Repeat(1, placeLastUses.Length)];
         typeMapRows ??= [1];
         using var blockStream = new MemoryStream();
         using var block = new BinaryWriter(blockStream);
         Local(block, 0, width);
         List(block, entry, width);
         block.Write(new byte[3 * width]);
-        List(block, Enumerable.Range(1, placeLastUses.Length).ToArray(), width);
+        List(block, [.. Enumerable.Range(1, placeLastUses.Length)], width);
         List(block, ending, width);
         var valueLastUse = Uses(block, valueLastUses, width);
         var placeLastUse = Uses(block, placeLastUses, width);
@@ -540,8 +547,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             writer.Write((uint)row);
         }
         var placeRegion = (int)stream.Position + width;
-        var placeFlags = (int)stream.Position + 2 * width;
-        var placeUses = (int)stream.Position + 2 * width + 1;
+        var placeFlags = (int)stream.Position + (2 * width);
+        var placeUses = (int)stream.Position + (2 * width) + 1;
         for (var place = 0; place < placeLastUses.Length; place++)
         {
             Local(writer, placeTypeIds[place], width);
@@ -667,13 +674,14 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         }
 
         var parameters = parameterCount == 0 ? default
-            : new TrRmParamTableReader(parameterBytes, parameterCount, signatures, types);
+            : new TrRmParamTableReader(parameterBytes, parameterCount, signatures,
+                types, TrRmArtifactSchema.Development);
         var methodBytes = new byte[methodCount * 28];
         for (var method = 0; method < methodCount; method++)
         {
-            Write(methodBytes, method * 28 + 4, 2);
-            Write(methodBytes, method * 28 + 8, (uint)(method + 1));
-            Write(methodBytes, method * 28 + 24, (uint)(method + 1));
+            Write(methodBytes, (method * 28) + 4, 2);
+            Write(methodBytes, (method * 28) + 8, (uint)(method + 1));
+            Write(methodBytes, (method * 28) + 24, (uint)(method + 1));
         }
 
         if (methodCount == 2)
@@ -689,7 +697,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             var clause = new byte[12];
             Write(clause, 0, 0x1600_0001);
             clause[4] = kind;
-            Write(clause, 8, 1);
+            Write(clause, 8, 0);
             contractSection = TrRmVariableTableWriter.EncodeBlobs([clause]);
         }
 
@@ -698,11 +706,11 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var contractTable = new TrRmContractTableReader(contractSection,
             contractKind is null ? 0 : 1, typeDefinitions, methods, signatures,
             parameters, types, developmentProfile: true);
-        var nativeImports = new TrRmNativeImportTableReader([], 0, names, methods,
+        var nativeImports = new TrRmDevelopmentNativeImportTableReader([], 0, names, methods,
             signatures, parameters, types, contractTable, default);
         var nativeVTables = new TrRmNativeVTableTableReader([], 0, methods, signatures,
-            parameters, types, contractTable);
-        byte[] target = targetModes is [2, 2]
+            parameters, types, contractTable, default);
+        var target = targetModes is [2, 2]
             ? Encode([[0x0B, 1, 1], [0x0B, 2, 2], [0x02, 3, 1, 42],
                 [0x0E, 1, 3], [0x0E, 2, 3]], [1, 1, 0], [3, 4, 4], [5, 5],
                 terminator: [0x83, 0]).Bytes
@@ -745,7 +753,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 
     private static object[] Items(object value, string name)
-        => Property<IEnumerable>(value, name).Cast<object>().ToArray();
+        => [.. Property<IEnumerable>(value, name).Cast<object>()];
 
     private static T Property<T>(object value, string name)
         => (T)(value.GetType().GetProperty(name)?.GetValue(value)

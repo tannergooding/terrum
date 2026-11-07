@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmUnionCaseTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmUnionCaseTableTests
 {
     [Test]
     public void ValidatesUnionCasePayloadRangesAndCompleteFieldTypes()
@@ -40,44 +41,72 @@ public sealed class TrRmUnionCaseTableTests
     }
 
     [Test]
+    public void UnionCaseReadersChargePayloadOwnershipAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        var setup = CreateReaders(fixture);
+        var caseBytes = TrRmUnionCaseDefTableWriter.Encode([
+            new TrRmUnionCaseDefRow(1, 0, 4, 0, 0),
+            new TrRmUnionCaseDefRow(1, 1, 5, 1, 2),
+        ], setup.Strings, setup.TypeDefs, 2);
+        var setupCases = new TrRmUnionCaseDefTableReader(
+            caseBytes, 2, setup.Strings, setup.TypeDefs, 2);
+        var fieldBytes = TrRmUnionCaseFieldTableWriter.Encode([
+            new TrRmUnionCaseFieldRow(2, 0, 6, 0xF200_0008),
+            new TrRmUnionCaseFieldRow(2, 1, 7, 1),
+        ], setup.Strings, setup.TypeSpecs, setupCases);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var cases = new TrRmUnionCaseDefTableReader(caseBytes, 2,
+                readers.Strings, readers.TypeDefs, 2, ledger);
+            var fields = new TrRmUnionCaseFieldTableReader(fieldBytes, 2,
+                readers.Strings, readers.TypeSpecs, cases, ledger);
+            Assert.That(cases.GetPayloadRange(2), Is.EqualTo((1, 2)));
+            Assert.That(fields.GetTypeSpecRef(2), Is.EqualTo(1u));
+        });
+    }
+
+    [Test]
     public void RejectsMalformedCaseRangesOwnersAndFieldRows()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeCases(fixture, [
                 new TrRmUnionCaseDefRow(0, 0, 4, 0, 0),
             ], 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeCases(fixture, [
                 new TrRmUnionCaseDefRow(1, 0, 0, 0, 0),
             ], 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeCases(fixture, [
                 new TrRmUnionCaseDefRow(1, 0, 4, 1, 1),
                 new TrRmUnionCaseDefRow(1, 1, 5, 1, 1),
             ], 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeCases(fixture, [
                 new TrRmUnionCaseDefRow(1, 0, 4, 0, 0),
                 new TrRmUnionCaseDefRow(1, 1, 5, 1, 1),
             ], 2));
 
-        Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
             new TrRmUnionCaseDefRow(1, 0, 4, 1, 1),
         ], [
             new TrRmUnionCaseFieldRow(2, 0, 6, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
             new TrRmUnionCaseDefRow(1, 0, 4, 1, 1),
         ], [
             new TrRmUnionCaseFieldRow(1, 1, 6, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
             new TrRmUnionCaseDefRow(1, 0, 4, 1, 1),
         ], [
             new TrRmUnionCaseFieldRow(1, 0, 0, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
+        _ = Assert.Throws<InvalidDataException>(() => EncodeFields(fixture, [
             new TrRmUnionCaseDefRow(1, 0, 4, 1, 1),
         ], [
             new TrRmUnionCaseFieldRow(1, 0, 6, 0xF400_0008),
@@ -102,14 +131,14 @@ public sealed class TrRmUnionCaseTableTests
 
         var malformedCases = (byte[])cases.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformedCases.AsSpan(12), 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(malformedCases, fields)));
 
         var malformedFields = (byte[])fields.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformedFields.AsSpan(12), 0xF400_0008);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 fixture.CreateArtifact(cases, malformedFields)));
     }
@@ -149,7 +178,8 @@ public sealed class TrRmUnionCaseTableTests
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
         ], 1, 0, 0, 0);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
+
+        _ = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
             1, 0, 0, 0);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(1, 3, 6, 0, 0, 0, 0, 1, 1, 0, 0),

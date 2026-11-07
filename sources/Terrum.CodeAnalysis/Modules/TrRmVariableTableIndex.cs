@@ -17,8 +17,14 @@ public readonly ref struct TrRmVariableTableIndex
     private readonly int _rowAlignment;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Gets the number of indexed rows.</summary>
     public int Count => _recordCount;
 
+    /// <summary>Validates and indexes an offset-indexed table section.</summary>
+    /// <param name="section">The borrowed section bytes.</param>
+    /// <param name="recordCount">The number of rows.</param>
+    /// <param name="minimumRowBytes">The minimum size of each row.</param>
+    /// <param name="rowAlignment">The required row-end alignment, either one or four bytes.</param>
     public TrRmVariableTableIndex(ReadOnlySpan<byte> section, int recordCount,
         int minimumRowBytes, int rowAlignment)
         : this(section, recordCount, minimumRowBytes, rowAlignment, null)
@@ -109,6 +115,9 @@ public readonly ref struct TrRmVariableTableIndex
         }
     }
 
+    /// <summary>Gets the borrowed bytes of a one-based row.</summary>
+    /// <param name="row">The one-based row number.</param>
+    /// <returns>The row's bytes.</returns>
     public ReadOnlySpan<byte> GetRow(int row)
     {
         ConsumeWork();

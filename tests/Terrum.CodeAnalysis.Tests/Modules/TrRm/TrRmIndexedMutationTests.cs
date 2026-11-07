@@ -3,23 +3,28 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmIndexedMutationTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmIndexedMutationTests
 {
     private static BoundProgram Compile(string source, bool library = false)
     {
         var compilation = library ? Compilation.CreateLibrary(SyntaxTree.Parse(source))
             : Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static void RoundTrip(string source, int expected = 42)
@@ -54,7 +59,7 @@ public sealed class TrRmIndexedMutationTests
         ];
         foreach (var (operation, result) in cases)
         {
-            var right = operation.Contains('<') || operation.Contains('>') ? "2" : $"{type}(2)";
+            var right = operation.Contains('<', System.StringComparison.Ordinal) || operation.Contains('>', System.StringComparison.Ordinal) ? "2" : $"{type}(2)";
             RoundTrip($"int32 Main() {{ mut {type} x = {type}(20); x {operation} {right}; return x == {type}({result}) ? 42 : 0; }}");
         }
         foreach (var op in new[] { "<<", ">>", ">>>" })
@@ -126,7 +131,7 @@ public sealed class TrRmIndexedMutationTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Main");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -145,15 +150,15 @@ public sealed class TrRmIndexedMutationTests
             TrRmExecutionAuditTests.Artifact(body, entry: true));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(int.MinValue));
     }
-    [TestCase((byte)(0))]
-    [TestCase((byte)(4))]
+    [TestCase((byte)0)]
+    [TestCase((byte)4)]
     public void IndependentInvalidConvertPoliciesAreRejected(byte policy)
     {
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             TrRmExecutionAuditTests.Artifact(IndependentConvertBody(policy))));
     }
-    [TestCase((byte)(1))]
-    [TestCase((byte)(2))]
+    [TestCase((byte)1)]
+    [TestCase((byte)2)]
     public void IndependentConvertPoliciesExecute(byte policy)
     {
         var program = TrRmExecutableCompiler.Load(
@@ -170,30 +175,30 @@ public sealed class TrRmIndexedMutationTests
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.That(program.Functions[0].NoFailureProof, Is.False);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body, effect: 1)));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
     }
-    [TestCase((byte)(2),(byte)(4))]
-    [TestCase((byte)(3),(byte)(4))]
-    [TestCase((byte)(1),(byte)(6))]
+    [TestCase((byte)2,(byte)4)]
+    [TestCase((byte)3,(byte)4)]
+    [TestCase((byte)1,(byte)6)]
     public void IndependentReinterpretRejectsBoolCharAndMismatchedWidths(
         byte sourceRow, byte destinationRow)
     {
         byte[] body = [4, 2, sourceRow, 0, 0, 0, destinationRow, 0, 0, 0, 2,
             1, 1, 1, 1, 6, 2, 2, 3, 1, 0x83, 1];
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             TrRmExecutionAuditTests.Artifact(body)));
     }
-    [TestCase((byte)(6),(byte)(2),(byte)(1))]
-    [TestCase((byte)(7),(byte)(1),(byte)(1))]
-    [TestCase((byte)(8),(byte)(1),(byte)(2))]
+    [TestCase((byte)6,(byte)2,(byte)1)]
+    [TestCase((byte)7,(byte)1,(byte)1)]
+    [TestCase((byte)8,(byte)1,(byte)2)]
     public void IndependentShiftRejectsWrongKindAndOperandTypes(
         byte kind, byte left, byte right)
     {
         byte[] body = [4, 2, 1, 0, 0, 0, 4, 0, 0, 0, 3,
             1, 1, 1, 1, 1, 2, 2, 1, 0x15, 3, kind, left, right, 0x83, 3];
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             TrRmExecutionAuditTests.Artifact(body)));
     }
     [TestCase(32u)]
@@ -206,7 +211,7 @@ public sealed class TrRmIndexedMutationTests
             TrRmExecutionAuditTests.Artifact(body));
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             TrRmExecutionAuditTests.Artifact(body, effect: 1)));
     }
 
@@ -228,6 +233,6 @@ public sealed class TrRmIndexedMutationTests
             bytes.Add((byte)((count >> (index * 8)) & byte.MaxValue));
         }
         bytes.AddRange([0x15, 3, 6, 1, 2, 0x83, 3]);
-        return bytes.ToArray();
+        return [.. bytes];
     }
 }

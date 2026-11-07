@@ -101,8 +101,11 @@ public readonly ref struct TrRmLayoutTableReader
                     || (targetProfile != 0
                         && !targetProfiles.IsAssignedProfileReference(targetProfile))
                     || kind > 4 || (flags & ~1) != 0 || reserved != 0
+                    || alignment > 8192
                     || (alignment != 0 && (alignment & (alignment - 1)) != 0)
-                    || pack is not (0 or 1 or 2 or 4 or 8 or 16)
+                    || (kind is 1 or 2
+                        ? pack is not (1 or 2 or 4 or 8 or 16)
+                        : pack is not (0 or 1 or 2 or 4 or 8 or 16))
                     || !ValidRange(fieldFirst, fieldCount, layoutFieldCount)
                     || ((flags & 1) != 0 && targetProfile == 0)
                     || (kind == 0 && (alignment != 0 || pack != 0))

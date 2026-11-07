@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmInterfaceBaseMethodTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmInterfaceBaseMethodTableTests
 {
     [Test]
     public void ValidatesCompleteBaseAndDirectInstanceMethodRows()
@@ -24,13 +25,32 @@ public sealed class TrRmInterfaceBaseMethodTableTests
     }
 
     [Test]
+    public void InterfaceBaseAndMethodReadersChargeAtExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var bases = new TrRmInterfaceBaseTableReader(
+                fixture.InterfaceBaseBytes, 1, readers.TypeSpecs,
+                readers.Interfaces, ledger);
+            Assert.That(bases.GetBaseTypeSpecRef(1), Is.EqualTo(1u));
+
+            var methods = new TrRmInterfaceMethodTableReader(
+                fixture.InterfaceMethodBytes, 1, readers.Interfaces,
+                readers.Methods, readers.Signatures, ledger);
+            Assert.That(methods.GetMethodDefRow(1), Is.EqualTo(1));
+        });
+    }
+
+    [Test]
     public void RejectsMalformedBaseReferencesAndOrdinalsInArtifacts()
     {
         var fixture = CreateFixture();
         var malformedBase = (byte[])fixture.InterfaceBaseBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformedBase.AsSpan(sizeof(uint)), 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(fixture, malformedBase, fixture.InterfaceMethodBytes,
                     fixture.SignatureBytes)));
@@ -38,7 +58,7 @@ public sealed class TrRmInterfaceBaseMethodTableTests
         malformedBase = (byte[])fixture.InterfaceBaseBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformedBase.AsSpan(2 * sizeof(uint)), 0);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(fixture, malformedBase, fixture.InterfaceMethodBytes,
                     fixture.SignatureBytes)));
@@ -50,7 +70,7 @@ public sealed class TrRmInterfaceBaseMethodTableTests
         var fixture = CreateFixture();
         var malformedMethod = (byte[])fixture.InterfaceMethodBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformedMethod, 2);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(fixture, fixture.InterfaceBaseBytes, malformedMethod,
                     fixture.SignatureBytes)));
@@ -58,17 +78,17 @@ public sealed class TrRmInterfaceBaseMethodTableTests
         malformedMethod = (byte[])fixture.InterfaceMethodBytes.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(
             malformedMethod.AsSpan(sizeof(uint)), 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(fixture, fixture.InterfaceBaseBytes, malformedMethod,
                     fixture.SignatureBytes)));
 
         var staticFixture = CreateFixture(receiverTypeSpecRef: 0);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(staticFixture.Artifact));
 
         var topLevelFixture = CreateFixture(methodOwnerTypeDef: 0, receiverTypeSpecRef: 0);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(topLevelFixture.Artifact));
     }
 
@@ -145,6 +165,28 @@ public sealed class TrRmInterfaceBaseMethodTableTests
         };
     }
 
+    private static Readers CreateReaders(Fixture fixture)
+    {
+        var strings = new TrRmStringTableReader(fixture.Strings, 5);
+        var modules = new TrRmModuleTableReader(fixture.Modules, 1, strings,
+            0, 1, 1, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(fixture.TypeSpecs, 1,
+            1, 0, 1, 0);
+        var types = new TrRmTypeDefTableReader(fixture.TypeDefs, 1,
+            strings, modules, 0, 1, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            fixture.SignatureBytes, 1, typeSpecs, 0, 1);
+        var methods = new TrRmMethodDefTableReader(fixture.Methods, 1,
+            strings, modules, types, signatures, 0, 0);
+        var genericParams = new TrRmGenericParamTableReader(
+            fixture.GenericParams, 1, strings, types, methods,
+            signatures, typeSpecs, 0);
+        var interfaces = new TrRmInterfaceDefTableReader(
+            fixture.InterfaceDefs, 1, types, genericParams,
+            1, 1, 0, 0, 0);
+        return new Readers(typeSpecs, signatures, methods, interfaces);
+    }
+
     private static byte[] CreateArtifact(Fixture fixture,
         byte[] interfaceBaseBytes, byte[] interfaceMethodBytes, byte[] signatureBytes)
         => TrRmArtifactWriter.Encode([
@@ -175,5 +217,24 @@ public sealed class TrRmInterfaceBaseMethodTableTests
         byte[] InterfaceMethodBytes)
     {
         public byte[] Artifact { get; init; } = [];
+    }
+
+    private readonly ref struct Readers
+    {
+        public Readers(TrRmTypeSpecTableReader typeSpecs,
+            TrRmMethodSigTableReader signatures,
+            TrRmMethodDefTableReader methods,
+            TrRmInterfaceDefTableReader interfaces)
+        {
+            TypeSpecs = typeSpecs;
+            Signatures = signatures;
+            Methods = methods;
+            Interfaces = interfaces;
+        }
+
+        public TrRmTypeSpecTableReader TypeSpecs { get; }
+        public TrRmMethodSigTableReader Signatures { get; }
+        public TrRmMethodDefTableReader Methods { get; }
+        public TrRmInterfaceDefTableReader Interfaces { get; }
     }
 }

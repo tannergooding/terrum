@@ -8,19 +8,20 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Strings;
 
-public sealed class StringLiteralComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringLiteralComponentTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -125,7 +126,7 @@ public sealed class StringLiteralComponentTests
                 return CheckStringLiterals();
             }
             """;
-        var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Harness, "entry.terrum")),
+        var compilation = CompileWithLayoutCore(trees.Add(SyntaxTree.Parse(Harness, "entry.terrum")),
         [
             new HostBuffer("Source", PrimitiveType.Char16, [.. source.ToString().Select(unit => (int)unit)], false),
             new HostBuffer("ExpectedLiterals", PrimitiveType.Int32, literals.ToImmutable(), false),
@@ -148,7 +149,11 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedUtf32BeBytes", PrimitiveType.Int32, utf32BeBytes.ToImmutable(), false),
         ], policy == NativeRuntimePolicy.FailFast ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
     }
@@ -175,11 +180,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "long-ascii-string-literal-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -218,11 +227,15 @@ public sealed class StringLiteralComponentTests
                 }
             }
             """, "literal-undersized-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -253,12 +266,16 @@ public sealed class StringLiteralComponentTests
                 }
             }
             """, "single-byte-unrepresentable-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16,
                 [34, 65, .. char.ConvertFromUtf32(scalar).Select(unit => (int)unit), 34], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -294,11 +311,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "string-row-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -331,11 +352,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "string-row-host-parity-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -367,11 +392,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "string-name-row-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -405,7 +434,7 @@ public sealed class StringLiteralComponentTests
             var verifyRow = $$"""
                     mut OwnedInt32Buffer completed = move row;
                     if (completed.Count != {{expectedLength}} || completed.Capacity != {{expectedLength}}) { return 2; }
-                    {{checks.Replace("row.", "completed.")}}
+                    {{checks.Replace("row.", "completed.", System.StringComparison.Ordinal)}}
                     """;
             var resultCheck = expected is null
                 ? $"if ({builder}(spelling, move workspace, init var row)) {{ return 1; }}"
@@ -429,11 +458,15 @@ public sealed class StringLiteralComponentTests
                     return 0;
                 }
                 """, "string-name-row-builder-entry.terrum");
-            var compilation = Compilation.Create(trees.Add(entry),
+            var compilation = CompileWithLayoutCore(trees.Add(entry),
                 [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
                 (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual7 = compilation.Program;
+                Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual7!;
+            }))();
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
         }
@@ -474,13 +507,17 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "maximum-utf8-string-row-builder-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
         [
             new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expectedRow.Select(static value => (int)value)], false),
         ], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -502,11 +539,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "invalid-name-row-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -541,11 +582,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "empty-namespace-row-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. "\"\"".Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -566,11 +611,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "invalid-namespace-row-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. "\"A\\0B\"".Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -591,7 +640,7 @@ public sealed class StringLiteralComponentTests
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var assertion = expected is bool equal
-            ? $"require TryCompareStringNames(first, second, init var same); if (same != {equal.ToString().ToLowerInvariant()}) {{ return 1; }}"
+            ? $"require TryCompareStringNames(first, second, init var same); if (same != {(equal ? "true" : "false")}) {{ return 1; }}"
             : "if (TryCompareStringNames(first, second, init var same)) { return 1; }";
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
@@ -604,11 +653,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "string-name-equality-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. (left + right).Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -627,7 +680,7 @@ public sealed class StringLiteralComponentTests
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var assertion = expected is bool equal
-            ? $"require TryCompareStringNamespaces(first, second, init var same); if (same != {equal.ToString().ToLowerInvariant()}) {{ return 1; }}"
+            ? $"require TryCompareStringNamespaces(first, second, init var same); if (same != {(equal ? "true" : "false")}) {{ return 1; }}"
             : "if (TryCompareStringNamespaces(first, second, init var same)) { return 1; }";
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
@@ -640,11 +693,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "string-namespace-equality-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. (left + right).Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -677,11 +734,15 @@ public sealed class StringLiteralComponentTests
                 }
             }
             """, "invalid-name-emission-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. (invalid + "\"Ok\"").Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -693,7 +754,7 @@ public sealed class StringLiteralComponentTests
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var contentEnd = unitCount + 4;
         var extent = contentEnd + 1;
-        var rowLength = extent + (4 - extent % 4) % 4;
+        var rowLength = extent + ((4 - (extent % 4)) % 4);
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
@@ -718,15 +779,15 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "string-row-count-entry.terrum");
-        var source = ImmutableArray.CreateBuilder<int>(unitCount + 2);
-        source.Add(34);
-        source.AddRange(Enumerable.Repeat(65, unitCount));
-        source.Add(34);
-        var compilation = Compilation.Create(trees.Add(entry),
-            [new HostBuffer("Source", PrimitiveType.Char16, source.ToImmutable(), false)],
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [34, .. Enumerable.Repeat(65, unitCount), 34], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -759,11 +820,15 @@ public sealed class StringLiteralComponentTests
                 }
             }
             """, "string-row-failure-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [34, 233, 34], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual16 = compilation.Program;
+            Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual16!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
@@ -811,12 +876,20 @@ public sealed class StringLiteralComponentTests
                 {{body}}
             }
             """, "entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [34, 34], false)]);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016"),Is.True);
     }
+
+    private static Compilation CompileWithLayoutCore(
+        ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
+        => Compilation.Create(trees, buffers, new CompilationOptions {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
 
     private static IEnumerable<LiteralFixture> Fixtures()
     {

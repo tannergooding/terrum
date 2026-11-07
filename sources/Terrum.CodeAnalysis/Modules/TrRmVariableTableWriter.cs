@@ -9,9 +9,15 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <summary>Writes offset-indexed variable rows; clause and instruction semantics are validated separately.</summary>
 public static class TrRmVariableTableWriter
 {
+    /// <summary>Encodes offset-indexed Blob rows.</summary>
+    /// <param name="rows">The row payloads in table order.</param>
+    /// <returns>The encoded variable-table section.</returns>
     public static byte[] EncodeBlobs(IReadOnlyList<ReadOnlyMemory<byte>> rows)
         => Encode(rows, 0, null);
 
+    /// <summary>Encodes offset-indexed Body rows.</summary>
+    /// <param name="rows">The row payloads in table order.</param>
+    /// <returns>The encoded variable-table section.</returns>
     public static byte[] EncodeBodies(IReadOnlyList<ReadOnlyMemory<byte>> rows)
         => Encode(rows, 1, null);
 

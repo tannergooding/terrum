@@ -16,6 +16,14 @@ public readonly ref struct TrRmPropertyDefTableReader
     private readonly int _recordCount;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Validates PropertyDef rows and their getter method references.</summary>
+    /// <param name="section">The borrowed PropertyDef section bytes.</param>
+    /// <param name="recordCount">The number of PropertyDef rows.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
     public TrRmPropertyDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
@@ -94,6 +102,9 @@ public readonly ref struct TrRmPropertyDefTableReader
         }
     }
 
+    /// <summary>Gets the source name of a PropertyDef row.</summary>
+    /// <param name="row">The one-based PropertyDef row.</param>
+    /// <returns>The property name.</returns>
     public string GetName(int row)
     {
         _resourceLedger?.ConsumeWork();
@@ -111,6 +122,7 @@ public readonly ref struct TrRmPropertyDefTableReader
         return _strings.DecodeName((int)name);
     }
 
+    /// <summary>Gets the number of validated PropertyDef rows.</summary>
     public int Count
     {
         get
@@ -120,12 +132,21 @@ public readonly ref struct TrRmPropertyDefTableReader
         }
     }
 
+    /// <summary>Gets the owning TypeDef row of a property.</summary>
+    /// <param name="row">The one-based PropertyDef row.</param>
+    /// <returns>The one-based owner TypeDef row.</returns>
     public int GetOwnerType(int row)
         => (int)Read(GetRow(row), 0);
 
+    /// <summary>Gets the flags recorded for a property.</summary>
+    /// <param name="row">The one-based PropertyDef row.</param>
+    /// <returns>The PropertyDef flags.</returns>
     public uint GetFlags(int row)
         => Read(GetRow(row), 16);
 
+    /// <summary>Gets the getter MethodDef row of a property.</summary>
+    /// <param name="row">The one-based PropertyDef row.</param>
+    /// <returns>The one-based getter MethodDef row.</returns>
     public int GetGetterMethod(int row)
         => (int)Read(GetRow(row), 12);
 

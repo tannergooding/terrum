@@ -15,7 +15,7 @@ public static partial class TrRmExecutableCompiler
     private static readonly UTF8Encoding s_sourceTypeExportKeyEncoding
         = new(false, true);
 
-    private sealed record A2SourceTypeImportPlan(
+    private sealed record SourceTypeImportPlan(
         List<TrRmModuleRefRow> ModuleRefs,
         List<TrRmImportRow> Imports,
         Dictionary<int, int> FirstImportRowByStructure);
@@ -36,7 +36,7 @@ public static partial class TrRmExecutableCompiler
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
-        if (program.EntryPoint != -1 || program.Structures.IsEmpty
+        if (program.EntryPoint != -1
             || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
@@ -54,7 +54,7 @@ public static partial class TrRmExecutableCompiler
             || program.RuntimePolicy != BoundRuntimePolicy.FailFast)
         {
             throw Unsupported(
-                "A2 Copy declaration emission requires a fail-fast library of supported struct declarations.");
+                "Standard source-type declaration emission requires a fail-fast library of supported struct declarations.");
         }
         if (!program.Functions.IsEmpty
             && schema is not (
@@ -72,7 +72,7 @@ public static partial class TrRmExecutableCompiler
                 program.NativeFixedArrayTypes))
         {
             throw Unsupported(
-                "A2 Copy declaration emission received an invalid native pointer type table.");
+                "Standard source-type declaration emission received an invalid native pointer type table.");
         }
 
         var typeDefCount = program.Structures.Length;
@@ -93,7 +93,7 @@ public static partial class TrRmExecutableCompiler
                 || structure.Fields.IsDefaultOrEmpty)
             {
                 throw Unsupported(
-                    "A2 Copy declaration emission supports Blittable fixed-layout structs without Cleanup.");
+                    "Standard source-type declaration emission supports Blittable fixed-layout structs without Cleanup.");
             }
 
             foreach (var field in structure.Fields)
@@ -110,11 +110,12 @@ public static partial class TrRmExecutableCompiler
                 var isPointer = NativePointerTypes.IsType(field.Type)
                     && (uint)NativePointerTypes.Index(field.Type)
                         < (uint)program.NativePointerTypes.Length;
-                if (!DirectNativeImportContract.IsScalar(field.Type)
-                    && !isStructure && !isValidArray && !isPointer)
+                if (field.RequiresUnsafeCaller
+                    || (!DirectNativeImportContract.IsScalar(field.Type)
+                        && !isStructure && !isValidArray && !isPointer))
                 {
                     throw Unsupported(
-                        "A2 Copy declaration emission supports scalar, nominal, fixed-array and checked native-pointer fields.");
+                        "Standard FieldDef declarations cannot discard an independent field-level unsafe obligation or an unsupported field type.");
                 }
             }
         }
@@ -122,7 +123,9 @@ public static partial class TrRmExecutableCompiler
         _ = FixedLayoutStorage.Validate(program.Structures,
             program.NativeFixedArrayTypes);
         var hasFloatingTypes = program.Structures.Any(static structure
-            => structure.Fields.Any(static field => IsFloat(field.Type)));
+                => structure.Fields.Any(static field => IsFloat(field.Type)))
+            || program.NativeFixedArrayTypes.Any(static fixedArray
+                => IsFloat(fixedArray.ElementType));
         var typeRows = (hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows)
             .ToList();
         var typeDefTypeSpecRows = new Dictionary<int, int>();
@@ -165,7 +168,7 @@ public static partial class TrRmExecutableCompiler
 
         var exportRows = CreateA2SourceTypeExportRows(program,
             sourceTypeExports, structureTypeDefRows, GetStringRow);
-        var typeImportPlan = CreateA2SourceTypeImportPlan(program,
+        var typeImportPlan = CreateSourceTypeImportPlan(program, schema,
             GetStringRow);
         var importedTypeSpecRows = new Dictionary<int, int>();
 
@@ -247,7 +250,7 @@ public static partial class TrRmExecutableCompiler
             if (typeName.Length == 0)
             {
                 throw Unsupported(
-                    $"A2 Copy declaration identity '{structure.Name}' is invalid.");
+                    $"Standard source TypeDef identity '{structure.Name}' is invalid.");
             }
 
             structureNamespaceRows[typeDefOrdinal]
@@ -469,18 +472,20 @@ public static partial class TrRmExecutableCompiler
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
             typeRows.Count, typeDefCount, typeImportPlan.Imports.Count, 0, 0,
             schema, methodDefCount: methodRows.Count);
-        var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
-            strings, modules, fieldRows.Count, 0, layoutRows.Count,
-            contractRows.Count,
-            schema);
+        var typeDefBytes = typeDefCount == 0 ? []
+            : TrRmTypeDefTableWriter.Encode(typeDefRows,
+                strings, modules, fieldRows.Count, 0, layoutRows.Count,
+                contractRows.Count, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
             strings, modules, fieldRows.Count, 0, layoutRows.Count,
             contractRows.Count,
             schema);
-        var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
-            typeDefs, typeSpecs);
-        var fields = new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
-            strings, typeDefs, typeSpecs);
+        var fieldBytes = fieldRows.Count == 0 ? []
+            : TrRmFieldDefTableWriter.Encode(fieldRows, strings,
+                typeDefs, typeSpecs);
+        var fields = fieldRows.Count == 0 ? default
+            : new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
+                strings, typeDefs, typeSpecs);
         var importBytes = typeImportPlan.Imports.Count == 0 ? []
             : TrRmImportTableWriter.Encode(typeImportPlan.Imports,
                 strings, moduleRefs, typeDefs, default, default, default,
@@ -538,13 +543,28 @@ public static partial class TrRmExecutableCompiler
             new(0x0001, 0, 1, moduleBytes),
             new(0x0002, 0, (uint)stringRows.Count, stringBytes),
             new(0x0011, 0, (uint)typeRows.Count, typeSpecBytes),
-            new(0x0013, 0, (uint)typeDefCount, typeDefBytes),
-            new(0x0014, 0, (uint)fieldRows.Count, fieldBytes),
-            new(0x0015, 0, (uint)layoutRows.Count, layoutBytes),
-            new(0x0023, 0, (uint)layoutFieldRows.Count,
-                layoutFieldBytes),
             new(0x0048, 0, 1, targetProfileBytes),
         };
+        if (typeDefCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0013, 0,
+                (uint)typeDefCount, typeDefBytes));
+        }
+        if (fieldRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0014, 0,
+                (uint)fieldRows.Count, fieldBytes));
+        }
+        if (layoutRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0015, 0,
+                (uint)layoutRows.Count, layoutBytes));
+        }
+        if (layoutFieldRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0023, 0,
+                (uint)layoutFieldRows.Count, layoutFieldBytes));
+        }
         if (methodRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x0016, 0,
@@ -686,7 +706,7 @@ public static partial class TrRmExecutableCompiler
         if (sourceDeclarations.IsDefault)
         {
             throw Unsupported(
-                "Explicit A2 TypeDef exports require a source-bound local declaration set.");
+                "Explicit Standard TypeDef exports require a source-bound local declaration set.");
         }
 
         var declarationByName
@@ -869,7 +889,7 @@ public static partial class TrRmExecutableCompiler
                     publication.ExpectedNativePointerTypes.AsSpan()))
             {
                 throw Unsupported(
-                    "A retained A2 TypeDef publication no longer matches its checked declaration and type tables.");
+                    "A retained Standard TypeDef publication no longer matches its checked declaration and type tables.");
             }
 
             if (publication.ExportKeys.IsEmpty)
@@ -881,7 +901,7 @@ public static partial class TrRmExecutableCompiler
                 || structure.IsUnique || structure.CleanupMethod is not null)
             {
                 throw Unsupported(
-                    "A retained A2 TypeDef export no longer names a public ordinary Copy declaration.");
+                    "A retained Standard TypeDef export no longer names a public ordinary Copy declaration.");
             }
 
             _ = selectedStructures.Add(publication.StructureIndex);
@@ -891,7 +911,7 @@ public static partial class TrRmExecutableCompiler
                     || exportKey.Contains('\0', StringComparison.Ordinal))
                 {
                     throw Unsupported(
-                        "A retained A2 TypeDef publication contains an invalid ExportKey.");
+                        "A retained Standard TypeDef publication contains an invalid ExportKey.");
                 }
 
                 try
@@ -901,14 +921,14 @@ public static partial class TrRmExecutableCompiler
                 catch (EncoderFallbackException exception)
                 {
                     throw new NotSupportedException(
-                        "A retained A2 TypeDef ExportKey is not well-formed scalar text.",
+                        "A retained Standard TypeDef ExportKey is not well-formed scalar text.",
                         exception);
                 }
 
                 if (!exportKeys.Add(exportKey))
                 {
                     throw Unsupported(
-                        "Retained A2 TypeDef ExportKeys are not unique.");
+                        "Retained Standard TypeDef ExportKeys are not unique.");
                 }
 
                 var typeDefRow = structureTypeDefRows[
@@ -999,7 +1019,7 @@ public static partial class TrRmExecutableCompiler
             if (!selectedStructures.Contains(structureIndex))
             {
                 throw Unsupported(
-                    "Every local nominal type in an exported A2 storage closure requires an explicit ExportKey.");
+                    "Every local nominal type in an exported Standard TypeDef storage closure requires an explicit ExportKey.");
             }
 
             var structure = program.Structures[structureIndex];
@@ -1007,7 +1027,7 @@ public static partial class TrRmExecutableCompiler
                 || structure.IsUnique || structure.CleanupMethod is not null)
             {
                 throw Unsupported(
-                    "An exported A2 storage closure contains an ineligible nominal type.");
+                    "An exported Standard TypeDef storage closure contains an ineligible nominal type.");
             }
 
             if (!checkedStructures.Contains(structureIndex))
@@ -1079,7 +1099,7 @@ public static partial class TrRmExecutableCompiler
                         publication.DeclarationSnapshot))
                 {
                     throw Unsupported(
-                        "A retained A2 TypeDef identity no longer matches its checked local declaration.");
+                        "A retained Standard TypeDef identity no longer matches its checked local declaration.");
                 }
 
                 sourceIndexes[publication.StructureIndex] = true;
@@ -1092,14 +1112,27 @@ public static partial class TrRmExecutableCompiler
                 && program.Structures[index].StandardTypeOrigin is null)
             {
                 throw Unsupported(
-                    "A2 source emission cannot preserve a referenced type without its Standard TypeDef origin.");
+                    "Standard source emission cannot preserve a referenced type without its Standard TypeDef origin.");
             }
         }
     }
 
-    private static A2SourceTypeImportPlan CreateA2SourceTypeImportPlan(
-        BoundProgram program, Func<string, int> getStringRow)
+    private static SourceTypeImportPlan CreateSourceTypeImportPlan(
+        BoundProgram program, TrRmArtifactSchema schema,
+        Func<string, int> getStringRow)
     {
+        var expectedProviderSchemaIdentity = schema switch {
+            TrRmArtifactSchema.LocalAggregateLayoutDraft
+                => StandardLocalAggregateLayoutSchemaIdentity,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                => StandardForeignInvocationStorageFixedArraySchemaIdentity,
+            _ => null,
+        };
         var moduleRefs = new List<TrRmModuleRefRow>();
         var imports = new List<TrRmImportRow>();
         var firstImportRowByStructure = new Dictionary<int, int>();
@@ -1135,30 +1168,32 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            var expectedProviderSchema = expectedProviderSchemaIdentity
+                ?? throw new ArgumentOutOfRangeException(nameof(schema));
             var provider = origin.Provider;
             var expectedDeclaration = origin.ExpectedDeclaration
                 ?? throw Unsupported(
-                    "An A2 source type origin does not retain its checked declaration snapshot.");
+                    "A Standard source type origin does not retain its checked declaration snapshot.");
             if (!SameA2SourceTypeDeclaration(
                     program.Structures[structureIndex],
                     expectedDeclaration))
             {
                 throw Unsupported(
-                    "An A2 source type declaration changed after its provider expectation was checked.");
+                    "A Standard source type declaration changed after its provider expectation was checked.");
             }
             var referenceRoot = origin.ReferenceRoot
                 ?? throw Unsupported(
-                    "An A2 source type origin does not retain its reference root.");
+                    "A Standard source type origin does not retain its reference root.");
             if (!StringComparer.Ordinal.Equals(provider.SchemaIdentity,
-                    StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                    expectedProviderSchema)
                 || !StringComparer.Ordinal.Equals(referenceRoot.SchemaIdentity,
-                    StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                    expectedProviderSchema)
                 || string.IsNullOrEmpty(provider.ModuleIdentity)
                 || origin.DefinitionId >> 24 != 0x13
                 || origin.ExportKeys.IsDefaultOrEmpty)
             {
                 throw Unsupported(
-                    "An A2 source type origin lacks a complete selected provider identity.");
+                    "A source type origin lacks a complete identity for the selected provider schema.");
             }
             if (validatedReferenceRoots.Add(referenceRoot)
                 && (origin.ExpectedFixedArrayTypes.IsDefault
@@ -1178,7 +1213,7 @@ public static partial class TrRmExecutableCompiler
                             origin.ExpectedNativePointerTypes.AsSpan())))
             {
                 throw Unsupported(
-                    "An A2 source type array or pointer table changed after its provider expectation was checked.");
+                    "A Standard source type array or pointer table changed after its provider expectation was checked.");
             }
 
             if (providerSnapshotsByIdentity.TryGetValue(
@@ -1188,7 +1223,7 @@ public static partial class TrRmExecutableCompiler
                         provider))
                 {
                     throw Unsupported(
-                        "A2 source type origins select conflicting snapshots for one provider identity.");
+                        "Standard source type origins select conflicting snapshots for one provider identity.");
                 }
             }
             else
@@ -1230,7 +1265,7 @@ public static partial class TrRmExecutableCompiler
                 if (!ReferenceEquals(provider, referenceRoot))
                 {
                     throw Unsupported(
-                        "An A2 lookup root does not belong to its retained reference Module.");
+                        "A Standard type lookup root does not belong to its retained reference Module.");
                 }
 
                 foreach (var exportKey in origin.ExportKeys)
@@ -1259,7 +1294,7 @@ public static partial class TrRmExecutableCompiler
                 if (origin.Expectations.IsDefaultOrEmpty)
                 {
                     throw Unsupported(
-                        "An imported A2 source type has no retained Import expectations.");
+                        "An imported Standard source type has no retained Import expectations.");
                 }
 
                 var rootExpectations = origin.Expectations.Where(expectation
@@ -1278,7 +1313,7 @@ public static partial class TrRmExecutableCompiler
                         || expectation.RuntimePolicy != provider.RuntimePolicy))
                 {
                     throw Unsupported(
-                        "An imported A2 source type lacks a complete expectation from its retained reference Module.");
+                        "An imported Standard source type lacks a complete expectation from its retained reference Module.");
                 }
 
                 var rootKeys = rootExpectations.Select(
@@ -1288,7 +1323,7 @@ public static partial class TrRmExecutableCompiler
                         StringComparer.Ordinal))
                 {
                     throw Unsupported(
-                        "An imported A2 source type's retained alias keys do not match its reference Module expectations.");
+                        "An imported Standard source type's retained alias keys do not match its reference Module expectations.");
                 }
 
                 foreach (var expectation in rootExpectations)
@@ -1331,9 +1366,21 @@ public static partial class TrRmExecutableCompiler
 
             var referenceRoot = origin.ReferenceRoot
                 ?? throw Unsupported(
-                    "An A2 source type origin does not retain its reference root.");
+                    "A Standard source type origin does not retain its reference root.");
             foreach (var expectation in origin.Expectations)
             {
+                if (schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
+                    && (!StringComparer.Ordinal.Equals(
+                            expectation.UsingModule.SchemaIdentity,
+                            StandardLocalAggregateLayoutSchemaIdentity)
+                        || !StringComparer.Ordinal.Equals(
+                            expectation.Provider.SchemaIdentity,
+                            StandardLocalAggregateLayoutSchemaIdentity)))
+                {
+                    throw Unsupported(
+                        "A source type Import edge does not retain the exact provider schema selected for this artifact.");
+                }
+
                 if (ReferenceEquals(expectation.UsingModule, referenceRoot)
                     || !writtenExpectations.Add((
                         expectation.UsingModule, expectation.ImportRow,
@@ -1352,7 +1399,7 @@ public static partial class TrRmExecutableCompiler
                         != expectation.Provider.RuntimePolicy)
                 {
                     throw Unsupported(
-                        "A provider-owned A2 expectation does not retain its actual TypeDef origin.");
+                        "A provider-owned Standard source-type expectation does not retain its actual TypeDef origin.");
                 }
 
                 var targetDefinitionKey
@@ -1385,7 +1432,7 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        return new A2SourceTypeImportPlan(moduleRefs, imports,
+        return new SourceTypeImportPlan(moduleRefs, imports,
             firstImportRowByStructure);
 
         void AddRootAliasKey(
@@ -1413,7 +1460,7 @@ public static partial class TrRmExecutableCompiler
                 || string.IsNullOrEmpty(exportKey))
             {
                 throw Unsupported(
-                    "An A2 source type Import has an empty provider identity or ExportKey.");
+                    "A Standard source type Import has an empty provider identity or ExportKey.");
             }
 
             if (!moduleRefsByIdentity.TryGetValue(producerIdentity,
@@ -1431,7 +1478,7 @@ public static partial class TrRmExecutableCompiler
                 || moduleRef.RuntimePolicy != runtimePolicy)
             {
                 throw Unsupported(
-                    "A2 source type origins retain conflicting Module requirements for one provider identity.");
+                    "Standard source type origins retain conflicting Module requirements for one provider identity.");
             }
 
             if (importTriples.Add((moduleRef.Row, exportKey,

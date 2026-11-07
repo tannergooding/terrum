@@ -15,7 +15,8 @@ using Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Bodies;
 
-public sealed class CompactIndexedBodyValueIndexComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CompactIndexedBodyValueIndexComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -150,9 +151,10 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexMatchesHostedReader(BoundRuntimePolicy policy)
     {
-        var cases = new List<ValueIndexCase>();
-        cases.Add(DominatedCrossBlockValueUse());
-        cases.Add(DominatedCrossBlockValueUseAcrossBranchMerge());
+        var cases = new List<ValueIndexCase> {
+            DominatedCrossBlockValueUse(),
+            DominatedCrossBlockValueUseAcrossBranchMerge()
+        };
         foreach (var width in new[] { 1, 2, 4 })
         {
             cases.Add(DivRemBlocks(width));
@@ -392,7 +394,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         Reject(secondOperation + 2, 6); // Later-block self use.
         Reject(secondOperation + 2, 7); // Out-of-range operand.
         Reject(facts.DescriptorsStart + 1, 0); // Descriptor undercounts used blocks.
-        Reject(facts.DescriptorsStart + 2 * 2 + 1, 1); // Unused result claims a use.
+        Reject(facts.DescriptorsStart + (2 * 2) + 1, 1); // Unused result claims a use.
         Reject(facts.DescriptorsStart, 0); // Vacant descriptor type.
         Reject(facts.DescriptorsStart, 3); // Descriptor type outside the map.
         Reject(facts.DefinitionsStart, (byte)facts.Definitions[2]); // Parameter not sentinel.
@@ -569,12 +571,12 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         var typedResultMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([1, 1, 2, 42], [], 1),
             0, [], ResultTypeSpec: 1, ExpectedValid: false);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(typedResultMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(typedResultMismatch));
 
         var unaryResultMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([4, 2, 3, 1], [2], 1),
             1, [2], ResultTypeSpec: 1, ExpectedValid: false);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(unaryResultMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(unaryResultMismatch));
 
         var bitNotBoolean = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([4, 2, 2, 1], [1], 1),
@@ -588,46 +590,46 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         var checkedNegateUnsigned = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([0x17, 2, 1], [2], 2),
             1, [2], ResultTypeSpec: 2, ExpectedValid: false, SecondTypeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(bitNotBoolean));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(bitNotBoolean));
         Assert.That(InspectHosted(validBooleanNot), Is.EqualTo((1, 2)));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(boolNotInteger));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(checkedNegateUnsigned));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(boolNotInteger));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(checkedNegateUnsigned));
 
         var binaryOperandMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([5, 3, 10, 1, 2], [2, 3], 2),
             2, [2, 3], ResultTypeSpec: 2, TypeSpecCount: 3,
             ExpectedValid: false, ThirdTypeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(binaryOperandMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(binaryOperandMismatch));
 
         var binaryResultMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([5, 3, 10, 1, 2], [2, 2], 3),
             2, [2, 2], ResultTypeSpec: 2, TypeSpecCount: 3,
             ExpectedValid: false, ThirdTypeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(binaryResultMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(binaryResultMismatch));
 
         var selectAlternativeMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([7, 4, 1, 2, 3], [1, 2, 3], 2),
             3, [1, 2, 3], ResultTypeSpec: 2, TypeSpecCount: 3,
             ExpectedValid: false, ThirdTypeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(selectAlternativeMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(selectAlternativeMismatch));
 
         var checkedBinaryOperandMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([0x15, 3, 1, 1, 2], [2, 3], 2),
             2, [2, 3], ResultTypeSpec: 2, TypeSpecCount: 3,
             ExpectedValid: false, ThirdTypeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(checkedBinaryOperandMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(checkedBinaryOperandMismatch));
 
         var checkedBinaryResultMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([0x15, 3, 1, 1, 2], [2, 2], 3),
             2, [2, 2], ResultTypeSpec: 2, TypeSpecCount: 3,
             ExpectedValid: false, ThirdTypeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(checkedBinaryResultMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(checkedBinaryResultMismatch));
 
         var checkedShiftResultMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([0x15, 3, 6, 1, 2], [2, 3], 3),
             2, [2, 3], ResultTypeSpec: 2, TypeSpecCount: 3,
             ExpectedValid: false, ThirdTypeCode: 0x0D);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(checkedShiftResultMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(checkedShiftResultMismatch));
 
         var validComparison = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([5, 3, 4, 1, 2], [2, 2], 1),
@@ -697,21 +699,21 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
             TrRmBodyExampleTests.IndexedScalarOperation([0x15, 3, 6, 1, 2], [2, 3], 2),
             2, [2, 3], ResultTypeSpec: 2, TypeSpecCount: 3,
             ExpectedValid: false, ThirdTypeCode: 9);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(comparisonResultMismatch));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(invalidBooleanConstant));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(invalidSignedBooleanConstant));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(invalidUnsignedNegativeConstant));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(comparisonResultMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(invalidBooleanConstant));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(invalidSignedBooleanConstant));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(invalidUnsignedNegativeConstant));
         Assert.That(InspectHosted(validUnsignedSignedConstant), Is.EqualTo((1, 1)));
         Assert.That(InspectHosted(wideInt32Minimum), Is.EqualTo((1, 1)));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(wideInt32AboveMaximum));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(wideInt32BelowMinimum));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(wideInt32AboveMaximum));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(wideInt32BelowMinimum));
         Assert.That(InspectHosted(wideUnsignedMaximum), Is.EqualTo((1, 1)));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(wideUnsignedAboveMaximum));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(wideUnsignedAboveMaximum));
         Assert.That(InspectHosted(float32Bits), Is.EqualTo((1, 1)));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(float32HighBits));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(float32HighBits));
         Assert.That(InspectHosted(float64Bits), Is.EqualTo((1, 1)));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(selectConditionMismatch));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(checkedShiftCountMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(selectConditionMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(checkedShiftCountMismatch));
 
         var branchConditionMismatch = ConditionalBlocks(1, useSwitch: false)
             with { FirstTypeCode = 8, ExpectedValid = false };
@@ -719,51 +721,51 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
             with { FirstTypeCode = 0x14, ExpectedValid = false };
         var switchPatternMismatch = ConditionalBlocks(1, useSwitch: true, switchPattern: 2)
             with { ExpectedValid = false };
-        Assert.Throws<InvalidDataException>(() => InspectHosted(branchConditionMismatch));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(switchSelectorMismatch));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(switchPatternMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(branchConditionMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(switchSelectorMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(switchPatternMismatch));
 
         var checkedBooleanOperand = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([0x15, 3, 1, 1, 2], [2, 2], 2),
             2, [2, 2], ResultTypeSpec: 2, ExpectedValid: false,
             FirstTypeCode: 8, SecondTypeCode: 1);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(checkedBooleanOperand));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(checkedBooleanOperand));
 
         var validDivRem = DivRemBlocks(1);
         var divRemFacts = DecodeFacts(validDivRem.Section);
         ValueIndexCase DivRemWithMismatchedType(int value)
         {
             var section = (byte[])validDivRem.Section.Clone();
-            section[divRemFacts.DescriptorsStart + (value - 1) * 2] = 1;
+            section[divRemFacts.DescriptorsStart + ((value - 1) * 2)] = 1;
             return validDivRem with { Section = section, ExpectedValid = false };
         }
         var divRemOperandMismatch = DivRemWithMismatchedType(2);
         var divRemQuotientMismatch = DivRemWithMismatchedType(3);
         var divRemRemainderMismatch = DivRemWithMismatchedType(4);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(divRemOperandMismatch));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(divRemQuotientMismatch));
-        Assert.Throws<InvalidDataException>(() => InspectHosted(divRemRemainderMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(divRemOperandMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(divRemQuotientMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(divRemRemainderMismatch));
         var divRemBooleanOperand = validDivRem with {
             FirstTypeCode = 8,
             SecondTypeCode = 1,
             ExpectedValid = false,
         };
-        Assert.Throws<InvalidDataException>(() => InspectHosted(divRemBooleanOperand));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(divRemBooleanOperand));
 
         var typed = TrRmBodyExampleTests.IndexedScalarOperation([3, 2, 1], [2], 1);
         var copyTypeMismatch = new ValueIndexCase(
             typed, 1, [2], ResultTypeSpec: 1, ExpectedValid: false);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(copyTypeMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(copyTypeMismatch));
 
         var loop = TrRmBodyExampleTests.IndexedScalarLoop(ghostLiveness: true);
         var ghostLiveness = new ValueIndexCase(loop, 1, [2], ExpectedValid: false);
-        Assert.Throws<InvalidDataException>(() => InspectHosted(ghostLiveness));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(ghostLiveness));
         var call = CallBlocks(1, 1, packed: false);
         var facts = DecodeFacts(call.Section);
         var badTarget = (byte[])call.Section.Clone();
         badTarget[facts.BlockDataStart + facts.Definitions[1] + 2] = 3;
         var targetMismatch = call with { Section = badTarget };
-        Assert.Throws<InvalidDataException>(() => InspectHosted(targetMismatch));
+        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(targetMismatch));
         await ExecuteCasesAsync(
             [typedResultMismatch, copyTypeMismatch, unaryResultMismatch,
                 bitNotBoolean, validBooleanNot, boolNotInteger, checkedNegateUnsigned,
@@ -880,7 +882,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
                     }
                     else
                     {
-                        Assert.Throws<InvalidDataException>(() => InspectHosted(fixture));
+                        _ = Assert.Throws<InvalidDataException>(() => InspectHosted(fixture));
                     }
                 }
                 expected.AddRange([fixture.ParameterCount, fixture.TypeSpecCount,
@@ -996,8 +998,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         var values = (int)ReadWord(section, ref cursor, width);
         var regions = (int)ReadWord(section, ref cursor, width);
         var types = (int)ReadWord(section, ref cursor, width);
-        var regionStart = cursor + types * 4;
-        cursor += types * 4 + regions * (1 + 4 * width);
+        var regionStart = cursor + (types * 4);
+        cursor += (types * 4) + (regions * (1 + (4 * width)));
         var descriptorsStart = cursor;
         var uses = new int[values];
         for (var value = 0; value < values; value++)
@@ -1143,7 +1145,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         var parameterTypeCode = useSwitch ? (byte)8 : (byte)1;
         var terminator = useSwitch
             ? new byte[] { 0x82, 1, 1, 0, 2, 0, 4, 0 }
-            : new byte[] { 0x81, 1, 2, 0, 4, 0 };
+            : [0x81, 1, 2, 0, 4, 0];
         var section = BuildBody(1, [1], [1], [0, 1, 1, 1, 1],
         [
             new([1], [], [], [(1, 0)], [], terminator),
@@ -1344,7 +1346,11 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
     {
         var compilation = Compilation.Create(sources, [.. buffers], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"indexed-value-index-{Guid.NewGuid():N}.exe");
         try

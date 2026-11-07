@@ -7,26 +7,26 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class ContractTableValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ContractTableValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            bool valid = TryValidateMethodSigParamTables(
+            bool valid = TryValidateDevelopmentMethodSigParamTables(
                 Host.Expected[3], Host.Expected[4], 0, Host.Expected[5],
                 Host.Expected[1], 0)
-                && TryValidateContractTable(
+                && TryValidateDevelopmentContractTable(
                     Host.Expected[0], Host.Expected[1], Host.Expected[2],
                     Host.Expected[3], Host.Expected[4], Host.Expected[5]);
             return valid == (Host.Expected[6] != 0) ? 0 : 1;
@@ -34,7 +34,8 @@ public sealed class ContractTableValidationComponentTests
         """;
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task ContractTableValidationMatchesHostedReader(BoundRuntimePolicy policy)
+    public async Task DevelopmentContractTableValidationMatchesHostedReader(
+        BoundRuntimePolicy policy)
     {
         var empty = CreateFixture([]);
         var cleanupThenEffect = CreateFixture([
@@ -218,7 +219,11 @@ public sealed class ContractTableValidationComponentTests
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true), Is.EqualTo(0));
@@ -234,13 +239,13 @@ public sealed class ContractTableValidationComponentTests
         var methodRows = clauses.Select((clause, index) => (clause, index))
             .Where(static item => item.clause.Owner >> 24 == 0x16)
             .Select(static item => item.index + 1).ToArray();
-        byte[] typeDefs = new byte[44];
+        var typeDefs = new byte[44];
         WriteWord(typeDefs, 0, 1);
         WriteWord(typeDefs, 4, 3);
         WriteWord(typeDefs, 8, 4);
         WriteWord(typeDefs, 36, typeRows.Length == 0 ? 0u : (uint)typeRows[0]);
         WriteWord(typeDefs, 40, (uint)typeRows.Length);
-        byte[] methods = new byte[28];
+        var methods = new byte[28];
         WriteWord(methods, 0, 1);
         WriteWord(methods, 4, 4);
         WriteWord(methods, 8, 1);
@@ -253,14 +258,14 @@ public sealed class ContractTableValidationComponentTests
             1, 0, (byte)(booleanResult ? 1 : 8),
             1, 0, 8,
         ];
-        byte[] signatures = new byte[24];
+        var signatures = new byte[24];
         WriteWord(signatures, 0, booleanResult ? 1u : 2u);
         if (hasOutputParam)
         {
             WriteWord(signatures, 8, 1);
             WriteWord(signatures, 12, 1);
         }
-        byte[] parameters = hasOutputParam ? new byte[16] : [];
+        var parameters = hasOutputParam ? new byte[16] : [];
         if (hasOutputParam)
         {
             WriteWord(parameters, 0, 1);
@@ -268,8 +273,8 @@ public sealed class ContractTableValidationComponentTests
             parameters[12] = paramMode;
         }
 
-        byte[][] rows = clauses.Select(static clause =>
-            Contract(clause.Owner, clause.Kind, clause.Payload)).ToArray();
+        byte[][] rows = [.. clauses.Select(static clause =>
+            Contract(clause.Owner, clause.Kind, clause.Payload))];
         var contracts = EncodeContractSection(rows);
         return new TestCase(new TableData(contracts, typeDefs, methods, signatures,
             parameters, typeSpecs, clauses.Length, 1, 1, 1,
@@ -304,7 +309,7 @@ public sealed class ContractTableValidationComponentTests
             3, 0, 0, 0,
             1, 0, 1,
         ];
-        byte[] contracts = EncodeContractSection([.. rows]);
+        var contracts = EncodeContractSection([.. rows]);
         var tables = new TableData(contracts, [], methods, signatures, [], typeSpecs,
             rows.Count, 0, methodCount, 1, 0, 1);
         return new TestCase(tables, true, true);
@@ -314,10 +319,10 @@ public sealed class ContractTableValidationComponentTests
     {
         try
         {
-            byte[] stringBytes = TrRmStringTableWriter.EncodeTextRows(
+            var stringBytes = TrRmStringTableWriter.EncodeTextRows(
                 [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0)]);
             var strings = new TrRmStringTableReader(stringBytes, 4);
-            byte[] moduleBytes = new byte[48];
+            var moduleBytes = new byte[48];
             WriteWord(moduleBytes, 0, 2);
             WriteWord(moduleBytes, 4, 1);
             WriteWord(moduleBytes, 32, 1);
@@ -329,16 +334,19 @@ public sealed class ContractTableValidationComponentTests
             var types = new TrRmTypeDefTableReader(tables.TypeDefs, tables.TypeDefCount,
                 strings, modules, 0, 0, 0, tables.RecordCount);
             var typeSpecs = new TrRmTypeSpecTableReader(tables.TypeSpecs,
-                tables.TypeSpecCount, tables.TypeDefCount, 0, 0, 0);
+                tables.TypeSpecCount, tables.TypeDefCount, 0, 0, 0,
+                TrRmArtifactSchema.Development);
             var signatures = new TrRmMethodSigTableReader(tables.Signatures,
                 tables.SignatureCount, typeSpecs, tables.ParamCount, 0);
             var parameters = tables.ParamCount == 0
                 ? default
-                : new TrRmParamTableReader(tables.Params, tables.ParamCount, signatures, typeSpecs);
+                : new TrRmParamTableReader(tables.Params, tables.ParamCount,
+                    signatures, typeSpecs, TrRmArtifactSchema.Development);
             var methods = new TrRmMethodDefTableReader(tables.Methods, tables.MethodDefCount,
                 strings, modules, types, signatures, tables.RecordCount, 0);
             _ = new TrRmContractTableReader(tables.Contracts, tables.RecordCount,
-                types, methods, signatures, parameters, typeSpecs);
+                types, methods, signatures, parameters, typeSpecs,
+                developmentProfile: true);
             return true;
         }
         catch (InvalidDataException)
@@ -367,10 +375,10 @@ public sealed class ContractTableValidationComponentTests
             return [];
         }
 
-        int indexLength = (rows.Length + 1) * sizeof(uint);
-        int dataLength = rows.Sum(static row => row.Length);
+        var indexLength = (rows.Length + 1) * sizeof(uint);
+        var dataLength = rows.Sum(static row => row.Length);
         var section = new byte[indexLength + dataLength];
-        int offset = 0;
+        var offset = 0;
         for (var row = 0; row < rows.Length; row++)
         {
             WriteWord(section, row * sizeof(uint), (uint)offset);
@@ -402,23 +410,23 @@ public sealed class ContractTableValidationComponentTests
 
     private static byte[] SetWord(byte[] bytes, int offset, uint value)
     {
-        byte[] result = bytes.ToArray();
+        byte[] result = [.. bytes];
         WriteWord(result, offset, value);
         return result;
     }
 
     private static byte[] SetContractOffset(byte[] section, int row, uint value)
     {
-        byte[] result = section.ToArray();
+        byte[] result = [.. section];
         WriteWord(result, row * sizeof(uint), value);
         return result;
     }
 
     private static byte[] SetContractByte(TableData tables, int row, int rowOffset, int value)
     {
-        byte[] result = tables.Contracts.ToArray();
-        int indexLength = (tables.RecordCount + 1) * sizeof(uint);
-        int dataOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+        byte[] result = [.. tables.Contracts];
+        var indexLength = (tables.RecordCount + 1) * sizeof(uint);
+        var dataOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
             result.AsSpan((row - 1) * sizeof(uint))));
         result[indexLength + dataOffset + rowOffset] = checked((byte)value);
         return result;
@@ -435,8 +443,8 @@ public sealed class ContractTableValidationComponentTests
         int row, int rowOffset, int value)
     {
         int[] values = [.. testCase.Tables.Contracts.Select(static item => (int)item)];
-        int indexLength = (testCase.Tables.RecordCount + 1) * sizeof(uint);
-        int dataOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+        var indexLength = (testCase.Tables.RecordCount + 1) * sizeof(uint);
+        var dataOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
             testCase.Tables.Contracts.AsSpan((row - 1) * sizeof(uint))));
         values[indexLength + dataOffset + rowOffset] = value;
         return new TestCase(testCase.Tables, false, false, values);

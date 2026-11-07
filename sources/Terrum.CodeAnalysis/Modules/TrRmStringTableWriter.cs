@@ -8,16 +8,24 @@ using System.Text;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Encodes TRRM String sections from text and selected encodings.</summary>
+/// <remarks>Encoding values 0 through 3 select ASCII, UTF-8, UTF-16LE and UTF-32LE, respectively.</remarks>
 public static class TrRmStringTableWriter
 {
     private static readonly UTF8Encoding s_utf8 = new(false, true);
     private static readonly UnicodeEncoding s_utf16 = new(false, false, true);
     private static readonly UTF32Encoding s_utf32 = new(false, false, true);
 
+    /// <summary>Encodes nonempty name rows using ASCII, UTF-8, UTF-16LE or UTF-32LE.</summary>
+    /// <param name="names">The text and encoding for each row, in table order.</param>
+    /// <returns>The encoded String section.</returns>
     public static byte[] EncodeNames(IReadOnlyList<(string Text, int Encoding)> names)
         => EncodeRows(names, allowEmpty: false, argumentName: nameof(names),
             resourceLedger: null);
 
+    /// <summary>Encodes text rows, allowing empty text and the selected ASCII or Unicode encoding.</summary>
+    /// <param name="rows">The text and encoding for each row, in table order.</param>
+    /// <returns>The encoded String section.</returns>
     public static byte[] EncodeTextRows(IReadOnlyList<(string Text, int Encoding)> rows)
         => EncodeRows(rows, allowEmpty: true, argumentName: nameof(rows),
             resourceLedger: null);

@@ -11,6 +11,9 @@ public readonly ref struct TrRmStringTableReader
     private readonly TrRmVariableTableIndex _rows;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Validates and indexes the borrowed String section.</summary>
+    /// <param name="section">The String section bytes, which must remain unchanged while this reader is in use.</param>
+    /// <param name="recordCount">The number of String rows.</param>
     public TrRmStringTableReader(ReadOnlySpan<byte> section, int recordCount)
         : this(section, recordCount, null)
     {
@@ -29,9 +32,15 @@ public readonly ref struct TrRmStringTableReader
     /// <summary>Gets the number of validated string rows.</summary>
     public int Count { get; }
 
+    /// <summary>Decodes a nonempty name from a one-based String row.</summary>
+    /// <param name="row">The one-based String row.</param>
+    /// <returns>The decoded name.</returns>
     public string DecodeName(int row)
         => DecodeText(row, allowEmpty: false);
 
+    /// <summary>Decodes a namespace from a one-based String row; the namespace may be empty.</summary>
+    /// <param name="row">The one-based String row.</param>
+    /// <returns>The decoded namespace.</returns>
     public string DecodeNamespace(int row)
         => DecodeText(row, allowEmpty: true);
 

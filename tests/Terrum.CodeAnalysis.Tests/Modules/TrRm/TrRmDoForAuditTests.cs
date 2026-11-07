@@ -2,13 +2,14 @@
 
 using System;
 using System.IO;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmDoForAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmDoForAuditTests
 {
     // Entry defines zero/one/limit. The loop header increments before testing and
     // passes the replacement to itself or the exit: do { x++; } while (x < limit).
@@ -65,17 +66,17 @@ public sealed class TrRmDoForAuditTests
         Assert.That(NativeJit.Execute(
             TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
-    [TestCase(13,(byte)(2))]
-    [TestCase(16,(byte)(4))]
-    [TestCase(84,(byte)(4))]
-    [TestCase(88,(byte)(0))]
-    [TestCase(170,(byte)(3))]
+    [TestCase(13,(byte)2)]
+    [TestCase(16,(byte)4)]
+    [TestCase(84,(byte)4)]
+    [TestCase(88,(byte)0)]
+    [TestCase(170,(byte)3)]
     public void IteratorCannotBecomeASecondLoopEntryOrCycleHeader(int offset, byte value)
     {
         var body = IteratorBody(3);
         Assert.That(value, Is.Not.EqualTo(body[offset]));
         body[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
     [TestCase((byte)0,1)]
@@ -89,34 +90,34 @@ public sealed class TrRmDoForAuditTests
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-    [TestCase(9,(byte)(1))]
-    [TestCase(13,(byte)(2))]
-    [TestCase(14,(byte)(1))]
-    [TestCase(15,(byte)(3))]
-    [TestCase(16,(byte)(2))]
-    [TestCase(17,(byte)(1))]
-    [TestCase(27,(byte)(2))]
-    [TestCase(28,(byte)(1))]
-    [TestCase(34,(byte)(5))]
-    [TestCase(39,(byte)(0))]
-    [TestCase(40,(byte)(24))]
-    [TestCase(44,(byte)(24))]
-    [TestCase(48,(byte)(32))]
-    [TestCase(72,(byte)(3))]
-    [TestCase(76,(byte)(0))]
-    [TestCase(81,(byte)(4))]
-    [TestCase(85,(byte)(4))]
-    [TestCase(89,(byte)(0))]
-    [TestCase(109,(byte)(4))]
-    [TestCase(110,(byte)(3))]
-    [TestCase(112,(byte)(6))]
-    [TestCase(113,(byte)(1))]
+    [TestCase(9,(byte)1)]
+    [TestCase(13,(byte)2)]
+    [TestCase(14,(byte)1)]
+    [TestCase(15,(byte)3)]
+    [TestCase(16,(byte)2)]
+    [TestCase(17,(byte)1)]
+    [TestCase(27,(byte)2)]
+    [TestCase(28,(byte)1)]
+    [TestCase(34,(byte)5)]
+    [TestCase(39,(byte)0)]
+    [TestCase(40,(byte)24)]
+    [TestCase(44,(byte)24)]
+    [TestCase(48,(byte)32)]
+    [TestCase(72,(byte)3)]
+    [TestCase(76,(byte)0)]
+    [TestCase(81,(byte)4)]
+    [TestCase(85,(byte)4)]
+    [TestCase(89,(byte)0)]
+    [TestCase(109,(byte)4)]
+    [TestCase(110,(byte)3)]
+    [TestCase(112,(byte)6)]
+    [TestCase(113,(byte)1)]
     public void ForgedPostTestIndexesRegionsTypesAndInventoriesReject(int offset, byte value)
     {
         var body = PostTestBody(3);
         Assert.That(value, Is.Not.EqualTo(body[offset]));
         body[offset] = value;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
@@ -138,16 +139,16 @@ public sealed class TrRmDoForAuditTests
         byte[] uses = [3, 1, 4, 0, 5, 2, 6, 2, 7, 0];
         uses.CopyTo(body, 87);
         body[102] = 7;
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
     [Test]
-    public void PostTestOperationsCannotAcquireNoThrowFromTheLoopCondition()
+    public void RetiredNoThrowEffectRejectsPostTestLoopBodies()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(PostTestBody(0), effect: 1);
-        TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact));
     }
 
     [Test]
@@ -156,7 +157,7 @@ public sealed class TrRmDoForAuditTests
         var body = PostTestBody(3);
         for (var length = 1; length < body.Length; length++)
         {
-            Assert.Throws<InvalidDataException>(() =>
+            _ = Assert.Throws<InvalidDataException>(() =>
                 TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body[..length])));
         }
     }

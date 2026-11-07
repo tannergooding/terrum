@@ -6,6 +6,10 @@ using System.Collections.Generic;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Describes an import's producer reference, ExportKey and expected definition.</summary>
+/// <param name="ModuleRefRow">The one-based ModuleRef row naming the producer.</param>
+/// <param name="ExportKeyStringRow">The String row containing the ExportKey.</param>
+/// <param name="ExpectedLocalDefId">The producer-local definition identifier expected for the import.</param>
 public readonly record struct TrRmImportRow(
     int ModuleRefRow, int ExportKeyStringRow, uint ExpectedLocalDefId);
 

@@ -3,43 +3,44 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmMethodDefTableReaderTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmMethodDefTableReaderTests
 {
     [Test]
     public void ModuleLevelCallableUsesSignatureWithoutNominalTypes()
     {
         Assert.That(GetName(Method(), 1), Is.EqualTo("Run"));
-        Assert.Throws<InvalidDataException>(() => GetName(Method(), 0));
-        Assert.Throws<InvalidDataException>(() => GetName(Method(), 2));
+        _ = Assert.Throws<InvalidDataException>(() => GetName(Method(), 0));
+        _ = Assert.Throws<InvalidDataException>(() => GetName(Method(), 2));
     }
-    [TestCase(0,(byte)(1))]
-    [TestCase(4,(byte)(0))]
-    [TestCase(8,(byte)(0))]
-    [TestCase(8,(byte)(2))]
-    [TestCase(12,(byte)(3))]
-    [TestCase(16,(byte)(1))]
-    [TestCase(20,(byte)(1))]
-    [TestCase(24,(byte)(0))]
-    [TestCase(24,(byte)(2))]
+    [TestCase(0,(byte)1)]
+    [TestCase(4,(byte)0)]
+    [TestCase(8,(byte)0)]
+    [TestCase(8,(byte)2)]
+    [TestCase(12,(byte)3)]
+    [TestCase(16,(byte)1)]
+    [TestCase(20,(byte)1)]
+    [TestCase(24,(byte)0)]
+    [TestCase(24,(byte)2)]
     public void RejectsBadReferencesVisibilityAndUnownedBodies(int offset, byte replacement)
     {
         var bytes = Method();
         bytes[offset] = replacement;
-        Assert.Throws<InvalidDataException>(() => Create(bytes));
+        _ = Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
     [Test]
     public void RejectsTruncatedRowAndUnownedSignatureReceiver()
     {
-        Assert.Throws<InvalidDataException>(() => Create(Method()[..^1]));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Method()[..^1]));
         var signature = Signature();
         Write(signature, 4, 1);
-        Assert.Throws<InvalidDataException>(() => Create(Method(), signature: signature));
+        _ = Assert.Throws<InvalidDataException>(() => Create(Method(), signature: signature));
     }
 
     [Test]
@@ -53,7 +54,7 @@ public sealed class TrRmMethodDefTableReaderTests
         var signature = Signature();
         Write(signature, 16, 1);
         Write(signature, 20, 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             Create(rows, methodCount: 2, bodyCount: 0, signature: signature, genericCount: 1));
     }
 
@@ -61,7 +62,7 @@ public sealed class TrRmMethodDefTableReaderTests
     public void NominalMethodOwnerMustBelongToTheSameModule()
     {
         CreateTwoModules(wrongOwner: false);
-        Assert.Throws<InvalidDataException>(() => CreateTwoModules(wrongOwner: true));
+        _ = Assert.Throws<InvalidDataException>(() => CreateTwoModules(wrongOwner: true));
     }
 
     [Test]

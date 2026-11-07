@@ -30,6 +30,7 @@ public readonly ref struct TrRmInterfaceConstDefTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated InterfaceConstDef rows.</summary>
     public int Count => _recordCount;
@@ -44,6 +45,16 @@ public readonly ref struct TrRmInterfaceConstDefTableReader
     public TrRmInterfaceConstDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeSpecTableReader types,
         TrRmInterfaceDefTableReader interfaces, int constantSourceCount)
+        : this(section, recordCount, strings, types, interfaces,
+            constantSourceCount, null)
+    {
+    }
+
+    internal TrRmInterfaceConstDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmTypeSpecTableReader types, TrRmInterfaceDefTableReader interfaces,
+        int constantSourceCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != interfaces.InterfaceConstCount
@@ -55,13 +66,17 @@ public readonly ref struct TrRmInterfaceConstDefTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        resourceLedger?.ConsumeWork(checked((ulong)recordCount + 2UL));
         var rowOwners = new int[recordCount + 1];
+        _resourceLedger = resourceLedger;
         for (var interfaceDef = 1; interfaceDef <= interfaces.Count; interfaceDef++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = interfaces.GetInterfaceConstRange(interfaceDef);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
                 var row = first + ordinal;
+                _resourceLedger?.ConsumeWork(2);
                 if (rowOwners[row] != 0)
                 {
                     throw InvalidInterfaceConstDef();
@@ -87,6 +102,7 @@ public readonly ref struct TrRmInterfaceConstDefTableReader
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if (rowOwners[row] == 0)
             {
                 throw InvalidInterfaceConstDef();
@@ -112,6 +128,7 @@ public readonly ref struct TrRmInterfaceConstDefTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidInterfaceConstDef();
@@ -123,8 +140,12 @@ public readonly ref struct TrRmInterfaceConstDefTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidInterfaceConstDef()
         => new("Invalid TRRM InterfaceConstDef table.");
@@ -181,6 +202,7 @@ public readonly ref struct TrRmAssociatedConstDefTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated AssociatedConstDef rows.</summary>
     public int Count => _recordCount;
@@ -194,6 +216,14 @@ public readonly ref struct TrRmAssociatedConstDefTableReader
     public TrRmAssociatedConstDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeSpecTableReader types,
         TrRmInterfaceDefTableReader interfaces)
+        : this(section, recordCount, strings, types, interfaces, null)
+    {
+    }
+
+    internal TrRmAssociatedConstDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmTypeSpecTableReader types, TrRmInterfaceDefTableReader interfaces,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != interfaces.AssociatedConstCount
@@ -204,13 +234,17 @@ public readonly ref struct TrRmAssociatedConstDefTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        resourceLedger?.ConsumeWork(checked((ulong)recordCount + 2UL));
         var rowOwners = new int[recordCount + 1];
+        _resourceLedger = resourceLedger;
         for (var interfaceDef = 1; interfaceDef <= interfaces.Count; interfaceDef++)
         {
+            _resourceLedger?.ConsumeWork();
             var (first, count) = interfaces.GetAssociatedConstRange(interfaceDef);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
                 var row = first + ordinal;
+                _resourceLedger?.ConsumeWork(2);
                 if (rowOwners[row] != 0)
                 {
                     throw InvalidAssociatedConstDef();
@@ -234,6 +268,7 @@ public readonly ref struct TrRmAssociatedConstDefTableReader
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if (rowOwners[row] == 0)
             {
                 throw InvalidAssociatedConstDef();
@@ -255,6 +290,7 @@ public readonly ref struct TrRmAssociatedConstDefTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidAssociatedConstDef();
@@ -266,8 +302,12 @@ public readonly ref struct TrRmAssociatedConstDefTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidAssociatedConstDef()
         => new("Invalid TRRM AssociatedConstDef table.");

@@ -13,7 +13,8 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmEnumTablesTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmEnumTablesTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int EnumReturn();
@@ -25,31 +26,31 @@ public sealed class TrRmEnumTablesTests
     public void RoundTripsNominalEnumAndDuplicateValuedMembers()
     {
         var fixture = CreateFixture();
-        var result = Validate(fixture);
+        var (Flags, MemberCount, Values) = Validate(fixture);
 
-        Assert.That(result.Flags, Is.EqualTo(1));
-        Assert.That(result.MemberCount, Is.EqualTo(2));
-        Assert.That(result.Values, Is.EqualTo(new[] { 7, 7 }));
+        Assert.That(Flags, Is.EqualTo(1));
+        Assert.That(MemberCount, Is.EqualTo(2));
+        Assert.That(Values, Is.EqualTo([7, 7]));
     }
 
     [Test]
     public void AcceptsAnEmptyEnumWithoutAnEnumMemberSection()
     {
-        var result = Validate(CreateFixture(includeMembers: false, blittable: false));
+        var (Flags, MemberCount, Values) = Validate(CreateFixture(includeMembers: false, blittable: false));
 
-        Assert.That(result.Flags, Is.EqualTo(1));
-        Assert.That(result.MemberCount, Is.Zero);
-        Assert.That(result.Values, Is.Empty);
+        Assert.That(Flags, Is.EqualTo(1));
+        Assert.That(MemberCount, Is.Zero);
+        Assert.That(Values, Is.Empty);
     }
 
     [Test]
     public void RejectsWrongUnderlyingTypeAndReservedEnumFlags()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() => Validate(fixture with {
+        _ = Assert.Throws<InvalidDataException>(() => Validate(fixture with {
             EnumBytes = WriteUInt32(fixture.EnumBytes, 4, 0xF200_0007),
         }));
-        Assert.Throws<InvalidDataException>(() => Validate(fixture with {
+        _ = Assert.Throws<InvalidDataException>(() => Validate(fixture with {
             EnumBytes = WriteUInt32(fixture.EnumBytes, 8, 2),
         }));
     }
@@ -58,10 +59,10 @@ public sealed class TrRmEnumTablesTests
     public void RejectsDuplicateMemberKeysAndOrphanMemberRows()
     {
         var fixture = CreateFixture();
-        Assert.Throws<InvalidDataException>(() => Validate(fixture with {
+        _ = Assert.Throws<InvalidDataException>(() => Validate(fixture with {
             MemberBytes = WriteUInt32(fixture.MemberBytes, 20 + 8, 6),
         }));
-        Assert.Throws<InvalidDataException>(() => Validate(fixture with {
+        _ = Assert.Throws<InvalidDataException>(() => Validate(fixture with {
             EnumBytes = WriteUInt32(fixture.EnumBytes, 16, 1),
         }));
     }
@@ -73,7 +74,7 @@ public sealed class TrRmEnumTablesTests
         var otherProfile = new byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(otherProfile, 2);
         BinaryPrimitives.WriteUInt32LittleEndian(otherProfile.AsSpan(4), 1);
-        Assert.Throws<InvalidDataException>(() => Validate(fixture with {
+        _ = Assert.Throws<InvalidDataException>(() => Validate(fixture with {
             TargetProfileBytes = otherProfile,
         }));
     }
@@ -85,11 +86,11 @@ public sealed class TrRmEnumTablesTests
             TrRmFeatureRow.NativeBoundaryContracts,
             new TrRmFeatureRow(18, 1),
         ]);
-        var closure = ValidateCandidateArtifact(artifact);
-        Assert.That(closure.HasTypedFrozenValues, Is.True);
-        Assert.That(closure.HasNominalUnionMetadata, Is.False);
-        Assert.Throws<InvalidDataException>(() => ValidateDefaultArtifact(artifact));
-        Assert.Throws<InvalidDataException>(() => ValidateCandidateArtifact(
+        var (HasTypedFrozenValues, HasNominalUnionMetadata) = ValidateCandidateArtifact(artifact);
+        Assert.That(HasTypedFrozenValues, Is.True);
+        Assert.That(HasNominalUnionMetadata, Is.False);
+        _ = Assert.Throws<InvalidDataException>(() => ValidateDefaultArtifact(artifact));
+        _ = Assert.Throws<InvalidDataException>(() => ValidateCandidateArtifact(
             CreateArtifact([
                 TrRmFeatureRow.NativeBoundaryContracts,
                 TrRmFeatureRow.TypedFrozenValues,
@@ -106,46 +107,46 @@ public sealed class TrRmEnumTablesTests
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [provider]));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [CreateBoundEnumArtifact(
                         isConsumer: false, memberValue: 8)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [CreateBoundEnumArtifact(
                         isConsumer: false, declarationKey: "different-key")]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [CreateBoundEnumArtifact(
                         isConsumer: false, providerExportKey: "other")]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [CreateBoundEnumArtifact(
                         isConsumer: false, providerModuleIdentity: "other")]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [CreateBoundEnumArtifact(
                         isConsumer: false, providerTargetRequirement: 1)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [CreateBoundEnumArtifact(
                         isConsumer: false, flags: 0)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [CreateBoundEnumArtifact(
                         isConsumer: false, blittable: false)]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, []));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator
                 .ValidateNominalEnumsDraftProviderBindings(
                     consumer, [provider, provider]));
@@ -157,10 +158,14 @@ public sealed class TrRmEnumTablesTests
         var enumIdentity = new CoreDeclarationIdentity(
             "enum-module", "Color", CoreDeclarationKind.EnumType);
         var member = new BoundEnumMemberDefinition(
-            new CoreDeclarationIdentity("enum-module", "color-red",
-                CoreDeclarationKind.EnumMember),
-            enumIdentity, "Red", 7, true, "color-red");
-        var definition = new BoundEnumDefinition(enumIdentity, "Example.Color",
+            new BoundEnumMemberIdentity.Core(new CoreDeclarationIdentity(
+                "enum-module", "color-red",
+                CoreDeclarationKind.EnumMember)),
+            new BoundEnumDeclarationIdentity.Core(enumIdentity), "Red", 7,
+            true, "color-red");
+        var definition = new BoundEnumDefinition(
+            new BoundEnumDeclarationIdentity.Core(enumIdentity),
+            "Example.Color",
             PrimitiveType.Int32, [member], true, true, false)
         {
             BlittableTargetRequirement
@@ -178,7 +183,7 @@ public sealed class TrRmEnumTablesTests
         Assert.That(TrRmExecutableCompiler.EmitStandard(program, "enum-module",
                 "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 1),
             Is.EqualTo(artifact));
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(program, "enum-module",
                 "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 0));
         var tables = TrRmStructuralMetadataValidator
@@ -204,10 +209,14 @@ public sealed class TrRmEnumTablesTests
         var enumIdentity = new CoreDeclarationIdentity(
             "enum-module", "Color", CoreDeclarationKind.EnumType);
         var member = new BoundEnumMemberDefinition(
-            new CoreDeclarationIdentity("enum-module", "color-red",
-                CoreDeclarationKind.EnumMember),
-            enumIdentity, "Red", 7, true, "color-red");
-        var definition = new BoundEnumDefinition(enumIdentity, "Example.Color",
+            new BoundEnumMemberIdentity.Core(new CoreDeclarationIdentity(
+                "enum-module", "color-red",
+                CoreDeclarationKind.EnumMember)),
+            new BoundEnumDeclarationIdentity.Core(enumIdentity), "Red", 7,
+            true, "color-red");
+        var definition = new BoundEnumDefinition(
+            new BoundEnumDeclarationIdentity.Core(enumIdentity),
+            "Example.Color",
             PrimitiveType.Int32, [member], true, true, false)
         {
             BlittableTargetRequirement
@@ -276,10 +285,13 @@ public sealed class TrRmEnumTablesTests
         var colorIdentity = new CoreDeclarationIdentity(
             "enum-module", "Color", CoreDeclarationKind.EnumType);
         var colorMember = new BoundEnumMemberDefinition(
-            new CoreDeclarationIdentity("enum-module", "color-red",
-                CoreDeclarationKind.EnumMember),
-            colorIdentity, "Red", 7, true, "color-red");
-        var colorDefinition = new BoundEnumDefinition(colorIdentity,
+            new BoundEnumMemberIdentity.Core(new CoreDeclarationIdentity(
+                "enum-module", "color-red",
+                CoreDeclarationKind.EnumMember)),
+            new BoundEnumDeclarationIdentity.Core(colorIdentity),
+            "Red", 7, true, "color-red");
+        var colorDefinition = new BoundEnumDefinition(
+            new BoundEnumDeclarationIdentity.Core(colorIdentity),
             "Example.Color", PrimitiveType.Int32, [colorMember], true, true, false)
         {
             BlittableTargetRequirement
@@ -288,10 +300,13 @@ public sealed class TrRmEnumTablesTests
         var sizeIdentity = new CoreDeclarationIdentity(
             "enum-module", "Size", CoreDeclarationKind.EnumType);
         var sizeMember = new BoundEnumMemberDefinition(
-            new CoreDeclarationIdentity("enum-module", "size-small",
-                CoreDeclarationKind.EnumMember),
-            sizeIdentity, "Small", 1, true, "size-small");
-        var sizeDefinition = new BoundEnumDefinition(sizeIdentity,
+            new BoundEnumMemberIdentity.Core(new CoreDeclarationIdentity(
+                "enum-module", "size-small",
+                CoreDeclarationKind.EnumMember)),
+            new BoundEnumDeclarationIdentity.Core(sizeIdentity), "Small", 1,
+            true, "size-small");
+        var sizeDefinition = new BoundEnumDefinition(
+            new BoundEnumDeclarationIdentity.Core(sizeIdentity),
             "Example.Size", PrimitiveType.Int32, [sizeMember], true, true, false)
         {
             BlittableTargetRequirement
@@ -368,7 +383,7 @@ public sealed class TrRmEnumTablesTests
 
         var invalidArtifact = TrRmArtifactWriter.Encode(invalidSections,
             TrRmArtifactSchema.NominalEnumsDraft);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadNominalEnumsDraftIdentityLibrary(
                 invalidArtifact));
 
@@ -379,7 +394,7 @@ public sealed class TrRmEnumTablesTests
         var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             var identity = Marshal.GetDelegateForFunctionPointer<EnumIdentity>(
                 NativeLibrary.GetExport(handle, "IdentityColor"));
@@ -452,11 +467,15 @@ public sealed class TrRmEnumTablesTests
         var enumIdentity = new CoreDeclarationIdentity(
             "enum-module", "Color", CoreDeclarationKind.EnumType);
         var member = new BoundEnumMemberDefinition(
-            new CoreDeclarationIdentity("enum-module", "color-red",
-                CoreDeclarationKind.EnumMember),
-            enumIdentity, "Red", 7, true, "color-red");
-        var definition = new BoundEnumDefinition(enumIdentity, "Example.Color",
-            PrimitiveType.Int32, [member], true, true, false);
+            new BoundEnumMemberIdentity.Core(new CoreDeclarationIdentity(
+                "enum-module", "color-red",
+                CoreDeclarationKind.EnumMember)),
+            new BoundEnumDeclarationIdentity.Core(enumIdentity), "Red", 7,
+            true, "color-red");
+        var definition = new BoundEnumDefinition(
+            new BoundEnumDeclarationIdentity.Core(enumIdentity),
+            "Example.Color", PrimitiveType.Int32, [member], true, true,
+            false);
         var enumType = BoundEnumTypes.Type(0);
         var constant = new BoundConstant(
             ScalarBits.FromPayload(PrimitiveType.Int32, [7, 0, 0, 0]),
@@ -481,7 +500,7 @@ public sealed class TrRmEnumTablesTests
         var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             var getColor = Marshal.GetDelegateForFunctionPointer<EnumReturn>(
                 NativeLibrary.GetExport(handle, "GetColor"));
@@ -565,7 +584,7 @@ public sealed class TrRmEnumTablesTests
         var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             var getConvention = Marshal.GetDelegateForFunctionPointer<EnumReturn>(
                 NativeLibrary.GetExport(handle, "GetConvention"));
@@ -640,7 +659,7 @@ public sealed class TrRmEnumTablesTests
         var handle = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(path, image);
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
             handle = NativeLibrary.Load(path);
             var identity = Marshal.GetDelegateForFunctionPointer<EnumIdentity>(
                 NativeLibrary.GetExport(handle, "IdentityConvention"));
@@ -663,18 +682,22 @@ public sealed class TrRmEnumTablesTests
         var enumIdentity = new CoreDeclarationIdentity(
             "provider-module", "Color", CoreDeclarationKind.EnumType);
         var member = new BoundEnumMemberDefinition(
-            new CoreDeclarationIdentity("provider-module", "color-red",
-                CoreDeclarationKind.EnumMember),
-            enumIdentity, "Red", 7, true, "color-red");
+            new BoundEnumMemberIdentity.Core(new CoreDeclarationIdentity(
+                "provider-module", "color-red",
+                CoreDeclarationKind.EnumMember)),
+            new BoundEnumDeclarationIdentity.Core(enumIdentity), "Red", 7,
+            true, "color-red");
         var program = new BoundProgram([], -1)
         {
             EnumDefinitions = [
-                new BoundEnumDefinition(enumIdentity, "Example.Color",
+                new BoundEnumDefinition(
+                    new BoundEnumDeclarationIdentity.Core(enumIdentity),
+                    "Example.Color",
                     PrimitiveType.Int32, [member], true, true, false),
             ],
         };
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitNominalEnumsDraftDeclarationLibrary(
                 program, "consumer-module", moduleTargetRequirement: 0));
     }
@@ -687,10 +710,13 @@ public sealed class TrRmEnumTablesTests
         var enumIdentity = new CoreDeclarationIdentity(
             "core.native", "Color", CoreDeclarationKind.EnumType);
         var member = new BoundEnumMemberDefinition(
-            new CoreDeclarationIdentity("core.native", "color-red",
-                CoreDeclarationKind.EnumMember),
-            enumIdentity, "Red", 7, true, "color-red");
-        var importedDefinition = new BoundEnumDefinition(enumIdentity,
+            new BoundEnumMemberIdentity.Core(new CoreDeclarationIdentity(
+                "core.native", "color-red",
+                CoreDeclarationKind.EnumMember)),
+            new BoundEnumDeclarationIdentity.Core(enumIdentity), "Red", 7,
+            true, "color-red");
+        var importedDefinition = new BoundEnumDefinition(
+            new BoundEnumDeclarationIdentity.Core(enumIdentity),
             "Example.Color", PrimitiveType.Int32, [member], true, true, false);
         var definitions = registration.EnumDefinitions
             .Select(BoundEnumDefinition.FromCore)
@@ -756,11 +782,11 @@ public sealed class TrRmEnumTablesTests
 
         Assert.That(value.Type, Is.EqualTo(BoundEnumTypes.Type(0)));
         Assert.That(value.Bits.Low, Is.EqualTo(7UL));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateNominalEnumFrozenScalar(artifact, 0xF200_0008));
         var invalidPayload = CreateNominalEnumValueArtifact(
             blobLength: 8, isImported: imported);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             ValidateNominalEnumFrozenScalar(invalidPayload, 1));
     }
 
@@ -799,7 +825,7 @@ public sealed class TrRmEnumTablesTests
             TrRmArtifactSchema.NominalEnumsDraft);
         var targetProfileBytes = blittable
             ? TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(1, 1)])
-            : Array.Empty<byte>();
+            : [];
         var targetProfiles = new TrRmTargetProfileTableReader(targetProfileBytes,
             blittable ? 1 : 0);
         var layoutRows = blittable
@@ -807,7 +833,7 @@ public sealed class TrRmEnumTablesTests
                 new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
                 new TrRmLayoutRow(1, 1, 0, 1, 0, 0, 0, 0),
             }
-            : new[] { new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0) };
+            : [new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0)];
         var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows, types,
             targetProfiles, 0);
         var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
@@ -818,7 +844,7 @@ public sealed class TrRmEnumTablesTests
                 new TrRmEnumMemberDefRow(1, 0, 6, 4, 7),
                 new TrRmEnumMemberDefRow(1, 1, 7, 5, 7),
             }
-            : Array.Empty<TrRmEnumMemberDefRow>();
+            : [];
         var memberBytes = TrRmEnumTablesWriter.EncodeMembers(memberRows,
             strings, types);
         var members = new TrRmEnumMemberDefTableReader(memberBytes,
@@ -850,14 +876,14 @@ public sealed class TrRmEnumTablesTests
             fixture.MemberCount, strings, types);
         var enums = new TrRmEnumDefTableReader(fixture.EnumBytes, 1, types,
             typeSpecs, layouts, targetProfiles, members);
-        var range = enums.GetMemberRange(1);
-        var values = new int[range.Count];
+        var (First, Count) = enums.GetMemberRange(1);
+        var values = new int[Count];
         for (var index = 0; index < values.Length; index++)
         {
-            values[index] = members.GetValue(range.First + index);
+            values[index] = members.GetValue(First + index);
         }
 
-        return (enums.GetFlags(1), range.Count, values);
+        return (enums.GetFlags(1), Count, values);
     }
 
     private static byte[] CreateArtifact(TrRmFeatureRow[] features,
@@ -1019,10 +1045,10 @@ public sealed class TrRmEnumTablesTests
                 TrRmFeatureRow.TypedFrozenValues,
                 new TrRmFeatureRow(18, 1),
             }
-            : new[] {
+            : [
                 TrRmFeatureRow.NativeBoundaryContracts,
                 new TrRmFeatureRow(18, 1),
-            };
+            ];
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows,
             TrRmArtifactSchema.NominalEnumsDraft);
         var moduleBytes = TrRmModuleTableWriter.Encode([
@@ -1057,7 +1083,7 @@ public sealed class TrRmEnumTablesTests
                 new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
                 new TrRmLayoutRow(1, 1, 0, 1, 0, 0, 0, 0),
             }
-            : new[] { new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0) };
+            : [new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0)];
         var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows, types,
             targetProfiles, layoutFieldCount: 0);
         var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
@@ -1075,7 +1101,7 @@ public sealed class TrRmEnumTablesTests
             ? TrRmModuleRefTableWriter.Encode([
                 new TrRmModuleRefRow(3, 0, 0),
             ], strings, modules)
-            : Array.Empty<byte>();
+            : [];
         var moduleRefs = new TrRmModuleRefTableReader(
             moduleRefsBytes, isConsumer ? 1 : 0, strings, modules);
         var features = new TrRmFeatureTableReader(featureBytes,
@@ -1086,13 +1112,13 @@ public sealed class TrRmEnumTablesTests
             ], strings, moduleRefs, types, default, default, default,
                 default, default, features, modules,
                 TrRmArtifactSchema.NominalEnumsDraft)
-            : Array.Empty<byte>();
+            : [];
         var imports = new TrRmImportTableReader(importsBytes,
             isConsumer ? 1 : 0, strings, moduleRefs, types, default, default,
             default, default, default, features, modules,
             TrRmArtifactSchema.NominalEnumsDraft);
         var exportsBytes = isConsumer
-            ? Array.Empty<byte>()
+            ? []
             : TrRmExportTableWriter.Encode([
                 new TrRmExportRow(0x1300_0001, 9),
             ], strings, types, default, default, imports,

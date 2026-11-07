@@ -3,12 +3,13 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmVariableTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmVariableTableWriterTests
 {
     [Test]
     public void EncodesEmptyAndNonemptyBlobRowsWithIndependentStorage()
@@ -36,28 +37,62 @@ public sealed class TrRmVariableTableWriterTests
         Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(first));
         Assert.That(reader.GetRow(2).IsEmpty, Is.True);
         Assert.That(reader.GetRow(3).ToArray(), Is.EqualTo(last));
-        Assert.Throws<InvalidDataException>(() => ReadBlob(section, 0, 3));
-        Assert.Throws<InvalidDataException>(() => ReadBlob(section, 4, 3));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBlob(section, 0, 3));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBlob(section, 4, 3));
+    }
+
+    [Test]
+    public void BlobReaderChargesOffsetsAndPayloadAtTheExactWorkBoundary()
+    {
+        var section = TrRmVariableTableWriter.EncodeBlobs([
+            new byte[] { 1, 2, 3, 4 },
+        ]);
+        var exactLedger = new TrRmA3LayoutResourceLedger();
+        exactLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 28);
+        var exactReader = new TrRmBlobTableReader(section, 1, exactLedger);
+
+        Assert.That(exactReader.GetRow(1).ToArray(),
+            Is.EqualTo(new byte[] { 1, 2, 3, 4 }));
+        Assert.That(exactLedger.WorkRemaining, Is.Zero);
+
+        var shortLedger = new TrRmA3LayoutResourceLedger();
+        shortLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 27);
+        var shortReader = new TrRmBlobTableReader(section, 1, shortLedger);
+        TrRmResourceLimitException? exception = null;
+        try
+        {
+            _ = shortReader.GetRow(1);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.That(exception!.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.WorkLimit + 1)));
     }
 
     [Test]
     public void RejectsMalformedBlobIndexes()
     {
-        byte[] section = TrRmVariableTableWriter.EncodeBlobs([
+        var section = TrRmVariableTableWriter.EncodeBlobs([
             ReadOnlyMemory<byte>.Empty, new byte[] { 1, 2, 3 },
         ]);
         var changedStart = (byte[])section.Clone();
         changedStart[0] = 1;
-        Assert.Throws<InvalidDataException>(() => ReadBlob(changedStart, 1, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBlob(changedStart, 1, 2));
 
         var changedEnd = (byte[])section.Clone();
         changedEnd[8] = 2;
-        Assert.Throws<InvalidDataException>(() => ReadBlob(changedEnd, 1, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBlob(changedEnd, 1, 2));
 
         var descending = (byte[])section.Clone();
         descending[4] = 2;
         descending[8] = 1;
-        Assert.Throws<InvalidDataException>(() => ReadBlob(descending, 1, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBlob(descending, 1, 2));
     }
 
     private static byte[] ReadBlob(byte[] section, int row, int count)
@@ -78,23 +113,23 @@ public sealed class TrRmVariableTableWriterTests
         Assert.That(reader.Count, Is.EqualTo(2));
         Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(new byte[] { 0xFF }));
         Assert.That(reader.GetRow(2).ToArray(), Is.EqualTo(new byte[] { 1, 2 }));
-        Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 0, 2));
-        Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 3, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 0, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 3, 2));
     }
 
     [Test]
     public void RejectsEmptyOrMalformedBodyRows()
     {
-        byte[] section = TrRmVariableTableWriter.EncodeBodies([new byte[] { 1 },
+        var section = TrRmVariableTableWriter.EncodeBodies([new byte[] { 1 },
             new byte[] { 2, 3 }]);
 
         var emptyRow = (byte[])section.Clone();
         emptyRow[4] = 0;
-        Assert.Throws<InvalidDataException>(() => ReadBody(emptyRow, 1, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBody(emptyRow, 1, 2));
 
         var pastEnd = (byte[])section.Clone();
         pastEnd[8] = 4;
-        Assert.Throws<InvalidDataException>(() => ReadBody(pastEnd, 2, 2));
+        _ = Assert.Throws<InvalidDataException>(() => ReadBody(pastEnd, 2, 2));
     }
 
     private static byte[] ReadBody(byte[] section, int row, int count)
@@ -106,10 +141,10 @@ public sealed class TrRmVariableTableWriterTests
     [Test]
     public void RejectsAbsentTablesAndEmptyBodies()
     {
-        Assert.Throws<ArgumentNullException>(() => TrRmVariableTableWriter.EncodeBlobs(null!));
-        Assert.Throws<ArgumentOutOfRangeException>(() => TrRmVariableTableWriter.EncodeBlobs([]));
-        Assert.Throws<ArgumentOutOfRangeException>(() => TrRmVariableTableWriter.EncodeBodies([]));
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentNullException>(() => TrRmVariableTableWriter.EncodeBlobs(null!));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => TrRmVariableTableWriter.EncodeBlobs([]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => TrRmVariableTableWriter.EncodeBodies([]));
+        _ = Assert.Throws<ArgumentException>(() =>
             TrRmVariableTableWriter.EncodeBodies([new byte[] { 1 }, ReadOnlyMemory<byte>.Empty]));
     }
 

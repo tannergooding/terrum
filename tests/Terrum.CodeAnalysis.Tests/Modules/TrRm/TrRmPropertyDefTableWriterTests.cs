@@ -2,12 +2,13 @@
 
 using System;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmPropertyDefTableWriterTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmPropertyDefTableWriterTests
 {
     [Test]
     public void EmitsGetterIdentityIndependentOfImplementationName()
@@ -58,12 +59,12 @@ public sealed class TrRmPropertyDefTableWriterTests
     public void RejectsInvalidOwnerNameTypeGetterAndVisibility()
     {
         var row = new TrRmPropertyDefRow(1, 5, 1, 1, 0);
-        Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { OwnerTypeDefRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { NameStringRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRef = 2 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { GetterMethodDefRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 3 }]));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { OwnerTypeDefRow = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { NameStringRow = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRef = 2 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { GetterMethodDefRow = 0 }]));
+        _ = Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 3 }]));
     }
 
     [Test]
@@ -71,7 +72,7 @@ public sealed class TrRmPropertyDefTableWriterTests
     {
         var property = new TrRmPropertyDefRow(1, 5, 0xF2000008, 1, 0);
         Assert.That(Encode([property]), Has.Length.EqualTo(20));
-        Assert.Throws<InvalidDataException>(() => Encode([
+        _ = Assert.Throws<InvalidDataException>(() => Encode([
             property with { TypeSpecRef = 0xF2000001 },
         ]));
     }

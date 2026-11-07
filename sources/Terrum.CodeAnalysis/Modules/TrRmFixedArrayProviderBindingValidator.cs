@@ -14,6 +14,11 @@ internal readonly record struct TrRmStandardTypeProviderBinding(
     int ProviderTypeDefRow, string ProducerIdentity, string ExportKey,
     uint TargetRequirement, uint RuntimePolicy);
 
+internal readonly record struct TrRmStandardMethodTypeSpecPair(
+    int ExpectedArtifactIndex, int ExpectedModuleRow,
+    uint ExpectedTypeSpecRef, int ActualArtifactIndex, int ActualModuleRow,
+    uint ActualTypeSpecRef);
+
 internal static class TrRmFixedArrayProviderBindingValidator
 {
     private const string FixedArraySchemaIdentity
@@ -95,6 +100,19 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
             throw;
         }
+    }
+
+    internal static void ValidateMethodTypeSpecPairs(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
+        byte[][] artifacts, string[] schemaIdentities,
+        ImmutableArray<TrRmStandardModuleSelection> modules,
+        int rootModuleRow,
+        ImmutableArray<TrRmStandardMethodTypeSpecPair> typeSpecPairs)
+    {
+        var context = new ValidationContext(consumer, artifacts,
+            schemaIdentities, modules, a3ResourceLedger: null);
+        _ = context.Validate(rootModuleRow);
+        context.ValidateMethodTypeSpecPairs(typeSpecPairs);
     }
 
     private readonly record struct TypeOrigin(
@@ -280,6 +298,49 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
             ConsumeWork(checked((ulong)orderedBindings.Count + 1UL));
             return [.. orderedBindings];
+        }
+
+        internal void ValidateMethodTypeSpecPairs(
+            ImmutableArray<TrRmStandardMethodTypeSpecPair> typeSpecPairs)
+        {
+            var pendingTypes = new Queue<TypeOriginPair>();
+            foreach (var pair in typeSpecPairs)
+            {
+                ConsumeWork();
+                var expectedTables = GetTables(pair.ExpectedArtifactIndex);
+                var actualTables = GetTables(pair.ActualArtifactIndex);
+                var expectedTypeSpec = expectedTables.TypeSpecs
+                    .GetTypeSpecRef(pair.ExpectedTypeSpecRef);
+                var actualTypeSpec = actualTables.TypeSpecs
+                    .GetTypeSpecRef(pair.ActualTypeSpecRef);
+                if (expectedTypeSpec.Form == 0x0F
+                    || actualTypeSpec.Form == 0x0F)
+                {
+                    if (pair.ExpectedTypeSpecRef
+                        != pair.ActualTypeSpecRef)
+                    {
+                        throw InvalidBinding();
+                    }
+
+                    continue;
+                }
+
+                if (!TypeSpecsMatch(expectedTables,
+                        pair.ExpectedArtifactIndex, pair.ExpectedModuleRow,
+                        pair.ExpectedTypeSpecRef, actualTables,
+                        pair.ActualArtifactIndex, pair.ActualModuleRow,
+                        pair.ActualTypeSpecRef, isInlineStorage: true,
+                        pendingTypes: pendingTypes))
+                {
+                    throw InvalidBinding();
+                }
+            }
+
+            while (pendingTypes.TryDequeue(out var pair))
+            {
+                ConsumeWork();
+                ValidateTypePair(pair, pendingTypes);
+            }
         }
 
         private void CollectStorageType(int artifactIndex, int moduleRow,

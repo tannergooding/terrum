@@ -6,6 +6,14 @@ using System.Collections.Generic;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Describes one MethodDef row and its owned metadata ranges.</summary>
+/// <param name="OwnerTypeDefRow">The owning TypeDef row, or zero for a module-level method.</param>
+/// <param name="NameStringRow">The String row containing the method name.</param>
+/// <param name="SignatureRow">The one-based MethodSig row.</param>
+/// <param name="Flags">The MethodDef flags.</param>
+/// <param name="ContractFirst">The first owned Contract row, or zero when there are none.</param>
+/// <param name="ContractCount">The number of owned Contract rows.</param>
+/// <param name="BodyRow">The one-based Body row, or zero when the method has no body.</param>
 public readonly record struct TrRmMethodDefRow(
     int OwnerTypeDefRow, int NameStringRow, int SignatureRow, uint Flags,
     int ContractFirst, int ContractCount, int BodyRow);
@@ -13,6 +21,15 @@ public readonly record struct TrRmMethodDefRow(
 /// <summary>Emits MethodDef rows with checked module, signature and Body ownership.</summary>
 public static class TrRmMethodDefTableWriter
 {
+    /// <summary>Encodes MethodDef rows and validates their ownership and references.</summary>
+    /// <param name="rows">The MethodDef rows in table order.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="modules">The validated Module table.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="contractCount">The total number of Contract rows.</param>
+    /// <param name="bodyCount">The total number of Body rows.</param>
+    /// <returns>The encoded MethodDef section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmMethodDefRow> rows,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,

@@ -11,8 +11,12 @@ public readonly ref struct TrRmBlobTableReader
     private readonly TrRmVariableTableIndex _rows;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
+    /// <summary>Gets the number of validated Blob rows.</summary>
     public int Count => _rows.Count;
 
+    /// <summary>Validates and indexes the borrowed Blob section.</summary>
+    /// <param name="section">The Blob section bytes, which must remain unchanged while this reader is in use.</param>
+    /// <param name="recordCount">The number of Blob rows.</param>
     public TrRmBlobTableReader(ReadOnlySpan<byte> section, int recordCount)
         : this(section, recordCount, null)
     {
@@ -26,6 +30,9 @@ public readonly ref struct TrRmBlobTableReader
         _resourceLedger = resourceLedger;
     }
 
+    /// <summary>Gets the borrowed bytes of a one-based Blob row.</summary>
+    /// <param name="row">The one-based row number.</param>
+    /// <returns>The row's bytes.</returns>
     public ReadOnlySpan<byte> GetRow(int row)
     {
         var result = _rows.GetRow(row);

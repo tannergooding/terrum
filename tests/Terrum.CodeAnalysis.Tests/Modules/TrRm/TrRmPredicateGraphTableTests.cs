@@ -4,12 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmPredicateGraphTableTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmPredicateGraphTableTests
 {
     [Test]
     public void ValidatesGraphReferencesAndTypedCaptureRoles()
@@ -58,7 +59,7 @@ public sealed class TrRmPredicateGraphTableTests
     }
 
     [Test]
-    public void ValidatesPredicateChildEdgesAndRootFirstDepthFirstOrder()
+    public void ValidatesPredicateChildEdgesAndCanonicalWriterOrder()
     {
         var bytes = EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(2, 0, 3),
@@ -89,104 +90,123 @@ public sealed class TrRmPredicateGraphTableTests
     }
 
     [Test]
+    public void AcceptsValidEdgesWhenNodeRowsAreNotRootFirstDepthFirst()
+    {
+        var graphRows = new[] { new TrRmPredicateGraphRow(3, 1) };
+        var graphBytes = TrRmPredicateGraphTableWriter.Encode(
+            graphRows, nodeCount: 3, readFootprintCount: 1);
+        var graphs = new TrRmPredicateGraphTableReader(graphBytes, 1, 3, 1);
+        var edgeBytes = TrRmPredicateChildEdgeTableWriter.Encode([
+            new TrRmPredicateChildEdgeRow(3, 0, 1),
+            new TrRmPredicateChildEdgeRow(1, 0, 2),
+        ], nodeCount: 3, graphs: graphs);
+        var edges = new TrRmPredicateChildEdgeTableReader(
+            edgeBytes, 2, 3, graphs);
+
+        Assert.That(edges.GetChildCount(3), Is.EqualTo(1));
+        Assert.That(edges.GetChildNodeRowByOrdinal(3, 0), Is.EqualTo(1));
+        Assert.That(edges.GetChildNodeRowByOrdinal(1, 0), Is.EqualTo(2));
+    }
+
+    [Test]
     public void RejectsMalformedPredicateChildOrdinalsAndGraphTopology()
     {
-        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(0, 0, 1),
         ], nodeCount: 2, rootRows: [1]));
-        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(1, 0, 0x0100_0000),
         ], nodeCount: 2, rootRows: [1]));
-        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(1, 1, 2),
         ], nodeCount: 2, rootRows: [1]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeChildEdges([], nodeCount: 2, rootRows: [1, 1]));
-        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(1, 0, 2),
             new TrRmPredicateChildEdgeRow(1, 1, 2),
         ], nodeCount: 2, rootRows: [1]));
-        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(1, 0, 2),
             new TrRmPredicateChildEdgeRow(1, 1, 3),
             new TrRmPredicateChildEdgeRow(2, 0, 3),
         ], nodeCount: 3, rootRows: [1]));
-        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(1, 0, 2),
             new TrRmPredicateChildEdgeRow(2, 0, 3),
             new TrRmPredicateChildEdgeRow(3, 0, 2),
         ], nodeCount: 3, rootRows: [1]));
-        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
             new TrRmPredicateChildEdgeRow(1, 0, 3),
         ], nodeCount: 3, rootRows: [1, 3]));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             EncodeChildEdges([], nodeCount: 2, rootRows: [1]));
     }
 
     [Test]
     public void RejectsMalformedOrSharedReadFootprintRanges()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateReadFootprintTableWriter.Encode([
                 new TrRmPredicateReadFootprintRow(1, 0, 0, 0),
             ], 1, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateReadFootprintTableWriter.Encode([
                 new TrRmPredicateReadFootprintRow(0, 1, 0, 0),
             ], 1, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateReadFootprintTableWriter.Encode([
                 new TrRmPredicateReadFootprintRow(0x0100_0000, 1, 0, 0),
             ], 1, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateReadFootprintTableWriter.Encode([
                 new TrRmPredicateReadFootprintRow(2, 2, 0, 0),
             ], 2, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateReadFootprintTableWriter.Encode([
                 new TrRmPredicateReadFootprintRow(1, 1, 0, 0),
                 new TrRmPredicateReadFootprintRow(1, 1, 0, 0),
             ], 1, 0));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateReadFootprintTableWriter.Encode([
                 new TrRmPredicateReadFootprintRow(0, 0, 1, 1),
                 new TrRmPredicateReadFootprintRow(0, 0, 1, 1),
             ], 0, 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             new TrRmPredicateReadFootprintTableReader(new byte[15], 1, 0, 0));
     }
 
     [Test]
     public void RejectsInvalidGraphTargetsAndCaptureOrdinalsRolesFlagsOrTypes()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateGraphTableWriter.Encode([
                 new TrRmPredicateGraphRow(0, 1),
             ], 1, 1));
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmPredicateGraphTableWriter.Encode([
                 new TrRmPredicateGraphRow(1, 2),
             ], 1, 1));
 
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(0, 0, 1, 0, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(1, 1, 1, 0, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(1, 0, 0, 0, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(1, 0, 2, 1, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(1, 0, 3, 1, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(1, 0, 1, 2, 1),
         ]));
-        Assert.Throws<InvalidDataException>(() => EncodeCaptures([
+        _ = Assert.Throws<InvalidDataException>(() => EncodeCaptures([
             new TrRmPredicateCaptureRow(1, 0, 1, 0, 0xF400_0008),
         ]));
     }
@@ -203,7 +223,7 @@ public sealed class TrRmPredicateGraphTableTests
         ], graphCount: 1, types: typeSpecs);
 
         BinaryPrimitives.WriteUInt32LittleEndian(captureBytes.AsSpan(4), 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(graphBytes, captureBytes, graphCount: 1,
                     nodeCount: 1, footprintCount: 1)));
@@ -212,7 +232,7 @@ public sealed class TrRmPredicateGraphTableTests
             new TrRmPredicateCaptureRow(1, 0, 1, 0, 1),
         ], graphCount: 1, typeSpecs);
         BinaryPrimitives.WriteUInt32LittleEndian(captureBytes.AsSpan(12), 0xF400_0008);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(graphBytes, captureBytes, graphCount: 1,
                     nodeCount: 1, footprintCount: 1)));
@@ -231,7 +251,7 @@ public sealed class TrRmPredicateGraphTableTests
         BinaryPrimitives.WriteUInt32LittleEndian(footprintBytes, 2);
         BinaryPrimitives.WriteUInt32LittleEndian(footprintBytes.AsSpan(4), 1);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(graphBytes, captureBytes, graphCount: 1,
                     nodeCount: 1, footprintCount: 1,
@@ -254,7 +274,7 @@ public sealed class TrRmPredicateGraphTableTests
         ], graphCount: 1, types: CreateTypeSpecs());
         BinaryPrimitives.WriteUInt32LittleEndian(edgeBytes.AsSpan(4), 1);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(
                 CreateArtifact(graphBytes, captureBytes, graphCount: 1,
                     nodeCount: 2, footprintCount: 1,

@@ -7,18 +7,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.Metadata;
 
-public sealed class ArtifactDirectoryValidationComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ArtifactDirectoryValidationComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -44,12 +44,12 @@ public sealed class ArtifactDirectoryValidationComponentTests
     public async Task ArtifactDirectoryValidationMatchesHostedIndexExceptPayloadOrdering(
         BoundRuntimePolicy policy)
     {
-        byte[] minimal = MinimalArtifact();
-        byte[] extensions = ExtensionArtifact();
-        byte[] outOfOrder = OutOfOrderArtifact();
-        byte[] referenceSlots = ReferenceSlotArtifact();
-        byte[] standardMetadataRows = StandardMetadataRowsArtifact();
-        byte[] featureArtifact = FeatureArtifact(1, 1,
+        var minimal = MinimalArtifact();
+        var extensions = ExtensionArtifact();
+        var outOfOrder = OutOfOrderArtifact();
+        var referenceSlots = ReferenceSlotArtifact();
+        var standardMetadataRows = StandardMetadataRowsArtifact();
+        var featureArtifact = FeatureArtifact(1, 1,
             FeatureRow(1, 6));
         var cases = new List<TestCase> {
             NewCase(minimal, 0x0002),
@@ -147,7 +147,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
 
             var entryCount = testCase.Artifact[12] | (testCase.Artifact[13] << 8)
                 | (testCase.Artifact[14] << 16) | (testCase.Artifact[15] << 24);
-            int[] artifact = testCase.Artifact;
+            var artifact = testCase.Artifact;
             int[] expected = [
                 testCase.ExpectedCandidateValid ? 1 : 0,
                 testCase.QueryKind,
@@ -169,10 +169,14 @@ public sealed class ArtifactDirectoryValidationComponentTests
                 new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-            int jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
+            var jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
             Assert.That(jitResult == 0, Is.True, $"JIT differential case {caseIndex} returned {jitResult}.");
-            int aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            var aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true);
             Assert.That(aotResult == 0, Is.True, $"AOT differential case {caseIndex} returned {aotResult}.");
         }
@@ -204,15 +208,15 @@ public sealed class ArtifactDirectoryValidationComponentTests
     private static TestCase CreateCase(byte[] artifact, int queryKind,
         bool expectedCandidateValid, bool expectedHostedValid)
     {
-        int found = 0;
-        int start = 0;
-        int length = 0;
-        int count = 0;
-        int flags = 0;
+        var found = 0;
+        var start = 0;
+        var length = 0;
+        var count = 0;
+        var flags = 0;
         var entryCount = ReadWord(artifact, 12);
         for (var entry = 0; entry < entryCount; entry++)
         {
-            var row = 32 + entry * 16;
+            var row = 32 + (entry * 16);
             if (ReadHalfWord(artifact, row) == queryKind)
             {
                 found = 1;
@@ -369,7 +373,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x8001, 1, 1, new byte[] { 0x11 }),
-            new TrRmSection(0x8002, 1, 1, new byte[] { 0x22 }),
+            new TrRmSection(0x8002, 1, 1, "\""u8.ToArray()),
         ]);
         var firstStart = ReadWord(artifact, 56);
         var secondStart = ReadWord(artifact, 72);
@@ -461,7 +465,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         var entryCount = checked((int)ReadWord(artifact, 12));
         for (var entry = 0; entry < entryCount; entry++)
         {
-            var row = 32 + entry * 16;
+            var row = 32 + (entry * 16);
             if (ReadHalfWord(artifact, row) == kind)
             {
                 return row;
