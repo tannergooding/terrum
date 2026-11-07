@@ -3,8 +3,8 @@
 This is an informative reference for the development CLI, not the selected
 [`terrum.cli/1` machine contract](../specs/cli-protocol.md).
 The latter has one supervisor envelope, separate program status and dedicated
-program-output destinations. No implementation migration or conformance claim
-follows from that selection.
+program-output destinations. The development responses below do not implement
+that supervisor contract.
 
 ## Existing schemas and worker behavior
 
@@ -36,13 +36,15 @@ it does not adopt or amend the selected `terrum.cli/1` protocol.
 
 ## Provisional TRRM source schema selection
 
-The experimental `compile-trrm` command accepts
-`--trrm-schema <exact-schema-identity>` for Standard source production. The
-current exact selections are `trrm/1-draft-layout-queries-1` and
-`trrm/1-draft-nominal-enums-1`; omission preserves the existing Development
-`Emit` behavior. Unknown, malformed, repeated and ineligible options are
-usage errors, and a failed selected emission does not replace the output.
-The public `EmitStandard` API also selects the unapproved
+The experimental `compile-trrm` command forwards
+`--trrm-schema <exact-schema-identity>` to the public `EmitStandard` API with
+Windows x64 target requirement 1. Omission preserves Development `Emit`.
+Standard source candidates include `trrm/1-draft-layout-queries-1`,
+`trrm/1-draft-nominal-enums-1` and the bounded foreign-invocation/local-layout
+selections below. Exact schema selection does not widen their producer gates.
+Unknown, malformed, repeated and ineligible options are usage errors, and
+failed emission does not replace the output. Foreign/layout candidates include
+the unapproved
 `trrm/1-draft-foreign-invocation-contracts-1` (F) and
 `trrm/1-draft-foreign-invocation-storage-addresses-1` (F+S) and
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-2` (A2),
@@ -57,8 +59,9 @@ The public `EmitStandard` API also selects the unapproved
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1`
 (A2R1+Repeat),
 and `trrm/1-draft-local-aggregate-layout-execution-1` (L1) identities.
-The CLI does not accept an explicit `NativeCoreRegistration` input, so it
-cannot author the NativeImport source required by these bounded producers.
+A3 uses the exact identity described below. Eligible source commands can
+configure NativeImport roles through the provisional NativeCore manifest.
+The CLI does not expose the API's explicit source TypeDef export-key map.
 Artifact commands accept exact per-artifact schema identities and a root
 Module identity, plus repeatable explicitly selected provider schema/path
 pairs. The current whitelist includes F/F+S, A2/A2E/A2EU/A2EU+SF1,
@@ -124,8 +127,7 @@ Boolean equality/inequality uses assigned `0x32` XOR and `0x33` NOT. Comparison
 operands may be Home reads or admitted direct NativeImport calls; a left Home
 read is snapshotted before a right-side call, and nested checked argument
 failure prevents the branch. Boolean `==`/`!=` with one literal lowers by
-inverting the existing read/call branch. The focused A2EU
-producer/reader/JIT/AOT selection passed.
+inverting the existing read/call branch.
 Numeric comparison literals are supported only by the distinct, provisional
 A2EU+SF1 selector, which adds typed Feature 11/1 frozen-value tables for the
 existing scalar codec while leaving A2EU unchanged; this comparison path
@@ -148,28 +150,53 @@ Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast,
 including selected comparison-call failure; CheckedExceptions and
 cleanup/loan transport remain incomplete.
 The bounded F route runs/builds direct NativeImport executables and emits
-direct-import libraries. A provisional
-NativeModuleCompiler path verifies one retained Import against one selected
-F/F+S provider and carries the checked origin/expectation plan through JIT
-and PE lowering. The source-free loader selects exact non-first root/provider
-Module identities, and one root Import can resolve to a distinct leaf provider
-co-located in the root artifact or supplied separately. Other populated
-Modules cannot retain ModuleRefs/Imports; provider chains, additional imports,
-raw-output contracts and wider remapping remain unsupported.
+direct-import libraries. Its provisional native plan validates every retained
+MethodDef Import in the supplied exact-F Module closure, including disconnected
+Modules, and preserves each original expectation and selected provider origin.
+Separate and co-located providers, multiple Imports, chains, diamonds,
+self-edges and cycles have bounded coverage. Only root imports are realized
+for lowering; provider Bodies are not merged or executed. F+S and NativeOutput
+compositions retain their separate admission gates. The
+[native integration inventory](conformance-gaps.md#cg-004) records those
+compositions and remaining production, remapping and runtime limits.
 
 The scalar-local F+S Body path explicitly initializes typed Homes using the
 assigned R14/R15 contextual values, forms `EC`/record `0E` addresses, and
 stages those pointer Homes in NativeParameter CallSites. The selected
 `GetSystemTimeAdjustment` case is supervised through API JIT, CLI JIT and CLI
 AOT; malformed Home write authority and extent reject, and failed AOT
-preflight preserves an existing output. RegisterPlace sources, arrays,
-aggregates, field/index selection, multiple indirect operations, staged
-side-effects and provider NativeParameter runtime qualification remain open.
+preflight preserves an existing output. This scalar-local F+S slice does not
+include RegisterPlace sources, arrays, aggregates or field/index selection;
+the A2 successors have separate support in the
+[native integration inventory](conformance-gaps.md#cg-004). Multiple indirect
+operations, staged side-effects and broader provider NativeParameter runtime
+qualification remain open.
 The source and consumer surfaces follow the unapproved
 [Standard schema-selection proposal](../proposals/standard-trrm-source-schema-selection.md)
 and [selected-provider consumption proposal](../proposals/standard-trrm-selected-provider-consumption.md);
 the provisional native handoff and F+S delta follow
 [provider-native lowering](../proposals/standard-trrm-provider-native-lowering.md).
+
+## Provisional native Core registration
+
+The source `analyze`, `build`, `build-native-import`, `build-library`, `jit`
+and `compile-trrm` commands accept one `--native-core-manifest <path>`.
+The exact version-1 JSON input constructs an explicit in-process registration
+for NativeImport, NativeCallable and NativeCallConv roles with complete
+provider selections and original expectations. It supplies no built-in
+authority, provider, schema or key, decodes no provider artifacts, and does not
+persist host authorization. NativeExport is outside this manifest version.
+`compile-trrm` requires the manifest's using-Module identity to match
+`--identity`; schema and runtime selection remain independent. Other command
+forms reject the option before consuming input. Shared admission with a
+Layout manifest preserves their separate grammars and checks the combined
+binding snapshot; it does not extend either option's eligibility or bypass
+native-import/lowering gates.
+This follows the unapproved
+[NativeCore CLI proposal](../proposals/native-core-cli-registration.md).
+[CG-023](conformance-gaps.md#cg-023) records malformed-input, provider-closure,
+composition and output-preservation coverage; this is not `terrum.cli/1`
+approval or a source-free Core provider protocol.
 
 ## Provisional source layout registration
 
@@ -184,23 +211,24 @@ provider set; it does not select a default, configure native Core schemas,
 decode provider artifacts or choose a TRRM output schema. Manifest admission
 precedes source and consumer-artifact reading, and manifest aliases with
 sources, producer input or output reject before publication. Syntax-only,
-`frontend-build`/`frontend-build-library`/`frontend-run`, source-free,
-`compile-native`, native set/graph and other artifact commands reject the
-option. The separate test-only `frontend-component` probe accepts it only for
-its fixed component-source compilation; it does not configure the subject
-input. A separate scanner extension admits it to
+source-free, `compile-native`, native set/graph and other artifact commands
+reject the option. The `frontend-build`, `frontend-build-library` and
+`frontend-run` fallback wrappers also reject it. The separate test-only
+`frontend-component` probe accepts it only for its fixed component-source
+compilation; it does not configure subject input or extend the fallback
+commands. A separate scanner extension admits it to
 `scan-component`/`build-component` only for scanner-source compilation;
 `build-component` does not pass it to subject-source compilation. Private
-module source inputs remain bounded file paths, not stdin. These provisional
-routes follow the unapproved
+module source inputs remain bounded file paths, not stdin. The manifest and
+component/private-route candidates remain unapproved:
 [Layout CLI configuration proposal](../proposals/source-layout-cli-registration.md)
 and its separate
 [private-module extension](../proposals/private-module-source-layout-registration.md)
 and the separate unapproved
 [scanner-component extension](../proposals/scanner-component-source-layout-registration.md);
 the frontend probe follows the separate unapproved
-[frontend-component extension](../proposals/frontend-component-source-layout-registration.md);
-they do not change the selected `terrum.cli/1` protocol.
+[frontend-component extension](../proposals/frontend-component-source-layout-registration.md).
+These implementation paths do not change the selected `terrum.cli/1` protocol.
 
 ## Provisional normal-backing agreement selection
 
@@ -212,24 +240,21 @@ output combinations reject it as a usage error. The choice is a host lowering
 selection, not a TargetProfile, semantic schema or persisted authorization.
 Analysis responses publish `"profile": null` and identify the selected key
 separately as `nativeLoweringAgreement`; they do not label it as one of the
-existing private native profiles. Native `build` and `jit` now execute the
-selected agreement for source-bound classes with scalar/native-address,
-inline-copy and ordinary class-handle fields. They also support local ordinary
-references with the candidate 16-byte/8-aligned carrier and a zero support word
-for stack/inline places: formation, Copy/rebind, reborrow, and scalar or
-inline-Copy reads/writes. References to normal-backed class/box subplaces
-capture the selected control and field address, retain one support hold per
-descriptor residence, and release it on rebind, lexical exit and checked
-unwind. References to class-handle slots retain the containing allocation;
-writable slot stores preserve local roots and typed class-field retirement.
-Direct class fields, nested child fields and inline-Copy subplaces are covered
-under both runtime policies. Class creation, handle copies,
-handle-field assignment/replacement, borrowed receiver calls, scope retirement,
-iterative child-handle retirement and checked construction rollback remain
-supported. Optional-reference operations, reference-bearing fields/aggregates,
-reference parameters/results, by-value handle parameters, Cleanup, foreign
-calls and source-independent indexed bodies remain unsupported and reject
-before emission.
+existing private native profiles. Native `build` and `jit` execute a bounded
+source-bound class/reference closure under both runtime policies. It includes
+scalar/native-address and inline-Copy payloads, ordinary/optional class-handle
+fields, local required/optional ordinary references, and stored reference
+descriptors in class fields and inline Copy aggregates. The candidate carrier
+is 16 bytes with alignment 8; stack/inline references have zero support, while
+normal-backed subplace descriptors retain one control hold per residence.
+Generated direct nonforeign calls also carry required/optional ordinary
+reference parameters/results and descriptor-bearing aggregate inputs, with
+source-order staging and result publication after cleanup. The
+[normal-backing inventory](conformance-gaps.md#cg-027) details retention,
+replacement, rollback, handoff and evidence boundaries.
+Optional GC/init references, reference output parameters, by-value handle
+parameters/results, Cleanup, foreign/native-callable calls and
+source-independent persistence remain unsupported and reject before emission.
 `build-native-import` accepts the selector but still rejects at its
 native-import lowering boundary. No route falls back to the address-only or
 tracing representation. This provisional implementation follows the unapproved
@@ -249,17 +274,19 @@ separately from `"profile": null`.
 The current source-bound Windows x64 path selects 8/8 ordinary and optional
 reference values, direct reference arguments/results, and scalar/raw-pointer
 native import boundaries without normal-backing runtime data. Debug
-regressions exercise source-free-independent JIT lowering, PE build and
+regressions exercise source-bound JIT lowering, PE build and
 supervised image execution, direct scalar System32 import execution, and the
 separate `build-native-import` producer, including optional presence testing.
-The current related Debug selection passes. Checked GC/init descriptors,
-managed-class runtime state, checked-reference foreign/function-pointer
+Checked GC/init descriptors, managed-class runtime state, checked-reference
+foreign/function-pointer
 crossings, persisted module/TRRM/native-package transport and independently
 precompiled provider closure remain unsupported; they reject rather than
 fall back to another agreement. This implementation follows the unapproved
 [host-selection amendment](../proposals/reference-stored-descriptor-host-selection.md)
 and [stored-descriptor owner](../proposals/reference-stored-descriptor-layout.md);
 it does not change `terrum.cli/1` or establish general reference conformance.
+
+## Response payloads and source input
 
 Use the built terrumc.dll/executable for stdout isolation; dotnet run may print
 build messages. The `-` input path reads stdin. Human diagnostics use stderr;

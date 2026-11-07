@@ -149,9 +149,7 @@ lookup. Same-owner class diamonds deduplicate only after recursive layout and
 type comparison; divergent snapshots and conflicting owners reject. A
 reference-only class with array-derived field metadata does not promote the
 native image to the managed-class runtime profile; owned managed-class array
-fields remain unsupported. The focused class/revision-106/readonly selection
-passes; the analyzer-enabled Debug build passes with zero warnings and errors.
-This candidate remains unapproved and adds no
+fields remain unsupported. This candidate remains unapproved and adds no
 construction/runtime promotion. The provisional enum-identity implementation
 now preserves an uncalled `NativeImport` with a private-enum `NativeParameter`
 pointee through private reference, set and graph remapping; a changed selected

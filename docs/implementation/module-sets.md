@@ -14,19 +14,16 @@ contract needed for validation or type/cleanup checking, while an **actual
 machine import** is an emitted call represented in the PE import table.
 Declaration retention does not by itself create a machine import.
 
-A module set is a flat, leaf-only native deployment contract. The broader
-compiler support boundary is in [implementation](../implementation.md); future
-formats and servicing work are tracked in [roadmap](../roadmap.md).
+A module set is a flat, leaf-only deployment with a persisted Windows x64
+consumer and checked semantic contract. Provider identities select the DLLs,
+not the order of `--provider` arguments. Validation checks unambiguous exports,
+selected packages, contracts, policy, profiles and PE import ownership before
+any process starts. A compatible replacement changes the provider image
+without changing the consumer bytes.
 The accepted [TRRM binding relation](../specs/representation/binding-and-replacement.md)
 does not relax these development package, exact-layout or native ABI gates.
-
-A native module set persists **one** Windows x64 consumer EXE and its checked
-semantic contract. Two to sixteen independently compiled leaf DLL packages
-provide distinct, unambiguous public exports. Identity selects the DLL, not
-the order of `--provider` arguments. The consumer imports only those named
-exports, and validation checks the selected packages, contracts, policy,
-profiles, and PE import ownership before any process starts. A compatible
-replacement changes the provider image without changing the consumer bytes.
+See [implementation](../implementation.md) for broader support and
+[roadmap](../roadmap.md) for future formats and servicing.
 
 From the repository root, after building `terrumc`:
 
@@ -73,8 +70,8 @@ execution; the Windows loader must resolve them under its normal search policy.
 The set is intentionally leaf-only: it does not model transitive graphs,
 cycles, arbitrary version roll-forward, hot servicing, resilient layouts,
 or the future general `TRRM` semantic-IL format. Current modules permit a
-native-set consumer to retain private managed state, but image boundaries
-remain limited to scalar and
+native-set consumer to retain private managed state. For this managed-state
+profile, image boundaries remain limited to scalar and
 public handle-free `Copy` value contracts, including existing conditional
 `bool`/`out` results. Handles, unique values, views, reference modes and
 mutating-receiver ABI do not cross the boundary; each persisted image has its

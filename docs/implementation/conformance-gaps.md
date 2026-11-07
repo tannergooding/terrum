@@ -6,7 +6,7 @@ certificate. Source/test observations below are static evidence; naming a test
 does not mean it ran or covers the complete contract.
 
 The [accepted specification](../specs/README.md) records current acceptance,
-not immutable pre-v1 design. An implementation session must select its exact
+not immutable pre-v1 design. Implementation must select its exact
 accepted or explicitly authorized experimental contract. Pending assignments
 remain in their proposals; do not implement them merely because this inventory
 links them, preserve unpublished encodings automatically, or reinterpret old
@@ -45,14 +45,15 @@ is a qualification gate, not an assertion of a newly reproduced defect.
 | [CG-025](#cg-025) | Generic native regression and qualification evidence | Final selected compiler inputs and active cases |
 | [CG-026](#cg-026) | Source vocabulary, grammar and binding convergence | CG-023 input identity; accepted source owners |
 | [CG-027](#cg-027) | Normal/GC backing, roots, pin reborrows and Cleanup | CG-001/002/003/004/006/009/022/026; selected GC type/runtime carriers |
+| [CG-028](#cg-028) | Nominal enum values and persistence | CG-001/004/026; enum/value codec approval |
 
 ## Evidence and closure rules
 
-Read the [test project exclusions](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj)
-and each selected test's gates. Retained prototype tests and
-`BoundTreeTraversalTests.cs` are excluded; they are not active coverage. Keep
-ordinary tests headless. Window/hardware qualification requires its documented
-opt-in and cannot be substituted for generic regression cases.
+Check the [test project configuration](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj)
+and each selected test's gates. `BoundTreeTraversalTests.cs` is included in the
+current project; prototype cases establish only their exercised profiles.
+Keep ordinary tests headless. Window/hardware qualification requires its
+documented opt-in and cannot be substituted for generic regression cases.
 
 Implement general facts through binding, shared nested traversal/rewriting,
 mandatory verification, persistence, dependency binding/replacement and lowering.
@@ -382,13 +383,12 @@ general Captures/provenance persistence. Native graph packages and consumer sets
 select outer schema version 3, which removes `NoThrow`/`MayThrow` from
 recorded import contracts while retaining directed DoesNotReturn and
 caller-unsafe checks; exact readers reject older v2 artifacts instead of
-normalizing away those promises. Focused NoThrow module/graph/set regression
-selection passed. CheckedExceptions may unwind through
+normalizing away those promises. CheckedExceptions may unwind through
 private `NativeModuleCompiler` producer/graph images into a runtime-policy-
 matched generated caller; public `NativeEmitter.EmitLibrary` exports still
 require an ephemeral verified `NoFailureProof` under `CheckedExceptions`.
-The managed-class/graph plus public-export regression selection passed, including cross-image recovery and public-export
-rejection. Remaining private semantic/native binding and proof boundaries
+Regressions cover cross-image recovery and public-export rejection.
+Remaining private semantic/native binding and proof boundaries
 stay open. The unapproved
 [direct-import provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md)
 is provisionally implemented with version-3 TNPK/TNSP/TNGP expectation tables
@@ -467,12 +467,11 @@ StorageAddress backing at extents zero and one through such a chain, and typed
 pointer-formal Homes at zero or positive extents through explicit unsafe
 calls; the latter includes local copies of opaque incoming pointers. Read,
 Write and ReadWrite cases preserve their exact contracts through source-free
-re-emission and PE import emission. The analyzer-enabled Debug build passes,
-the focused backing selection passes, and the
-NativeOutput/NativeParameter/local-aggregate selection passes. The combined NativeOutput Body/arithmetic-profile selection passes, also with no skips. The nested-control-flow F/F+S selection passes. F/F+S output Bodies also encode negated Boolean Home conditions by
+re-emission and PE import emission. F/F+S output Bodies also encode negated
+Boolean Home conditions by
 reversing the conditional-edge targets; source-free reconstruction
 canonicalizes the equivalent branch ordering and re-emits byte-identically.
-The combined A2/F/F+S selection passes. A2 now has a
+A2 also has a
 one-dimensional scalar-array local initialized from contextual zero or
 all-bits-set integer constants (covered for `int32` and `int64`), an
 `int32` local zero-index plus caller index Home, a
@@ -482,7 +481,8 @@ and declared extents 0, 1 and 2 are covered; the source-free reader rebuilds
 the array initializer and address and re-emits the selected A2 artifact
 byte-identically. This remains provisional implementation evidence, not accepted-
 conformance support. A2 array-valued function parameters remain rejected by
-mandatory verification. Nonzero/general and nested array initializers,
+mandatory verification. In this NativeOutput composition, nonzero/general
+and nested array initializers,
 nested or field-backed paths, other index forms, more complex CFGs and loops,
 larger backing variants, other dependency sources/provider graphs,
 NativeVTable, checked/indirect outputs, failure/retirement, exceptional
@@ -498,9 +498,8 @@ ModuleRef/Import edges reconstruct and re-emit the provider-bound NativeOutput
 Body; separate and co-located provider declarations, F+S-to-F mixed selection,
 PE emission, `ptr<void>` output values and changed descriptor/type/selector/
 dependency rejection are covered. F+S is bounded to one selected provider
-Module and does not gain F-only provider-graph admission. The combined
-NativeAddress/NativeImport/provider/local-aggregate selection passes, and the analyzer-enabled Debug build passes with zero
-warnings/errors. This remains provisional implementation
+Module and does not gain F-only provider-graph admission. This remains
+provisional implementation
 evidence, not accepted-conformance support. It does not select NativeParameter
 `000E`/16, nominal type-provider mapping, A2/A3 provider aliases,
 NativeVTable/foreign-interface identity, checked or indirect outputs, or
@@ -516,8 +515,7 @@ Broader F/F+S CFGs, exceptional indeterminacy, other schema/ownership paths
 and failure/retirement remain open.
 The authored direct-import custody fixture also exercises a complementary
 `DuplicateHandle` result without reading or adopting the output cell under
-FailFast and CheckedExceptions on JIT and native-image execution; its focused
-selection passes.
+FailFast and CheckedExceptions on JIT and native-image execution.
 
 The unapproved NativeExport source/Core candidate is now provisionally
 implemented for method-only in-process registrations: exact selected X and
@@ -532,8 +530,7 @@ TypeDef field/layout ownership and Feature closure; producer validation
 exercises the structural reader. Bounded F/A2 NativeAddress source-free consumers restore module-level and
 static-type caller X, re-emit it and invoke the exported method from a PE
 library; compatible provider replacement preserves the export, and a changed
-NativeImport library descriptor rejects. The analyzer-enabled Debug build and
-11/11 related NativeExport/F/A2/PE tests pass, including source-free library
+NativeImport library descriptor rejects. Regressions cover source-free library
 and supervised executable execution. Remaining are NativeExport source-free
 routes outside these NativeAddress compositions and static data exports.
 NativeCore manifest v1 remains I/C/P-only.
@@ -549,9 +546,8 @@ provider co-location, diamonds, repeated ModuleRefs, multiple public keys for
 one actual definition, 17-provider fan-in, self-edges and mutual cycles are
 covered by public API tests;
 provider Bodies are not merged or invoked. The checked plan revalidates the
-complete retained closure before lowering. The Debug fast build and combined
-NativeAddress/provider-CLI selection passed,
-including deep-provider rejection, duplicate/empty/non-first Modules, caller
+complete retained closure before lowering. Regressions cover
+deep-provider rejection, duplicate/empty/non-first Modules, caller
 buffer mutation after plan creation, duplicate mixed names, non-first address
 targets, 17-provider fan-in, UTF-16 identity and ordinal case/normalization
 checks, exact alternate ExportKey selection, compatible deep-body replacement,
@@ -573,8 +569,7 @@ TypeSpec anchor rejects during selected loading. Exact-F loading rejects
 one-over 24-bit record counts for Module, ModuleRef, TypeSpec, MethodDef,
 Import and Body sections. The shared Body reader/writer selection also covers
 the 65,536-entry map boundary and one-over rejection; the provider matrix
-retains its 17-Module fan-in case. The combined NativeAddress/provider CLI and
-Body reader/writer selection passed. This remains
+retains its 17-Module fan-in case. This remains
 provisional, not formal approval or full Standard conformance.
 The selected proposal introduces no separate closure work/depth cap; finite
 graph validation remains subject to existing row/map and operation/backend
@@ -594,13 +589,12 @@ validation. It rejects duplicate per-Module array layouts with structurally
 equivalent TypeSpec identities. The direct selected-provider path resolves an
 imported Copy TypeDef by its ModuleRef and ExportKey, compares its fields and
 all Layout variants, derives target geometry, and retains/revalidates the
-provider origin in the Standard native plan. The Debug fast A2/F+S/API/CLI/
-provider-binding selection passed. Provider-owned
+provider origin in the Standard native plan. Provider-owned
 import chains now resolve each exact ModuleRef and ExportKey and validate
 every intermediate Copy expectation against the selected provider; matching
 and same-size/different-field chain cases, plus nested-array field identity
-and same-layout nested replacement rejection, passed in the 27-test A2
-fixed-array layout/provider selection. The follow-up selection passed, adding function-pointer anchor equivalence across relocated MethodDef
+and same-layout nested replacement rejection have regression coverage, as do
+function-pointer anchor equivalence across relocated MethodDef
 rows and rejection of a different anchor signature. These are metadata/provider checks,
 not array runtime or full Body evidence. A2, its allocations and Copy bit
 remain unapproved. The A2 `EmitStandard` path emits declaration-only local
@@ -608,8 +602,9 @@ Blittable Sequential/Transparent structs with `DeclaredCopy` `0x20` and
 Feature `2/1` for checked ordinary non-unique/no-Cleanup declarations; unique
 rows remain unmarked. It also emits TypeSpec `0x11` and Module-owned
 FixedArrayLayout rows for scalar, unit and nested array fields in these
-declarations with exact Feature `20/1` and `2/1` closure. Array Body rows and
-operations are not produced. The type-only source-free branch reconstructs
+declarations with exact Feature `20/1` and `2/1` closure. These declaration-only
+artifacts do not produce array Bodies; the separate executable path below does.
+The type-only source-free branch reconstructs
 local non-generic Copy TypeDefs and these field types, including acyclic arrays
 whose elements are local nominal Copy structs. It resolves array/TypeDef layout
 dependencies in order and revalidates the completed geometry. The executable
@@ -628,8 +623,7 @@ Body records from checked source. Its exact A2E successor also binds
 whole-array transition, emits the Home PlaceSelection and nullary store with
 canonical short `91`/`92` references when representable, and reconstructs and
 byte-identically re-emits the operation. A2 still rejects the A2E record.
-The focused A2E and related Body/array/vacancy selection passed. These
-results are provisional implementation evidence, not approval of the A2E
+These results are provisional implementation evidence, not approval of the A2E
 proposal, provider Body remapping, or native execution. Provider replacement/
 re-encoding and supervised JIT/AOT qualification remain open.
 The [A2 source Copy identity proposal](../proposals/standard-trrm-source-copy-type-identity.md)
@@ -664,8 +658,7 @@ TypeSpec/Layout/LayoutField/FixedArrayLayout rows move. Independent regressions
 reorder FieldDef owner blocks, Layout variants, FixedArrayLayout rows and
 topologically valid TypeSpec leaf rows with their child references, then
 exercise CreateStandardReference and LoadStandard/EmitStandard/rebind.
-Separate and co-located provider Module graphs are covered. The
-combined A2 provider/reference/layout selection passed.
+Separate and co-located provider Module graphs are covered.
 PlaceSelection/TypeMap/Body remapping and source-free Body execution remain
 open. Type-only source
 consumers now re-emit origin-backed TypeDef stubs, ModuleRefs, Imports,
@@ -724,7 +717,7 @@ context and constructed-identity payload charges are covered. A3 aggregate
 depth sums now use nonwrapping `BigInteger` arithmetic before comparing against
 the 128-frame limit; nested frames plus `ulong.MaxValue` through
 `EnterDepthContext`, `CheckDepthFromCurrent` and `ReserveWorkAtDepth` reject with
-the exact required depth without consuming work. The focused A3 layout, TypeSpec, witness/text and CLI resource selection passed. A3
+the exact required depth without consuming work. A3
 `LoadStandard`, `CreateStandardReference` and native-plan paths now select one
 root ledger before input snapshots, reserve selected input/schema/artifact
 state and copied bytes before allocation, and carry the same ledger through
@@ -742,8 +735,7 @@ The shared `TrRmVariableTableIndex` now accepts the same ledger and charges
 offset-field access, checked row boundaries and each selected row lookup.
 Blob, Body, Contract, FieldPath, String and TypeSpec readers pass the root
 ledger into it; duplicate caller-side offset charges were removed so each
-index read is accounted once. The combined focused A3 index/layout/provider/
-TypeSpec/witness/text/CLI plus variable-table and Body-reader selection passed.
+index read is accounted once.
 Repeated retained-plan work shares the same budget: after an earlier
 no-`NativeImport` attempt, changed-provider revalidation can correctly exhaust
 the remaining work before establishing incompatibility. Separate within-budget
@@ -755,8 +747,7 @@ producer gap is the exact-A3 Standard dispatch from `EmitStandardCore` to
 and performs final index/structural validation. That route now creates one A3
 root ledger, reserves final framed-artifact bytes before allocating the output,
 and passes the same ledger through `TrRmArtifactWriter`, the final
-`TrRmArtifactIndex` and structural validation. The combined focused A3
-consumer/provider/table/Body and producer writer/emitter selection passed. Its
+`TrRmArtifactIndex` and structural validation. Its
 section/Body encoders now reserve output bytes and row state before allocating
 their encoded buffers; the final frame separately reserves its output bytes.
 The NativeAddress producer now charges its source scan, TypeSpec/signature/
@@ -766,8 +757,7 @@ staging or allocation. `TrRmRegisterBodyMapBuilder` uses the same root ledger
 for token collection, deduplication, index maps and encoded map bytes; storage-
 address analysis and Body emission preserve that ledger through their nested
 builders and record writers. Exact and one-short work-boundary checks cover
-both the simple NativeAddress and storage-address producer paths. Their
-focused emitter/Body-writer selection passed.
+both the simple NativeAddress and storage-address producer paths.
 The NativeAddress emitter's fixed-array TypeSpec path still accepts only
 A2/A2E/A2EU, so A3 source array production remains unfinished and
 must account for its TypeSpec/Layout/Body state before allocation.
@@ -775,9 +765,8 @@ The nested constructed-provider checks now retain a one-entry validated
 provider-table cache within the binding request and defer generic formal
 storage origins to their constructed owner/actual comparison. The A2
 PlaceSelection/EC fixtures use the assigned B5 fail-fast terminator rather
-than B7 Unreachable, which requires the separate exception carrier. The full
-`TrRmFixedArrayLayoutTableTests` class now passes; the combined
-NativeAddress, fixed-array and selected provider-CLI selection passes.
+than B7 Unreachable, which requires the separate exception carrier.
+`TrRmFixedArrayLayoutTableTests` covers these nested provider cases.
 Source production, source-free generic reconstruction and
 remapping/replacement, generic-array CLI JIT/AOT and supervised
 constructed-array runtime behavior remain open. The failure-class proposal
@@ -853,7 +842,7 @@ establish broad provider/remapping support. Source-only execution observes the
 written Union field value; the current Standard runtime fixture executes the
 replacement but does not yet expose its bytes as a result. Malformed-record,
 cross-block and provider-permutation cases, exact persisted-byte observations,
-private Repeat-initialization persistence, complete provenance/alias transfer,
+broader private Repeat compositions, complete provenance/alias transfer,
 and sparse resource bounds remain open. Private field-path writes use their
 separate revision-104 codec; they do not discharge these Standard A2 gates.
 Repeat call-result maps and staged snapshots now carry leases through call
@@ -874,16 +863,15 @@ replacement. The live callable-root `InitializationState` map now retains its
 reservation between operations, transfers completed outputs into that owner,
 and lends the same lease to snapshot scopes without double-counting or
 disposing the root state. Empty replacements release reserved bytes. A public
-branch-to-unknown-outer-index compilation regression covers this handoff; the
-focused Repeat initialization/ledger selection passes, and the
-analyzer-enabled Debug build passes. Raw-Union guarantee-union template and
+branch-to-unknown-outer-index compilation regression covers this handoff.
+Raw-Union guarantee-union template and
 override combinations charge seven work units per produced byte, and their
 sparse-key merge charges both ordered head checks, each key read once, and
-the comparison. The expanded loop/Repeat/ledger selection passes. Loop fixed-point iterations now retire temporary continue/break,
+the comparison. Loop fixed-point iterations retire temporary continue/break,
 body/iterator, post-test condition, back-edge and native-merge snapshots at
 their last use while retaining entry/head state through convergence; stored
-Breaks/Continues edge owners reset after transfer. The expanded
-Repeat/loop/cleanup/failure-edge regression selection passes. A public fixed-extent source case compiles with 150 sparse element
+Breaks/Continues edge owners reset after transfer. A public fixed-extent source
+case compiles with 150 sparse element
 replacements and reports TRM3016 work-limit exhaustion with 151; this does not
 establish a one-unit ledger boundary.
 The Standard nested-repeat regression
@@ -940,10 +928,9 @@ across CFG blocks, consecutive register reuse, and packed `Alignment=32`
 neighbor preservation through source-free Standard JIT/AOT. Source-free
 negative mutations reject malformed nested index Homes/base registers,
 projection layouts and FieldDef rows/types/owners, plus malformed C2/C3
-comparison inputs. The focused field-place/consumer/native selection passed
-**46/46 with zero skips**.
-The separate A2/L1 wide-array selection passed **4/4 with zero skips**,
-covering positive-stride wide source-free L1 Body/TypeMap re-emission, A2
+comparison inputs.
+Separate A2/L1 wide-array tests cover positive-stride wide source-free L1
+Body/TypeMap re-emission, A2
 type-only geometry, A2 Body-map address counts and the distinct A2R1+Repeat
 zero-stride maximum-count case without allocating or executing large arrays.
 
@@ -1412,14 +1399,14 @@ EagerInitializer, LazyUnit, StaticAccess, StaticDependency and publication
 rows; it resolves candidate DefId `24` through role-checked Imports/Exports,
 checks method-owned initialization clauses against initializer/constructor/
 lazy identities, and requires a matching publication/dependency for retained
-ImmutableData kind 2. The focused Debug selection passed.
+ImmutableData kind 2.
 It does not establish exact provider replacement, source-authored output,
 Body StaticPlace/recovery, runtime state/failure/cleanup, AOT/JIT execution or
 final immutable-value truth. Hosted source binding resolves the registered
 static trigger and composes one bodyless primary `static partial` declaration
 with one implementation in either source order, keeping trigger/clauses on
-the primary and body/source span on the implementation. The combined focused
-non-generic eager field slice keeps fields outside instance layouts, binds
+the primary and body/source span on the implementation. The non-generic eager
+field slice keeps fields outside instance layouts, binds
 owner/type/access/mutability/order facts and checked initializer functions,
 and supports typed static reads and mutable writes; reads of later uninitialized
 fields reject. The separate LazyInitialization registration now flows through
@@ -1448,9 +1435,7 @@ Closed source-generic struct instances now retain exact
 owner type arguments on their field/group facts and substitute field,
 initializer, auto-property and constructor facts; source-generic class owners
 remain outside the current closed-struct specialization profile, and provider
-persistence/remapping remains open. The combined focused Debug selection
-passes, and the
-analyzer-enabled Debug build passes.
+persistence/remapping remains open.
 Native lowering, private semantic modules and Standard TRRM currently reject
 static-constructor and static-field facts until their lifecycle and persistence
 routes are implemented.
@@ -1499,8 +1484,7 @@ reverse-declaration versus reverse-acquisition retirement.
 lowering now support direct top-level field moves and vacant-field repair for
 structurally tracked unique local owners. Per-field runtime flags skip moved
 children during partial retirement and whole-owner replacement; constructor
-acquisition flags remain distinct. The focused JIT/emitted-image selection
-passed.
+acquisition flags remain distinct.
 Direct top-level live unique-field replacement is also provisionally
 implemented for derived and authored-cleanup parents, including constructors
 and maybe-live field states. It stages the replacement before cleanup and
@@ -1509,8 +1493,6 @@ unknown, fallible, external or reentrant Cleanup is rejected. This proof is a
 conservative implementation subset, does not rely on a general NoThrow
 declaration, and is authorized only by the still-unapproved
 [replacement-retirement proposal](../proposals/live-field-replacement-retirement.md).
-The Debug fast build passed and the active checked-reference, partial-owner
-lifecycle and live-replacement selection passed.
 Nested unique-field moves, vacant repair, maybe-live replacement and
 hierarchical partial-retirement flags are now implemented for structurally
 tracked local owners with eligible mutable ancestor paths. The selected private
@@ -1523,8 +1505,7 @@ it does not add Standard TRRM support.
 conditional/recovery joins, and loop fixed points. Whole-owner replacement
 invalidates descendant generations; a direct field move and vacant-field
 repair advance only that field subtree. A sibling checked reference remains
-valid across a conditional partial move. The Debug fast build passed, and the
-active checked-reference plus partial-owner lifecycle selection passed.
+valid across a conditional partial move.
 
 The current tests exercise both runtime policies, branch-joined nested
 replacement, checked repair failure, a repairing loop, sibling-reference
@@ -1533,7 +1514,7 @@ incomplete Cleanup, checked failure with a live nested owner field,
 nested partial retirement in reverse field order, constructor failures before,
 during and after field acquisition, malformed private field-move records,
 provider replacement, and native graph/set exchange with a remapped consumer
-type table. The Debug fast build and combined active selection passed.
+type table.
 Other acquisition layouts and all remaining unwind joins remain unfinished.
 The current route does not establish Standard TRRM, CLI or standalone-compiler
 support, generalized checked-reference provenance or proofs for called
@@ -1724,18 +1705,15 @@ normal return/fallthrough, and preserve ordinary type checking. No-normal
 flow is carried through direct calls, return expressions, initializers,
 arguments, conditionals and pre-test conditions. Private module
 replacement, native module execution and both scalar frontend routes have
-active regressions. The Release fast build and focused no-return/effect/
-control-flow/frontend selection passed 131 tests with zero skipped; this is
-not current-schema TRRM CallSite evidence.
+active regressions. This is source/private/frontend evidence, not
+current-schema TRRM CallSite evidence.
 
 The selected standard-body method validator now resolves direct/import
 MethodMap targets for general CallSites and compact bound calls. It enforces
 the unit/non-unit result-selector shape, requires a `DoesNotReturn` CallSite
 to use `None` and end its Block, and rejects compact bound calls to those
-targets. Short `0x90` is admitted as a potential terminator. Release fast
-build passed; the focused register Body reader selection passed 57 tests and
-the combined TRRM/metadata/CLI/no-return selection passed 1,763 tests with
-zero skipped. This is selected-validation evidence, not current-schema
+targets. Short `0x90` is admitted as a potential terminator. This is
+selected-validation evidence, not current-schema
 execution evidence.
 
 **Routes/gate:** complete the accepted register CallSite rule through
@@ -1883,7 +1861,7 @@ output targets; it distinguishes direct `this` from `nameof(@this)`/literal
 duplicate and incompatible recipes. Explicit `ForwardsBacking` sources are
 checked against a matching explicit dependency/capture set. The focused
 source-recipe selection also confirms a valid strict subset and rejects extra
-or unrelated sources; 32 tests passed with zero skips. The legacy
+or unrelated sources. The legacy
 TokenSpan call/capture flow now consumes normalized source contracts, and the
 legacy projection is checked for consistency. This remains compilation-local
 and uses live slot identities. In the TokenSnapshot/TokenSpan profile, per-state
@@ -1897,9 +1875,8 @@ receivers do not widen the inferred source set.
 Separately, a bounded source-verifier slice admits `Captures` on writable
 pointer holders whose pointee carries pointer provenance. The body must satisfy
 the declared capture set; call sites use the published declaration, stage
-actual source origins, and preserve unknown writable effects as unknown. The
-Release fast output/provenance/register-map selection passed 531 tests with no
-skips. General `Captures` persistence is not yet implemented: private revision
+actual source origins, and preserve unknown writable effects as unknown.
+General `Captures` persistence is not yet implemented: private revision
 92 now rejects a NativeCallable capture as unrepresented rather than dropping
 its Dependency declaration; candidate revision 93 must carry and revalidate it.
 General aliasable-reference generations, owner/guard/root/pin obligations,
@@ -2066,8 +2043,7 @@ TRM2000 for every other public command form in the CLI usage list, before
 malformed source stdin or missing artifacts are consumed. Source-free
 private-module regressions separately prove that a split-provider registration
 normalizes to a self-contained NativeImport contract, does not persist the host
-registration, and rejects replacement with a changed calling convention. The
-combined NativeCore, CLI, source-free and complete-schema selection passes; the analyzer-enabled Debug build passes. This is
+registration, and rejects replacement with a changed calling convention. This is
 implementation evidence for unapproved candidates, not protocol approval or
 complete conformance. The selected CLI-manifest route is not itself a
 private-module producer command. Complete native source-schema arguments,
@@ -2180,7 +2156,7 @@ runtime policies, including root-scope functions alongside block namespaces.
 Nested namespace functions inherit aliases from enclosing scopes, and sibling
 namespace scopes retain independent alias environments; nested aliases shadow
 outer aliases and duplicate declarations at one namespace identity reject.
-The combined namespace and source-free call-frame selection passes. Alias sharing across repeated namespace
+Alias sharing across repeated namespace
 identities is implemented for top-level and nested parts, including forward
 chains and dotted/nested-equivalent paths; duplicate aliases across those
 parts reject. Root aliases alongside block namespaces now participate in
@@ -2188,10 +2164,9 @@ outward lookup; nested aliases shadow root aliases, siblings retain root
 visibility, and duplicate root declarations reject. Non-function declarations
 in mixed namespace blocks remain outside this frontend. The
 source-free reader also accepts discarded scalar call results
-without admitting arbitrary discarded values; the focused recursive call/out
-statement selection passes in both Debug and Release. The broader
-`ScalarFrontendProjects` selection passes in both configurations, and
-floating-conversion library coverage passes in each. Checked-exceptions
+without admitting arbitrary discarded values. Recursive call/output,
+`ScalarFrontendProjects` and floating-conversion library regressions cover
+Debug and Release. Checked-exceptions
 library exports continue to require their no-failure proof; fallible public
 exports reject with `TRM4002` without publishing an output image.
 The hosted lexer/decoder now covers noninterpolated raw-text fence selection,
@@ -2237,13 +2212,11 @@ unpublished profile to make a subset appear conforming.
 incomplete.** The
 [integrated GC runtime proposal](../proposals/integrated-gc-runtime-boundary.md)
 supersedes the separate RootPin provider/deployment recommendation within the
-unapproved proposal set. Its common ABI is not assigned or implemented;
-existing RootPin evidence below remains scoped to the prior candidate.
-This changes no accepted source rule or implementation-support claim.
+unapproved proposal set. Its common ABI is not assigned or implemented. The
+RootPin details below are scoped prototype evidence for the superseded
+candidate, not integrated-GC support or a change to accepted source rules.
 
-The provider, export-table and absolute-path JIT/AOT details below are
-prototype evidence for the superseded separate RootPin candidate; they are
-not the common GC runtime ABI or its implementation.
+### Superseded RootPin prototype
 
 The earlier unapproved RootPin proposals describe a Windows
 x64 stable-cell runtime, Feature 14/1, TargetProfile 2/1, F0 and Body record
@@ -2312,6 +2285,8 @@ Canonical source contracts are in
 positive, negative and cross-feature cases are in
 [storage and GC conformance](../specs/conformance/source-storage-and-gc.md).
 
+### Image-private tracing profiles
+
 **Current/evidence:** [native implementation profiles](native.md) document
 private `native-18` through `native-20` managed-node/class tracing, optional
 handles, cycles and explicit collection. Those bounded profiles use
@@ -2321,22 +2296,13 @@ stable `ref *root` pin reborrows, or a public managed-handle ABI. The profiles
 explicitly exclude interior pointers and pinning; source-defined classes use
 compiler-owned `TryCreate` factories, while `new C(...)` remains unsupported.
 The existing Cleanup prototype is for unique values and does not implement
-GC-triggered object Cleanup. The internal RootPin draft selection now checks
-Feature 14/1, TargetProfile 2/1 and the F0/record-0D schema boundary, including
-the distinct foreign-invocation NativeAddress record. The test-only native
-probe exercises typed support-cell holds, per-thread frame registration,
-cooperative `Poll`, cross-thread frame tracing, call/result transfer, exception
-rollback, typed object-graph tracing and transactional test-only payload
-relocation. The provider ABI is exported and probe-tested. The synthetic JIT
-resolver's exact selected path/file identity, same-provider ABI, process-
-Superseded RootPin provider prototypes validate process-lifetime retention,
-missing-export failure latch and concurrent same-path bootstrap under that
-prior candidate; compiler-produced integrated-GC runtime attachment and AOT
-resolution remain open. Source operations, standard producer/consumer
-execution, production collector integration, compiler lowering and complete
-qualification remain open. The supervised JIT provider selection passed. These are
-scoped implementation facts, not a reason to weaken the accepted contracts
-or infer conformance from the private collector.
+GC-triggered object Cleanup. The
+[RootPin prototype evidence above](#superseded-rootpin-prototype) is separate
+from these tracing profiles. Source operations, compiler-produced integrated-GC
+runtime attachment, standard producer/consumer execution, AOT resolution,
+production collector integration and complete qualification remain open.
+
+### Normal-backing agreement
 
 The separate unapproved
 [normal-backing candidate](../proposals/reference-normal-backing-support.md)
@@ -2344,11 +2310,13 @@ now has an exact case-sensitive host agreement key threaded through
 `CompilationOptions`, bound programs, source Binder, `ValueLayout`, mandatory
 verification, native emission/JIT entry points and the four selected CLI
 commands. Under that explicit key, ordinary checked-reference fields have the
-candidate 16/8 size/alignment and nested inline layout is recomputed; regression
-coverage checks the changed field offset/aggregate size and confirms that
-omitting the key cannot verify or emit the candidate-bound program. Emission,
-direct native imports and unsupported JIT/AOT routes fail closed rather than
-selecting today's 8-byte layout or a tracing profile. A bounded source-bound
+candidate 16/8 size/alignment and nested inline layout is recomputed.
+Non-Blittable holders remain bounded by the existing structure capacity.
+Regression coverage checks the changed field offset/aggregate size and confirms that
+omitting the key cannot verify or emit the candidate-bound program.
+Unsupported emission and JIT/AOT routes, including direct native imports,
+fail closed rather than selecting today's 8-byte layout or a tracing profile.
+A bounded source-bound
 runtime slice is now implemented: each allocation has a compiler-private
 32-byte control with exact runtime identity, nonreused generation, checked
 strong-hold count, class identity and payload size; a separate per-image/JIT
@@ -2385,7 +2353,8 @@ backing escapes under both runtime policies. Optional ordinary references now
 support local values and typed leaves in normal-backed class/inline-Copy
 storage under the selected agreement. Absence is both words zero; present
 values retain/release their support through Copy, replacement, constructor
-rollback and retirement. The selected JIT/AOT optional integration passes under both policies where applicable.
+rollback and retirement. JIT/AOT regressions cover these optional operations
+under both policies where applicable.
 The source-bound direct nonforeign call ABI now stages required and optional
 ordinary reference inputs by value and returns support-bearing values through hidden
 16-byte storage. Reentrant frame-owned plans match generated entries, transfer
@@ -2393,15 +2362,10 @@ input holds without count changes, publish result support only after cleanup,
 and settle pre-entry and checked-unwind failures. JIT/AOT qualification covers
 source-order staging and rebinding, nested results, multi-leaf aggregate
 inputs, backing retention after the source handle ends, later-argument failure,
-checked unwind and plan reuse. The complete Debug `NormalBacking` selection
-passes, including inline call-result reads through
-`BoundReferenceRead` descriptors. Spill-root discovery now traverses
+checked unwind and plan reuse, including inline call-result reads through
+`BoundReferenceRead` descriptors. Spill-root discovery traverses
 reference formation, reborrow and read descriptors to register nested call
-results. The combined normal-backing, lowering-agreement,
-dependency-source and checked-reference selection passes.
-The latest focused Debug fast selection, including the complete NormalBacking
-suite and related TRRM identity/anchor tests, passed.
-Optional ordinary references are included in direct formals/results and
+results. Optional ordinary references are included in direct formals/results and
 descriptor-bearing aggregate inputs, including absent results. Optional
 GC/init references remain unsupported.
 
@@ -2418,6 +2382,8 @@ module relowering and cross-instance exchange remain unimplemented; this is
 not full normal-backing conformance.
 The agreement is not persisted or accepted by module/graph/TRRM routes.
 
+### Acceptance gates
+
 **Routes/gate:** preserve normal `C`/`box<T>` stable shared backing separately
 from GC-backed `gc C`, `gc box<T>` and `gc ref<T>`. Carry exact backing
 identity, retains, roots, pin support, resource/guard dependencies and the
@@ -2433,17 +2399,11 @@ with thread-neutral/transferable transitive obligations.
 
 The former `pin` TypeSpec qualifier bit is retired/reserved and must not be
 reused for GC. The unapproved proposals retain reusable type/runtime and
-stable-cell analysis; the RootPin draft profile supplies only its prior exact
-schema dispatch. The integrated GC proposal supersedes the separate provider
-ABI and deployment recommendation but does not assign a common ABI. The
-test-only RootPin provider prototype covers stable cells, typed support residences,
-cooperative mutator rendezvous, cross-thread object-graph marking and
-transactional payload relocation, and exports the exact candidate provider
-ABI. The synthetic JIT runtime-import path is partially implemented and
-qualified, but source binding, independent producer/consumer execution, AOT
-provider resolution, production collector integration, lowering and complete
-qualification remain open. Never infer support from private formats or equal
-version bytes.
+stable-cell analysis, but the RootPin draft supplies only its exact prototype
+schema. Integrated-GC ABI assignment, source binding, independent exchange,
+compiler lowering, AOT resolution and production collector integration remain
+gates; prototype runtime-import evidence does not close them. Never infer
+support from private formats or equal version bytes.
 Use unrelated synthetic classes/boxes and root/pin operations,
 including bounded references that outlive a handle local but not a slot or
 owner/guard endpoint, optional-root presence checks, failed acquisition with
@@ -2472,19 +2432,17 @@ ownership, ordered member snapshots, public access, base/Flags shape, default
 Auto Layout and the exact supported Blittable target. A source-free provider
 validator binds an imported enum TypeDef to its selected Export and compares
 the exact enum/member snapshot and target Layout facts; missing providers,
-changed names/keys/values/Flags, target mismatches and ambiguity reject. The
-focused enum metadata/provider selection passed.
+changed names/keys/values/Flags, target mismatches and ambiguity reject.
 A separate in-memory host-supplied `Sample.Palette` test emits and loads a
 Windows x64 DLL for `Echo(Palette) -> Palette`; the Winapi int32 carrier
 preserves `0x13572468` and `int32` minimum through both argument and result.
-That supervised `NativeEmitter` ABI case passes; the
-complete `NativeCoreRegistrationTests` selection passed. This
+That supervised `NativeEmitter` case exercises this ABI only. It
 does not validate source enum declaration parsing, general Standard producer
-emission, replacement/packing, private-semantic revision 97, JIT, imported
+emission, replacement/packing, general private enum exchange, JIT, imported
 enum calls, checked policy or other targets.
 
-The public Standard source producer now selects only the exact existing
-baseline or `NominalEnumsDraft` identity through `EmitStandard`; the CLI's
+The enum source producer selects the exact `NominalEnumsDraft` identity
+through `EmitStandard`, separately from the existing baseline; the CLI's
 `compile-trrm --trrm-schema` option forwards the selected identity without
 changing the default Development `Emit` route. The candidate producer covers
 complete enum declaration libraries and bounded parameterless scalar/enum
@@ -2494,15 +2452,13 @@ requirement 1.
 Blittable enum declarations require target requirement 1; declaration and
 constant-return output otherwise preserves explicit 0/1. The source-free
 scalar-return execution helper remains Windows x64-only.
-The Debug fast build passed; the related enum/API selection passed.
-The selected CLI schema/default/error cases passed.
+CLI regressions cover exact schema selection, defaults and errors.
 Separately, the unapproved private revision-105 enum-identity candidate now
 allows an explicit private import to reuse its retained enum occurrence
 without Core member-token assignments. A bodyless, uncalled `ReadColor`
 NativeImport carries a private-enum `NativeParameter` pointee through
 revision-106 producer/reference and set/graph remapping; changed selected
-provider snapshots reject. The focused enum/class/NativeParameter selection
-passes, and the analyzer-enabled Debug build passes.
+provider snapshots reject.
 General nonconstant enum Bodies, source enum declaration production,
 other private enum contexts, full P+E replacement/topology and remaining
 cross-provider remapping remain open.

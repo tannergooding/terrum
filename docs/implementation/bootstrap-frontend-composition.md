@@ -19,7 +19,9 @@ compiler.
 `frontend-build`, `frontend-build-library`, and `frontend-run` invoke a
 separate C# compiler process on the original source for every input. They
 preserve the source name and selected runtime/arithmetic profiles; library
-build selects public top-level functions. No AST, partial semantic projection,
+build selects public top-level functions. These fallback commands reject
+`--layout-core-manifest`; the test-only `frontend-component` probe accepts it
+only for its fixed component source. No AST, partial semantic projection,
 or `Host.Source` buffer crosses this compiler boundary.
 `frontend-component` remains an explicit test-only projection prototype; it
 does not select executable build, library, JIT, private-module or standard

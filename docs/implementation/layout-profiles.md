@@ -55,19 +55,15 @@ array/field paths, provider relocation, JIT/AOT, a no-entry root-only library,
 wide geometry and the manifest routes. The nested Standard L1 field-place
 slice now covers two array projections, a field suffix, a conditional RHS call
 and repeated postfix-index writes. Its `Pack=1`, `Alignment=32` source-free
-JIT/AOT case observes adjacent fields/elements and the focused
-field-place/consumer/native selection passed **46/46 with zero skips**. The
-Standard L1 runtime cases exercise `Pack=1` and
-`Alignment=32`; the separate `Alignment=8192` tests establish native frame
-lowering, not L1 runtime support at that alignment. This remains focused slice
+JIT/AOT case observes adjacent fields/elements. This remains focused slice
 evidence, not complete L1 acceptance: other negative boundaries, full
 remapping/re-emission, all CLI routes, generic/receiver-bearing providers and
 overall L1 qualification remain open. Bodyless MethodDef provider binding now
 preserves the assigned implicit-readonly-reference Param marker, validates it
 against the provider signature, re-emits the import and executes the adapted
 CallSite through the selected native L1 route.
-The separate A2/L1 wide-array selection passed **4/4 with zero skips**. It
-covers source-free L1 Body/TypeMap re-emission of a positive-stride extent
+Separate A2/L1 wide-array tests cover source-free L1 Body/TypeMap re-emission
+of a positive-stride extent
 above u32 with a retained UInt64 index, A2 type-only reconstruction of wide
 positive-stride arrays, A2 Body-map admission of a maximum-u32 address count
 within a larger array, and the distinct A2R1+Repeat zero-stride maximum-count
@@ -97,9 +93,12 @@ The address-based storage limit is 128 bytes, independent of the 16-byte
 executable value profile. The pointer contract remains one element,
 `NoEscape`, and backed by an initialized local; verification checks that all
 aggregate fields are initialized. Private semantic metadata revision 80
-preserves and remaps the pointee type. Development `.trrm` `NativeParameter`
-persistence remains rejected pending an approved encoding, and direct native
-outputs remain limited to scalar and raw-pointer pointees.
+preserves and remaps the pointee type. The canonical Standard `NativeParameter`
+encoding remains unapproved; bounded Development and F/F+S experiments do not
+establish general register-Body support. Direct `NativeOutput` has a separate
+result-correlated vacant-cell profile for scalar, raw-pointer and eligible
+Blittable Copy values, tracked in the
+[native integration inventory](conformance-gaps.md#cg-004).
 The separate unapproved F+S Standard route currently addresses initialized
 scalar local Homes. Its unapproved A2 composition now carries TypeSpec
 fixed-array identity, Module-owned layout rows, Feature `20/1`, TypeDef
@@ -127,28 +126,32 @@ are reconstructed. The selected union metadata/source-free and private
 round-trip cases are covered; whole-Union initialization and executable
 union-array values remain under the unapproved, provisionally actionable
 [union initialization proposal](../proposals/standard-trrm-raw-union-initialization.md).
-The emitter/consumer test class passed.
 The source-reference path selects explicit nonempty TypeDef ExportKeys from
 one local type-only A2 Module, preserves the provider snapshot and each
 selected/closure TypeDef origin, and exposes only selected roots to ordinary
-name lookup. Standard/private writers reject these origins rather than
-discarding them; separately supplied A2 providers bind through their checked
+name lookup. Selected type-only Standard writers preserve these origins;
+private writers reject unsupported projections rather than discarding them.
+Separately supplied A2 providers bind through their checked
 Copy/layout contracts, and imported closure types retain actual provider
 origins plus original consumer Import/ModuleRef expectations. Direct-field and
 array imports, compatible TypeDef relocation, incompatible packing and
 snapshot immutability are covered. Provider-owned TypeDef Import chains also
 project through separately supplied or co-located A2 type-only Modules while
-retaining both provider and consumer expectations. Alias/multiple-view handling,
-origin replacement/remapping, canonical re-encoding and executable Body
-consumption remain open. The combined provider/reference/layout and
-provider-chain selections have regression coverage.
+retaining both provider and consumer expectations. Selected alias keys and
+distinct expected views preserve their original expectations while binding
+to the same actual TypeDef. Type-only re-encoding covers relocated provider
+rows and imported origin graphs; general replacement/remapping and executable
+Body consumption remain open. [CG-004](conformance-gaps.md#cg-004) retains the
+exact reference/re-emission gates.
 The executable NativeAddress path still rejects nonempty TypeDef tables.
-Neither path constructs executable array TypeMap entries or reconstructs
-PlaceSelection/EC Bodies. Provider-owned replacement/remapping, source-independent array
-initialization and actual array native-address execution remain unsupported.
-Historical private semantic-module revision 81 combined fixed-layout
-commitments with span roles. It is now rejected before decoding; the current
-revision-89 writer retains fixed-layout facts but does not persist span roles.
+The type-only reconstruction/reference paths do not consume executable
+PlaceSelection/EC Bodies. General provider-owned array replacement/remapping
+and native-address execution of imported nominal-array elements remain open;
+the selected local-array executable slices are tracked in
+[CG-004](conformance-gaps.md#cg-004).
+Private semantic-module revision 81 combined fixed-layout commitments with
+span roles and is rejected before decoding. Current private writers retain
+fixed-layout facts but reject compilation-local span roles.
 
 
 ## Compact and resilient layout support

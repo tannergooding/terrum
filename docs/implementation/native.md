@@ -1390,7 +1390,8 @@ fallback.
 
 The current C# implementation has guards for 1,024 functions, 256
 parameter/local slots per function, 64 arguments, 128 levels of IR nesting,
-3,840-byte frames, 8 MiB of machine code, 256 fixed-buffer descriptors and
+checked `int32` frame geometry, 8 MiB of machine code, 256 fixed-buffer
+descriptors and
 1,048,576 initialized 32-bit words; emitter refusals report `TRM4001`. These
 are implementation limits, not selected language, metadata, or ABI maxima.
 Reassess each count against its actual representation/resource owner rather
@@ -1423,8 +1424,9 @@ semantics; it does not itself introduce a loan of the original value's storage.
 A source-level borrowed result needs its own declared lifetime, access
 and alias contract. The bounded one-field scalar transparent wrapper
 inherits its carrier's direct ABI; no other transparent-wrapper ABI is
-implemented. Outputs use separate exact-size publication into the caller's
-storage only on a true return.
+implemented. Boolean-result outputs publish exact-size values into caller
+storage only on a true return; supported non-Boolean/void output profiles
+require publication on every normal return.
 
 Unique instance receiver loans are an exception to by-value aggregate passing:
 they always pass a pointer to the live readonly owner, including 4- and 8-byte

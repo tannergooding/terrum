@@ -7,13 +7,13 @@ independently bootstrapped compiler. The approved
 [source grammar](../specs/grammar-spec.md) defines the language, not the
 limits of individual prototypes in this inventory.
 
-The C#-authored and Terrum-authored compilers are standalone implementations.
-The intended pre-GA fallback, when Terrum does not yet support a source
-feature, is to invoke the C# compiler as a separate process on the original
-source. No AST or partial semantic projection is handed between compilers.
-This process-level routing is not yet established by the component tests;
-the long-term goal is matching general support and then removing the C#
-implementation after GA.
+The [compiler transition inventory](bootstrap-frontend-composition.md#compiler-boundary)
+defines the standalone implementations and whole-source process fallback.
+`frontend-build`, `frontend-build-library` and `frontend-run` already use a
+separate C# compiler process for every original input. No AST or partial
+semantic projection crosses that boundary. This is transitional hosted
+compilation, not independent Terrum compilation or completion of the post-GA
+transition.
 
 The existing `TokenCursor`, v87/v88 scalar projection and private
 `Span<Token>` module paths are implementation prototypes, not selected
@@ -481,7 +481,8 @@ source-class/`ManagedNode` handles with their readonly/write and supported
 optional forms. Typed handle substitutions retain their supplied
 qualification; `Copy` does not grant member, null-test or operator
 capabilities. These specializations remain compilation-local. Unique/owning
-arguments, views, generic classes/structs, managed fields inside user structs,
+arguments, views, generic classes and open/public generic structs, managed
+fields inside user structs,
 partial holes, constructor/method inference, ordinary overloads and public
 generic ABI remain unsupported. Concrete source-class `TryCreate` factories,
 fields and methods may be used inside a template without granting those
@@ -524,13 +525,17 @@ emit or hand source to the C# compiler.
 `frontend-build-library self-host <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
 forwards the original source to a separate C# compiler process and preserves
 the source name and selected policies. Library compilation exports all public
-top-level functions; the output is replaced only on success.
+top-level functions; the output is replaced only on success. It rejects
+`--layout-core-manifest`.
 `frontend-build self-host <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
 also forwards original source to that process; it does not use the scalar
-projection or the hosted emitter in this command.
+projection or the hosted emitter in this command and rejects
+`--layout-core-manifest`.
 `frontend-run self-host <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
 executes through the same original-source process boundary and returns
-`Main`'s raw exit status. The `<terrum-project-directory>` argument remains in
+`Main`'s raw exit status and rejects `--layout-core-manifest`. The
+test-only `frontend-component` probe accepts a Layout manifest only for its
+fixed component source. The `<terrum-project-directory>` argument remains in
 the transitional command form, but build/library/run do not read it; only
 component-probe commands use that directory. The arithmetic selector applies
 to the subject source compiled by the child process and is independent of

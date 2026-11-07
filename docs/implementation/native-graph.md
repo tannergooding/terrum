@@ -45,7 +45,8 @@ per-operation arithmetic in graph contracts under the unapproved
 This serialization revision is distinct from the private version-3 graph
 container and native package formats; the direct-import expectation table is a
 separate unapproved outer-format extension. Participants
-communicate only through the established scalar and handle-free public `Copy`
+in these managed profiles communicate only through the established scalar
+and handle-free public `Copy`
 value contracts. Each persisted image has its own heap and root chain; an
 imported call preserves the caller's roots, and `ManagedHeap.Collect()` remains
 local to the image where it runs. The experimental `Host.Source` grant is not
@@ -142,12 +143,11 @@ framework-dependent .NET registrar bound to its creator process, which likewise
 never executes generated code. It is process-start code generation, not
 in-process replacement of live code or a native-code sandbox.
 
-This graph is acyclic and explicitly bounded. It does not claim transitive
-version roll-forward, hot servicing, resilient layouts, the future general
-`TRRM` semantic-IL format, or replacement of already-emitted machine code by
-the semantic JIT. Single-provider, leaf-set and graph package readers accept
-only version 3; version 3 metadata records emitted imports and selected
-direct-import expectations separately from retained declarations.
+These acyclic graphs do not provide transitive version roll-forward, hot
+servicing, resilient layouts or general `TRRM` semantic-IL interchange.
+Graph JIT relowers the root at process start; it does not replace live machine
+code. Single-provider and leaf-set package readers share the graph's exact
+version-3 boundary.
 
 An implementation may use lexical readonly views over an owned native buffer
 without changing its exported declaration. Such a producer carries the
@@ -235,8 +235,9 @@ leaf's managed roots.
 The [Copy-field variant](../../samples/DependencyGraphServicing/managed-copy-class-leaf.terrum)
 can replace that same leaf with nested inline Copy values alongside its optional
 edges. Use it in place of `managed-class-leaf.terrum` in the producer command
-below. It writes current semantic-module revision 78 while retaining the
-`native-20` profile, returns the same result and collects its private cycle.
+below. It retains the `native-20` profile with checked inline Copy fields,
+returns the same result and collects its private cycle. Exact semantic
+revisions are tracked in the [module inventory](modules.md).
 The unchanged root and intermediate do not import its nested struct layouts;
 retired semantic-module revisions are rejected and must be rebuilt from source.
 

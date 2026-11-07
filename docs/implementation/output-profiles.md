@@ -192,8 +192,7 @@ and readonly native scalar addresses (7). Existing support for these drafts
 does not require retaining them when the reviewed contract is implemented.
 
 `TrRmScalarInitOutputBodyReaderTests` and related executable reader/compiler
-cases exercise this experiment. Their presence is not a claim that they ran
-for this documentation change or use current normative bytes.
+cases exercise this Development experiment, not current normative bytes.
 The accepted [output-state and dependency contracts](../specs/representation/contract-clauses.md)
 own the design; the [gap inventory](conformance-gaps.md#cg-002)
 owns remaining physical and compiler gates.

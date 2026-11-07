@@ -1,7 +1,7 @@
 # Hosted view and owner profiles
 
-This is an informative support inventory relocated from the lifetime
-specification. It describes bounded hosted projections, not limits on the
+This informative inventory describes bounded hosted projections, not limits
+on the
 [general dependency contract](../specs/language/dependencies-and-views.md).
 The [implementation summary](../implementation.md) owns current support.
 No general view ABI, stored-reference codec or concurrent protocol follows.
@@ -45,6 +45,9 @@ every summarized field subtree remains Copy. This is not a general
 reference-place or managed-field profile.
 Bodyless private persistence, Standard TRRM summary transport, GC roots,
 pinning, and other nonlocal storage families remain unsupported.
+The separately selected [normal-backing agreement](conformance-gaps.md#cg-027)
+adds a bounded class-field and direct-call runtime closure; it is not implied
+by this compilation-local profile.
 
 ## Compact unique-owner loans
 

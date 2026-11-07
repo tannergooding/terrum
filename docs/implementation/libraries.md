@@ -6,9 +6,8 @@ do not claim current source checking, code generation, runtime or artifact
 support. The [implementation inventory](../implementation.md) owns the
 implemented subset; it does not define language/library behavior.
 
-The historical library design notes describe a self-hosted managed-node
-collection candidate as a bounded consumer of source-defined classes and
-optional edges. That candidate is not the generic List/LinkedList API
+The managed-node collection candidate is a bounded consumer of source-defined
+classes and optional edges. It is not the generic List/LinkedList API
 inventory and does not establish its guards, registered builders, lending
 roles, invalidation or public replacement contracts.
 
@@ -47,24 +46,13 @@ not establish the complete selected library contract. Unsupported facilities
 must decline affected use rather than silently substitute default values,
 blocking, allocation, lossy text conversion or a candidate protocol.
 
-This separation intentionally does not migrate code or change the API
-sketches. Compiler/library support should be tracked at its exact tested
-revision, not inferred from the specification audit or from historical notes.
-
 ## Generic witness support
 
-Current compiler support for comparison and unary witnesses is
-bounded, while shift, heterogeneous-binary, increment/decrement and
-`true`/`false` protocols remain unimplemented -- see
-[implementation](../implementation.md#bounded-generic-functions) for the exact
-current boundary.
-
-The current implementation deliberately
-keeps generic templates and their witness resolution compilation-local; that
-is a bounded-implementation characteristic tracked in
-[implementation](../implementation.md#bounded-generic-functions), not a
-permanent library requirement, and does not foreclose a future public generic
-contract. Current compiler and sample coverage does not extend to the
+Comparison and unary witnesses are bounded and compilation-local; shift,
+heterogeneous-binary, increment/decrement and `true`/`false` protocols remain
+unimplemented. The [generic implementation boundary](../implementation.md#bounded-generic-functions)
+tracks templates and witness resolution, not a permanent restriction on public
+generic contracts. Current compiler and sample coverage does not extend to the
 complete library inventories, primitive numeric conformance, mixed-result
 operators, families or generic collection algorithms.
 
