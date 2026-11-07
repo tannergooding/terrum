@@ -706,17 +706,29 @@ public static partial class TrRmExecutableCompiler
                     var result1 = (arithmeticPayload >> 4) & 0x0F;
                     var source0 = (arithmeticPayload >> 8) & 0x0F;
                     var source1 = arithmeticPayload >> 12;
+                    var isUnaryArithmetic
+                        = instruction[1] is 0x04 or 0x08;
+                    var rightOperandIsValid = false;
+                    if (isUnaryArithmetic)
+                    {
+                        rightOperandIsValid = source1 == 15
+                            && pendingRightHomeLoad < 0;
+                    }
+                    else
+                    {
+                        rightOperandIsValid
+                            = (source1 == 1 && pendingRightHomeLoad >= 0)
+                                || ((source1 is 14 or 15)
+                                    && pendingRightHomeLoad < 0);
+                    }
                     if (blockIndex != 0 || pendingHomeLoad < 0
                         || pendingBackingArithmeticControl is not null
                         || pendingComparison
-                        || instruction[1] is not (0x01 or 0x02 or 0x05 or 0x06)
+                        || instruction[1] is not (0x01 or 0x02 or 0x03
+                            or 0x04 or 0x05 or 0x06 or 0x07 or 0x08)
                         || destination != 0 || result1 != 15
                         || source0 != 0
-                        || (source1 == 1 && pendingRightHomeLoad < 0)
-                        || ((source1 is 14 or 15)
-                            && pendingRightHomeLoad >= 0)
-                        || (source1 != 1 && source1 != 14
-                            && source1 != 15))
+                        || !rightOperandIsValid)
                     {
                         throw Unsupported(
                             "A direct NativeOutput Body contains an unsupported computed local initializer.");
@@ -1193,75 +1205,97 @@ public static partial class TrRmExecutableCompiler
                 if (backingArithmeticControlByHome.TryGetValue(homeIndex,
                         out var arithmeticControl))
                 {
-                    BoundExpression rightValue;
-                    if (backingRightHomeByHome.TryGetValue(homeIndex,
-                            out var rightHome))
-                    {
-                        if (rightHome >= homeIndex
-                            || rightHome >= variableByHome.Length)
-                        {
-                            throw Invalid(
-                                "A direct NativeOutput local arithmetic operand must read an earlier Home.");
-                        }
-
-                        var rightVariable = variableByHome[rightHome];
-                        if (rightVariable < 0
-                            || rightVariable >= variables.Count
-                            || (rightVariable >= callerParameterCount
-                                && !backingLocalHomeIndices.Contains(rightHome))
-                            || variables[rightVariable].Type != type)
-                        {
-                            throw Invalid(
-                                "A direct NativeOutput local arithmetic operand differs from its Home.");
-                        }
-
-                        rightValue = new BoundRead(rightVariable, type,
-                            default);
-                    }
-                    else if (backingRightRegisterByHome.TryGetValue(
-                            homeIndex, out var rightRegister))
-                    {
-                        if (!PrimitiveTypeFacts.IsIntegerOrWide(type)
-                            || rightRegister is not (14 or 15))
-                        {
-                            throw Invalid(
-                                "A direct NativeOutput local has an invalid arithmetic constant.");
-                        }
-
-                        var width = PrimitiveTypeFacts.ScalarWidth(type) * 8;
-                        var allBitsLow = width >= sizeof(ulong) * 8
-                            ? ulong.MaxValue : (1UL << width) - 1;
-                        var allBitsHigh = width > sizeof(ulong) * 8
-                            ? ulong.MaxValue : 0;
-                        rightValue = new BoundConstant(new ScalarBits(
-                            rightRegister == 14 ? 0 : allBitsLow,
-                            rightRegister == 14 ? 0 : allBitsHigh), type,
-                            default);
-                    }
-                    else
-                    {
-                        throw Invalid(
-                            "A direct NativeOutput local arithmetic operation has no right operand.");
-                    }
-
-                    var operation = arithmeticControl switch {
-                        0x01 or 0x05 => TokenKind.Plus,
-                        0x02 or 0x06 => TokenKind.Minus,
-                        _ => throw Invalid(
-                            "A direct NativeOutput local has an unsupported arithmetic control."),
-                    };
                     var overflowBehavior = arithmeticControl switch {
-                        0x01 or 0x02 =>
+                        0x01 or 0x02 or 0x03 or 0x04 =>
                             BoundIntegerOverflowBehavior.Checked,
-                        0x05 or 0x06 =>
+                        0x05 or 0x06 or 0x07 or 0x08 =>
                             BoundIntegerOverflowBehavior.Wrapping,
                         _ => throw Invalid(
                             "A direct NativeOutput local has an unsupported arithmetic control."),
                     };
-                    initializer = new BoundBinary(operation, initializer,
-                        rightValue, type, default) {
-                            OverflowBehavior = overflowBehavior,
+                    if (arithmeticControl is 0x04 or 0x08)
+                    {
+                        if (!PrimitiveTypeFacts.IsIntegerOrWide(type)
+                            || backingRightHomeByHome.ContainsKey(homeIndex)
+                            || !backingRightRegisterByHome.TryGetValue(
+                                homeIndex, out var unarySourceRegister)
+                            || unarySourceRegister != 15)
+                        {
+                            throw Invalid(
+                                "A direct NativeOutput unary local initializer is malformed.");
+                        }
+
+                        initializer = new BoundUnary(TokenKind.Minus,
+                            initializer, type, default) {
+                                OverflowBehavior = overflowBehavior,
+                            };
+                    }
+                    else
+                    {
+                        BoundExpression rightValue;
+                        if (backingRightHomeByHome.TryGetValue(homeIndex,
+                                out var rightHome))
+                        {
+                            if (rightHome >= homeIndex
+                                || rightHome >= variableByHome.Length)
+                            {
+                                throw Invalid(
+                                    "A direct NativeOutput local arithmetic operand must read an earlier Home.");
+                            }
+
+                            var rightVariable = variableByHome[rightHome];
+                            if (rightVariable < 0
+                                || rightVariable >= variables.Count
+                                || (rightVariable >= callerParameterCount
+                                    && !backingLocalHomeIndices.Contains(
+                                        rightHome))
+                                || variables[rightVariable].Type != type)
+                            {
+                                throw Invalid(
+                                    "A direct NativeOutput local arithmetic operand differs from its Home.");
+                            }
+
+                            rightValue = new BoundRead(rightVariable, type,
+                                default);
+                        }
+                        else if (backingRightRegisterByHome.TryGetValue(
+                                homeIndex, out var rightRegister))
+                        {
+                            if (!PrimitiveTypeFacts.IsIntegerOrWide(type)
+                                || rightRegister is not (14 or 15))
+                            {
+                                throw Invalid(
+                                    "A direct NativeOutput local has an invalid arithmetic constant.");
+                            }
+
+                            var width = PrimitiveTypeFacts.ScalarWidth(type) * 8;
+                            var allBitsLow = width >= sizeof(ulong) * 8
+                                ? ulong.MaxValue : (1UL << width) - 1;
+                            var allBitsHigh = width > sizeof(ulong) * 8
+                                ? ulong.MaxValue : 0;
+                            rightValue = new BoundConstant(new ScalarBits(
+                                rightRegister == 14 ? 0 : allBitsLow,
+                                rightRegister == 14 ? 0 : allBitsHigh), type,
+                                default);
+                        }
+                        else
+                        {
+                            throw Invalid(
+                                "A direct NativeOutput local arithmetic operation has no right operand.");
+                        }
+
+                        var operation = arithmeticControl switch {
+                            0x01 or 0x05 => TokenKind.Plus,
+                            0x02 or 0x06 => TokenKind.Minus,
+                            0x03 or 0x07 => TokenKind.Star,
+                            _ => throw Invalid(
+                                "A direct NativeOutput local has an unsupported arithmetic control."),
                         };
+                        initializer = new BoundBinary(operation, initializer,
+                            rightValue, type, default) {
+                                OverflowBehavior = overflowBehavior,
+                            };
+                    }
                 }
                 backingLocalStatements.Add(new BoundLocal(variableIndex,
                     initializer, default));

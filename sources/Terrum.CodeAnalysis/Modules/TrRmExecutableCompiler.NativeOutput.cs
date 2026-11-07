@@ -1725,6 +1725,27 @@ public static partial class TrRmExecutableCompiler
         rightSource = null;
         rightRegister = 15;
         arithmeticControl = 0;
+        if (expression is BoundUnary {
+                Operator: TokenKind.Minus,
+                Operand: BoundRead operand,
+            } unary
+            && unary.Type == operand.Type
+            && PrimitiveTypeFacts.IsIntegerOrWide(unary.Type))
+        {
+            arithmeticControl = unary.OverflowBehavior switch {
+                BoundIntegerOverflowBehavior.Checked => (byte)0x04,
+                BoundIntegerOverflowBehavior.Wrapping => (byte)0x08,
+                _ => (byte)0,
+            };
+            if (arithmeticControl == 0)
+            {
+                return false;
+            }
+
+            source = operand;
+            return true;
+        }
+
         if (expression is not BoundBinary {
                 Left: BoundRead left,
             } binary
@@ -1737,8 +1758,10 @@ public static partial class TrRmExecutableCompiler
         arithmeticControl = (binary.Operator, binary.OverflowBehavior) switch {
             (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
             (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
+            (TokenKind.Star, BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
             (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
             (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
+            (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x07,
             _ => (byte)0,
         };
         if (arithmeticControl == 0)
