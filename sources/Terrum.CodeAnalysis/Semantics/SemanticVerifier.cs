@@ -7287,8 +7287,6 @@ public static partial class SemanticVerifier
                 }
                 var mergedTemplate = MeetPayload(
                     TemplateBytes, other.TemplateBytes);
-                ChargeWork();
-                _ = PayloadEquals(TemplateBytes, mergedTemplate);
                 if (!outputAlreadyReserved)
                 {
                     (outputState ?? throw Invalid()).TransferFrom(
@@ -7385,15 +7383,10 @@ public static partial class SemanticVerifier
                     ChargeWork();
                     var equalsTemplate = PayloadEquals(
                         mergedBytes, mergedTemplate);
-                    _ = PayloadEquals(leftValue, mergedBytes);
                     if (!equalsTemplate)
                     {
                         ChargeWork(9);
                         emit(index, mergedBytes, candidateScratch);
-                    }
-                    else if (leftOverride)
-                    {
-                        ChargeWork(2);
                     }
                 }
             }
