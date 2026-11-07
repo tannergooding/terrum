@@ -528,15 +528,18 @@ public sealed partial class CliTests
     {
         const string source = """
             namespace Demo {
+                int32 Root() { return 0; }
                 namespace Tools {
                     int32 Main() { return 42; }
                 }
                 namespace Other {
                     int32 Helper() { return 0; }
                 }
+                int32 After() { return 0; }
             }
             """;
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        var demoStart = source.IndexOf("Demo", StringComparison.Ordinal);
         var toolsStart = source.IndexOf("Tools", StringComparison.Ordinal);
         var otherStart = source.IndexOf("Other", StringComparison.Ordinal);
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -552,11 +555,16 @@ public sealed partial class CliTests
                 .GetProperty("functions").EnumerateArray().ToArray();
             Assert.That(functions.Select(static function =>
                     function.GetProperty("qualifiedName").GetString()).ToArray(),
-                Is.EqualTo(["Demo.Tools.Main", "Demo.Other.Helper"]));
+                Is.EqualTo([
+                    "Demo.Root",
+                    "Demo.Tools.Main",
+                    "Demo.Other.Helper",
+                    "Demo.After",
+                ]));
             Assert.That(functions.Select(static function =>
                     function.GetProperty("namespaceNameSpan")
                         .GetProperty("start").GetInt32()).ToArray(),
-                Is.EqualTo([toolsStart, otherStart]));
+                Is.EqualTo([demoStart, toolsStart, otherStart, demoStart]));
             var (frontendExit, frontendOutput, frontendError) = await RunAsync(
                 input, "frontend-run", directory, "-", "--runtime", policy,
                 "--json").ConfigureAwait(false);
@@ -611,12 +619,14 @@ public sealed partial class CliTests
         const string source = """
             namespace Demo {
                 namespace Tools {
+                    int32 Before() { return 0; }
                     namespace Inner {
                         int32 Main() { return 42; }
                     }
                     namespace Alternate {
                         int32 Helper() { return 0; }
                     }
+                    int32 After() { return 0; }
                 }
                 namespace Other {
                     int32 Utility() { return 0; }
@@ -625,13 +635,17 @@ public sealed partial class CliTests
             """;
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var expectedNames = new[] {
+            "Demo.Tools.Before",
             "Demo.Tools.Inner.Main",
             "Demo.Tools.Alternate.Helper",
+            "Demo.Tools.After",
             "Demo.Other.Utility",
         };
         var expectedNamespaceStarts = new[] {
+            source.IndexOf("Tools", StringComparison.Ordinal),
             source.IndexOf("Inner", StringComparison.Ordinal),
             source.IndexOf("Alternate", StringComparison.Ordinal),
+            source.IndexOf("Tools", StringComparison.Ordinal),
             source.IndexOf("Other", StringComparison.Ordinal),
         };
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -663,9 +677,6 @@ public sealed partial class CliTests
 
     [TestCase("namespace Demo.Tools { alias Scalar = int32; int32 Main() { return 42; } } namespace Demo.Tools { int32 Next() { return 0; } }")]
     [TestCase("namespace Demo.Tools { alias Scalar = int32; namespace Inner { Scalar Main() { return 42; } } }")]
-    [TestCase("namespace Demo.Tools { namespace Other { int32 Main() { return 42; } } int32 Root() { return 0; } }")]
-    [TestCase("namespace Demo { int32 Root() { return 0; } namespace Tools { int32 Main() { return 42; } } }")]
-    [TestCase("namespace Demo { namespace Tools { int32 Main() { return 42; } } int32 Root() { return 0; } }")]
     [TestCase("namespace Demo.Tools { using Other; int32 Main() { return 42; } }")]
     [TestCase("namespace Demo.Tools { import Other; int32 Main() { return 42; } }")]
     [TestCase("int32 Before() { return 0; } namespace Demo.Tools { int32 Main() { return 42; } }")]

@@ -599,105 +599,73 @@ public static partial class ScalarFrontendHost
 
         bool Take(TokenKind kind)
         {
-            if (at >= scopeEnd || tokens[at].Kind != kind) { return false; }
+            if (at >= scopeEnd || tokens[at].Kind != kind)
+            {
+                return false;
+            }
             at++;
             return true;
         }
-
     }
 
     private static int ReadNamespaceBody(ImmutableArray<SyntaxToken> tokens, int openingIndex,
-        int endToken, string namespaceIdentity, TextSpan namespaceNameSpan, TextSpan header,
-        List<ProgramScope> scopes, List<(TextSpan Header, TextSpan Close)> wrappers,
-        out string resolvedNamespace)
+        int endToken, string namespaceIdentity, TextSpan namespaceNameSpan, List<ProgramScope> scopes,
+        int nestingDepth, out string resolvedNamespace)
     {
-        var namespaceParts = new List<string>(namespaceIdentity.Split('.'));
-        var parentHeaders = new List<TextSpan>();
-        var currentOpening = openingIndex;
-        var currentNameSpan = namespaceNameSpan;
-        var currentHeader = header;
-        while (true)
+        if (nestingDepth > 8)
         {
-            var bodyStart = currentOpening + 1;
-            if (bodyStart < endToken && tokens[bodyStart].Kind == TokenKind.NamespaceKeyword)
+            throw InvalidResult();
+        }
+        var namespaceParts = new List<string>(namespaceIdentity.Split('.'));
+        resolvedNamespace = namespaceIdentity;
+        var cursor = openingIndex + 1;
+        var segmentStart = cursor;
+        var declarationDepth = 0;
+        while (cursor < endToken)
+        {
+            if (declarationDepth == 0
+                && tokens[cursor].Kind == TokenKind.CloseBrace)
             {
-                parentHeaders.Add(currentHeader);
-                var nested = ReadNestedNamespaceHeader(tokens, bodyStart, endToken, namespaceParts);
-                currentOpening = nested.OpeningIndex;
-                currentNameSpan = nested.NameSpan;
-                currentHeader = nested.Header;
+                AddScope(segmentStart, cursor);
+                return cursor + 1;
+            }
+            if (declarationDepth == 0
+                && tokens[cursor].Kind == TokenKind.NamespaceKeyword)
+            {
+                AddScope(segmentStart, cursor);
+                var previousPartCount = namespaceParts.Count;
+                var (childOpening, childNameSpan) = ReadNestedNamespaceHeader(
+                    tokens, cursor, endToken, namespaceParts);
+                cursor = ReadNamespaceBody(tokens, childOpening, endToken,
+                    string.Join(".", namespaceParts), childNameSpan, scopes,
+                    nestingDepth + 1, out _);
+                namespaceParts.RemoveRange(previousPartCount,
+                    namespaceParts.Count - previousPartCount);
+                segmentStart = cursor;
                 continue;
             }
-            var cursor = bodyStart;
-            var depth = 1;
-            while (cursor < endToken && depth != 0)
+            if (tokens[cursor].Kind == TokenKind.OpenBrace)
             {
-                if (tokens[cursor].Kind == TokenKind.NamespaceKeyword)
+                declarationDepth++;
+            }
+            else if (tokens[cursor].Kind == TokenKind.CloseBrace)
+            {
+                if (declarationDepth == 0)
                 {
                     throw InvalidResult();
                 }
-                if (tokens[cursor].Kind == TokenKind.OpenBrace)
-                {
-                    depth++;
-                }
-                else if (tokens[cursor].Kind == TokenKind.CloseBrace)
-                {
-                    depth--;
-                }
-                cursor++;
+                declarationDepth--;
             }
-            if (depth != 0)
+            cursor++;
+        }
+        throw InvalidResult();
+
+        void AddScope(int start, int end)
+        {
+            if (start < end)
             {
-                throw InvalidResult();
-            }
-            resolvedNamespace = string.Join(".", namespaceParts);
-            scopes.Add(new ProgramScope(resolvedNamespace, currentNameSpan,
-                bodyStart, cursor - 1));
-            if (parentCount == 0)
-            {
-                return cursor;
-            }
-
-            var leafPartCount = nestedPartCounts[^1];
-            namespaceParts.RemoveRange(namespaceParts.Count - leafPartCount,
-                leafPartCount);
-            nestedPartCounts.RemoveAt(nestedPartCounts.Count - 1);
-            while (parentCount > 0)
-            {
-                if (cursor < endToken
-                    && tokens[cursor].Kind == TokenKind.NamespaceKeyword)
-                {
-                    if (parentCount >= 8)
-                    {
-                        throw InvalidResult();
-                    }
-                    var previousPartCount = namespaceParts.Count;
-                    var (OpeningIndex, NameSpan) = ReadNestedNamespaceHeader(
-                        tokens, cursor, endToken, namespaceParts);
-                    nestedPartCounts.Add(
-                        namespaceParts.Count - previousPartCount);
-                    currentOpening = OpeningIndex;
-                    currentNameSpan = NameSpan;
-                    break;
-                }
-
-                if (cursor >= endToken
-                    || tokens[cursor].Kind != TokenKind.CloseBrace)
-                {
-                    throw InvalidResult();
-                }
-
-                cursor++;
-                parentCount--;
-                if (nestedPartCounts.Count == 0)
-                {
-                    return cursor;
-                }
-
-                var parentPartCount = nestedPartCounts[^1];
-                namespaceParts.RemoveRange(namespaceParts.Count
-                    - parentPartCount, parentPartCount);
-                nestedPartCounts.RemoveAt(nestedPartCounts.Count - 1);
+                scopes.Add(new ProgramScope(namespaceIdentity, namespaceNameSpan,
+                    start, end));
             }
         }
     }

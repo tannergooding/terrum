@@ -252,15 +252,16 @@ of declaration order. Duplicate normalized names, call-site local/parameter
 shadowing and mismatched argument counts/types reject. Supported namespace
 forms are one file-scoped namespace, one block, repeated flat blocks including
 different qualified identities, or nested namespace trees of at most eight
-levels whose non-leaf blocks contain only child namespaces. Function rows
-retain the source span of their owning leaf namespace block. Up to twelve internal
+levels with supported scalar-function declarations before, between or after
+child namespaces. Function rows retain the source span of their owning
+namespace block. Up to twelve internal
 nongeneric scalar aliases resolve return/parameter/local types, including
 forward chains; the original source is independently audited. Duplicate,
 unresolved, cyclic, public, attributed and generic aliases reject. Alias names
 are not explicit conversion-call targets. Same-leaf alias support is narrower
 than accepted enclosing-namespace lookup, not a new lookup rule. Imports,
-overloads, mixed root declarations and namespace blocks, declarations in
-intermediate namespace parents, aliases across
+overloads, mixed root declarations and namespace blocks, non-function
+declarations in intermediate namespace parents, aliases across
 multiple scopes, and broader call forms remain outside this frontend.
 
 Named by-value and scalar `out`/`init ref<T>` arguments preserve source

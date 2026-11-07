@@ -262,127 +262,173 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
         {
             return false;
         }
-        int32 bodyStart = terminatorStart + terminatorLength;
-        mut int32 cursor = nameEnd + 1;
-        mut int32 namespaceDepth = 1;
-        mut bool hasNestedNamespace = false;
-        mut int32 leafNameStartOffset = nameStartOffset;
-        mut int32 leafNameLength = nameEndOffset - nameStartOffset;
-        mut int32 leafBodyStart = bodyStart;
-        while (cursor < eof && Host.Tokens[cursor * 3] == 6)
-        {
-            if (namespaceDepth >= 8)
-            {
-                return false;
-            }
-            int32 nestedNameStart = cursor + 1;
-            if (nestedNameStart >= eof || Host.Tokens[nestedNameStart * 3] != 2)
-            {
-                return false;
-            }
-            mut int32 nestedNameEnd = nestedNameStart + 1;
-            while (nestedNameEnd < eof && Host.Tokens[nestedNameEnd * 3] == 54)
-            {
-                nestedNameEnd = nestedNameEnd + 1;
-                if (nestedNameEnd >= eof || Host.Tokens[nestedNameEnd * 3] != 2)
-                {
-                    return false;
-                }
-                nestedNameEnd = nestedNameEnd + 1;
-            }
-            int32 nestedNameStartOffset = Host.Tokens[nestedNameStart * 3 + 1];
-            int32 nestedLastName = nestedNameEnd - 1;
-            int32 nestedNameEndOffset = Host.Tokens[nestedLastName * 3 + 1]
-                + Host.Tokens[nestedLastName * 3 + 2];
-            int32 nestedKeywordStart = Host.Tokens[cursor * 3 + 1];
-            if (nestedNameStartOffset < 0
-                || nestedNameEndOffset < nestedNameStartOffset
-                || nestedNameEndOffset > Host.Source.Length
-                || !ScalarProgramReaderNamespaceKeyword(
-                    nestedKeywordStart, nestedNameStartOffset)
-                || !ScalarProgramReaderNamespaceNameTokens(
-                    nestedNameStart, nestedNameEnd,
-                    nestedNameStartOffset, nestedNameEndOffset))
-            {
-                return false;
-            }
-            int32 nestedOpeningOffset = nestedNameEnd * 3;
-            int32 nestedOpeningStart = Host.Tokens[nestedOpeningOffset + 1];
-            int32 nestedOpeningLength = Host.Tokens[nestedOpeningOffset + 2];
-            if (Host.Tokens[nestedOpeningOffset] != 48
-                || nestedOpeningLength != 1
-                || nestedOpeningStart < nestedNameEndOffset
-                || !ScalarProgramReaderRange(
-                    nestedOpeningStart, nestedOpeningLength, Host.Source.Length)
-                || Host.Source[nestedOpeningStart] != '{')
-            {
-                return false;
-            }
-            hasNestedNamespace = true;
-            namespaceDepth = namespaceDepth + 1;
-            leafNameStartOffset = nestedNameStartOffset;
-            leafNameLength = nestedNameEndOffset - nestedNameStartOffset;
-            leafBodyStart = nestedOpeningStart + nestedOpeningLength;
-            cursor = nestedNameEnd + 1;
-        }
-        mut int32 depth = namespaceDepth;
-        mut int32 leafCloseStart = 0;
-        while (cursor < eof && depth != 0)
-        {
-            int32 kind = Host.Tokens[cursor * 3];
-            if (hasNestedNamespace && depth < namespaceDepth && kind != 49
-                || kind == 6 || kind == 5
-                || kind == 102 && (hasNestedNamespace ? depth != namespaceDepth : depth != 1))
-            {
-                return false;
-            }
-            if (kind == 48 || kind == 49)
-            {
-                int32 offset = cursor * 3;
-                int32 tokenStart = Host.Tokens[offset + 1];
-                int32 tokenLength = Host.Tokens[offset + 2];
-                if (tokenLength != 1
-                    || !ScalarProgramReaderRange(tokenStart, tokenLength, Host.Source.Length)
-                    || kind == 48 && Host.Source[tokenStart] != '{'
-                    || kind == 49 && Host.Source[tokenStart] != '}')
-                {
-                    return false;
-                }
-                if (kind == 48) { depth = depth + 1; }
-                else
-                {
-                    if (depth == namespaceDepth)
-                    {
-                        leafCloseStart = tokenStart;
-                    }
-                    depth = depth - 1;
-                }
-            }
-            cursor = cursor + 1;
-        }
-        if (depth != 0)
+        if (!ScalarProgramReaderNamespaceBlock(at, eof, functionSourceStart,
+                spanStart, spanLength, 1, init var next,
+                init var blockMatches, init var blockHasAlias))
         {
             return false;
         }
-        int32 close = cursor - 1;
-        int32 closeStart = Host.Tokens[close * 3 + 1];
-        if (hasNestedNamespace
-            && leafNameStartOffset == spanStart && leafNameLength == spanLength
-            && functionSourceStart >= leafBodyStart
-            && functionSourceStart < leafCloseStart
-            || !hasNestedNamespace
-            && nameStartOffset == spanStart && nameEndOffset - nameStartOffset == spanLength
-            && functionSourceStart >= bodyStart && functionSourceStart < closeStart)
-        {
-            matchesFunctionBlock = true;
-        }
-        at = cursor;
+        matchesFunctionBlock = matchesFunctionBlock || blockMatches;
+        at = next;
         if (at < eof && Host.Tokens[at * 3] != 6)
         {
             return false;
         }
     }
     return matchesFunctionBlock;
+}
+
+bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
+    int32 functionSourceStart, int32 spanStart, int32 spanLength,
+    int32 nestingDepth, init ref<int32> next,
+    init ref<bool> matchesFunctionBlock, init ref<bool> subtreeHasAlias)
+{
+    next = at;
+    matchesFunctionBlock = false;
+    subtreeHasAlias = false;
+    if (nestingDepth > 8 || at < 0 || at >= eof
+        || Host.Tokens[at * 3] != 6)
+    {
+        return false;
+    }
+    int32 nameStart = at + 1;
+    if (nameStart >= eof || Host.Tokens[nameStart * 3] != 2)
+    {
+        return false;
+    }
+    mut int32 nameEnd = nameStart + 1;
+    while (nameEnd < eof && Host.Tokens[nameEnd * 3] == 54)
+    {
+        nameEnd = nameEnd + 1;
+        if (nameEnd >= eof || Host.Tokens[nameEnd * 3] != 2)
+        {
+            return false;
+        }
+        nameEnd = nameEnd + 1;
+    }
+    int32 nameStartOffset = Host.Tokens[nameStart * 3 + 1];
+    int32 lastName = nameEnd - 1;
+    int32 nameEndOffset = Host.Tokens[lastName * 3 + 1]
+        + Host.Tokens[lastName * 3 + 2];
+    int32 keywordStart = Host.Tokens[at * 3 + 1];
+    if (nameStartOffset < 0 || nameEndOffset < nameStartOffset
+        || nameEndOffset > Host.Source.Length
+        || !ScalarProgramReaderNamespaceKeyword(keywordStart, nameStartOffset)
+        || !ScalarProgramReaderNamespaceNameTokens(
+            nameStart, nameEnd, nameStartOffset, nameEndOffset))
+    {
+        return false;
+    }
+    int32 openingOffset = nameEnd * 3;
+    int32 openingStart = Host.Tokens[openingOffset + 1];
+    int32 openingLength = Host.Tokens[openingOffset + 2];
+    if (Host.Tokens[openingOffset] != 48 || openingLength != 1
+        || openingStart < nameEndOffset
+        || !ScalarProgramReaderRange(openingStart, openingLength, Host.Source.Length)
+        || Host.Source[openingStart] != '{')
+    {
+        return false;
+    }
+    mut int32 cursor = nameEnd + 1;
+    mut int32 segmentStart = openingStart + openingLength;
+    mut int32 declarationDepth = 0;
+    mut int32 childCount = 0;
+    mut bool segmentHasAlias = false;
+    while (cursor < eof)
+    {
+        int32 offset = cursor * 3;
+        int32 kind = Host.Tokens[offset];
+        int32 tokenStart = Host.Tokens[offset + 1];
+        int32 tokenLength = Host.Tokens[offset + 2];
+        if (kind == 5 || kind == 6 && declarationDepth != 0)
+        {
+            return false;
+        }
+        if (declarationDepth == 0 && kind == 49)
+        {
+            if (tokenLength != 1
+                || !ScalarProgramReaderRange(tokenStart, tokenLength, Host.Source.Length)
+                || Host.Source[tokenStart] != '}')
+            {
+                return false;
+            }
+            if (functionSourceStart >= segmentStart && functionSourceStart < tokenStart
+                && nameStartOffset == spanStart
+                && nameEndOffset - nameStartOffset == spanLength)
+            {
+                matchesFunctionBlock = true;
+            }
+            next = cursor + 1;
+            return true;
+        }
+        if (declarationDepth == 0 && kind == 6)
+        {
+            if (segmentHasAlias)
+            {
+                return false;
+            }
+            if (functionSourceStart >= segmentStart && functionSourceStart < tokenStart
+                && nameStartOffset == spanStart
+                && nameEndOffset - nameStartOffset == spanLength)
+            {
+                matchesFunctionBlock = true;
+            }
+            if (!ScalarProgramReaderNamespaceBlock(cursor, eof, functionSourceStart,
+                    spanStart, spanLength, nestingDepth + 1,
+                    init var childNext, init var childMatches,
+                    init var childHasAlias)
+                || childNext <= cursor)
+            {
+                return false;
+            }
+            matchesFunctionBlock = matchesFunctionBlock || childMatches;
+            subtreeHasAlias = subtreeHasAlias || childHasAlias;
+            childCount = childCount + 1;
+            if (childCount > 1 && subtreeHasAlias)
+            {
+                return false;
+            }
+            int32 childClose = childNext - 1;
+            int32 childCloseOffset = childClose * 3;
+            int32 childCloseStart = Host.Tokens[childCloseOffset + 1];
+            int32 childCloseLength = Host.Tokens[childCloseOffset + 2];
+            if (Host.Tokens[childCloseOffset] != 49
+                || childCloseLength != 1
+                || !ScalarProgramReaderRange(
+                    childCloseStart, childCloseLength, Host.Source.Length)
+                || Host.Source[childCloseStart] != '}')
+            {
+                return false;
+            }
+            segmentStart = childCloseStart + childCloseLength;
+            cursor = childNext;
+            continue;
+        }
+        if (kind == 102)
+        {
+            if (childCount != 0) { return false; }
+            segmentHasAlias = true;
+            subtreeHasAlias = true;
+        }
+        if (kind == 48 || kind == 49)
+        {
+            if (tokenLength != 1
+                || !ScalarProgramReaderRange(tokenStart, tokenLength, Host.Source.Length)
+                || kind == 48 && Host.Source[tokenStart] != '{'
+                || kind == 49 && Host.Source[tokenStart] != '}')
+            {
+                return false;
+            }
+            if (kind == 48) { declarationDepth = declarationDepth + 1; }
+            else
+            {
+                if (declarationDepth == 0) { return false; }
+                declarationDepth = declarationDepth - 1;
+            }
+        }
+        cursor = cursor + 1;
+    }
+    return false;
 }
 
 bool ScalarProgramReaderTokenSpan(int32 tokenStart, int32 tokenEnd,

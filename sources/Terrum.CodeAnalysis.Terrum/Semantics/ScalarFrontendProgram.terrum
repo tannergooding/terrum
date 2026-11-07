@@ -146,224 +146,6 @@ int32 CountScalarProgramNamespaces(Span<Token> tokenView, int32 count)
     return namespaces;
 }
 
-bool TryReadScalarProgramNamespaceBlock(Span<Token> tokenView, int32 count, int32 at,
-    init ref<int32> declarationStart, init ref<int32> declarationEnd,
-    init ref<int32> next, init ref<SourceRange> namespaceName,
-    init ref<bool> hasNestedNamespace, init ref<SourceRange> error)
-{
-    require SourceRange.TryCreate(0, 0, init var empty);
-    if (!TryGetScalarWindowToken(tokenView, 0, count, false, at, init var keyword))
-    {
-        return false;
-    }
-    declarationStart = 0;
-    declarationEnd = 0;
-    next = at;
-    namespaceName = empty;
-    hasNestedNamespace = false;
-    error = empty;
-    if (keyword.Kind != 6)
-    {
-        error = keyword.Range;
-        return true;
-    }
-    if (!TryGetScalarWindowToken(tokenView, 0, count, false, at + 1, init var firstName)
-        || firstName.Kind != 2)
-    {
-        error = keyword.Range;
-        return true;
-    }
-    mut SourceRange lastName = firstName.Range;
-    mut int32 cursor = at + 2;
-    while (cursor < count - 1
-        && TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var separator)
-        && separator.Kind == 54)
-    {
-        cursor = cursor + 1;
-        if (!TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var segment)
-            || segment.Kind != 2)
-        {
-            error = separator.Range;
-            return true;
-        }
-        lastName = segment.Range;
-        cursor = cursor + 1;
-    }
-    if (!SourceRange.TryCreate(firstName.Range.Start,
-            lastName.End - firstName.Range.Start, init var qualifiedName))
-    {
-        error = keyword.Range;
-        return true;
-    }
-    namespaceName = qualifiedName;
-    if (!TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var opening))
-    {
-        error = keyword.Range;
-        return true;
-    }
-    if (opening.Kind != 48)
-    {
-        error = opening.Range;
-        return true;
-    }
-
-    declarationStart = cursor + 1;
-    if (TryGetScalarWindowToken(tokenView, 0, count, false,
-            declarationStart, init var firstBodyToken)
-        && firstBodyToken.Kind == 6)
-    {
-        if (!TryReadScalarProgramNestedNamespaceBlock(tokenView, count, declarationStart, 2,
-                init var nestedStart, init var nestedEnd, init var nestedNext,
-                init var nestedName, init var nestedError))
-        {
-            return false;
-        }
-        if (nestedError.Length != 0)
-        {
-            error = nestedError;
-            return true;
-        }
-        if (!TryGetScalarWindowToken(tokenView, 0, count, false,
-                nestedNext, init var outerClose)
-            || outerClose.Kind != 49)
-        {
-            error = nestedName;
-            return true;
-        }
-        declarationStart = nestedStart;
-        declarationEnd = nestedEnd;
-        namespaceName = nestedName;
-        hasNestedNamespace = true;
-        next = nestedNext + 1;
-        return true;
-    }
-    mut int32 depth = 1;
-    cursor = declarationStart;
-    while (cursor < count - 1 && depth != 0)
-    {
-        require TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var token);
-        if (token.Kind == 6 || token.Kind == 5 || token.Kind == 102)
-        {
-            error = token.Range;
-            return true;
-        }
-        if (token.Kind == 48) { depth = depth + 1; }
-        if (token.Kind == 49) { depth = depth - 1; }
-        cursor = cursor + 1;
-    }
-    if (depth != 0)
-    {
-        error = opening.Range;
-        return true;
-    }
-    declarationEnd = cursor - 1;
-    next = cursor;
-    return true;
-}
-
-bool TryReadScalarProgramNestedNamespaceBlock(Span<Token> tokenView, int32 count,
-    int32 at, int32 nestingDepth, init ref<int32> declarationStart,
-    init ref<int32> declarationEnd, init ref<int32> next,
-    init ref<SourceRange> namespaceName, init ref<SourceRange> error)
-{
-    require SourceRange.TryCreate(0, 0, init var empty);
-    declarationStart = 0;
-    declarationEnd = 0;
-    next = at;
-    namespaceName = empty;
-    error = empty;
-    if (!TryGetScalarWindowToken(tokenView, 0, count, false, at, init var keyword)
-        || keyword.Kind != 6
-        || !TryGetScalarWindowToken(tokenView, 0, count, false, at + 1, init var firstName)
-        || firstName.Kind != 2)
-    {
-        return false;
-    }
-    mut SourceRange lastName = firstName.Range;
-    mut int32 cursor = at + 2;
-    while (cursor < count - 1
-        && TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var separator)
-        && separator.Kind == 54)
-    {
-        cursor = cursor + 1;
-        if (!TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var segment)
-            || segment.Kind != 2)
-        {
-            error = separator.Range;
-            return true;
-        }
-        lastName = segment.Range;
-        cursor = cursor + 1;
-    }
-    if (!SourceRange.TryCreate(firstName.Range.Start,
-            lastName.End - firstName.Range.Start, init var currentName)
-        || !TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var opening)
-        || opening.Kind != 48)
-    {
-        error = keyword.Range;
-        return true;
-    }
-    int32 bodyStart = cursor + 1;
-    if (bodyStart < count - 1
-        && TryGetScalarWindowToken(tokenView, 0, count, false,
-            bodyStart, init var nested)
-        && nested.Kind == 6)
-    {
-        if (nestingDepth >= 8)
-        {
-            error = nested.Range;
-            return true;
-        }
-        if (!TryReadScalarProgramNestedNamespaceBlock(tokenView, count, bodyStart,
-                nestingDepth + 1, init var nestedStart, init var nestedEnd,
-                init var nestedNext, init var nestedName, init var nestedError))
-        {
-            return false;
-        }
-        if (nestedError.Length != 0)
-        {
-            error = nestedError;
-            return true;
-        }
-        if (!TryGetScalarWindowToken(tokenView, 0, count, false,
-                nestedNext, init var outerClose)
-            || outerClose.Kind != 49)
-        {
-            error = nestedName;
-            return true;
-        }
-        declarationStart = nestedStart;
-        declarationEnd = nestedEnd;
-        namespaceName = nestedName;
-        next = nestedNext + 1;
-        return true;
-    }
-    mut int32 depth = 1;
-    cursor = bodyStart;
-    while (cursor < count - 1 && depth != 0)
-    {
-        require TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var token);
-        if (token.Kind == 6 || token.Kind == 5)
-        {
-            error = token.Range;
-            return true;
-        }
-        if (token.Kind == 48) { depth = depth + 1; }
-        if (token.Kind == 49) { depth = depth - 1; }
-        cursor = cursor + 1;
-    }
-    if (depth != 0)
-    {
-        error = opening.Range;
-        return true;
-    }
-    declarationStart = bodyStart;
-    declarationEnd = cursor - 1;
-    namespaceName = currentName;
-    next = cursor;
-    return true;
-}
-
 bool TryInventoryScalarProgramScope(Span<Token> tokenView, int32 count,
     int32 declarationStart, int32 declarationEnd, SourceRange namespaceName,
     bool hasNamespace, int32 aliasCount, int32 initialFunctionCount,
@@ -538,6 +320,57 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
     return true;
 }
 
+bool TryInventoryScalarProgramNamespaceSegment(Span<Token> tokenView, int32 count,
+    int32 declarationStart, int32 declarationEnd, SourceRange currentNamespace,
+    int32 initialFunctionCount, bool initialHasFourParameterFunction,
+    SourceRange initialNamespaceName, int32 initialAliasCount,
+    init ref<int32> functionCount, init ref<bool> hasFourParameterFunction,
+    init ref<SourceRange> namespaceName, init ref<int32> aliasCount,
+    init ref<SourceRange> error, init ref<int32> errorCode)
+{
+    require SourceRange.TryCreate(0, 0, init var empty);
+    functionCount = initialFunctionCount;
+    hasFourParameterFunction = initialHasFourParameterFunction;
+    namespaceName = initialNamespaceName;
+    aliasCount = initialAliasCount;
+    error = empty;
+    errorCode = 1;
+    if (declarationStart >= declarationEnd) { return true; }
+    var aliasError = BuildScalarAliasTable(tokenView, count, declarationStart,
+        declarationEnd, init var currentAliasCount);
+    if (aliasError.Length != 0)
+    {
+        error = aliasError;
+        return true;
+    }
+    if (!TryInventoryScalarProgramScope(tokenView, count, declarationStart,
+            declarationEnd, currentNamespace, true, currentAliasCount,
+            initialFunctionCount, initialHasFourParameterFunction,
+            init var updatedFunctions, init var updatedHasFour,
+            init var useLegacy, init var inventoryError,
+            init var inventoryErrorCode))
+    {
+        return false;
+    }
+    if (useLegacy)
+    {
+        error = currentNamespace;
+        return true;
+    }
+    if (inventoryError.Length != 0)
+    {
+        error = inventoryError;
+        errorCode = inventoryErrorCode;
+        return true;
+    }
+    functionCount = updatedFunctions;
+    hasFourParameterFunction = updatedHasFour;
+    namespaceName = initialNamespaceName.Length == 0
+        ? currentNamespace : initialNamespaceName;
+    aliasCount = initialAliasCount + currentAliasCount;
+    return true;
+}
+
 bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
     int32 at, int32 nestingDepth, int32 initialFunctionCount,
     bool initialHasFourParameterFunction, SourceRange initialNamespaceName,
@@ -591,21 +424,91 @@ bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
         return true;
     }
     int32 bodyStart = cursor + 1;
-    if (bodyStart < count - 1
-        && TryGetScalarWindowToken(tokenView, 0, count, false, bodyStart, init var child)
-        && child.Kind == 6)
+    mut int32 scan = bodyStart;
+    mut int32 segmentStart = bodyStart;
+    mut int32 depth = 0;
+    mut int32 functions = initialFunctionCount;
+    mut bool hasFour = initialHasFourParameterFunction;
+    mut SourceRange firstNamespace = initialNamespaceName;
+    mut int32 aliases = initialAliasCount;
+    mut int32 parentAliases = 0;
+    mut int32 childCount = 0;
+    while (scan < count - 1)
     {
-        mut int32 childAt = bodyStart;
-        mut int32 functions = initialFunctionCount;
-        mut bool hasFour = initialHasFourParameterFunction;
-        mut SourceRange firstNamespace = initialNamespaceName;
-        mut int32 aliases = initialAliasCount;
-        mut int32 childCount = 0;
-        while (childAt < count - 1
-            && TryGetScalarWindowToken(tokenView, 0, count, false, childAt, init var childToken)
-            && childToken.Kind == 6)
+        require TryGetScalarWindowToken(tokenView, 0, count, false, scan, init var token);
+        if (depth == 0 && token.Kind == 49)
         {
-            if (!TryInventoryScalarProgramNamespaceTree(tokenView, count, childAt,
+            if (segmentStart < scan)
+            {
+                if (!TryInventoryScalarProgramNamespaceSegment(tokenView, count,
+                        segmentStart, scan, currentNamespace, functions, hasFour,
+                        firstNamespace, aliases, init var updatedFunctions,
+                        init var updatedHasFour, init var updatedNamespace,
+                        init var updatedAliases, init var segmentError,
+                        init var segmentErrorCode))
+                {
+                    return false;
+                }
+                if (segmentError.Length != 0)
+                {
+                    error = segmentError;
+                    errorCode = segmentErrorCode;
+                    return true;
+                }
+                parentAliases = parentAliases + updatedAliases - aliases;
+                functions = updatedFunctions;
+                hasFour = updatedHasFour;
+                firstNamespace = updatedNamespace;
+                aliases = updatedAliases;
+            }
+            if (childCount > 0 && parentAliases > 0)
+            {
+                error = currentNamespace;
+                return true;
+            }
+            functionCount = functions;
+            hasFourParameterFunction = hasFour;
+            namespaceName = firstNamespace;
+            aliasCount = aliases;
+            next = scan + 1;
+            return true;
+        }
+        if (depth == 0 && token.Kind == 6)
+        {
+            if (parentAliases > 0)
+            {
+                error = currentNamespace;
+                return true;
+            }
+            if (segmentStart < scan)
+            {
+                if (!TryInventoryScalarProgramNamespaceSegment(tokenView, count,
+                        segmentStart, scan, currentNamespace, functions, hasFour,
+                        firstNamespace, aliases, init var updatedFunctions,
+                        init var updatedHasFour, init var updatedNamespace,
+                        init var updatedAliases, init var segmentError,
+                        init var segmentErrorCode))
+                {
+                    return false;
+                }
+                if (segmentError.Length != 0)
+                {
+                    error = segmentError;
+                    errorCode = segmentErrorCode;
+                    return true;
+                }
+                parentAliases = parentAliases + updatedAliases - aliases;
+                functions = updatedFunctions;
+                hasFour = updatedHasFour;
+                firstNamespace = updatedNamespace;
+                aliases = updatedAliases;
+                if (parentAliases > 0)
+                {
+                    error = currentNamespace;
+                    return true;
+                }
+            }
+            if (!TryInventoryScalarProgramNamespaceTree(tokenView, count, scan,
                     nestingDepth + 1, functions, hasFour, firstNamespace, aliases,
                     init var childFunctions, init var childHasFour,
                     init var childNamespace, init var childAliases,
@@ -623,78 +526,21 @@ bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
             hasFour = childHasFour;
             firstNamespace = childNamespace;
             aliases = childAliases;
-            childAt = childNext;
             childCount = childCount + 1;
-        }
-        if (childCount > 1 && aliases > initialAliasCount)
-        {
-            error = currentNamespace;
-            return true;
-        }
-        if (!TryGetScalarWindowToken(tokenView, 0, count, false, childAt, init var close)
-            || close.Kind != 49)
-        {
-            error = currentNamespace;
-            return true;
-        }
-        functionCount = functions;
-        hasFourParameterFunction = hasFour;
-        namespaceName = firstNamespace;
-        aliasCount = aliases;
-        next = childAt + 1;
-        return true;
-    }
-    mut int32 depth = 1;
-    cursor = bodyStart;
-    while (cursor < count - 1 && depth != 0)
-    {
-        require TryGetScalarWindowToken(tokenView, 0, count, false, cursor, init var token);
-        if (token.Kind == 6 || token.Kind == 5)
-        {
-            error = token.Range;
-            return true;
+            if (childCount > 1 && aliases > initialAliasCount)
+            {
+                error = currentNamespace;
+                return true;
+            }
+            scan = childNext;
+            segmentStart = childNext;
+            continue;
         }
         if (token.Kind == 48) { depth = depth + 1; }
         if (token.Kind == 49) { depth = depth - 1; }
-        cursor = cursor + 1;
+        scan = scan + 1;
     }
-    if (depth != 0)
-    {
-        error = opening.Range;
-        return true;
-    }
-    int32 declarationEnd = cursor - 1;
-    var aliasError = BuildScalarAliasTable(tokenView, count, bodyStart,
-        declarationEnd, init var currentAliasCount);
-    if (aliasError.Length != 0)
-    {
-        error = aliasError;
-        return true;
-    }
-    if (!TryInventoryScalarProgramScope(tokenView, count, bodyStart, declarationEnd,
-            currentNamespace, true, currentAliasCount, initialFunctionCount,
-            initialHasFourParameterFunction, init var updatedFunctions,
-            init var updatedHasFour, init var useLegacy, init var inventoryError,
-            init var inventoryErrorCode))
-    {
-        return false;
-    }
-    if (useLegacy)
-    {
-        error = currentNamespace;
-        return true;
-    }
-    if (inventoryError.Length != 0)
-    {
-        error = inventoryError;
-        errorCode = inventoryErrorCode;
-        return true;
-    }
-    functionCount = updatedFunctions;
-    hasFourParameterFunction = updatedHasFour;
-    namespaceName = initialNamespaceName.Length == 0 ? currentNamespace : initialNamespaceName;
-    aliasCount = initialAliasCount + currentAliasCount;
-    next = cursor;
+    error = opening.Range;
     return true;
 }
 int32 CacheScalarProgramFunctionName(int32 ordinal, SourceRange name)

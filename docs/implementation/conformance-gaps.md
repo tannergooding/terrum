@@ -2023,11 +2023,11 @@ experimental authoring. The [scanner](../scanner.md) and
 component protocols, not complete source conformance. This is a coverage
 handoff, not a claim that every rule below currently fails. The scalar
 frontend accepts distinct flat namespace blocks and nested namespace branches
-through depth eight when non-leaf blocks contain only child namespaces. It
-preserves per-function leaf-name spans and matches component/hosted execution
-and native/hosted build output under both runtime policies. Declarations in
-intermediate namespace parents and mixed root/namespace declarations remain
-outside that component.
+through depth eight, including supported scalar-function declarations in
+intermediate namespace blocks. It preserves per-function owner-name spans and
+matches component/hosted execution and native/hosted build output under both
+runtime policies. Mixed root/namespace declarations remain outside that
+component.
 The hosted lexer/decoder now covers noninterpolated raw-text fence selection,
 single-line and framed forms, indentation, newline directives and Unicode
 scalars; source binding consumes decoded ASCII through `utf8z`. Interpolated
