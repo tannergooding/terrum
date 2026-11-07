@@ -1838,6 +1838,7 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [TestCase("[Terrum.Interop.NativeImport(\"example.dll\")] public extern int32 Read();")]
+    [TestCase("[Terrum.Interop.NativeImport(\"example.dll\", \"Read\")] public extern int32 Read();")]
     [TestCase("[Terrum.Interop.NativeCallable] public int32 Identity(int32 value) { return value; }")]
     public void NativeDeclarationRolesRequireAnExplicitCoreRegistration(string source)
     {
