@@ -523,10 +523,147 @@ public sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task ScalarFrontendSupportsSiblingNestedNamespaceBlocksAsync()
+    {
+        const string source = """
+            namespace Demo {
+                namespace Tools {
+                    int32 Main() { return 42; }
+                }
+                namespace Other {
+                    int32 Helper() { return 0; }
+                }
+            }
+            """;
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        var toolsStart = source.IndexOf("Tools", StringComparison.Ordinal);
+        var otherStart = source.IndexOf("Other", StringComparison.Ordinal);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (exit, output, error) = await RunFrontendComponentAsync(
+                input, directory, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(0), $"{output}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            var functions = document.RootElement.GetProperty("result")
+                .GetProperty("functions").EnumerateArray().ToArray();
+            Assert.That(functions.Select(static function =>
+                    function.GetProperty("qualifiedName").GetString()).ToArray(),
+                Is.EqualTo(["Demo.Tools.Main", "Demo.Other.Helper"]));
+            Assert.That(functions.Select(static function =>
+                    function.GetProperty("namespaceNameSpan")
+                        .GetProperty("start").GetInt32()).ToArray(),
+                Is.EqualTo([toolsStart, otherStart]));
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(
+                input, "frontend-run", directory, "-", "--runtime", policy,
+                "--json").ConfigureAwait(false);
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                input, "jit", "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(frontendExit, Is.EqualTo(42));
+            Assert.That(hostedExit, Is.EqualTo(frontendExit));
+            Assert.That(frontendOutput, Is.Empty);
+            Assert.That(hostedOutput, Is.Empty);
+            Assert.That(frontendError, Is.Empty);
+            Assert.That(hostedError, Is.Empty);
+
+            var nativePath = Path.Combine(TestArtifactPaths.DirectoryPath,
+                $"terrum-sibling-nested-namespaces-{policy}-{Guid.NewGuid():N}.native.exe");
+            var hostedPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+                $"terrum-sibling-nested-namespaces-{policy}-{Guid.NewGuid():N}.hosted.exe");
+            try
+            {
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(
+                    input, "frontend-build", directory, "-", "-o", nativePath,
+                    "--runtime", policy, "--json").ConfigureAwait(false);
+                var (hostedBuildExit, hostedBuildOutput, hostedBuildError)
+                    = await RunAsync(input, "build", "-", "-o", hostedPath,
+                        "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(nativeExit == 0, Is.True,
+                    $"{nativeOutput}{nativeError}");
+                Assert.That(hostedBuildExit == 0, Is.True,
+                    $"{hostedBuildOutput}{hostedBuildError}");
+                Assert.That(nativeError, Is.Empty);
+                Assert.That(hostedBuildError, Is.Empty);
+                Assert.That(await File.ReadAllBytesAsync(nativePath)
+                        .ConfigureAwait(false),
+                    Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)
+                        .ConfigureAwait(false)));
+                Assert.That(await ExecuteNativeImageAsync(nativePath)
+                        .ConfigureAwait(false), Is.EqualTo(42));
+            }
+            finally
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(nativePath)
+                    .ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(hostedPath)
+                    .ConfigureAwait(true);
+            }
+        }
+    }
+
+    [Test]
+    public async Task ScalarFrontendSupportsBranchesAtNestedNamespaceLevelsAsync()
+    {
+        const string source = """
+            namespace Demo {
+                namespace Tools {
+                    namespace Inner {
+                        int32 Main() { return 42; }
+                    }
+                    namespace Alternate {
+                        int32 Helper() { return 0; }
+                    }
+                }
+                namespace Other {
+                    int32 Utility() { return 0; }
+                }
+            }
+            """;
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        var expectedNames = new[] {
+            "Demo.Tools.Inner.Main",
+            "Demo.Tools.Alternate.Helper",
+            "Demo.Other.Utility",
+        };
+        var expectedNamespaceStarts = new[] {
+            source.IndexOf("Inner", StringComparison.Ordinal),
+            source.IndexOf("Alternate", StringComparison.Ordinal),
+            source.IndexOf("Other", StringComparison.Ordinal),
+        };
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (exit, output, error) = await RunFrontendComponentAsync(
+                input, directory, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(0), $"{output}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            var functions = document.RootElement.GetProperty("result")
+                .GetProperty("functions").EnumerateArray().ToArray();
+            Assert.That(functions.Select(static function =>
+                    function.GetProperty("qualifiedName").GetString()).ToArray(),
+                Is.EqualTo(expectedNames));
+            Assert.That(functions.Select(static function =>
+                    function.GetProperty("namespaceNameSpan")
+                        .GetProperty("start").GetInt32()).ToArray(),
+                Is.EqualTo(expectedNamespaceStarts));
+            var (runExit, runOutput, runError) = await RunAsync(
+                input, "frontend-run", directory, "-", "--runtime", policy,
+                "--json").ConfigureAwait(false);
+            Assert.That(runExit, Is.EqualTo(42));
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+        }
+    }
+
     [TestCase("namespace Demo.Tools { alias Scalar = int32; int32 Main() { return 42; } } namespace Demo.Tools { int32 Next() { return 0; } }")]
     [TestCase("namespace Demo.Tools { alias Scalar = int32; namespace Inner { Scalar Main() { return 42; } } }")]
     [TestCase("namespace Demo.Tools { namespace Other { int32 Main() { return 42; } } int32 Root() { return 0; } }")]
-    [TestCase("namespace Demo { namespace Tools { int32 Main() { return 42; } } namespace Other { int32 Next() { return 0; } } }")]
     [TestCase("namespace Demo { int32 Root() { return 0; } namespace Tools { int32 Main() { return 42; } } }")]
     [TestCase("namespace Demo { namespace Tools { int32 Main() { return 42; } } int32 Root() { return 0; } }")]
     [TestCase("namespace Demo.Tools { using Other; int32 Main() { return 42; } }")]

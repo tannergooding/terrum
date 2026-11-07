@@ -650,25 +650,59 @@ public static partial class ScalarFrontendHost
             {
                 throw InvalidResult();
             }
-            var closeToken = tokens[cursor - 1];
             resolvedNamespace = string.Join(".", namespaceParts);
             scopes.Add(new ProgramScope(resolvedNamespace, currentNameSpan,
                 bodyStart, cursor - 1));
-            wrappers.Add((currentHeader, closeToken.Span));
-            for (var parent = parentHeaders.Count - 1; parent >= 0; parent--)
+            if (parentCount == 0)
             {
-                if (cursor >= endToken || tokens[cursor].Kind != TokenKind.CloseBrace)
+                return cursor;
+            }
+
+            var leafPartCount = nestedPartCounts[^1];
+            namespaceParts.RemoveRange(namespaceParts.Count - leafPartCount,
+                leafPartCount);
+            nestedPartCounts.RemoveAt(nestedPartCounts.Count - 1);
+            while (parentCount > 0)
+            {
+                if (cursor < endToken
+                    && tokens[cursor].Kind == TokenKind.NamespaceKeyword)
+                {
+                    if (parentCount >= 8)
+                    {
+                        throw InvalidResult();
+                    }
+                    var previousPartCount = namespaceParts.Count;
+                    var (OpeningIndex, NameSpan) = ReadNestedNamespaceHeader(
+                        tokens, cursor, endToken, namespaceParts);
+                    nestedPartCounts.Add(
+                        namespaceParts.Count - previousPartCount);
+                    currentOpening = OpeningIndex;
+                    currentNameSpan = NameSpan;
+                    break;
+                }
+
+                if (cursor >= endToken
+                    || tokens[cursor].Kind != TokenKind.CloseBrace)
                 {
                     throw InvalidResult();
                 }
-                wrappers.Add((parentHeaders[parent], tokens[cursor].Span));
+
                 cursor++;
+                parentCount--;
+                if (nestedPartCounts.Count == 0)
+                {
+                    return cursor;
+                }
+
+                var parentPartCount = nestedPartCounts[^1];
+                namespaceParts.RemoveRange(namespaceParts.Count
+                    - parentPartCount, parentPartCount);
+                nestedPartCounts.RemoveAt(nestedPartCounts.Count - 1);
             }
-            return cursor;
         }
     }
 
-    private static (int OpeningIndex, TextSpan NameSpan, TextSpan Header) ReadNestedNamespaceHeader(
+    private static (int OpeningIndex, TextSpan NameSpan) ReadNestedNamespaceHeader(
         ImmutableArray<SyntaxToken> tokens, int namespaceKeywordIndex, int endToken,
         List<string> namespaceParts)
     {
