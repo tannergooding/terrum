@@ -149,6 +149,12 @@ public static partial class TrRmExecutableCompiler
                 "The direct NativeOutput call has unsupported declaration or argument facts.");
         }
 
+        if (target.IsModuleReference != (target.ModuleImport is not null))
+        {
+            throw Invalid(
+                "The direct NativeOutput target has inconsistent ModuleImport identity.");
+        }
+
         var outputCalls = CollectDirectNativeOutputCalls(caller);
         if (outputCalls.Count != outputCallCount
             || outputCalls.Any(call => call.Function != targetIndex))
@@ -501,6 +507,15 @@ public static partial class TrRmExecutableCompiler
             return row;
         }
 
+        var providerIdentityStringRow = 0;
+        var providerExportKeyStringRow = 0;
+        if (target.ModuleImport is BoundModuleImport moduleImport)
+        {
+            providerIdentityStringRow = AddString(
+                moduleImport.ProducerIdentity, 0);
+            providerExportKeyStringRow = AddString(moduleImport.ExportKey, 0);
+        }
+
         var typeDefRows = new List<TrRmTypeDefRow>(program.Structures.Length);
         var fieldRows = new List<TrRmFieldDefRow>();
         var layoutRows = new List<TrRmLayoutRow>(
@@ -595,17 +610,35 @@ public static partial class TrRmExecutableCompiler
         methodRowByFunction[callerIndex] = 2;
         var targetMethodRow = methodRowByFunction[targetIndex];
         var callerMethodRow = methodRowByFunction[callerIndex];
+        var moduleRefRows = new List<TrRmModuleRefRow>(1);
+        var functionModuleRefRow = 0;
+        if (target.ModuleImport is BoundModuleImport targetModuleImport)
+        {
+            functionModuleRefRow = 1;
+            moduleRefRows.Add(new TrRmModuleRefRow(
+                providerIdentityStringRow,
+                targetModuleImport.TargetRequirement,
+                targetModuleImport.RuntimePolicy));
+        }
+
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2,
                 TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
                 0, program.EntryPoint < 0 ? 0 : callerMethodRow,
                 1, 1, 1, 1, 1, featureRows.Count),
-        ], strings, 0, program.Structures.Length,
+        ], strings, moduleRefRows.Count, program.Structures.Length,
             program.Functions.Length, 0,
             featureRows.Count);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, program.Structures.Length, program.Functions.Length, 0,
+            moduleRefRows.Count, program.Structures.Length,
+            program.Functions.Length, 0,
             featureRows.Count);
+        var moduleRefBytes = moduleRefRows.Count == 0 ? []
+            : TrRmModuleRefTableWriter.Encode(moduleRefRows, strings, modules);
+        var moduleRefs = moduleRefRows.Count == 0
+            ? default
+            : new TrRmModuleRefTableReader(moduleRefBytes,
+                moduleRefRows.Count, strings, modules);
 
         var parameterRows = new List<TrRmParamRow>(
             target.ParameterCount + caller.ParameterCount);
@@ -785,6 +818,13 @@ public static partial class TrRmExecutableCompiler
             contractRows.Count, typeDefs, methods, signatures, parameters,
             typeSpecs, 0, features, modules, schema, predicateGraphs.Count);
 
+        var importBytes = functionModuleRefRow == 0 ? []
+            : TrRmImportTableWriter.Encode([
+                new TrRmImportRow(functionModuleRefRow,
+                    providerExportKeyStringRow,
+                    0x1600_0000u | checked((uint)targetMethodRow)),
+            ], strings, moduleRefs, typeDefs, methods, default, default,
+                default, default, features, modules, schema);
         var nativeImportBytes = TrRmNativeImportTableWriter.Encode([
             new TrRmNativeImportRow(1, (byte)import.ResolutionMode,
                 (byte)import.ResolutionPolicy,
@@ -1371,6 +1411,15 @@ public static partial class TrRmExecutableCompiler
             new(0x003C, 0, checked((uint)predicateOperands.Count),
                 predicateOperandBytes),
         };
+        if (moduleRefRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0010, 0,
+                checked((uint)moduleRefRows.Count), moduleRefBytes));
+        }
+        if (functionModuleRefRow != 0)
+        {
+            sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
+        }
         if (typeDefRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x0013, 0,

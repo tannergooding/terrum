@@ -289,11 +289,12 @@ public static partial class TrRmExecutableCompiler
                     .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index)
                 : TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationDraftAndGetExecutionTables(index);
-        if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0
-            && HasNativeOutputReservationBody(tables, selectedModuleRow))
+        if (ShouldReconstructNativeOutputCallProgram(tables,
+                selectedModuleRow, schema))
         {
             return ReconstructForeignInvocationNativeOutputCallProgram(
-                tables, selectedModuleRow, verifySemantics, schema);
+                tables, selectedModuleRow, selectedModuleImports,
+                verifySemantics, schema);
         }
 
         return LoadForeignInvocationDraftNativeAddressLibrary(index, tables,
@@ -329,13 +330,28 @@ public static partial class TrRmExecutableCompiler
         return false;
     }
 
+    private static bool ShouldReconstructNativeOutputCallProgram(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow, TrRmArtifactSchema schema)
+    {
+        if (!HasNativeOutputReservationBody(tables, selectedModuleRow))
+        {
+            return false;
+        }
+
+        return (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0)
+            || schema is TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft;
+    }
+
     private static BoundProgram ReconstructForeignInvocationNativeOutputCallProgram(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-        int selectedModuleRow, bool verifySemantics,
+        int selectedModuleRow,
+        IReadOnlyDictionary<int, BoundModuleImport>? selectedModuleImports,
+        bool verifySemantics,
         TrRmArtifactSchema schema)
     {
         if (!schema.UsesForeignInvocationContracts()
-            || tables.Imports.Count != 0 || tables.ModuleRefs.Count != 0
             || tables.NativeExports.Count != 0
             || tables.NativeCallables.Count != 0
             || tables.NativeVTables.Count != 0
@@ -349,6 +365,49 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetMethodDefRange(selectedModuleRow);
         var callerMethodRow = 0;
         var importedMethods = new List<int>();
+        var importedMethodRows = new HashSet<int>();
+        var (moduleRefStart, moduleRefEnd)
+            = tables.Modules.GetModuleRefRange(selectedModuleRow);
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
+        {
+            var moduleRefRow
+                = tables.Imports.GetModuleRefForImportRow(importRow);
+            if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                != selectedModuleRow)
+            {
+                continue;
+            }
+
+            var expectedDefinition
+                = tables.Imports.GetExpectedDefinitionForImportRow(importRow);
+            if ((expectedDefinition >> 24) != 0x16)
+            {
+                throw Unsupported(
+                    "The direct NativeOutput Body loader supports MethodDef Module Imports only.");
+            }
+
+            var methodRow = checked((int)(expectedDefinition & 0x00FF_FFFF));
+            if (methodRow < methodStart || methodRow >= methodEnd
+                || !tables.StandardNativeImports.HasImportForMethod(methodRow)
+                || !importedMethodRows.Add(methodRow)
+                || selectedModuleImports is null
+                || !selectedModuleImports.ContainsKey(methodRow))
+            {
+                throw Invalid(
+                    "A direct NativeOutput Module Import has no selected NativeImport method.");
+            }
+        }
+
+        if (importedMethodRows.Count
+            != (selectedModuleImports?.Count ?? 0)
+            || (moduleRefStart == moduleRefEnd
+                && importedMethodRows.Count != 0))
+        {
+            throw Invalid(
+                "The direct NativeOutput Module Imports differ from the selected provider edges.");
+        }
+
         var methodIndexByRow = new int[tables.Methods.Count + 1];
         Array.Fill(methodIndexByRow, -1);
         var nextFunctionIndex = 0;
@@ -432,6 +491,11 @@ public static partial class TrRmExecutableCompiler
                 ResolutionPolicy = (NativeImportResolutionPolicy)importRow.ResolutionPolicy,
                 Parameters = nativeParameters,
             };
+            var selectedModuleImport
+                = selectedModuleImports is not null
+                    && selectedModuleImports.TryGetValue(method,
+                        out var moduleImport)
+                        ? moduleImport : null;
             var flags = tables.Methods.GetFlags(method);
             functionsByMethod[method] = new BoundFunction(
                 tables.Methods.GetName(method), returnType,
@@ -443,6 +507,8 @@ public static partial class TrRmExecutableCompiler
                     ? null : NativeOutputDeclarationRole.DirectImport,
                 NativeOutputContracts = nativeOutputs,
                 DependencyContracts = dependencyContracts,
+                ModuleImport = selectedModuleImport,
+                IsModuleReference = selectedModuleImport is not null,
                 IsExternal = true,
                 RequiresUnsafeCaller = true,
                 IsPrivate = flags == 0,
@@ -1426,11 +1492,12 @@ public static partial class TrRmExecutableCompiler
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
     {
-        if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0
-            && HasNativeOutputReservationBody(tables, selectedModuleRow))
+        if (ShouldReconstructNativeOutputCallProgram(tables,
+                selectedModuleRow, schema))
         {
             return ReconstructForeignInvocationNativeOutputCallProgram(
-                tables, selectedModuleRow, verifySemantics, schema);
+                tables, selectedModuleRow, selectedModuleImports,
+                verifySemantics, schema);
         }
 
         ValidateNativeAddressArtifactSections(index, tables, schema);

@@ -452,6 +452,66 @@ NativeAddress/provider-CLI selection passed 144/144 with zero skips at
 including deep-provider rejection, duplicate/empty/non-first Modules, caller
 buffer mutation after plan creation, duplicate mixed names, non-first address
 targets, 17-provider fan-in, UTF-16 identity and ordinal case/normalization
+The separately provisional NativeOutput candidate now has a bounded
+Standard F/A2 direct-import Body path for sequential calls, two-level nested
+Boolean-formal branches and a three-level nested status/result-correlated
+output-read path, plus NativeParameter inputs. Existing D5/D6 instructions
+preserve multi-step local value-copy chains. A2 round-trips one-element local
+StorageAddress backing at extents zero and one through such a chain, and typed
+pointer-formal Homes at zero or positive extents through explicit unsafe
+calls; the latter includes local copies of opaque incoming pointers. Read,
+Write and ReadWrite cases preserve their exact contracts through source-free
+re-emission and PE import emission. The analyzer-enabled Debug build passes,
+the focused backing selection passes 21/21, and the
+NativeOutput/NativeParameter/local-aggregate selection passes 359/359 with no
+skips. The nested-control-flow F/A2 selection passes 4/4. This remains
+provisional
+implementation evidence, not accepted-conformance support. More complex
+nested CFGs and loops, larger known backing, other dependency sources/provider
+graphs, NativeVTable,
+checked/indirect outputs and failure/retirement remain open.
+The separate unapproved Standard provider-binding candidate is now
+provisionally implemented for NativeParameter-free F/F+S direct-import cells.
+Public bodyless providers emit shared OutputState, PredicateGraph and
+Dependency records with a real Export and no dummy caller or anchor. Binding
+retains the original consumer declaration, compares exact foreign descriptors
+and normalized built-in/raw-pointer signature identities, and checks selector
+states, graph meaning, effects and complete dependency sets. F and F+S
+ModuleRef/Import edges reconstruct and re-emit the provider-bound NativeOutput
+Body; separate and co-located provider declarations, F+S-to-F mixed selection,
+PE emission, `ptr<void>` output values and changed descriptor/type/selector/
+dependency rejection are covered. F+S is bounded to one selected provider
+Module and does not gain F-only provider-graph admission. The combined
+NativeAddress/NativeImport selection passes 332/332 with no skips, the local
+aggregate native selection passes 16/16, and the analyzer-enabled Debug build
+passes with zero warnings/errors. This remains provisional implementation
+evidence, not accepted-conformance support. It does not select NativeParameter
+`000E`/16, nominal type-provider mapping, A2/A3 provider aliases,
+NativeVTable/foreign-interface identity, checked or indirect outputs, or
+resource adoption/release. Dedicated NativeOutput regressions across already
+admitted F multi-provider/graph edges remain open, even though the shared
+comparer is applied to each retained edge. Broader F/A2 CFGs, exceptional
+indeterminacy, other schema/ownership paths and failure/retirement remain open.
+
+The unapproved NativeExport source/Core candidate is now provisionally
+implemented for method-only in-process registrations: exact selected X and
+transparent schema aliases bind optional positional/named EntryName literals,
+method X preserves the effective NativeCallable convention and caller
+unsafety, and PE library emission merges source names with host-selected
+exports while coalescing the same owner/symbol and rejecting collisions.
+`NativeEmitter.Emit` also publishes method exports in executable PE images.
+The Standard producer emits module-level and static-type MethodDef `0x0022`
+rows with exact owner-specific `0x000C` references, default/explicit names,
+TypeDef field/layout ownership and Feature closure; producer validation
+exercises the structural reader. Bounded F/A2 NativeAddress source-free consumers restore module-level and
+static-type caller X, re-emit it and invoke the exported method from a PE
+library; compatible provider replacement preserves the export, and a changed
+NativeImport library descriptor rejects. The analyzer-enabled Debug build and
+11/11 related NativeExport/F/A2/PE tests pass, including source-free library
+and supervised executable execution. Remaining are NativeExport source-free
+routes outside these NativeAddress compositions and static data exports.
+NativeCore manifest v1 remains I/C/P-only.
+
 checks, exact alternate ExportKey selection, compatible deep-body replacement,
 chain/diamond/mutual-cycle CLI JIT/AOT, no-entry DLL export invocation, PE
 import/export inspection and sentinel output preservation. Native input/

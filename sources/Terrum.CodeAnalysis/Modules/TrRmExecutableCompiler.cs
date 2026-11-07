@@ -198,7 +198,25 @@ public static partial class TrRmExecutableCompiler
                 "The foreign-invocation source emitter requires the Windows x64 target.");
         }
 
-        return schemaIdentity switch
+        if ((StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignInvocationSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationStorageAddressSchemaIdentity))
+            && HasDirectNativeOutputCall(program))
+        {
+            return EmitStandardNativeOutputCallProgram(program,
+                moduleIdentity,
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationSchemaIdentity)
+                    ? TrRmArtifactSchema.ForeignInvocationDraft
+                    : TrRmArtifactSchema.ForeignInvocationStorageAddressDraft);
+        }
+
+        if ((StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignInvocationSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationStorageAddressSchemaIdentity))
+            && HasStandaloneNativeOutputProviderDeclaration(program))
         {
             StandardLayoutQueriesSchemaIdentity
                 => EmitDevelopment(program, moduleIdentity,

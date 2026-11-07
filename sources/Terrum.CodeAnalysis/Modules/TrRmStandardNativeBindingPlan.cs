@@ -263,7 +263,10 @@ internal sealed class TrRmStandardNativeBindingPlan
         }
 
         if (TrRmExecutableCompiler.IsExactForeignInvocationSchemaSet(
-                _schemaIdentities))
+                _schemaIdentities)
+            || (!_providerBindings.IsDefaultOrEmpty
+                && TrRmExecutableCompiler
+                    .IsNativeOutputProviderSchemaSet(_schemaIdentities)))
         {
             var closure = TrRmExecutableCompiler
                 .ValidateStandardProviderClosure([.. _artifacts],
