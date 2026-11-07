@@ -6750,19 +6750,22 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
-    [TestCase("Read", 0u)]
-    [TestCase("Read", 1u)]
-    [TestCase("Read", 2u)]
-    [TestCase("Write", 2u)]
-    [TestCase("ReadWrite", 2u)]
+    [TestCase("Read", 0u, false)]
+    [TestCase("Read", 1u, false)]
+    [TestCase("Read", 2u, false)]
+    [TestCase("Write", 2u, false)]
+    [TestCase("ReadWrite", 2u, false)]
+    [TestCase("Read", 2u, true)]
     public void StandardA2NativeOutputCallRetainsArrayParameterBacking(
-        string access, uint nativeParameterExtent)
+        string access, uint nativeParameterExtent, bool allBitsSet)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string moduleIdentity = "a2-native-output-array-backing";
         var pointerType = access == "Read"
             ? "ptr<int32>" : "write ptr<int32>";
+        var arrayValues = allBitsSet
+            ? "[-1, -1, -1]" : "[0, 0, 0]";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Result {
@@ -6780,7 +6783,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
 
             internal int32 Probe(int32 index) {
                     int32 zeroIndex = 0;
-                    mut [int32; 3] backing = [0, 0, 0];
+                    mut [int32; 3] backing = {{arrayValues}};
                 init mut Result result;
                 unsafe { return Observe(&backing[index], &init result); }
             }
@@ -6832,7 +6835,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Assert.That(element, Is.TypeOf<BoundConstant>());
             var constant = (BoundConstant)element;
             Assert.That(constant.Type, Is.EqualTo(PrimitiveType.Int32));
-            Assert.That(constant.Bits.Low, Is.Zero);
+            Assert.That(constant.Bits.Low, Is.EqualTo(allBitsSet
+                ? uint.MaxValue : 0));
             Assert.That(constant.Bits.High, Is.Zero);
         }
         Assert.That(call, Is.Not.Null);

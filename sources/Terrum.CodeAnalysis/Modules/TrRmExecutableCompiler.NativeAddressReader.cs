@@ -925,7 +925,7 @@ public static partial class TrRmExecutableCompiler
                         || storePayload[3] != 1
                         || placeRegister
                             != pendingArrayInitializationSelection.PlaceRegister
-                        || sourceRegister != 14
+                        || sourceRegister is not (14 or 15)
                         || !arrayInitializationStoreRecordIndexes.Add(
                             storeRecordIndex)
                         || !arrayInitializationsByHome.TryGetValue(
@@ -936,8 +936,25 @@ public static partial class TrRmExecutableCompiler
                             "A direct NativeOutput array element store is malformed.");
                     }
 
-                    arrayInitialization.Elements.Add(new BoundConstant(0,
-                        arrayInitialization.Layout.ElementType, default));
+                    var elementType
+                        = arrayInitialization.Layout.ElementType;
+                    if (!PrimitiveTypeFacts.IsIntegerOrWide(elementType))
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput array initializer has a non-integer contextual store.");
+                    }
+
+                    var elementWidth
+                        = PrimitiveTypeFacts.ScalarWidth(elementType) * 8;
+                    var allBitsLow = elementWidth >= sizeof(ulong) * 8
+                        ? ulong.MaxValue : (1UL << elementWidth) - 1;
+                    var allBitsHigh = elementWidth > sizeof(ulong) * 8
+                        ? ulong.MaxValue : 0;
+                    arrayInitialization.Elements.Add(new BoundConstant(
+                        sourceRegister == 14
+                            ? new ScalarBits(0, 0)
+                            : new ScalarBits(allBitsLow, allBitsHigh),
+                        elementType, default));
                     if ((ulong)arrayInitialization.Elements.Count
                         < arrayInitialization.Layout.ElementCount)
                     {

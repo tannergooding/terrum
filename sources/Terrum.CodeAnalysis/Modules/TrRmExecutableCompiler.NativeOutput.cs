@@ -1439,9 +1439,11 @@ public static partial class TrRmExecutableCompiler
                     var constant
                         = (BoundConstant)arrayInitialization.Elements[
                             elementIndex];
-                    if (!TryGetContextualInitializationRegister(constant,
+                    if (!PrimitiveTypeFacts.IsIntegerOrWide(
+                            layout.ElementType)
+                        || !TryGetContextualInitializationRegister(constant,
                             layout.ElementType, schema, out var sourceRegister)
-                        || sourceRegister != 14)
+                        || sourceRegister is not (14 or 15))
                     {
                         throw Unsupported(
                             "A direct NativeOutput array initializer requires assigned scalar source registers.");
@@ -2423,11 +2425,13 @@ public static partial class TrRmExecutableCompiler
                                 arrayInitialization, program, schema)
                             && arrayInitialization.Elements.All(element =>
                                 element is BoundConstant constant
+                                    && PrimitiveTypeFacts.IsIntegerOrWide(
+                                        arrayInitialization.Layout.ElementType)
                                     && TryGetContextualInitializationRegister(
                                         constant, arrayInitialization.Layout
                                             .ElementType, schema,
                                         out var sourceRegister)
-                                    && sourceRegister == 14);
+                                    && sourceRegister is 14 or 15);
                     var isScalarConstantInitializer
                         = schema
                             == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
@@ -2436,6 +2440,8 @@ public static partial class TrRmExecutableCompiler
                                 < (uint)caller.Variables.Length
                             && constantInitializer.Type == caller
                                 .Variables[local.Variable].Type
+                            && constantInitializer.Bits.Low == 0
+                            && constantInitializer.Bits.High == 0
                             && TryGetContextualInitializationRegister(
                                 constantInitializer,
                                 caller.Variables[local.Variable].Type,
