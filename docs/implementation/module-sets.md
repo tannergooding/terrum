@@ -47,8 +47,16 @@ to inspect the child status in PowerShell. Compilation never runs the consumer.
 `--json` is supported as the final argument on all three set commands.
 Output artifacts are atomically replaced only after successful compilation.
 
-The `TNSP` version 2 container records retained declaration ownership separately
-from actual machine imports; the reader accepts only version 2. Its embedded
+The `TNSP` version 3 container records retained declaration ownership separately
+from actual machine imports; the reader accepts only version 3. It also retains
+the selected provider and foreign descriptor for each module-selected direct
+import in an outer expectation table. Direct-import outputs keep the revision-92
+inner contract, and the consumer image remains bound to the selected provider
+DLL/export. Provider-owned direct imports are real checked leaf exports, not
+forwarder strings or an import-table bypass. This is the provisional,
+unapproved integration in the
+[provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md).
+Its embedded
 semantic contract uses the provisionally implemented private revision 89
 arithmetic records from the unapproved
 [proposal](../proposals/source-arithmetic-private-persistence.md), while

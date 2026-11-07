@@ -120,8 +120,14 @@ Selected leaf and intermediate DLL images remain byte-for-byte unchanged.
 The JIT worker uses its application directory as its current directory and
 absolute paths for staged inputs, so a retained worker-directory handle cannot
 prevent removal of the transient staging directory after execution.
-The graph reader accepts only version 2, and both JIT and AOT execution require
-its explicit machine-import metadata.
+The graph reader accepts only version 3, and both JIT and AOT execution require
+its explicit machine-import metadata and direct-import expectation table. A
+graph-owned direct import can be exported as a checked IAT leaf thunk; a
+module-selected direct import remains bound to the exact provider DLL/export.
+Graph replacement compares its retained foreign descriptor and revision-92
+output contract with that selected provider. This is the provisional,
+unapproved integration in the
+[provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md).
 The worker loads DLLs by full staged path in dependency order, registers
 unwind information for root code, and unloads DLLs after root code and unwind
 memory are released. This requires Windows x64. On CET-enforcing Windows, the
@@ -140,8 +146,8 @@ This graph is acyclic and explicitly bounded. It does not claim transitive
 version roll-forward, hot servicing, resilient layouts, the future general
 `TRRM` semantic-IL format, or replacement of already-emitted machine code by
 the semantic JIT. Single-provider, leaf-set and graph package readers accept
-only version 2; version 2 metadata records emitted imports separately from
-retained declarations.
+only version 3; version 3 metadata records emitted imports and selected
+direct-import expectations separately from retained declarations.
 
 An implementation may use lexical readonly views over an owned native buffer
 without changing its exported declaration. Such a producer carries the
@@ -302,7 +308,7 @@ foreach ($policy in $policies) {
 }
 ```
 
-Graph version 2 packages carry the declared origin and cleanup owner of every
+Graph version 3 packages carry the declared origin and cleanup owner of every
 retained type, separately from the actual PE imports reported by the same
 native emission. A graph DLL may return or bool/out-publish a dependency-owned
 Copy or unique value without exporting its cleanup from the wrong DLL. Select

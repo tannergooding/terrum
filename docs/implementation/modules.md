@@ -62,13 +62,18 @@ The internal, unapproved
 [RootPinRuntimeDraft](../proposals/trrm-root-pin-schema-selection.md) selector
 now isolates candidate Feature 14/1, TargetProfile 2/1 and F0/record-0D
 ReferenceSupport from the four foreign-invocation profiles, which retain
-NativeAddress record 0D. This is schema and structural framing only: RootPin
-source binding, the runtime provider, relocation/pinning and native lowering
-are not implemented.
+NativeAddress record 0D. This remains a prior unapproved schema snapshot, not
+the selected ABI for the integrated, pluggable GC runtime proposed in
+[integrated GC boundary](../proposals/integrated-gc-runtime-boundary.md).
+The RootPin source binding, common GC ABI, collector integration,
+relocation/pinning and native lowering are not implemented.
 InterfaceBase and InterfaceMethod rows validate their range ownership,
 ordinals, complete base TypeSpecRefs and directly declared instance MethodDef
 owners. Base-instance interface binding, ownerless witness/query ConstantSource
-contexts and associated-relation/witness execution remain incomplete. Standard
+contexts and associated-relation/witness execution remain incomplete. Constraint
+kind 3 provisionally selects a bounded one-based AssociatedRelation row under
+the unapproved payload proposal; this does not implement relation satisfaction
+or witness execution. Standard
 ConstantSource rows validate tags and their selected target-table row bounds
 only. The FrozenValueNode structural reader is integrated, and its provisional
 24-scalar codec validates exact widths, unit, Boolean, rune and raw payload
@@ -88,14 +93,42 @@ their selected-use Module binding. Windows x64 materialization maps all 24
 provisional fixed-scalar carriers through `ScalarBits`, checks the selected
 Module target and exact native size/alignment, and preserves raw payload bits.
 The standard scalar loader executes an int32 ConstantMap load/return through
-JIT and PE emission. Private semantic modules now select exact revision 101:
-the revision-92 payload, three u64 tag-35 storage-address extents, the
-mandatory structural array table with flat direct-local operations in tags
-43-46, and the mandatory tag-35 ancestor-path count/list. The unapproved
+JIT and PE emission. Private semantic modules retain exact revision 104 for
+features it admits under the user's provisional direction for the still-
+unapproved [wide-layout proposal](../proposals/wide-fixed-layout-private-persistence.md).
+The exact provisional revision-106/-2 successor composes checked references,
+direct-import expectations, callable/function-pointer contracts, CopyOrigin
+and raw-Union return coverage for bounded rootless-Copy aggregates with
+fixed-array fields; revision 105 and the withdrawn 106/-1 candidate are not
+reader aliases. This successor remains provisional under
+[`private-raw-union-return-coverage.md`](../proposals/private-raw-union-return-coverage.md).
+It retains revision 92 output contracts and revision 99's three u64 tag-35
+storage-address extents. Its inherited revision-103 codec includes the
+revision-100 structural array table and flat direct-local operations in tags
+43-46, RepeatCopy tag 47, revision-104's field-path write tag 48, revision-101's mandatory
+tag-35 ancestor-path count/list and revision-103's layout controls. Revision
+104 widens only inline struct size and struct-field offset/size operands to
+u64; managed-class size and fields remain i32. The reader revalidates the
+full-width geometry and rejects predecessor revision 103 exactly. The active
+`PrivateRepeatTag47IsCompactForZeroOneAndLargeCounts` test checks that the
+single seed child remains compact for N=0, N=1 and a large count.
+Revision 106 retains the inherited 102+FieldWrites constructor-backed
+nested-local role for direct-local field-suffixed writes and lawful address
+uses; its R places persist through PlaceRead 50 and CheckedStore 53, not tag
+48. Nested array reads and whole-inner-array replacement remain excluded.
+`PrivateNestedFieldPathBackingRoundTripsAndExecutes` exercises the 106
+source-free Repeat/field-write path through JIT and PE, then tests native
+consumer-set/graph embedding and compatible provider replacement.
+`PrivateRepeatBodiesSurviveSemanticModuleSetReemission` and
+`PrivateRepeatBodiesSurviveFixedArrayTableReorderingOnReplacement` cover
+source-free semantic consumer-set re-emission and Repeat fixed-array-table
+index remapping under provider replacement. Broader provider/dependency
+expectation closure and malformed consumer matrices remain separate gates.
+Positive-stride very-wide runtime use, by-value nested-array signatures and
+ptr-to-array runtime carriers also remain separate gates. The unapproved
 [fixed-array private-persistence proposal](../proposals/native-fixed-array-private-persistence.md)
 remains provisional; current evidence covers source-free flat scalar/unit
-JIT/AOT, set/graph packages, and CLI module run/link. Nested array values and
-ptr-to-array runtime carriers reject. The unapproved
+JIT/AOT, set/graph packages, and CLI module run/link. The unapproved
 [nested storage-address-path proposal](../proposals/native-storage-address-path-private-persistence.md)
 owns the tag-35 path extension; the separate unapproved
 [address-only backing companion](../proposals/native-storage-address-address-only-backing.md)
@@ -106,7 +139,29 @@ source-free consumer/re-emission, JIT/AOT and native package-set/graph
 execution. This does not admit ordinary nested value operations, vacant
 backing, escapes or pointer-to-array carriers. Nested and pointer-array
 recipes not rooted by this exact backing role remain metadata-only.
-Full revision-101 artifacts now preserve descriptive nominal
+The unapproved
+[private nominal-class-reference candidate](../proposals/private-nominal-class-reference.md)
+is provisionally implemented for reference-only snapshots, including nested
+class/structure, pointer, checked-reference, function-pointer and fixed-array
+type maps. These maps survive private references, semantic sets/graphs, and
+semantic/native-package persistence. Hidden type names remain outside source
+lookup. Same-owner class diamonds deduplicate only after recursive layout and
+type comparison; divergent snapshots and conflicting owners reject. A
+reference-only class with array-derived field metadata does not promote the
+native image to the managed-class runtime profile; owned managed-class array
+fields remain unsupported. The focused class/revision-106/readonly selection
+passes 13/13 with no skips, and the analyzer-enabled Debug build passes with
+zero warnings and errors. This candidate remains unapproved and adds no
+construction/runtime promotion. The provisional enum-identity implementation
+now preserves an uncalled `NativeImport` with a private-enum `NativeParameter`
+pointee through private reference, set and graph remapping; a changed selected
+provider snapshot rejects. Broader enum closure, malformed/replacement cases,
+and CLI/package/runtime route qualification remain open.
+The private 106/-2 producer/reference also round-trips a bounded raw-Union
+fixed-array field root with explicit nominal identity inputs; ordinary
+non-Union array-derived locals and nested backing outside the selected profile
+remain rejected.
+Revision-103 artifacts preserve descriptive nominal
 array fields and their nested/pointer/fnptr closure through writing, reading,
 ordinary linking, sets, graphs and source-free execution; bodyless provider
 references prune recipes not rooted by an admitted runtime contract. The
@@ -115,8 +170,9 @@ records this provisional scope and adds no type-only export contract. CLI
 coverage includes native producer/consumer packages, sets, graphs, and direct
 source executable/library builds, plus a bounded `NativeImport` from an array
 element under both runtime policies; these remain separate from Standard A2.
-Managed-class fields whose pointer or nested-class graph reaches array metadata
-are rejected as runtime carriers.
+Owned managed-class fields whose pointer or nested-class graph reaches array
+metadata are rejected as runtime carriers. Reference-only class snapshots
+retain this closure as metadata without enabling those runtime operations.
 
 Private modules still reject the eight candidate revision-94 scalar
 identities; the unapproved
@@ -185,27 +241,48 @@ Candidate revision 89 adds one checked/wrapping mode byte to unary, binary,
 update and compound-assignment arithmetic records. This private schema is
 provisionally implemented under the unapproved
 [private-persistence proposal](../proposals/source-arithmetic-private-persistence.md):
-the current exact revision 101 carries those operation modes, while revision
-89 is not selected independently. Candidate revision 92 composes the
+revisions 104 and 106 carry those operation modes, while revision 89 is not
+selected independently. Candidate revision 92 composes the
 unapproved NoThrow-retirement delta on 89
 with the aggregate-output collection and reservation tag 41 described by the
 separate [output persistence proposal](../proposals/aggregate-native-output-private-persistence.md).
 The retirement delta is specified in the unapproved
 [private NoThrow persistence proposal](../proposals/no-throw-private-persistence.md).
-This exact-schema implementation remains provisional: the current structured
-writer and reader select only 101, which composes revision 100's tag-35
-storage-address extents and revision 92's NoThrow/output contracts, then adds
-the selected fixed-array table, flat-operation records and mandatory
-ancestor-path count/list for tag 35. Every other private revision rejects and
-requires regeneration; proposed
-revisions 93–98 are not implicitly composed. Revision 99 omits the general
+This exact-schema implementation remains provisional: the structured writer
+selects revision 104 for its admitted features and exact revision 106/-2 for
+the checked-reference B+C+R+U+A composition; revision 105 and 106/-1 are
+rejected rather than read as aliases. Revision 104 includes revision 100's tag-35
+storage-address extents and revision 92's NoThrow/output contracts, revision
+101's ancestor-path count/list and revision 102's field-path/repeat records,
+revision 103's selected layout controls, and revision 104's wide inline
+geometry. The reader accepts only exact revisions 104 and 106; all other
+private revisions reject and require regeneration, and proposed revisions
+93–98 are not implicitly composed. Revision 99 omits the general
 NoThrow field and contract tokens, persists direct-import NativeOutput
 declarations and output-specific dependency rows, and rejects general
 Dependency contracts it cannot represent. NativeCallable Captures and other
-general dependency contracts require the candidate revision 93 described in
-the [provenance proposal](../proposals/reference-provenance-carriers.md);
-standard TRRM and register-Body output persistence remain separate gaps. A
-The provisional revision-101 schema composes revision 100 and inherits
+general Dependency contracts require the candidate revision 93 described in
+the [provenance proposal](../proposals/reference-provenance-carriers.md).
+Revision 99 is private-only and is not a Standard TRRM or register-Body alias.
+Standard TRRM has a separate provisional F/F+S direct-import NativeOutput Body
+path for sequential and result-correlated calls, local-copy chains, and a
+bounded checked/wrapping integer unary-negation and add/sub/multiply
+local-initializer subset, checked integer division/remainder, and strict
+float32/float64 unary negation and add/sub/multiply/divide/remainder.
+Integer division/remainder remain checked in Release. The exact A2 schema
+also has a bounded direct NativeOutput Body path for one-dimensional scalar
+array locals initialized from contextual zero or all-bits-set integer
+constants (covered for `int32` and `int64`), with a NoEscape
+NativeParameter StorageAddress input (Read, Write or ReadWrite; declared
+extents 0–2) and result-correlated output reservation; it is source-free
+round-tripped and re-emits byte-identically. F/F+S Bodies also accept
+negated Boolean Home conditions through conditional-edge inversion and
+preserve byte-identical source-free re-emission. This does not establish
+support for array-valued function parameters, nested/field-backed arrays,
+general array initializers or indices. Other expression and predicate forms,
+general CFG, exceptional/failure retirement and ownership remain open; see the
+[conformance-gap inventory](conformance-gaps.md).
+The provisional revision-101 path composes revision 100 and inherits
 revision 99's amendment assigning expression tag 42 to typed `BoundFieldMove`
 field-place paths, carrying them through serialization,
 resolution, call traversal, linked verification and type-table remapping. This
@@ -226,7 +303,7 @@ validated six-byte IAT leaf thunk. TNPK, TNSP and TNGP consumers preserve the
 selected provider DLL route and compare the retained descriptor/output
 contracts on replacement. AOT is qualified for packages and sets; graphs also
 exercise root-only JIT, including a graph-owned direct-import export. This
-provisional path does not further amend revision 101, source syntax or
+provisional path does not further amend revision 104, source syntax or
 standard TRRM; the separate storage-address-path proposal owns its tag-35
 extension. Ordinary
 private-module replacement remains slot-flexible. These private
@@ -246,7 +323,7 @@ not persisted as an independent capability; removing the only scope rejects.
 | Field-value reads and getters inside `unsafe(expr)` | Eligible public `Copy` paths/owners and recursively exportable results. Getter identity remains canonical; linking permits only established producer qualification. This slice does not admit field/getter mutation. |
 | Readonly instance calls inside `unsafe(expr)` | One by-value receiver with recursively exportable by-value parameters/results. The method identifier is owner-relative; producer qualification is admitted only during linking. |
 | Mutable field-receiver calls inside `unsafe(expr)` | A nonescaping receiver loan is source argument zero mapped to formal zero of an ordinary or caller-unsafe synchronous mutable method. At least one field edge is caller-unsafe; every edge's declared access and the complete `MutReceiver`, initialization, place, mutability, ownership and reservation contracts are checked. Public non-unique `Copy` layouts and explicit by-value parameters/results must be recursively exportable. Wrapped/remapped or readonly receiver loans, mutable receiver imports, direct mutable-method exports, unsafe-block calls in this slice and other reference/output modes reject. |
-| Native function addresses and indirect calls | Revision 82 retains explicit Windows x64 `NativeAbi` signatures, native-callable function identities, address targets, and indirect-call operands/results. The target must exactly match its declared signature and retain caller-unsafety; defined native-callable bodies satisfy scoped no-failure verification, and call sites rely on the callable role rather than callee-body inference. Address formation and invocation require reconstructed unsafe scopes. Function-pointer values are non-owning code addresses and do not extend image lifetime. The development `.trrm` path also persists local callable entries and imported expected declarations, including provider identity/export key, but does not bind the provider or retain code lifetime; direct native imports can carry native-function-pointer parameters and results through their complete signature TypeSpecs. Explicit internal operations for the unapproved `trrm/1-development-native-conventions-resolution-1` candidate additionally round-trip NativeAbi role conventions, complete anchor identities, and import mode/policy through source-free references and re-emission. Default Development operations and Standard TRRM do not select this candidate; metadata support establishes neither native convention lowering nor loader behavior. |
+| Native function addresses and indirect calls | Revision 82 retains explicit Windows x64 `NativeAbi` signatures, native-callable function identities, address targets, and indirect-call operands/results. The target must exactly match its declared signature and retain caller-unsafety; defined native-callable bodies satisfy scoped no-failure verification, and call sites rely on the callable role rather than callee-body inference. Address formation and invocation require reconstructed unsafe scopes. Function-pointer values are non-owning code addresses and do not extend image lifetime. The development `.trrm` path also persists local callable entries and imported expected declarations, including provider identity/export key, but does not bind the provider or retain code lifetime; direct native imports can carry native-function-pointer parameters and results through their complete signature TypeSpecs. Explicit internal operations for the unapproved `trrm/1-development-native-conventions-resolution-1` candidate additionally round-trip NativeAbi role conventions, complete anchor identities, and import mode/policy through source-free references and re-emission. Default Development operations and Standard TRRM do not select this candidate; metadata support establishes neither native convention lowering nor loader behavior. The exact provisional private revision 106/-2 composition adds `NativeAddressContract:fnptr#i` roots for addressable NativeCallable and direct-import declarations, retaining complete signature-row vectors—including NativeParameter facts—for uncalled imports and bodyless expectations through private references, sets, graphs, and provider replacement. It preserves authored declared caller-unsafety separately from the native role's caller-unsafe obligation and does not itself grant addressability or select Standard TRRM. |
 | Typed native pointers | Revision 83 retains pointer identities, pointee types, write access, and address/read/write body nodes. Pointer and function-pointer tables are recursively validated and structurally remapped through private dependency sets and graphs; unsafe scopes are reconstructed and verified. The development `.trrm` path carries typed-pointer TypeSpecs and native-pointer rows for admitted declarations and call arguments, including direct-import pointer parameters and results. `NativeParameter` remains optional and adds no access, retention, extent, or alignment promise when absent; general pointer address/read/write Body nodes remain unsupported. |
 | Numeric-slot native vtable methods | Revisions 84-85 retain the slot, aligned vptr offset, and pointer parameter contracts; revision 86 retains the expected binding on imported consumer declarations, and revision 87 retains their output contracts. The development `.trrm` path encodes bodyless declarations in section `0x0032` and same-artifact compact-indexed calls through ordinary `Call` targets. A source reference preserves provider identity/export key in ModuleRef/Import and copies the role-4 binding row for source-free verification and lowering. Native-package single-provider, set, and graph routes validate the selected identity and exact binding, then rebind the local stub to the provider export. Ordinary private-module replacement remains slot-flexible. Bounded bodies preserve admitted typed-pointer signatures and arguments and support scalar output destinations with result-condition verification through ScalarInitOutput. General address/pointer operations remain unsupported. Loaded indexed bodies are not yet reserializable by the private semantic-module writer. |
 | Static binary nominal operators inside `unsafe(expr)` | Two exact owner-typed by-value operands and an owner result, or `bool` for comparisons. Public non-unique `Copy` owners have recursively exportable layouts, and the complete call retains canonical positional mapping. |
@@ -485,12 +562,20 @@ dotnet $cli run-module artifacts\bin\modules\consumer.trm artifacts\bin\modules\
 dotnet $cli link-module artifacts\bin\modules\consumer.trm artifacts\bin\modules\producer-v2.trm -o artifacts\bin\modules\linked.exe --runtime fail-fast
 ```
 
+The self-hosted sources below use `[Layout]`/`[Blittable]`. Their private
+producer/consumer compilation therefore needs an explicitly host-provisioned
+version-1 Layout Core manifest; there is no repository default or production
+provider selection. The same manifest selects only the current source
+compilation context and is not retained in the `.trm` artifact. Native
+`compile-native`/set/graph commands do not accept it.
+
 The actual compiler candidates can be built separately from their tests:
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
-dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\CharacterFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o artifacts\bin\modules\compiler-values.trm
-dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Text\RangeTests.terrum artifacts\bin\modules\compiler-values.trm --source samples\ModuleReplacement\range-entry.terrum -o artifacts\bin\modules\range-tests.trm
+$layoutManifest = 'artifacts\config\layout-core.json' # host-provisioned configuration
+dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\CharacterFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o artifacts\bin\modules\compiler-values.trm --layout-core-manifest $layoutManifest
+dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Text\RangeTests.terrum artifacts\bin\modules\compiler-values.trm --source samples\ModuleReplacement\range-entry.terrum -o artifacts\bin\modules\range-tests.trm --layout-core-manifest $layoutManifest
 dotnet $cli run-module artifacts\bin\modules\range-tests.trm artifacts\bin\modules\compiler-values.trm --runtime fail-fast # exits 0
 ```
 
@@ -500,8 +585,9 @@ the scalar-register-only profile:
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
-dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\bin\modules\token-values.trm
-dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Lexing\TokenTests.terrum artifacts\bin\modules\token-values.trm --source samples\ModuleReplacement\token-entry.terrum -o artifacts\bin\modules\token-tests.trm
+$layoutManifest = 'artifacts\config\layout-core.json' # host-provisioned configuration
+dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\bin\modules\token-values.trm --layout-core-manifest $layoutManifest
+dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Lexing\TokenTests.terrum artifacts\bin\modules\token-values.trm --source samples\ModuleReplacement\token-entry.terrum -o artifacts\bin\modules\token-tests.trm --layout-core-manifest $layoutManifest
 dotnet $cli run-module artifacts\bin\modules\token-tests.trm artifacts\bin\modules\token-values.trm --runtime fail-fast # exits 0
 ```
 
@@ -777,7 +863,7 @@ transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
 order, access and declared mutation authority. The current format retains the checked `IsMutable` flag per field; changing it
 in either direction changes the published value contract and is rejected
-during replacement. Structured-module revision 101 retains `DoesNotReturn` but
+during replacement. Structured-module revisions 104 and 106 retain `DoesNotReturn` but
 does not persist a general `IsNoThrow` declaration or compare that retired
 promise during replacement. It still rejects weakening `DoesNotReturn`
 without inferring effects from replacement bodies. Native graph package and
@@ -798,6 +884,25 @@ policy and resilient public layouts remain undefined; cyclic dependencies
 remain unsupported.
 
 ## Native package and image boundaries
+
+The explicitly selected, unapproved L1 Standard native route jointly lowers
+the source-free root and its MethodDef providers through ordinary native
+JIT/PE emission, without F NativeImport bindings. Before lowering, the plan
+reloads its exact artifact snapshots and checks the retained Module selections
+and every original MethodDef/TypeDef edge. Backend-only function/type names
+are unique; calls and nominal types map by selected origins, not names or
+layout sizes. Provider implementations remain non-exportable and the semantic
+closure retains its original import expectations. A no-entry library may
+export only public root-owned implementations. Supervised Windows x64 tests
+now exercise the selected root/provider paths through JIT and AOT, including
+imported nominal array fields, exact export targets, rejection before native
+publication and a no-entry root-only library. A bodyless MethodDef Import
+with the assigned implicit-readonly-reference Param flag now binds only to a
+provider MethodDef with the same parameter contract; its CallSite uses
+borrow-read, and source-order capture plus provider execution are covered
+through JIT and AOT. This is bounded evidence, not overall L1 acceptance;
+generic, receiver-bearing and MethodDef-contract-bearing providers remain
+open.
 
 For the managed `Snapshot` consumer, compile both compatible providers and one
 consumer artifact per policy. `run-module` services that same consumer

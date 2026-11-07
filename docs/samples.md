@@ -6,8 +6,8 @@ binding, emission, execution, or approval of a provisional contract. See the
 [sample entry point](../samples/README.md) for the directory map.
 
 The catalog records current implementation behavior, which can lag the
-accepted specification. In particular, runnable entries using `[NoThrow]` or
-the `checked-exceptions` runtime-policy switch demonstrate legacy prototype
+accepted specification. In particular, runnable entries using the
+`checked-exceptions` runtime-policy switch demonstrate legacy prototype
 behavior, not accepted source or module contracts; see
 [CG-003](implementation/conformance-gaps.md#cg-003).
 
@@ -71,7 +71,8 @@ implemented.
 |---|---|---|
 | [`factorial`](../samples/LanguageFeatures/ControlFlow/factorial.terrum), [`control-flow`](../samples/LanguageFeatures/ControlFlow/control-flow.terrum), [`stack-arguments`](../samples/LanguageFeatures/Functions/stack-arguments.terrum), [`for-loops`](../samples/LanguageFeatures/ControlFlow/for-loops.terrum), [`requirements`](../samples/LanguageFeatures/Contracts/requirements.terrum) | Recursion, mutation, stack arguments, loops, checked requirements; respective statuses 720, 45, 91, 285, 10 | `fail-fast`; actual-source [native tests](../tests/Terrum.CodeAnalysis.Tests/Native/NativeTests.cs) |
 | [`integers64`](../samples/LanguageFeatures/NumericTypes/integers64.terrum) | Signed/unsigned 64-bit arithmetic and conversions | Ordinary native build; [64-bit tests](../tests/Terrum.CodeAnalysis.Tests/Semantics/Integer64Tests.cs) |
-| [`no-throw`](../samples/LanguageFeatures/Contracts/no-throw.terrum), [`no-return`](../samples/LanguageFeatures/Contracts/no-return.terrum) | Effect contracts and conditional outputs; status 42 | `fail-fast`; actual-source native tests |
+| [`scalar-values`](../samples/LanguageFeatures/Contracts/scalar-values.terrum) | Scalar construction, getters and conditional output publication; status 42 | `fail-fast`; actual-source native tests |
+| [`no-return`](../samples/LanguageFeatures/Contracts/no-return.terrum) | Nonreturning rejection and conditional output flow; status 42 | `fail-fast`; actual-source native tests |
 | [`try-finally`](../samples/LanguageFeatures/EffectsAndCleanup/try-finally.terrum) | Nested normal-exit cleanup preserves a pending return; status 42 | `fail-fast`; failure terminates rather than unwinding |
 | [`checked-recovery`](../samples/LanguageFeatures/EffectsAndCleanup/checked-recovery.terrum) | Cross-function division failure runs `finally` before an unsafe `catch`; status 42 | `checked-exceptions`; AOT/JIT |
 | [`owner-transfer`](../samples/LanguageFeatures/Ownership/owner-transfer.terrum), [`unique-owner`](../samples/LanguageFeatures/Ownership/unique-owner.terrum), [`composite-owner`](../samples/LanguageFeatures/Ownership/composite-owner.terrum) | Moves, conditional ownership publication, receiver mutation, failed replacement, and partial construction; status 42 | Use `checked-exceptions` for recovery examples; compact owners hold no OS resource |

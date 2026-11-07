@@ -183,10 +183,12 @@ operators also lower to exact 16-byte Windows x64 code and execute through JIT
 and PE under both runtime policies. Hosted floating/BID operator semantics now
 bind and fold exactly. Windows x64 lowering covers float16, bfloat16, float32
 and float64 arithmetic, comparisons, sign operations, updates, compound
-assignments and truncating remainder. Native float128 and BID operations and
-full cross-format floating conversions remain incomplete. Standard register-Body
-CallSite execution and independent module-call replacement conformance remain
-separate gaps.
+assignments and truncating remainder, as well as BID decimal32/64/128
+arithmetic, comparisons, sign operations, updates, compound assignments and
+truncating remainder through JIT and PE under both runtime policies. Native
+float128 operations and full cross-format floating conversions remain
+incomplete. Standard register-Body CallSite execution and independent
+module-call replacement conformance remain separate gaps.
 
 The hosted compiler supports internal scalar `[ConstEval]` functions,
 required `const T name = expression;` locals and nested scalar `const`
@@ -362,7 +364,7 @@ and [publication contracts](../specs/language-contracts.md#22-declared-outcome-r
 | Boolean requirements | Kind 21 retains checked-require behavior under either runtime policy without a hidden local or new source scope. |
 | Structured returns and void completion | Tree/statement scalar returns use kind 8 with a typed root and keyword-through-semicolon span; their terminal header words 38–40 are `-1`. Terminal-expression envelopes remain a separate current form. All roots are consumed; reachable non-void fallthrough rejects unless a verified DoesNotReturn contract removes that normal edge. Void bodies permit empty/implicit completion and bare or grouped unit returns; a parameterless void entry exits zero. |
 | Else-if chains | False arms lower to nested conditionals without synthetic lexical blocks, retaining source coverage, local scopes and structural limits. |
-| NoThrow retirement and `DoesNotReturn` | The hosted binder rejects retired `[NoThrow]` source use with `TRM3017`; the scalar projection rejects its reserved bit and the CLI omits the retired `noThrow` field. `DoesNotReturn` remains independent, preserves its declared result type and removes implicit normal completion. Structured private revision 101 composes revision 100 and retains revision 92's omission of general NoThrow promises; native package/set/graph version 3 does likewise. Native-boundary and role-specific obligations remain a separate in-progress migration. |
+| NoThrow retirement and `DoesNotReturn` | The hosted binder rejects retired `[NoThrow]` source use with `TRM3017`; the scalar projection rejects its reserved bit and the CLI omits the retired `noThrow` field. `DoesNotReturn` remains independent, preserves its declared result type and removes implicit normal completion. Structured private revisions 104 and 106 retain revision 92's omission of general NoThrow promises; native package/set/graph version 3 does likewise. Native-boundary and role-specific obligations remain a separate in-progress migration. |
 | Named local lifetime ending | Kind 24 retains the slot, root `-1` and statement span. Parameters, unknown/inactive names and non-local places reject; shared verification owns definite liveness and reinitialization. |
 | Typed/inferred vacant locals | Kind 25 carries explicit `init T`; kind 26 carries `init var`; flag `0x2` records initialization authority. Inferred type comes from the first already-typed assignment expression, not an untyped literal. Unresolved, incompatible or optional storage rejects. |
 | Typed scalar constants | Kind 27 carries a direct literal; kind 28 carries an initializer reducible to `BoundConstant`; flag `0x4` records constant authority. Selected constant branches follow source evaluation. Inferred constants, runtime-dependent evaluated work and for-initializer constants reject. |
@@ -609,6 +611,12 @@ partial objects. Optional fields in `native-20` provide an explicit construction
 path for source-defined cycles.
 Class metadata is image-private: semantic/native modules retain it internally,
 while public DLL contracts exclude managed handles.
+An imported reference-only class snapshot by itself does not select
+`native-19`/`native-20` or add managed runtime data to a native image. An owned
+constructor/factory implementation or a class-bearing function signature or
+operation still selects the applicable managed-class runtime profile. The
+unapproved [private nominal-class reference candidate](../proposals/private-nominal-class-reference.md)
+adds no construction or field-access capability.
 Executable class payloads also admit acyclic, handle-free Copy struct fields
 of at most 16 bytes, within the same 128-byte payload bound. Whole-value reads
 and writes copy all bytes; nested field access preserves declared mutability
@@ -893,7 +901,22 @@ ephemeral `NoFailureProof` and is rechecked by the mandatory verifier before
 emission. A body with a possible Terrum failure, including a call to an
 ordinary unproved helper, rejects instead of unwinding a Terrum exception
 through a native caller. Fail-fast export behavior is unchanged. This
-host-selected export path does not implement the source `NativeExport` schema.
+host-selected library exports combine their ordinary selections with
+`NativeExport` source-role names from explicitly registered in-process
+schemas. Source method exports support omitted and explicit `EntryName`,
+preserve the implied/explicit `NativeCallable` contract, and coalesce the same
+owner/symbol selected through both paths. `NativeEmitter.Emit` also publishes
+method exports in executable PE images. The Standard producer writes
+module-level and static-type MethodDef `0x0022` rows with exact `0x000C`
+clause references, default/explicit names, TypeDef field/layout ownership and
+Feature closure; the structural validator checks the produced artifact.
+These remain provisional and unapproved. Bounded F/A2 NativeAddress
+source-free consumers restore module-level and static-type caller X, re-emit
+it, and invoke the exported method from a PE library. Compatible provider
+replacement preserves the export, while a changed NativeImport library
+descriptor rejects. Other Standard source-free routes and static data exports
+remain unimplemented.
+NativeCore CLI manifest v1 remains I/C/P-only.
 
 The private `NativeModuleCompiler` producer and graph-image routes are
 different: their package contract is generated-module interop, and a
@@ -1021,6 +1044,15 @@ OS-resource handles, stored loans and GC are not implied by this proof.
 The [sample](../../samples/LanguageFeatures/Ownership/unique-owner.terrum)
 updates an owner through a mutating method, then exercises checked recovery
 after a failed replacement while preserving the updated, still-live owner.
+The unapproved
+[authored NativeOutput adoption proposal](../proposals/native-output-authored-adoption-and-release.md)
+has a narrow provisional execution test: a result-correlated `DuplicateHandle`
+output is retained by an authored unique custodian and released by Cleanup
+after normal scope exit in JIT and supervised PE execution under both policies;
+JIT also checks explicit `finally` retirement across a handled checked failure.
+This establishes only that exercised
+wrapper path, not a general OS-resource contract, automatic adoption, or
+approval/stability of the proposal.
 
 ## Checked normal-continuation contracts
 
@@ -1197,8 +1229,10 @@ value requires an explicit checked conversion before returning from `Main`.
 
 ## Values, places and conditional publication
 
-Struct fields contain supported primitive values or other acyclic compact structs, with explicit constructors
-and naturally aligned declaration-order layouts of 1 through 16 bytes.
+Struct fields contain supported primitive values or other acyclic structs.
+Layout is target-derived; explicit Layout/Blittable roles require exact host
+registration. Packed, aligned, union and fixed-array geometry is summarized in
+the [layout profile inventory](layout-profiles.md).
 Constructors must initialize every field
 before reading or returning the entire receiver; individual initialized fields
 can be read during construction. Copying a value does not create a storage
@@ -1226,13 +1260,14 @@ through temporary values or immutable receivers are rejected.
 Whole-value replacement through a mutable local remains valid even when its
 fields are read-only. `SourceRange` and `Token` retain read-only fields; updates
 construct and replace valid values rather than bypass their constructors.
-This is the current bounded `ValueLayout` profile. Struct and field attributes
-diagnose `TRM3001`, so no transparent/native layout attribute is currently
-honored; the 1–16-byte aggregate rules do not provide resilient module layouts.
-Field positions and padding are computed from declaration order, size and
-alignment; arbitrary explicit field offsets are not supported.
-Aggregates over 16 bytes, reference-containing aggregates and implicit
-construction are not implemented.
+This bounded ordinary-value profile does not itself provide resilient module
+layouts. Source Layout/Blittable roles require exact host registration;
+unregistered names do not grant layout authority. Field positions and padding
+are computed from declaration order, size and alignment; arbitrary explicit
+field offsets are not supported. Reference-containing aggregates remain
+outside this support profile. The separately selected, unapproved Standard L1
+profile implements only its specified local-aggregate Body subset; see the
+[layout profile inventory](layout-profiles.md).
 
 Top-level functions and types default to `internal`; struct members,
 constructors and fields default to `private`. Module exports require explicit

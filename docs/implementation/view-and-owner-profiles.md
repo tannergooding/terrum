@@ -27,6 +27,25 @@ be the parser's selected path. Direct spans do not add general slicing,
 writable/ref-returning access, stored/escaping views, persisted captures,
 owner/guard retention or a public ABI.
 
+Within this compilation-local profile, normalized result/capture contracts
+drive TokenSpan call provenance. Backing dependencies follow unique
+TokenSnapshot owner moves to the new live slot, distinguish later reuse of the
+old slot, union at conditional sources, and retire with the last dependent
+view. This does not establish the same transfer or generation model for
+general references, GC roots, pinning, stored views or persisted contracts.
+
+## Ordinary checked-reference aggregate fields
+
+The source verifier and JIT now carry ordinary, non-GC/non-init checked
+references in inline aggregate fields through nested copies, local field
+rebinding, generic substitution, constructor/receiver calls and field loans.
+Fresh inline unique constructors are covered only by the unapproved,
+provisionally selected [candidate-95 extension](../proposals/reference-unique-constructor-field-provenance.md);
+every summarized field subtree remains Copy. This is not a general
+reference-place or managed-field profile.
+Bodyless private persistence, Standard TRRM summary transport, GC roots,
+pinning, and other nonlocal storage families remain unsupported.
+
 ## Compact unique-owner loans
 
 The bounded hosted owner projection uses synchronous unique receiver loans;
@@ -51,20 +70,22 @@ the whole root, excluding other root access including sibling fields.
 The bounded projection does not copy, pass, store, return or escape these views.
 Ending the loan leaves prior writes visible and ownership with the root.
 
-Its cleanup projection recognizes a NoThrow Cleanup unique-instance method,
-not the Close name alone. Compact owners contain primitive, nested Copy and
+Its cleanup projection recognizes a selected Cleanup unique-instance method,
+not the Close name alone. Cleanup does not require a general no-failure
+promise; normal cleanup failures propagate without resuming generated child
+retirement. Compact owners contain primitive, nested Copy and
 owning fields. Partial construction cleans acquired fields in reverse
 acquisition order; complete cleanup recurses through owning fields.
-Cleanup cannot invoke a potentially throwing operation. A statically constant
-index proved within an immutable host-buffer grant is usable in NoThrow
-cleanup; general indexing is not.
+The bounded projection permits a statically constant, in-range index proved
+within an immutable host-buffer grant; general indexing remains unsupported
+in this profile.
 Managed roots preserve live values but do not implement unique release or
 general view anchors.
 
 These implementation restrictions do not prohibit a separately checked
 published source/capture relationship in the language specification.
-Partial owning-field moves, complete view representations and wider
-dependency/ABI support remain separate implementation work.
+Standard TRRM persistence, broader dependency/ABI support and additional
+addressable storage families remain separate implementation work.
 The general [owning-field specification](../specs/language/ownership-and-cleanup.md)
-now defines those logical move/repair and complete/partial cleanup boundaries;
-this bounded implementation inventory does not restrict them.
+defines the logical move/repair and complete/partial cleanup boundaries; this
+bounded implementation inventory does not restrict them.

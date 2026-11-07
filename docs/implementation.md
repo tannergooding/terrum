@@ -155,11 +155,51 @@ binding and `ValueLayout`. Under the exact key
 fields use the candidate 16-byte/8-aligned layout, including nested placement
 and non-Blittable holder sizes up to the existing bounded structure maximum.
 The CLI accepts the key only for `analyze`, `build`, `build-native-import` and
-`jit`. The emitter and JIT deliberately reject selected programs as not yet
-implemented; no normal allocation control, backing hold, support-bearing
-descriptor operations, call/result ABI, runtime retirement or native execution
-is provided. The key is not a TargetProfile, persistence schema or serialized
-authorization, and no existing tracing profile selects it.
+`jit`. The selected JIT/AOT closure supports scalar/inline-Copy class
+payloads, class-handle fields, local zero-support references, and
+support-bearing references to normal-backed class subplaces, and stored
+ordinary reference descriptors in class fields and inline Copy aggregates.
+Each descriptor residence retains the control for its selected backing,
+independently of the class object containing the descriptor slot. Typed
+aggregate leaves are staged before replacement, included in constructor
+rollback and released during iterative retirement. Class-object provenance
+survives handle copies, aliases, field rebinding and constructor publication;
+stack-local backing escapes are rejected. JIT/AOT regressions cover direct and
+nested class fields, inline Copy aggregates, replacement, failed self-reference
+construction, checked unwind and last-hold retirement under both runtime
+policies. Optional ordinary references also use the 16/8 descriptor locally
+and in class/inline-Copy storage; zero pairs represent absence, while present
+typed leaves retain their normal backing. Tests cover lift/null, presence,
+coalescing, Copy/rebind, class-subplace retention, aggregate field storage,
+constructor rollback and checked unwind. Optional GC/init references remain
+unsupported. Readonly and writable class-handle slot references retain the
+containing class; writable stores preserve local handle roots and typed
+class-field retirement. Required ordinary reference values and inline Copy
+aggregates containing them now cross generated direct nonforeign calls in the
+selected closure. By-value inputs are staged in source order and transfer
+their support holds to exact generated parameter entries; reference results
+use hidden 16-byte storage and transfer a prepared hold only after callee
+cleanup. Frame-owned reentrant plans close on normal and checked-exception
+paths. The complete `NormalBacking` test class passes 65/65 with zero skips;
+coverage includes nested results, multi-leaf aggregate inputs, source-slot
+rebinding during later argument evaluation, source-handle retirement,
+pre-invocation failure, checked unwind, plan reuse, and inline call-result
+reads such as `return *Identity(ref input);` under both policies where
+applicable. Spill-root discovery follows reference formation, reborrow and
+read descriptors to register nested call-result support slots. Optional
+ordinary references are supported in local and
+stored values and cross direct function formals/results, including absent
+results and inline Copy call inputs with optional descriptor leaves. Foreign
+and native-callable boundaries,
+reference-bearing output parameters, by-value handle arguments/results,
+optional GC/init references, and source-independent persistence remain gated.
+The latest focused Debug fast selection, including the complete NormalBacking
+suite and related TRRM identity/anchor tests, passed 100/100 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-10-30_05_41_24_net11.0.trx`.
+Candidate-bound programs still fail closed at private module/graph and TRRM
+boundaries. The key is not a
+TargetProfile, persistence schema or serialized authorization, and no
+existing tracing profile selects it.
 
 Hosted statement switches evaluate the selector once and bind ordered scalar
 constant/wildcard arms, guards, cleanup-aware cross-arm transfers, inferred
@@ -206,11 +246,16 @@ These markers describe supported implementations, not approval of the
 remaining language contracts. The exact source, layout, metadata, ABI, and
 runtime contracts are in the
 [specification index](specs/README.md).
-Public fixed-layout source support is implemented for natural Windows x64
-`Sequential` and scalar-or-raw-pointer-carrier `Transparent` layouts committed
-with `[Blittable]`. Mandatory verification recomputes the fixed-storage facts,
-and private semantic modules persist them. Packing, alignment controls,
-and standard TRRM layout persistence remain unsupported. The verifier now
+Source `Layout`/`Blittable` roles require an explicitly selected
+`LayoutCoreRegistrationSet`; names alone grant no authority. The provisional
+target implementation covers `Auto`, `Sequential`, `Union`, and
+`Transparent` layouts, packing/alignment, and fixed-array geometry; see the
+[layout profile inventory](implementation/layout-profiles.md) for precise
+route support. Private revision 104 and Standard L1 preserve wide aggregate
+and array geometry, but these schemas and the L1 execution route remain
+unapproved candidates. Semantic geometry is not capped at 16 bytes or 8192:
+native materialization has separate target and host capacity limits, and the
+8192-byte bound applies only to byte-wise payload analysis. The verifier now
 tracks selected native-pointer origins through local inline-field reads,
 writes, copies and replacement, but this is not a published callable summary
 or a serialized standard/private contract. Raw pointer fields still carry
@@ -413,9 +458,19 @@ exclusive attachment and Feature 10 closure; the complete predicate-node
 schema, general predicate identity and execution remain open. The bounded
 Standard anchor comparator now normalizes admitted signature types and modes,
 Effects, OutputState, phase-3 selector identity and Dependency rows; it rejects
-structural anchor/type cycles. Selected Body-map type matching uses this
-comparator, but producer/replacement identity, cross-module provider binding,
-other consumer routes and re-encoding/remapping remain open.
+structural anchor/type cycles. Selected Body-map type matching and
+full-artifact PropertyDef getter/result validation use this comparator; the
+latter waits for the anchor table and accepts distinct equivalent anchors
+while rejecting changed conventions, signatures or contracts. Selected
+`GeneralPredicateGraphsDraft` StaticImmutablePublication field/extent
+validation also uses it after anchor construction. The full-artifact
+WitnessAssociatedConst duplicate-binding check likewise waits for validated
+anchors, rejecting distinct constructed interface instances whose nested
+function-pointer anchors have equivalent signatures and contracts.
+The related Debug fast TRRM identity/anchor selection passed 35/35 with zero
+skips, including a full-artifact WitnessAssociatedConst regression.
+Producer/replacement identity, cross-module provider binding, other consumer
+routes and re-encoding/remapping remain open.
 The Standard Contract reader also consumes the assigned 20-byte OutputState
 row, requiring Param mode `00`, a complete `ref<init T>` or `Span<init T>`
 type, and a phase-3 PredicateGraph attached to the same MethodDef. Its bounded
@@ -492,8 +547,12 @@ standard executable production remain incomplete. Standard AssociatedRelation
 rows now validate both complete TypeSpecRefs and direct AssociatedTypeDef or
 Import references expected to denote that definition kind. Exact
 declaring-interface references must use a TypeSpec row rather than inline
-F2/F3 forms; exact instance binding and the Constraint kind-3 row link remain
-incomplete. InterfaceConstDef and AssociatedConstDef rows validate their
+F2/F3 forms. Under the unapproved
+[Constraint payload proposal](proposals/constraint-associated-relation-payload.md),
+Constraint kind 3 provisionally selects a bounded one-based AssociatedRelation
+row with a type-formal owner; relation satisfaction, exact instance binding,
+AssociatedTypeDef provider binding and witness execution remain incomplete.
+InterfaceConstDef and AssociatedConstDef rows validate their
 InterfaceDef ranges, owners, names and complete type references; initialized
 interface constants also require a bounded ConstantSource row reference. The
 standard InterfaceWitness/WitnessMember readers additionally validate
@@ -651,15 +710,17 @@ JIT access and pointer formation, with checked bounds and unsafe obligations.
 Zero-extent arrays do not provide borrowable element storage.
 Native JIT/AOT lowering now probes large stack frames and has
 supervised coverage above the former ceiling. Provisional private semantic
-revision 101 composes revision 100's u64 tag-35 storage-address extents and
-array table/flat-operation records, then adds a mandatory ancestor-path
-count/list to tag 35. Its separate
+revision 103 composes the prior fixed-array, storage-address and field-path
+records, and additionally persists Packing, optional declared Alignment,
+derived Alignment and RequiredAlignment. Its separate
 [storage-address-path proposal](proposals/native-storage-address-path-private-persistence.md)
 remains unapproved. The separate
 [address-only backing companion](proposals/native-storage-address-address-only-backing.md)
-provisionally amends this exact 101 selection: recursively initialized,
-positive nested local backing is admitted only when every retained use is a
-direct NoEscape `NativeParameter` address argument. Private producer/reader,
+remains an unapproved candidate for the revision-101 path; the current private
+revision-103 implementation carries the bounded behavior: recursively
+initialized, positive nested local backing is admitted only when every
+retained use is a direct NoEscape `NativeParameter` address argument. Private
+producer/reader,
 source-free consumer/re-emission, JIT and AOT tests cover one and two
 ancestors; native package-set and graph routes also execute those addresses.
 Ordinary nested array values, vacant backing, escapes and ptr-to-array runtime
@@ -667,6 +728,10 @@ carriers remain excluded; nominal zero-payload operations and remaining
 replacement/body fixtures stay gated. Standard A2 declaration production
 remains type-only for local Blittable Copy types; it emits TypeSpec form
 `0x11` and FixedArrayLayout rows for scalar, unit, and nested array fields.
+Raw `LayoutKind.Union` is now carried through source binding, fixed-array
+geometry, A2 type-only metadata and private-module round-tripping; all
+alternatives must satisfy the rootless Copy closure, and typed alternative
+access requires `unsafe`.
 The source-free type-only route reconstructs local non-generic DeclaredCopy
 TypeDefs and those array fields, including acyclic arrays whose elements are
 local nominal Copy structs and raw Union layouts. Whole-Union initialization
@@ -685,8 +750,15 @@ children without zeroing or creating backing. These are bounded profile
 results, not general array-runtime or private nested-value admission. The
 private address-only backing exception does not select or substitute for
 Standard A2 contracts.
-Positive zero-payload non-array element values, general initializer
-effects/failures, provider Body-row remapping and broader native array
+The exact Standard A2 route additionally supports direct NativeImport scalar
+result calls in recursively nested initializers for scalar Copy elements.
+Calls are emitted once in source order into typed result Homes; the source-free
+reader reconstructs typed reads and canonical D8/D9 stores. A co-located
+provider regression passes Standard-bound JIT and supervised FailFast AOT,
+including a checked address fault before the invalid initializer call. This
+does not select ordinary unwind/Cleanup or general effectful initialization.
+Zero-payload non-array element values, nested pointer element
+backing/provenance, broader provider replacement/remapping and native-array
 contracts remain open.
 Under the separate unapproved A2 selector, mandatory Body-map validation now
 propagates typed PlaceHandle origins and declared value types across blocks,
@@ -705,8 +777,12 @@ passed 41/41 with zero skips at
 `artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-11-01_19_04_41_net11.0.trx`;
 successful recursive leaf calls execute exactly once in source order through
 the private reader, JIT and AOT. The private type-closure boundary accepts 64
-nested single-element dimensions (p=63) and rejects 65; source syntax rejects
-128 dimensions with `TRM1004`.
+nested single-element dimensions (p=63); the 65-dimensional p=64 route now
+passes producer, reader, consumer, JIT and AOT. Type closure counts one unit
+per array dimension. The 128/129 effective-depth boundary remains open, while
+source syntax rejects 127/128 dimensions with `TRM1004`. A source-free reader
+case also rejects a 131,071-node index tree under the shared expression-work
+limit.
 its bounded private address-only backing cases do not discharge the wider A2
 or overall source/runtime gates.
 The `MessageBoxW` sample is authored using the same direct import form as any
@@ -721,10 +797,6 @@ in an initialized fixed-array local; native lowering retains its checked
 element bounds. Fixed-array expressions, including those pointer addresses,
 remain unsupported by private semantic modules. Standard TRRM does not encode
 general pointer address/read/write operations, but it carries typed
-Raw `LayoutKind.Union` is now carried through source binding, fixed-array
-geometry, A2 type-only metadata and private-module round-tripping; all
-alternatives must satisfy the rootless Copy closure, and typed alternative
-access requires `unsafe`.
 native-pointer TypeSpecs and admitted pointer-valued declaration/call
 arguments in its bounded executable profile.
 
@@ -862,9 +934,15 @@ matching `utf8z`/`utf16z` literals require read-only, no-escape metadata and do
 not require a selected API catalog. A `utf16z` literal passed to a `ptr<char16>`
 parameter may satisfy a positive extent up to its stored UTF-16 element count,
 including the terminator; `utf8z` and `ptr<void>` literal inputs remain limited
-to extent zero. When a call forms an
-address with `&local` or the first element of a fixed array, the backing must be initialized
-and match the pointee type; `Write` and `ReadWrite` require mutable backing.
+to extent zero. When a call forms an address with `&local` or an indexed
+fixed-array element, the backing must be initialized and match the pointee
+type; `Write` and `ReadWrite` require mutable backing. Under the provisional
+`[E; N]` source route, direct NativeParameter addresses also admit a typed
+dynamic array index. The address uses the positive requested count Q (or one
+when the declaration gives no static minimum) and checks the original index
+once, then checks the original index and `Q <= N-i` before pointer formation.
+Three Windows x64 NativeJit cases exercise a successful indexed read plus
+negative-index and insufficient-suffix failures before `RtlCompareMemory`.
 Standard A2 now emits typed nested pointer-cell stores and reconstructs them
 source-free. JIT/AOT coverage exercises the nested NativeParameter route,
 fail-fast bounds suppression, provider pointer-TypeSpec remapping, and exact
@@ -954,15 +1032,134 @@ view. A same-module JIT regression and private producer/consumer execution
 exercise that ordinary-entry slice. The binder accepts the bare form with the
 Terrum default convention, but still accepts the prototype `NativeAbi` prefix
 pending migration of foreign callback source and test fixtures; that prefix is
-not the selected source contract. Standard `E9`/Body-record-`0D` production
-remains unimplemented, as does ordinary-address support in the Development
-profile. The Standard reader validates E9/record-0D framing and map-level
-anchor, target, contract, convention, result, and Feature relationships;
-selected-provider binding, canonical production, source-free reconstruction,
-remapping and execution remain open. See the unapproved
-[Standard native-address](proposals/standard-native-address-formation.md) and
-[NativeImport function-pointer](proposals/standard-native-import-function-pointer-contracts.md)
-proposals for the provisional carrier and remaining contracts.
+not the selected source contract. Under the unapproved F profile, the exact
+`EmitStandard` selector emits one direct NativeImport address and bounded
+`E0` CallSite shapes: scalar or typed-pointer signatures, `000E`
+NativeParameter facts, caller-formal Home inputs, and scalar register or
+result-Home returns. Direct NativeImport calls used as arguments are emitted
+as earlier E0 CallSites in source order; all but the last staged scalar result
+are preserved in typed Homes, and the last is consumed from R0. The
+source-free loader reconstructs these limited direct-import shapes, runs
+mandatory semantic verification, and supports byte-identical re-emission.
+Public `LoadStandard` and `CreateStandardReference` take exact per-artifact
+schema selections and an explicit provider set. The bounded loader binds one
+F Module's retained MethodDef Import to one F provider NativeImport by exact
+Module identity, export key, requirements, signature, NativeImport descriptor
+and complete `000E` facts; it preserves `ModuleImport` and reruns the mandatory
+consumer verifier. The checked native route resolves the selected root's sole
+Import set across the complete exact-F ModuleRef/MethodDef closure in all
+supplied artifacts, including disconnected Modules. Every original edge binds
+by exact Export key to a provider-owned NativeImport; mixed Modules with one
+owned NativeImport and imported expectations, chains, diamonds, self-edges and
+cycles are provisionally admitted. The immutable native plan retains all edge
+origins and revalidates the closure before lowering; only root imports are
+realized, while provider Bodies are not merged or executed. This implements the
+unapproved
+[provider-closure candidate](proposals/standard-trrm-provider-dependency-closure.md)
+provisionally, not as accepted conformance. Other schemas, source production/
+re-emission of non-target Imports and same-name expanded lowering remain
+unsupported.
+
+The separate unapproved F+S identity
+`trrm/1-draft-foreign-invocation-storage-addresses-1` now adds explicit
+R14/R15 scalar-local initialization, `EC`/Body record `0E`, and ordered
+NativeParameter CallSite inputs. Its producer and source-free loader preserve
+the initialized local, source Home authority, complete scalar pointee type,
+and pointer result Home; loading re-verifies the bound operation and
+byte-identically re-emits the canonical artifact. Effective Feature closure
+for the exercised NativeAddress/NativeParameter path is
+`{1,2,3,4,16}/1`; F+S does not select Feature 11 or arbitrary frozen-value
+decoding. A Windows x64 `GetSystemTimeAdjustment` case executes through
+`LoadStandard`/JIT and selected-schema CLI JIT/AOT, including a fresh read of
+the written BOOL local. Malformed source authority and extent are rejected,
+and a failed AOT preflight preserves the requested output. A separately
+selected, unapproved F+S+A2 candidate now routes through the public Standard
+API and artifact CLI commands. Its experimental metadata path reads/writes
+TypeSpec form `0x11` and the Module-owned `0x0012` layout row, validates
+Feature `20/1`, TypeDef `DeclaredCopy` bit `0x20`/Feature `2/1`,
+Copy/Cleanup exclusion, scalar and local non-generic Sequential/Transparent
+Windows x64 geometry, and Home/Register PlaceSelection plus counted EC
+RegisterPlace maps. Structural tests cover nested arrays and reject Q beyond
+the immediate array extent. The selected A2 `EmitStandard` declaration path
+emits local Blittable
+Sequential/Transparent structs with positive Copy evidence for checked
+ordinary types, and TypeSpec `0x11`/`0x0012` metadata for scalar, unit, and
+nested array fields. This declaration producer is type-only; the separate
+bounded F+S/A2/A2E executable producer carries the Body operations described
+above. `LoadStandard` now
+reconstructs the selected Module's local array type table for scalar, unit,
+direct-pointer, function-pointer, and nested-array elements; it recomputes
+target geometry and preserves full `uint64` counts, including zero-payload
+arrays at `ulong.MaxValue`. A separate type-only path reconstructs local
+non-generic DeclaredCopy TypeDefs and fields with scalar/array types, including
+arrays of local nominal Copy elements after their layout dependencies are
+reconstructed. Selected A2/A2E references now bind retained provider origins;
+the executable NativeAddress path consumes the exercised array TypeMap,
+PlaceSelection, SemanticStore and EC Body records. Standard A2 also produces
+nested index-side-effect sequences using the assigned `C0` controls: checked
+add/subtract are `0x01`/`0x02`, and wrapping add/subtract are `0x05`/`0x06`.
+The source-free reader reconstructs the corresponding `BoundUpdate` path
+indices and overflow policy; register-map validation preserves unrelated
+PlaceHandles and invalidates those rooted at an overwritten Home. Checked
+unsigned indices cover `uint8`/`uint16`/`uint32`/`uint64`/`uint128`; signed
+checked and wrapping prefix/postfix updates are also exercised. Source-free
+JIT and supervised AOT check exactly-once root-to-leaf effects and
+byte-count-dependent reads from the selected leaf. The complete unsigned
+matrix has AOT evidence, and selected `run-trrm` worker JIT covers all five
+widths. Direct in-process `NativeJit.Execute` for the `uint128` address-update
+probe terminated its test host, so that route is not claimed from this
+evidence. The Standard A2 producer and source-free reader now reuse R0/R1
+PlaceHandles across nested paths while retaining immutable selection ancestry
+for PlaceLoad, storage-address reconstruction and initialization replay.
+Nested initializers use general-register counters through depth 10 and
+validated Home-backed counters beyond that window; sibling initialization
+replays the parent selection path without losing counter values. Supervised
+JIT/AOT and byte-identical re-emission cover paths at depths 14, 15, 65 and
+126, including multi-element initialization at depth 12 and a two-element
+leaf at depth 65. The depth-126 boundary uses a programmatically extended
+bound input seeded from source that the parser accepts; depth 127 rejects at
+emission under the enclosing Body semantic-depth limit. The general
+fixed-array path contract accepts 128 projections and rejects 129. Canonical
+provider Body-row remapping, additional initializer/value carriers,
+failure/cleanup/loan provenance and broader address/runtime semantics remain
+open.
+The unapproved [A2 source Copy identity proposal](proposals/standard-trrm-source-copy-type-identity.md)
+now has a provisional local producer slice: `EmitStandard` accepts explicit
+source declaration/key mappings and emits selected TypeDef Exports only for
+binder-tracked public ordinary Copy declarations; every local nominal type in
+an exported root's field/array closure must also have an explicit key. There
+is no name-derived default or alias. Source `CreateStandardReference` type-key
+projection now selects nonempty explicit TypeDef ExportKeys from one local
+type-only A2 Module and materializes only those roots plus their required
+public nominal/array closure. Closure-only declarations remain unavailable to
+source name lookup. Each projected type retains the exact schema, artifact,
+Module requirements, TypeDef identity and ExportKeys; Standard and private
+module producers reject the projection rather than erasing its origin.
+Separately supplied A2 providers now bind through the checked Copy/layout
+contract; imported closure types retain both actual provider identity and the
+original using-Module Import/ModuleRef expectation. Direct field and array
+imports, compatible TypeDef relocation, incompatible packing, source-name
+lookup and immutable snapshots are covered. Provider-owned TypeDef Import
+chains now project through separately supplied or co-located A2 type-only
+Modules, retaining provider and consumer expectations. Alias/multiple-view
+handling, origin replacement/remapping, canonical re-encoding, source-free
+Bodies, CLI and runtime remain open. The combined A2 provider/reference/layout
+selection passed 162/162 with zero skips; the provider-chain selection passed
+163/163 with zero skips.
+The original A1 array candidate is superseded for integrated nominal arrays
+by the unapproved
+[A2 rootless Copy evidence proposal](proposals/standard-trrm-rootless-copy-type-evidence.md);
+the [A1 identity/shape proposal](proposals/standard-trrm-fixed-array-identity-shape.md)
+remains its structural design owner. The standalone Development profile
+still has no ordinary-address support. See
+the unapproved [Standard native-address](proposals/standard-native-address-formation.md),
+[Standard native storage-address](proposals/standard-native-storage-address-formation.md),
+[NativeImport function-pointer](proposals/standard-native-import-function-pointer-contracts.md),
+[selected-provider consumption](proposals/standard-trrm-selected-provider-consumption.md),
+and [provider-native lowering](proposals/standard-trrm-provider-native-lowering.md)
+proposals for the provisional carriers and remaining contracts. The CLI
+cannot author `NativeImport` source because it accepts no explicit
+`NativeCoreRegistration`; artifact commands do accept exact F/F+S selections.
 With an explicit Core registration, source/bound-tree binding now forms an
 inferred pointer type for a callable NativeImport and preserves its complete
 raw NativeOutput contracts in the existing selector, OutputState and
@@ -979,10 +1176,11 @@ and lower through the foreign indirect-call path. Windows x64 `QueryPerformanceC
 policies; the latter also exercises a fifth stack argument, and AOT emission
 checks the selected imports. Aggregate pointer-cell dependency and
 complement/discard/duplicate-reservation cases are also covered. Other
-selector/dependency call contracts remain gated. Standard `000E`/Feature
-`16/1`, selected-provider binding, private revision 97, source-free consumers,
-CLI and full exceptional reentrancy/cleanup qualification remain open; no
-normative spec is changed.
+selector/dependency call contracts remain gated. The bounded Standard F/F+S
+`000E`/Feature `16/1` source-free and CLI routes are implemented, but general
+provider NativeParameter runtime coverage, multi-edge NativeParameter contract
+cases, private revision 97, and exceptional reentrancy/cleanup qualification
+remain open; no normative spec is changed.
 The prototype retains
 concrete signatures through address formation, local/field transport,
 indirect calls, private semantic modules (revision 82), native module sets and
@@ -1116,12 +1314,17 @@ exclusive `004A` ranges. They do not bind path owners or compute target
 layouts; FieldMap token binding and query execution remain incomplete.
 FieldDef DefId/Import/Export rows also have structural C# support for owner
 imports and public local publication; exact field-contract and retained-layout
-comparison remain incomplete. An explicit out-of-band `CopyOriginDraft`
-profile now recognizes provisional Feature 15/1 and contract-only nonpublic
-TypeDef/FieldDef identities, with Feature 13/1 required for FieldDef
-Import/Export. This profile does not yet read or write Contract 000D and is not
-the selected current schema. The executable path still uses separate
-development Feature assignments and does not claim current schema conformance.
+comparison remain incomplete. The hosted structural validator now checks
+Feature 13/1 against the using Module for FieldDef Import/Export, selected
+Bodies containing `DE`, TypeIdentity or a nonempty FieldMap, CopyOrigin
+FieldPath contracts, general-graph layout/path operands, and retained
+target-layout dependencies in ConstantExecution. A Terrum-authored
+Feature-manifest consumer is not currently present in the maintained component
+tree. The out-of-band `CopyOriginDraft` profile still recognizes provisional
+Feature 15/1 and contract-only nonpublic TypeDef/FieldDef identities; it does
+not read or write Contract 000D and is not the selected current schema. The
+executable path still uses separate development Feature assignments and does
+not claim current schema conformance.
 Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed
 inputs, and invoke the shared mandatory verifier and backend; there is no
 producer-trust bypass. General imported-call linking and standard
@@ -1154,11 +1357,45 @@ to this Body path. This path does
 not move source verification or emission into Terrum-authored components.
 Static initialization is not encoded or executed by the current TRRM path.
 The accepted first implementation gate is a self-contained, single-module
-profile for non-generic, non-partial nominal types with ordinary eager scalar
-static fields. Authored static constructors use only the accepted trigger
-choices; execution requires enforced nonconcurrent access and fail-fast
-termination. The gate excludes lazy fields, static-property backing storage,
-foreign storage, generic or partial composition, and managed or
+profile for non-partial nominal types with ordinary eager scalar static fields,
+get-only auto-property backing, and supported closed source-generic struct
+instances. Authored static constructors use only the accepted trigger choices.
+The hosted source binder also pairs one
+bodyless primary
+`static partial` declaration with one implementation, preserving the primary's
+trigger and clauses and the implementation's body/source span. Static
+field declarations are now kept outside instance layouts with owner, access,
+mutability, type and source-order facts; eager declaration initializers bind
+through checked hidden functions, and direct/unqualified reads plus mutable
+writes use their exact field identities. Fields without declaration
+initializers require an authored static constructor. Mandatory verification
+requires every non-lazy field to be initialized on every normal return and
+rejects repeated initialization of immutable fields; conditional, loop and
+checked-catch joins preserve those initialization facts. The source binder
+also binds get-only static auto-properties into their owner's group at the
+property's declaration position, using an internal backing-field identity.
+Their declaration initializers use checked hidden functions; a property
+without an initializer requires static-constructor initialization. Computed
+properties add no backing storage. Additional setter/init or explicit
+property-local backing forms remain incomplete. The source binder also
+recognizes LazyInitialization only through the
+separate exact Core registration and its direct, field-selector or alias
+paths; this provisional source support does not execute a lazy unit.
+File-visible static fields retain their source-input ordinal; reads, writes
+and initialization references require that same source unit.
+Same-module friend access is also bound for static fields, methods and
+get-only static auto-property getters. It preserves exact nominal principals
+and closed generic arguments, supports a single `_` generic wildcard, and
+rejects unrelated or cross-module callers. Interface default bodies are not
+represented as callable bound functions, so interface friend access remains
+incomplete. File/friend access facts are source/bound-only and are not yet
+representable by the selected static persistence candidate.
+Static-constructor and field facts are not yet persisted or executed;
+native lowering, private module production and Standard TRRM emission reject
+them. Execution requires enforced nonconcurrent access and fail-fast
+termination. The gate excludes lazy runtime execution, setter/init or
+explicit-field property backing, foreign storage, source-generic class owners,
+partial nominal-type composition, interface friend bodies, and
 cleanup-bearing static values. Imported or packed definitions cannot
 participate in an initialization dependency, though unrelated imports may
 remain in the module. This is an implementation boundary, not a source

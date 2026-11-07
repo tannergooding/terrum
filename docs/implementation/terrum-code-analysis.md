@@ -259,17 +259,23 @@ Function rows retain the source span of their owning namespace block. Up to twel
 nongeneric scalar aliases resolve return/parameter/local types, including
 forward chains; the original source is independently audited. Duplicate,
 unresolved, cyclic, public, attributed and generic aliases reject. Alias names
-are not explicit conversion-call targets. Same-leaf alias support is narrower
-than accepted enclosing-namespace lookup, not a new lookup rule. Imports,
-overloads, non-function declarations in mixed namespace blocks, aliases across
-multiple scopes, and broader call forms remain outside this frontend.
+are not explicit conversion-call targets. Aliases from enclosing namespace
+scopes are visible to nested functions; sibling namespace scopes keep
+independent alias environments. Repeated top-level blocks of one namespace
+identity share their alias declarations across parts, including forward alias
+chains; duplicate aliases reject. Nested repeated namespace identities, root
+aliases alongside block namespaces, imports, overloads, non-function
+declarations in mixed namespace blocks, and broader call forms remain outside
+this frontend.
 
 Named by-value and scalar `out`/`init ref<T>` arguments preserve source
 evaluation order and explicit/declared destinations. Both floating output
 types and normal-return publication for non-Boolean or void results are
 supported; definite publication remains a hosted proof. Void callers can invoke
-scalar callees; void calls are direct statement roots, including supported
-`for` clauses, never values.
+scalar callees; expression statements may discard a scalar callee's non-unit
+result. The source-free reader accepts these call roots without admitting
+arbitrary value expressions. Calls are direct statement roots, including
+supported `for` clauses, never values.
 The `[DoesNotReturn]` effect is checked for supported scalar signatures and
 removes normal completion without changing a non-unit result type. The
 projection carries it across direct call statements and supported result
@@ -404,27 +410,14 @@ These are private structured-IR revisions, **not** TRRM `(major, minor)` or
 v87/v88 projection tags. The writer selects from retained features; it does not
 always emit the highest revision understood by the reader.
 
-The current reader/writer also contains experimental Span<Token> roles and
-operations in some private revisions. Those span payloads are not selected
-for persistence; do not treat their revisions or tests as an accepted
-compiler interface.
-
-| Retained facts, without an overriding native feature | Writer selection |
-|---|---|
-| Scalar, source-only requirement or `scanner-10` profile without private span/fixed-storage facts | 76 |
-| Explicit fixed-storage commitments without private span/frontend-profile facts | 78 |
-| Private span IR or scalar-frontend summary-profile requirement without fixed-storage facts | 77 |
-| That private span/profile schema combined with explicit fixed-storage commitments | 81 |
-
-Source dependence or scanner binding alone does not select revision 77.
-For example, `[Blittable]` SourceRange/Token metadata can select fixed-layout
-revision 78; the full private-span/frontend fixtures combine those commitments
-with span/profile facts and write **81**. The
-[private-span replacement fixture](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.PrivateSpans.cs)
-asserts provider 81 and a separate `scanner-10` scalar consumer **76**; the
-[complete frontend fixtures](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
-assert producer 81 for both invocation identities. A provider's revision does
-not automatically become its scalar consumer's revision.
+The current writer selects revision **89** for every newly written private
+module, including artifacts without arithmetic operations. Readers retain
+exact non-span revisions 76, 78–80, and 82–89. Revisions 77 and 81 are
+rejected before decoding; every retained revision rejects TokenSpan roles,
+types, and expression/statement tags. A tagged source-grant or scalar
+invocation profile may still appear in revision 89 only in explicit
+test/prototype modules; it is not selected by the ordinary compiler, native
+package, or standard metadata routes.
 
 Native facts have separate writer selections: direct imports 79, parameter
 contracts 80, function-pointer signatures 82, typed pointers 83, vtable
@@ -436,13 +429,13 @@ combined native schema may carry span/fixed-layout facts under its selected
 revision instead of 81; these cases are not added to the frontend invocation
 profile by reader capability alone.
 
-`ReadModuleHeader` explicitly admits revisions **76–89**, with **89** the
-current maximum, then checks each exact schema and feature combination.
+`ReadModuleHeader` explicitly admits the remaining exact revisions, with
+**89** the current writer schema, then checks each feature combination.
 Revision 89 provisionally adds private checked/wrapping operation modes under
 the unapproved
 [private-persistence proposal](../proposals/source-arithmetic-private-persistence.md);
 revisions 76–88 remain checked-only for those operations. The private-span
-gate admits 77, 79, 80 and 81–89; 76/78 remain span-free.
+gate rejects span-bearing payloads under every retained revision.
 Header acceptance is not arbitrary payload acceptance or a decoder fallback.
 Private roles/layouts, invocation requirements, backing, staged arguments,
 initialization, owner liveness and cleanup are revalidated after read/link.
@@ -516,38 +509,34 @@ protocols have independent `Copy` results, including non-`bool` `!`; these
 protocol sets still exclude heterogeneous binary, shift and `true`/`false`
 witnesses. Nominal `++`/`--` calls are a separate update contract,
 not an addition to those protocol sets.
-`build-component` uses the compiled scanner's records as the lexical input to
-the official host parser, binder and native emitter; the binder also consumes
-its decoded integer magnitudes. It does not re-lex or decode integer magnitudes
-from the target input again. The scanner's own compilation and the later compiler phases
-remain hosted in C#.
+`scan-component` and `build-component` are test-only in-process component
+probes. `build-component` passes the compiled scanner's records to the hosted
+parser, binder and native emitter; this is not the selected compiler input
+path, and the scanner's own compilation and later compiler phases remain
+hosted in C#.
 `frontend-component self-host <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
-executes the bounded native scalar frontend with explicit source buffers and
-projects its typed result for inspection. Invalid shapes produce a code and
-source span; lexical failures retain scanner diagnostics and publish no typed
-result. This command does not use the typed result to bind or emit a program;
-it needs supervision like the other in-process component commands.
-Compilation errors in the bundled frontend sources report their own source
-locations (including source indexes in the multi-source JSON schema).
+is also test-only: it executes the bounded native scalar frontend with
+explicit source buffers and projects its typed result for inspection. Invalid
+shapes produce a code and source span; lexical failures retain scanner
+diagnostics and publish no typed result. The projection is not used to bind,
+emit or hand source to the C# compiler.
 `frontend-build-library self-host <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
-instead lowers the same validated
-native facts into verified IR and emits a Windows x64 DLL for an explicitly
-`public` scalar function. The output is replaced only on success.
+forwards the original source to a separate C# compiler process and preserves
+the source name and selected policies. Library compilation exports all public
+top-level functions; the output is replaced only on success.
 `frontend-build self-host <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
-command emits a Windows x64 executable from native facts for a zero-parameter
-`int32 Main()` through the hosted emitter, retaining the output on failure.
+also forwards original source to that process; it does not use the scalar
+projection or the hosted emitter in this command.
 `frontend-run self-host <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
-JIT-executes the same bounded entry without writing an image. Like hosted
-`jit`, it returns the raw `Main` exit status and only uses JSON for diagnostics;
-supervise this in-process native command with a deadline.
-These commands apply the provisional arithmetic selector only while binding
-subject source; compilation of the frontend/scanner component itself remains
-Development. The selector is independent of runtime failure policy.
-The bounded input and source directory remain required, and general source
-binding, broader libraries and compiler self-build remain outstanding.
-Shared scalar/conditional/Boolean/integer-literal fixtures compare DLL output from
-the hosted and Terrum-authored frontend paths under both runtime policies;
-both paths still use the hosted native emitter.
+executes through the same original-source process boundary and returns
+`Main`'s raw exit status. The `<terrum-project-directory>` argument remains in
+the transitional command form, but build/library/run do not read it; only
+component-probe commands use that directory. The arithmetic selector applies
+to the subject source compiled by the child process and is independent of
+runtime failure policy. The Terrum-authored frontend remains a bounded
+prototype, not a self-sustaining compiler.
+CLI build/library/run tests compare the process path with hosted output and
+verify output preservation; they do not qualify independent Terrum emission.
 The bounded parameter/literal operands accept grouping inside or outside
 unary `+`/`-`; decimal signed minima still require the sign directly
 on the contextual literal. The current standalone compact expression layout
@@ -558,12 +547,8 @@ Nested encodings support complement over signed parameters/literals or
 binaries, signs over complemented parameters/literals or binaries, Boolean
 double negation and complement over complemented integer binaries.
 A third named parameter uses a disjoint operation offset for its
-parameter/literal expressions. These compact encodings do not represent
-arbitrary nested expressions; bounded tree records cover the broader subset.
-Bounded `int32 Main()` fixtures likewise compare Windows executable output
-and execute under both policies. These unchanged-corpus comparisons do not
-freeze unpublished bytes/readers or establish an independent native emitter
-or compiler self-build.
+parameter/literal expressions. These compact encodings do not represent arbitrary nested expressions; they
+remain limits of the test-only frontend prototype, not source-language limits.
 
 ## Component inventory
 
@@ -586,7 +571,7 @@ syntax or semantic records.
 | [FloatingFormatConversion](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/FloatingFormatConversion.terrum) | Internal raw-bit widening and narrowing between `float32` and `float64`; finite narrowing rounds once to nearest/ties-even with gradual underflow and overflow to infinity | Semantic-module JIT compares finite results with hosted conversions under both policies, including all float32 subnormal leading-bit positions, midpoint neighbors, underflow, overflow and NaN classification; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL compares finite conversions exactly and NaNs by classification only; exact NaN payload preservation is not promised, and TRRM encoding qualification is separate |
 | [FloatingNegation](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/FloatingNegation.terrum) | Internal raw-bit `float32`/`float64` negation by toggling only the sign bit | Semantic-module JIT compares exact bit results with the sign-bit oracle under both policies, including signed zeros, infinities, noncanonical NaNs and deterministic values; the independent `ComponentTestRunner` also executes representative cases under AOT/JIT and both policies; the Windows x64 internal DLL checks exact sign-bit toggling and involution through integer carriers; this does not define a public negation API or qualify the separate TRRM encoding |
 | [FloatingIntegerConversion](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/FloatingIntegerConversion.terrum) | Internal checked conversion from raw `float32`/`float64` bits to signed/unsigned 32-/64-bit integers, truncating toward zero before range checks | Semantic-module JIT compares all eight conversions with hosted behavior under both policies, including boundaries, non-finite values and negative fractions; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL directly checks all eight status-plus-output exports against checked casts, preserving failed outputs and adjacent canaries; the eight-pair source eligibility is accepted, but this helper does not define a public conversion API or qualify the separate TRRM encoding |
-| [CopyAlgorithms](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/CopyAlgorithms.terrum) | NoThrow selection and conditional `init ref<T>` publication of complete Copy values, with an explicit forwarding `out` adapter and no operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; existing `out` calls remain valid; persisted semantic-module JIT also executes the private generic specializations through an exported verifier under both policies; the Windows x64 fail-fast compiler-primitives DLL exercises all three operations through test-only wrappers over concrete Token specializations and also checks `SelectCopy` with the eight-byte SourceRange ABI, including selected fields, success/failure publication and adjacent output canaries; the Terrum `ComponentTestRunner` selects scalar and Token values through producer-local tests; sentinel-filled output storage is only for native write observation and does not relax source vacancy rules; this does not add a public generic ABI; no primitive operator conformance, borrowed views or generic runtime dispatch |
+| [CopyAlgorithms](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/CopyAlgorithms.terrum) | Ordinary Copy selection and conditional `init ref<T>` publication of complete Copy values, with an explicit forwarding `out` adapter and no operator witnesses or general no-failure promise | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; existing `out` calls remain valid; persisted semantic-module JIT also executes the private generic specializations through an exported verifier under both policies; the Windows x64 fail-fast compiler-primitives DLL exercises all three operations through test-only wrappers over concrete Token specializations and also checks `SelectCopy` with the eight-byte SourceRange ABI, including selected fields, success/failure publication and adjacent output canaries; the Terrum `ComponentTestRunner` selects scalar and Token values through producer-local tests; sentinel-filled output storage is only for native write observation and does not relax source vacancy rules; this does not add a public generic ABI; no primitive operator conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/IntegerFacts.terrum) | Internal `[ConstEval]` eligibility predicates for checked `int32`, `uint32`, `int64` and `uint64` arithmetic, including signed negation and absolute value | Boundary predicates are proven in required static expressions and executed under both native policies; native executables compare all 24 predicates with independent `BigInteger` range, divisor and signed-minimum expectations under both policies; persisted semantic-module JIT also compares 362 signed/unsigned boundary pairs with independent `BigInteger` expectations under both policies; the Windows x64 fail-fast compiler-primitives DLL exercises all 24 predicates through test-only exports against `BigInteger` boundary oracles; 32-bit signed checks widen safely, 64-bit checks rearrange bounds without overflowing, zero divisors reject, and signed-minimum remainder by `-1` remains valid; no public arithmetic API or compiler bootstrap |
 | [WideIntegerFacts](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/WideIntegerFacts.terrum) | Checked signed and unsigned 64-bit addition, subtraction, multiplication, division and remainder, signed negation and absolute value with conditional `init ref` publication, total unsigned signed-magnitude extraction, plus bounded decimal/radix-2..36 accumulation through the full unsigned range | Executed as separately compiled modules with vacancy-only `init ref` outputs and accumulation under both policies; persisted semantic-module JIT checks all ten binary helpers, both signed unary helpers and `MagnitudeInt64` against `BigInteger` across 935 boundary cases under both policies, and also checks decimal/all-radix accumulators against an independent arithmetic oracle across the unsigned range limits under both policies; Windows x64 fail-fast compiler-primitives DLL directly invokes all twelve checked arithmetic helpers, `MagnitudeInt64` and both accumulator functions against BigInteger boundary expectations; division by zero, signed-minimum quotient overflow, negation and absolute value do not publish; invalid accumulation leaves outputs unpublished; magnitude includes the signed minimum |
 | [WideIntegerTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Utilities/Numerics/WideIntegerTests.terrum) | Signed/unsigned arithmetic extrema, signed-minimum quotient overflow versus valid zero remainder, zero-divisor rejection, truncating signed division/remainder, invalid digits/radices, per-radix unsigned/signed limits and conditional output reuse | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
@@ -650,10 +635,10 @@ syntax or semantic records.
 | [SourceMapTableValidation](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/SourceMapTableValidation.terrum) | Candidate standard SourceMap prelude and mapping rows; selector 1 uses target section kind zero, a Body row and a zero-based `u16` block, while selector 0 uses SourceFile rows; the compact-location post-pass checks mapped blocks/ordinals against trusted per-method operation counts | AOT/JIT under both policies compare with `TrRmSourceMapTableReader`, including zero-based block 0 and final-block boundaries, shared-file slots, ordered mappings, invalid/truncated extents and cross-module references; one-based operation-count storage is only the internal scratch layout, and this component does not parse Body instructions or replace hosted readers |
 | [StringLiteralTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
 | [VariableTableIndex](../../sources/Terrum.CodeAnalysis.Terrum/Modules/VariableTableIndex.terrum) | Candidate generic TRRM variable-table index validation for one- or four-byte row alignment and a declared minimum row extent; returns the requested row's data-relative start and length | AOT/JIT under both policies compare Blob and Body row extents with hosted readers, including empty Blob rows; malformed count, index, byte word, minimum-size, offset, alignment and row-bound cases reject; row contents are uninterpreted and each query rescans the full index |
-| [CharacterFacts](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum) | Shared ASCII digit, hex-digit and newline decisions | Executed with `char16` comparisons, checked numeric type-call conversions and verified NoThrow classification contracts; persisted semantic-module JIT checks ASCII-digit, hex-digit and line-break behavior across every UTF-16 code unit, including successful digit publication and failed-output vacancy/reuse, and verifies `GetDecimalDigit` for all ten digits under both policies; Windows x64 compiler-primitives DLL integration invokes every export, exhaustively checks digit/newline classification, and checks decimal/hexadecimal mapping, rejection, output preservation and canaries; the Terrum `ComponentTestRunner` now exhaustively checks all three classifications/mappings over UTF-16 code units |
+| [CharacterFacts](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum) | Shared ASCII digit, hex-digit and newline decisions | Executed with `char16` comparisons and checked numeric type-call conversions; the ordinary classification helpers carry no general no-failure promise. Persisted semantic-module JIT checks ASCII-digit, hex-digit and line-break behavior across every UTF-16 code unit, including successful digit publication and failed-output vacancy/reuse, and verifies `GetDecimalDigit` for all ten digits under both policies; Windows x64 compiler-primitives DLL integration invokes every export, exhaustively checks digit/newline classification, and checks decimal/hexadecimal mapping, rejection, output preservation and canaries; the Terrum `ComponentTestRunner` now exhaustively checks all three classifications/mappings over UTF-16 code units |
 | [Token](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
 | [ComponentTestRunner](../../tests/Terrum.CodeAnalysis.Terrum.Tests/TestHelpers/ComponentTestRunner.terrum) | Explicit entry harness composing bounded range, character-fact, UTF-16, IntegerFacts, token, CopyAlgorithms, finite float math selection, wide and checked integer arithmetic, IntegerFormatting, IntegerFloatConversion, Char16FloatConversion, FloatingArithmetic, FloatingComparison, FloatingFormatConversion, FloatingNegation, FloatingIntegerConversion, IntegerMath, IntegerSaturation, IntegerWrapping, checked-conversion, and bit-operation tests | Persisted consumer executes the independently compiled producer through both JIT and AOT under both runtime policies; char16 conversion exhausts every code unit, floating addition/subtraction/multiplication/division covers rounding/subnormal/special-value boundaries, floating comparisons cover signed zeros and unordered NaNs, float-format checks cover subnormal, overflow and NaN-classification boundaries, and negation checks preserve exact raw payloads; test selection remains explicit and host-orchestrated |
-| [TokenCursor](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenCursor.terrum) | Read-only traversal and repeatable indexed reads of a validated `TokenSnapshot` without copying or owning its backing; indexed reads do not advance the remaining view | Hosted binding, mandatory verification and Windows x64 emission support only `Span<Token>`; `uint64` is the internal unsigned native-width index carrier, with full-width bounds checks before address calculation. `[Captures(nameof(tokens))]` preserves the owner dependency through copies, moves, joins and unwind. The scalar frontend passes the unadvanced snapshot view through parser methods and reads bounded indexed windows without storing the view. The [dedicated non-persisted Terrum component runner](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/TokenCursorComponentTestRunner.terrum) compiles the separate `TokenCursorTests.terrum` fixture in one compilation and checks ordered reads, exhaustion, negative/out-of-range indexes, and indexed-read non-consumption; the cursor's compilation-local span/capture metadata is never serialized. AOT/JIT also traverses every token in a maximum-length scanner snapshot under both policies while the owner remains live. No source-level `nuint`, mutable/writable spans, general slicing, arbitrary stored views, exports or persistence; see the [bounded cursor profile](view-and-owner-profiles.md#tokencursor-view). |
+| [TokenCursor](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenCursor.terrum) | Read-only traversal and repeatable indexed reads of a validated `TokenSnapshot` without copying or owning its backing; indexed reads do not advance the remaining view | Hosted binding, mandatory verification and Windows x64 emission support only `Span<Token>`; `uint64` is the internal unsigned native-width index carrier, with full-width bounds checks before address calculation. `[Captures(nameof(tokens))]` preserves the owner dependency through copies, moves, joins and unwind. Mutable `Span<Token>` locals support descriptor rebinding, and a `Captures`-declared writable `ref<Span<Token>>` formal can replace a local descriptor while retaining possible backing sources. Writable element views (`write Span<Token>`), general slicing, a public reference API for TokenCursor's private span field, reference-valued aggregate fields, exports and persistence remain unsupported. The scalar frontend passes the unadvanced snapshot view through parser methods and reads bounded indexed windows without storing the view. The [dedicated non-persisted Terrum component runner](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/TokenCursorComponentTestRunner.terrum) compiles the separate `TokenCursorTests.terrum` fixture in one compilation and checks ordered reads, exhaustion, negative/out-of-range indexes, and indexed-read non-consumption; the cursor's compilation-local span/capture metadata is never serialized. AOT/JIT also traverses every token in a maximum-length scanner snapshot under both policies while the owner remains live; separate checked-reference store tests cover descriptor replacement under both policies. See the [bounded cursor profile](view-and-owner-profiles.md#tokencursor-view). |
 | [RangeTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Text/RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed by `ComponentTestRunner` alongside `TokenTests` against an independent multi-source producer; C# still owns test discovery and execution orchestration |
 | [CharacterFactsTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/CharacterFactsTests.terrum) | Decimal digits, exhaustive ASCII-digit/line-break/hex classification and mapping across all UTF-16 code units | Executed by the explicitly composed `ComponentTestRunner` against the independent multi-source producer |
 | [Utf16CodeUnitsTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Text/Utf16CodeUnitsTests.terrum) | Exhaustive BMP decoding/width, every valid supplementary surrogate pair, and unpaired-surrogate rejection | Executed by the explicitly composed `ComponentTestRunner` against the independent multi-source producer |
@@ -714,8 +699,8 @@ Raw `char16` values are code units, not automatically validated Unicode scalars.
 arguments are evaluated under ordinary call rules; this is not a lazy conditional
 expression. Its `[Copy]` constraint is enough for whole-value returns without
 operator conformance, construction, field inspection or a default value.
-The caller can compose it through another Copy-constrained helper while retaining
-the declared NoThrow contract. Token/range fixtures verify independent nested
+The caller can compose it through another Copy-constrained helper without a
+general no-failure promise. Token/range fixtures verify independent nested
 copies after the original local values are replaced. The function remains a
 compilation-local template, not a separately published generic library contract.
 `TrySelectCopyInit<T>` accepts index zero or one and publishes the corresponding
