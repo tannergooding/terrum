@@ -6,6 +6,7 @@ using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
@@ -44,7 +45,9 @@ internal sealed class NativeResourceOwnerTests
     public void GenericUniqueCleanupOwnsAnOpaqueNativeResource()
     {
         var compilation = Compilation.Create(
-            SyntaxTree.Parse(OwnerSource), BoundRuntimePolicy.CheckedExceptions);
+            SyntaxTree.Parse(OwnerSource),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.CheckedExceptions));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -73,7 +76,8 @@ internal sealed class NativeResourceOwnerTests
             int32 Main() { return 0; }
             """);
         var compilation = Compilation.Create(
-            source, BoundRuntimePolicy.CheckedExceptions);
+            source, NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.CheckedExceptions));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

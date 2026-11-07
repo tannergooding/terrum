@@ -190,7 +190,7 @@ internal sealed class NativeLibraryTests
             [Terrum.Interop.NativeCallable]
             public int32 Callback(int32 value) { return value; }
             public int32 Ordinary() { return 0; }
-            """));
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
