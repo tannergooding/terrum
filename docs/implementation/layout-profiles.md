@@ -127,7 +127,7 @@ are reconstructed. The selected union metadata/source-free and private
 round-trip cases are covered; whole-Union initialization and executable
 union-array values remain under the unapproved, provisionally actionable
 [union initialization proposal](../proposals/standard-trrm-raw-union-initialization.md).
-The emitter/consumer test class passed 36/36.
+The emitter/consumer test class passed.
 The source-reference path selects explicit nonempty TypeDef ExportKeys from
 one local type-only A2 Module, preserves the provider snapshot and each
 selected/closure TypeDef origin, and exposes only selected roots to ordinary
@@ -140,9 +140,8 @@ snapshot immutability are covered. Provider-owned TypeDef Import chains also
 project through separately supplied or co-located A2 type-only Modules while
 retaining both provider and consumer expectations. Alias/multiple-view handling,
 origin replacement/remapping, canonical re-encoding and executable Body
-consumption remain open. The combined provider/reference/layout selection
-passed 162/162 and the provider-chain selection passed 163/163, both with zero
-skips.
+consumption remain open. The combined provider/reference/layout and
+provider-chain selections have regression coverage.
 The executable NativeAddress path still rejects nonempty TypeDef tables.
 Neither path constructs executable array TypeMap entries or reconstructs
 PlaceSelection/EC Bodies. Provider-owned replacement/remapping, source-independent array

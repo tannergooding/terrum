@@ -125,8 +125,7 @@ operands may be Home reads or admitted direct NativeImport calls; a left Home
 read is snapshotted before a right-side call, and nested checked argument
 failure prevents the branch. Boolean `==`/`!=` with one literal lowers by
 inverting the existing read/call branch. The focused A2EU
-producer/reader/JIT/AOT selection passed 76/76 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-boolean-literal-comparisons-final3\\a2eu-boolean-literal-comparisons-final3.trx`.
+producer/reader/JIT/AOT selection passed.
 Numeric comparison literals are supported only by the distinct, provisional
 A2EU+SF1 selector, which adds typed Feature 11/1 frozen-value tables for the
 existing scalar codec while leaving A2EU unchanged; this comparison path
@@ -253,7 +252,7 @@ native import boundaries without normal-backing runtime data. Debug
 regressions exercise source-free-independent JIT lowering, PE build and
 supervised image execution, direct scalar System32 import execution, and the
 separate `build-native-import` producer, including optional presence testing.
-The current related Debug selection passes 110/110 with zero skips. Checked GC/init descriptors,
+The current related Debug selection passes. Checked GC/init descriptors,
 managed-class runtime state, checked-reference foreign/function-pointer
 crossings, persisted module/TRRM/native-package transport and independently
 precompiled provider closure remain unsupported; they reject rather than
