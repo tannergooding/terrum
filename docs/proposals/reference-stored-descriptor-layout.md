@@ -20,6 +20,10 @@ The value remains a **checked, non-owning descriptor**, not `ptr<T>` or
 `gc ref<T>`. Equal pointer-sized bits grant no implicit conversion,
 marshalling, ownership, rooting, pinning or lifetime extension.
 
+The unapproved [host-selection amendment](reference-stored-descriptor-host-selection.md)
+names the exact rootless host key, default behavior and propagation checks;
+it changes neither this carrier nor the independent exact-schema agreement.
+
 “Externally bounded” means the actual storage and every required supporting
 owner, backing, guard, publication and code/load obligation already cover the
 descriptor's full dependent extent without a runtime hold owned by each

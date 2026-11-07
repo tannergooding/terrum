@@ -2,8 +2,10 @@
 
 **Status: unapproved; provisionally actionable only under the user's explicit
 missing-contract direction.** This is an integration amendment, not accepted
-source syntax, a normative schema allocation, compiler support or runtime
-qualification. No implementation or existing specification/proposal is changed.
+source syntax, a normative schema allocation or a stability promise. Its
+bounded implementation is provisional; focused producer/consumer and
+supervised Windows x64 JIT/AOT tests cover only the selected local aggregate
+and provider subset described in the implementation inventories.
 
 The authorization is: “At a genuine missing contract, prepare the smallest
 concrete decision needed as a new proposal doc using gpt-6.1-sol at max
@@ -55,7 +57,7 @@ These are inspected source/document facts, not newly executed tests.
 | [Aggregate inventory](../specs/il-instruction-set.md#semantic-family-inventory) and [aggregate semantics](../specs/il-instruction-set.md#optional-values-aggregates-and-queries) | A dedicated aggregate-construction operation is unassigned. This does not forbid ordinary checked calls and structural construction stores; it does forbid inventing an aggregate opcode, constant or R14 default. Empty Sequential completion needs the explicit applicability decision below. |
 | [`EmitStandardCore` and `EmitDevelopment`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.cs#L170-L399) | B and E1 source production enter the shared writer. Its admission permits executable scalar bodies or declaration-only Blittable libraries. The [later declaration check](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.cs#L662-L686) independently rejects constructors, struct members, non-scalar results and non-scalar storage. Removing only the first guard is incomplete. |
 | [`EmitForeignInvocationDraftNativeAddressLibrary`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs#L100-L209) | The executable A2R1+Repeat route requires FailFast, exactly one pointer signature/formation, one caller and direct NativeImport declarations. Another local constructor Body is rejected. These are route restrictions, not a general Standard Body contract. |
-| [`BoundStruct`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs#L593-L644), [`BoundFunction`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs#L804-L805), [`ModuleCompiler`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), [Standard layout reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmLayoutTableReader.cs)/[writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmLayoutTableWriter.cs) | The working tree has Pack/declared Alignment and completed/required alignment facts; private fixed-array revision 103 persists declared inputs. Private persistence is not Standard interchange or executable support. |
+| [`BoundStruct`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs#L593-L644), [`BoundFunction`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs#L804-L805), [`ModuleCompiler`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), [Standard layout reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmLayoutTableReader.cs)/[writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmLayoutTableWriter.cs) | The working tree has Pack/declared Alignment and completed/required alignment facts; private semantic revision 104 persists declared inputs and wide inline-struct geometry. Private persistence is not Standard interchange or executable support. |
 | [`ValueLayout`](../../sources/Terrum.CodeAnalysis/Semantics/ValueLayout.cs), [`aligned prolog`](../../sources/Terrum.CodeAnalysis/Native/NativeEmitter.cs#L5841-L5893), [`NativeUnwind`](../../sources/Terrum.CodeAnalysis/Native/NativeUnwind.cs) | Existing 16-byte value, 128-byte address-storage and bounded struct/frame representations are implementation boundaries, not target limits. There is already aligned-frame/probe/unwind machinery to integrate rather than replace with a sample path. |
 | [`NativeFrameTests`](../../tests/Terrum.CodeAnalysis.Tests/Native/Unwind/NativeFrameTests.cs#L154-L270), [`TrRmFixedArrayLayoutTableTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmFixedArrayLayoutTableTests.cs#L157-L210) | The working tree contains source-native packed/aligned frame cases and Standard type/layout round-trip cases. Neither establishes the missing source-free executable route; no pass result is claimed here. |
 | [`NativeModuleCompiler.StandardTrRm`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.StandardTrRm.cs#L13-L53), [provider-native proposal](standard-trrm-provider-native-lowering.md#decision-and-scope) | The native facade consumes an F resolved-binding plan. It is not a general aggregate-Body loader or an authorization to discard a provider marker. |
@@ -188,6 +190,15 @@ perform inaccessible source field writes. Exporting/discovering source
 constructor roles is not assigned here; independently retained/exported
 declaration identities cannot be erased by this normalization.
 
+Accordingly, the initial L1 producer accepts only nonpublic source
+constructors. It rejects a public constructor before normalization rather than
+re-emitting it as an unexported helper: L1 assigns no constructor-role
+discovery or export identity with which to preserve the public declaration.
+Private and internal constructors may be represented by a private helper only
+when their checked local call sites are remapped; the helper does not widen
+their source visibility or create a constructor export alias. Public
+constructor support requires a separately assigned declaration/export path.
+
 The construction Home starts **vacant**, never as zero/default/live.
 Initialize complete children under the actual private construction authority;
 retain partial state and all surviving dependencies between stores. A
@@ -271,7 +282,7 @@ Omitted declared alignment is the metadata owner's zero representation;
 source Alignment zero is still invalid. Derive offsets, extent, completed
 object alignment and transitive required explicit alignment under the exact
 target. Do not serialize derived offsets as authority, reacquire Core schemas
-from names during source-free loading, or substitute private revision 103.
+from names during source-free loading, or substitute private revision 104.
 
 Keep all layout, array `count * stride`, nested offset and alignment-rounding
 arithmetic checked in target nuint. Derive array stride from the completed E
@@ -469,9 +480,13 @@ cases cannot fill that separate gate.
 For a root with only locally implemented executable methods, use the
 selected semantic loader and the ordinary checked native emitter/JIT
 handoff. Preserve any type-provider/layout binding context. Executable
-MethodDef-provider closure still needs the provider-native owner's checked
-plan; clearing imports or broadening its F-only acceptance is not this
-decision. An unsupported provider lowering remains an open gate.
+MethodDef-provider closure and its checked native handoff are addressed
+separately by the unapproved
+[L1 MethodDef-provider closure proposal](standard-trrm-l1-method-provider-native-closure.md).
+That proposal is being followed provisionally under the user's explicit
+missing-contract direction; it does not broaden the provider-native owner's
+F-only admission. Clearing imports is not a valid substitute, and its
+implementation and qualification remain open gates.
 
 Deliberately excluded: new Layout schemas/formulas; public/exported constructor
 role discovery; general aggregate constants/defaults; direct structural-array

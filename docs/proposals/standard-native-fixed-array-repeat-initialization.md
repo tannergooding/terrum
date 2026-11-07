@@ -1,19 +1,12 @@
 # Standard native fixed-array repeat initialization
 
-**Status: unapproved; provisionally actionable only under the user's explicit
-missing-contract workflow.** Every recommendation below remains a candidate,
-not normative adoption, implementation support or execution evidence. The
-exact private revision-102 identities below were drafted before the current
-revision-102 field-path schema and revision-103 writer selection; they require
-reidentification before implementation.
+**Status: unapproved.** The source and Standard contracts remain candidates;
+current code support and evidence are separate. Private Repeat transport uses
+the exact unapproved `terrum/private-semantic-104-wide-fixed-layout-1`
+candidate owned by the [wide-layout proposal](wide-fixed-layout-private-persistence.md).
+The historical revision-102 sections below do not select an active schema,
+compatibility alias or fallback.
 [Proposal index](README.md).
-
-> “At a genuine missing contract, prepare the smallest concrete decision needed
-> as a new proposal doc using gpt-6.1-sol at max reasoning, then continue with it
-> being treated as a provisional approval/direction. I will go and appropriately
-> review/approve those proposals at a future point; this allows you to continue
-> work without being blocked. Do not invent compatibility aliases, fallbacks or
-> encodings to avoid the decision.”
 
 ## Decision and preserved baseline
 
@@ -22,9 +15,10 @@ N=0, followed by ordinary Copy repetition**. Retain one element-fact template
 and sparse deviations, not N expressions, captures or analysis entries.
 For compact Standard retention, select the distinct **A2R1+Repeat** successor
 below with one explicitly amended SemanticStore combination; allocate no
-opcode. The original private candidate used **revision 102, expression tag
-47**; current revision 102 already denotes a different schema, so its exact
-identity must be revised before implementation. Huge source qualification
+opcode. The historical private candidate assigned **expression tag 47** under
+revision 102. The current private writer selects exact revision 104, which
+inherits the revision-103 codec containing tags 47 and 48. The old 102
+assignments are not compatibility schemas or alternate selectors. Huge source qualification
 needs neither native emission nor storage allocation.
 
 This enables the pending
@@ -257,22 +251,21 @@ or compatibility reader is prescribed. Semantic-only source qualification
 needs no serialized Body; existing exact schemas remain usable for unchanged
 type-only inputs, but cannot retain the new compact operation.
 
-## Historical exact private semantic candidate
+## Historical private revision-102 Repeat candidate
 
-**Unapproved private candidate: i32 revision 102**, exact identity
+**Historical unapproved candidate: i32 revision 102**, exact identity
 **`terrum/private-semantic-102-fixed-array-repeat-initialization-1`**.
 Inherit the complete [101 storage-address-path schema](native-storage-address-path-private-persistence.md),
 its [address-only backing amendment](native-storage-address-address-only-backing.md)
 and [artifact-local projection rules](native-fixed-array-private-metadata-boundary.md);
 add **expression tag 47 (`2F` hex)** for the proposed repeat node.
-The [implementation inventory](../implementation/modules.md) records current
-private revision 103, which includes revision 102's fixed-array field-path
-writes. This candidate's exact revision-102 assignment was drafted against the
-earlier revision-101 codec and is now occupied by a different selected
-schema; the candidate identity must be revised before implementation. Its
-tag-47 proposal still avoids changing the then-existing tag-43 layout
-invariant. The later 102+FieldWrites candidate is a distinct schema with the
-same stale revision number, not a compatible alias.
+The current exact private candidate is
+[`terrum/private-semantic-104-wide-fixed-layout-1`](wide-fixed-layout-private-persistence.md),
+which inherits the complete revision-103 codec, including tag 47 and tag 48.
+The old 102 identity below is retained only to explain the superseded draft;
+the record payload and once-only seed rules are inherited without an old
+header decoder or fallback. The separate historical 102+FieldWrites
+composition is likewise not a compatible alias.
 
 | Alternative | Decision |
 |---|---|
@@ -284,6 +277,8 @@ same stale revision number, not a compatible alias.
 
 Keep magic `54 52 52 4D`; offset 4 contains little-endian **i32 102**
 (`66 00 00 00`). The identity above is documentation, not another wire string.
+This header is historical only; the tag-47 expression payload below is
+inherited unchanged by the selected private-104 candidate.
 Retain 101's header/profile/kind/runtime fields, mandatory possibly empty
 44-byte array table, declaration/body framing, tag-35 ancestor list, tags
 1–46 and statement/type namespaces. No Standard assignment or candidate
@@ -309,18 +304,18 @@ constant seed has 21 bytes: the repeat is **34 bytes**, at N=0/1/H alike.
 This is an independent framing oracle, not writer/reader agreement.
 N=0 still requires that child and its once-only effects/failure edge.
 
-Private 102 admits tag 47 in the inherited flat direct-local construction/
-whole-replacement contexts, subject to the same complete RootlessCopy,
-private value-codec, authority and layout checks. For **101's positive-extent
-address-only nested backing role**, amend its constructor-tree restriction
-in 102 only: a matching tag 43 **or 47** is a constructor subtree, and an
-array-valued list item/repeat seed must itself be such a complete constructor.
-This permits compact mixed list/repeat backing trees, not ordinary nested
-array reads/calls/temporaries. Keep that role's positive dimensions,
-non-array leaf eligibility and NoEscape direct NativeParameter restrictions.
-Tags 44–46 retain their flat-operation meanings; general nested/field paths,
-array ABI, non-unit zero-payload and other excluded value carriers remain
-separate private capability gaps, not silently admitted by recursive framing.
+The selected private-104 candidate inherits tag 47 in the revision-103 codec.
+It admits the flat direct-local construction/whole-replacement contexts,
+subject to complete RootlessCopy, private value-codec, authority and layout
+checks. For the inherited positive-extent address-only nested-backing role,
+a matching tag 43 or 47 is a constructor subtree, and an array-valued list
+item/repeat seed must itself be a complete constructor. This permits compact
+mixed list/repeat backing trees, not ordinary nested array reads, calls or
+temporaries. Keep that role's positive dimensions, non-array leaf eligibility
+and NoEscape direct NativeParameter restrictions. Tags 44–48 retain their
+individual meanings; array ABI, non-unit zero-payload and other excluded value
+carriers remain separate private capability gaps, not silently admitted by
+recursive framing.
 
 Re-derive D/common, typed validity and pointer provenance from the retained
 seed, operations and admitted published contracts; do not serialize a trusted
@@ -332,27 +327,27 @@ an imported body. Full owned construction is not a bodyless provider promise.
 
 ### Exact selection, embedding and transformation
 
-Under an adopted, reidentified exact candidate, all selected private
-producers, consumers, contract-only projections and graph libraries must use
-that one schema, including scalar-only artifacts and empty array tables.
-Readers must select its exact identity before tables/records, without a
-`>=101` gate, profile sniffing, retry or scalar-only fallback. Reject unknown
-tags, missing/truncated seed, invalid spans/types/table references,
-seed-type mismatch, invalid closure/geometry, excluded enclosing uses and
-inherited byte/node/depth exhaustion. Update every exact-membership/header/
-snapshot path coherently, not only tag dispatch.
+The unapproved revision-104 candidate requires all selected private
+producers, consumers, contract-only projections and graph libraries to use
+that exact schema, including scalar-only artifacts and empty array tables.
+Readers select revision 104 before tables/records, without a `>=101` gate,
+profile sniffing, retry or scalar-only fallback. Reject unknown tags,
+missing/truncated seed, invalid spans/types/table references, seed-type
+mismatch, invalid closure/geometry, excluded enclosing uses and inherited
+byte/node/depth exhaustion. Update every exact-membership/header/snapshot path
+coherently, not only tag dispatch.
 Regenerate from source or complete checked IR; header patching is not a
 conversion, and no universal detection of dishonestly relabelled bytes is
 promised.
 
 Semantic [module sets](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.ModuleSets.cs)
-select 102 independently for each provider and consumer. Keep native
+select 104 independently for each provider and consumer. Keep native
 [TNPK](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs),
 [TNSP](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.ModuleSets.cs)
 and [TNGP](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.GraphPackages.cs)
 **outer version 3** layouts unchanged. Every embedded semantic Contract/full
-module independently selects 102; outer 3, matching policy/profile or a valid
-checksum cannot authorize an inner-101 decoder. Rebuild enclosing lengths,
+module independently selects 104; outer 3, matching policy/profile or a valid
+checksum cannot authorize an inner-101/102/103 decoder. Rebuild enclosing lengths,
 import/dependency tables and hashes; keep actual provider/export expectations
 and native binding/image checks. Only small supported programs enter native
 packages; huge semantic artifacts do not acquire executable storage.
@@ -369,7 +364,7 @@ Required obligations cannot be pruned with the implementation.
 
 Private load/link/re-emission must retain tag 47 and one child without source
 rereading, N-element expansion or Standard/private fallback. The A2R1+Repeat
-Standard successor above is **unchanged**; private 102 is a distinct exact
+Standard successor above is **unchanged**; private 104 is a distinct exact
 route, not its alias or a replacement for its conformance gates.
 
 ## Field writes through captured array elements
@@ -483,14 +478,19 @@ Reconstruction must retain Element-to-Field parent facts and the field suffix;
 fixing only the reader's discriminator without preserving that path is incomplete.
 Mandatory structural/binding checks and producer truth retain their existing roles.
 
-### Private 102+FieldWrites: exact tag 48
+### Historical 102+FieldWrites candidate: tag 48
 
-Select the **unapproved amended whole-schema agreement**
+The historical **unapproved amended whole-schema agreement** was
 **`terrum/private-semantic-102-fixed-array-repeat-initialization-field-path-writes-1`**,
 shorthand **102+FieldWrites**. It composes the repeat-only 102 candidate above
 with only this field-write/backing admission. Header i32 102, tag 47 and all
 existing payloads remain unchanged; the repeat-only agreement remains the
 unchanged base, **not an alias for this composition**.
+
+The current revision-104 candidate inherits this tag-48 record from its
+revision-103 predecessor alongside tag 47. The payload below describes the
+inherited record, not a second schema selection; revision 102 and
+102+FieldWrites are not readable aliases.
 
 Tag 46 still represents one flat **whole element** value. Existing private
 field-assignment statement tag 9 has no indexed path; neither can encode this
@@ -532,14 +532,11 @@ Source/private production checks actual unsafe scope; reconstruction derives
 the obligation from owner/layout/field facts and the enclosing unsafe scope,
 not a stored IsUnsafeAuthorized bit.
 
-The originally proposed 102+FieldWrites agreement is not the current private
-selection and its revision is occupied by a different schema. After
-reidentification, private entry points must select **one exact amended
-agreement**; integrating the field-write amendment replaces its repeat-only
-base and does not add decoder modes. Regenerate all private peers/contracts/
-packages to that agreement. Equal i32 values, outer version 3 or absence/
-presence of tag 48 do not select a schema. No automatic old-schema detection,
-compatible alias or fallback is claimed.
+Private entry points select exact revision 104 before decoding the inherited
+tag-47/tag-48 records. Revision 102, revision 103, outer version 3 or the
+presence/absence of either expression tag does not select a schema. Regenerate
+private peers/contracts/packages to revision 104; no automatic old-schema
+detection, compatible alias or fallback is claimed.
 Existing exact-101/unknown-version rejection, full-source-free closure,
 TNPK/TNSP/TNGP embedding, resource and R/C-representation boundaries remain.
 
@@ -552,7 +549,7 @@ These are future producer/consumer/native tests, not evidence run here:
 | Source/D | Mutable Word Low/Wide fields; known and uint64 unknown `values[i].Low = value` preserve Wide-defined tail/common D. Repeat Low-only, padded and pointer-bearing seeds; Low writes cannot invent Wide/provenance, while whole padded-field writes kill their padding holes. Include nested arrays and `Inner.Low` suffixes. |
 | Authority/order/aliases | Reject missing target unsafe scope, immutable roots/fields, invalid intermediate typed views and getter/temporary roots. Count base/index/RHS effects once; N/negative/too-wide indices suppress later work. RHS index rebinding does not retarget; RHS alias mutations are reflected at commitment, failed RHS preserves actual precommit state, and conflicting loans/lifetime loss reject. |
 | Standard | Emit/load/re-emit Element-to-Field and nested field chains in unchanged A2R1+Repeat. Exercise place-register aliases, overwritten/reused registers, cross-block captured places and wrong owner/type/authority/base-carrier rejection. Permute FieldDef/TypeDef/Import/layout/Home/record indexes without losing original provider expectations or D. |
-| Private | Independent 75-byte tag-48 vector, P/F/type/root/ordinal/truncation/resource rejection and tag-46/47 byte invariants. Source-free direct/nested-root construction, field stores and re-emission retain one index evaluation and exact field effects. Repeat-only 102 rejects 48; amended peers explicitly agree before exchange. Array-field roots and unsupported value/R/C crossings retain negative gates. |
+| Private | Independent 75-byte tag-48 vector, P/F/type/root/ordinal/truncation/resource rejection and tag-46/47 byte invariants. Source-free direct/nested-root construction, field stores and re-emission retain one index evaluation and exact field effects. Revision 104 is the only selected schema; historical revision-102 candidates are rejected. Array-field roots and unsupported value/R/C crossings retain negative gates. |
 | Native/resources | On small source and source-free Standard/private/set/package fixtures, verify Low changes only its selected byte, Wide's other bytes and neighboring elements survive, and packed/overaligned stores use exact extent/alignment. Nested private fixtures use admitted scalar-leaf readback/address consumers, not a new array ABI. Re-test changed provider/field mappings. Huge-count semantic D updates remain template/sparse; existing frame limits still decline huge native materialization. |
 
 ## Integration, resources and native boundaries
@@ -634,9 +631,9 @@ let a complete padded alternative have payload `[0,1)` and `[4,8)`.
 | Padding/provenance | Wide then padded replacement yields D `[0,1)` plus `[4,8)`, not `[0,8)`; Low-only subrange writes preserve untouched bytes. Packed/overaligned and tail-padding cases do not create backing. Repeated pointer/code cells retain the same origin/extent; expired/short backing, overlapping typed-pointer invalidation, lost required facts and zero-extent addresses reject under existing rules. |
 | Resources | Hold seed/path/override shapes fixed while increasing N through H and the maximum layout-valid count: traversal, snapshots, Copy, Common, unknown writes and joins remain compact. Increase actual stored keys/nesting separately; test supported work/state/depth limits at and beyond their inclusive boundary, nonwrapping charges and no partial success on exhaustion. Native payload bytes are not allocated by semantic tests. |
 | Standard isolation/remapping | Round-trip RepeatCopy with scalar/unit/raw-Union/nested-array seeds and changed map/record/Home/field/provider indexes, including short/full index boundaries. Reject value 6 under old schemas, wrong role/type/transition/None, bad reserved fields/references/requirements and incompatible bindings. Retain D/R/C without source/debug data or fallback. |
-| Private selection/framing | Every full/reference/consumer/graph output selects 102, including no-repeat scalar programs. Check the 34-byte tag-47 oracle and inherited tag-43 exact count/list, tag-35 paths and 44–46 operations. N=0/1/H retain one child; malformed/truncated children, mismatched E/type rows, honestly declared 101/unknown versions and inherited resource-limit violations reject. Huge semantic round-trips allocate no N-sized payload. |
-| Private source-free/dependencies | Load/link/re-emit full persisted producer/consumer bytes with no source. Verify once-only seed calls, D/common and copied snapshots after mutation, unit/empty cases, and small effects/failure fixtures. Reorder array/nominal/pointer/fnptr tables and selected providers; retain original seed import/layout/Copy/backing expectations, rejecting incompatible replacements or unrepresentable R/C crossings. Bodyless references do not restore omitted bodies. Mixed tag-43/47 positive nested address-only backing passes; ordinary nested paths/values remain explicit negative private gates. |
-| Private embedding | Semantic sets and TNPK/TNSP/TNGP outer-3 packages retain exact inner 102 through dependency binding and re-emission. A validly rehashed outer-3 wrapper containing an honestly inner-101 Contract still rejects. Test wrong kinds, policy/profile, lengths/hashes and missing/incompatible dependencies. Small source-free packages execute under existing headless supervision; huge programs remain semantic-only. |
+| Private selection/framing | Every full/reference/consumer/graph output selects exact revision 104, including no-repeat scalar programs. Check the 34-byte tag-47 oracle, 75-byte tag-48 vector and inherited tag-43 exact count/list, tag-35 paths and 44–46 operations. N=0/1/H retain one child; malformed/truncated children, mismatched E/type rows, honestly declared 101/102/103 or unknown versions and inherited resource-limit violations reject. Huge semantic round-trips allocate no N-sized payload. |
+| Private source-free/dependencies | Load/link/re-emit full persisted producer/consumer bytes with no source. Verify once-only seed calls, D/common and copied snapshots after mutation, unit/empty cases, and small effects/failure fixtures. Reorder array/nominal/pointer/fnptr tables and selected providers; retain original seed import/layout/Copy/backing expectations, rejecting incompatible replacements or unrepresentable R/C crossings. Bodyless references do not restore omitted bodies. Mixed tag-43/47 positive nested address backing and the inherited 102+FieldWrites field-suffixed role pass; nested array reads and whole-inner-array replacement remain negative private gates. |
+| Private embedding | Semantic sets and TNPK/TNSP/TNGP outer-3 packages retain exact inner 104 through dependency binding and re-emission. A validly rehashed outer-3 wrapper containing an honestly inner-101/102/103 Contract still rejects. Test wrong kinds, policy/profile, lengths/hashes and missing/incompatible dependencies. Small source-free packages execute under existing headless supervision; huge programs remain semantic-only. |
 | Native separation | Small supervised JIT/AOT fixtures verify once-only effects, copies, failure/publication, fresh readback and untouched neighbors after Standard remapping. Separately verify native capacity decline for unsupported huge frames; no huge execution, silent heap fallback or emission-only runtime claim. |
 
 Current implementation observations, not newly run qualification:
@@ -646,18 +643,18 @@ Current implementation observations, not newly run qualification:
 | [Binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.NativeSampleArray.cs), [bound initializer](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs) and [array verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.NativeSampleArray.cs) | Only exact lists are represented; add the proposed source/bound repeat route and all shared traversal/failure checks without changing list invariants. |
 | [`RawUnionArrayElementState`](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs) | It stores GuaranteedBytes plus sparse `Dictionary<ulong, byte[]>` overrides. Known access, Copy and Common visit stored keys, but it cannot install a richer uniform seed; unknown writes currently update overrides and Merge requires equal defaults. Generalize per-instance templates, nested/default path coverage and guarded provenance without changing type G or allocating extent-sized masks. |
 | [Standard writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs) and [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs) | The writer visits list elements and the reader accumulates an element list until N is complete. Add exact successor selection, record reader/writer/validation and compact reconstruction/remapping; existing index-counter Homes are not a repeat/completion carrier. |
-| [Private codec](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs) and [array admission/remapping](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.NativeFixedArrays.cs) | Exact 101 has no repeat tag. Implement the selected 102/tag-47 route, coherent header/snapshot/embedding selection, seed closure/remapping and the scoped nested-backing constructor amendment. Required private source-free/re-emission tests are not replaceable by Standard evidence; unsupported broader private values/paths or published facts remain separate gaps. |
-| [Field binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs), [path verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.NativeSampleArray.cs) and [Standard place reconstruction](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs) | Indexed field targets currently reject as temporaries; PathWrite verifies Value against the whole leaf E and Standard Field/register-base reconstruction accepts only a prior Field. Integrate the field suffix, captured target/post-RHS W transfer and Element-to-Field composition. Private 102+FieldWrites/tag 48 is the separate selected transport, not tag-46 reinterpretation. |
+| [Private codec](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs) and [array admission/remapping](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.NativeFixedArrays.cs) | The current writer/reader select exact private revisions 104 and 106. Revision 104 inherits tags 47 and 48; revision 106 uses R PlaceRead/CheckedStore 50/53 for typed paths while preserving the inherited 102+FieldWrites nested backing role. `PrivateRepeatTag47IsCompactForZeroOneAndLargeCounts` checks the 34-byte seed vector; `PrivateNestedFieldPathBackingRoundTripsAndExecutes` exercises a source-free 106 Repeat plus nested field write through JIT/PE, native consumer-set/graph embedding and compatible replacement. `PrivateNestedFieldPathRejectsDiscontinuousProjectionAndOwner` checks malformed 53 typed-place paths. `PrivateRepeatBodiesSurviveSemanticModuleSetReemission` and `PrivateRepeatBodiesSurviveFixedArrayTableReorderingOnReplacement` cover source-free consumer-set re-emission and Repeat array-table index remapping. Broader provider/dependency expectation closure and malformed consumer matrices remain required; Standard evidence cannot replace these gates. Nested array reads and whole-inner-array replacement remain excluded. |
+| [Field binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs), [path verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.NativeSampleArray.cs) and [Standard place reconstruction](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs) | Source field targets and Standard Element-to-Field reconstruction are implemented and covered by focused source-free/runtime cases; broader provenance/alias and resource transfer remains open. Private tag 48 is inherited under exact revision 104, not a separate 102+FieldWrites selector or tag-46 reinterpretation. |
 | [Layout](../../sources/Terrum.CodeAnalysis/Semantics/NativeFixedArrayContract.cs), [VerifyCore](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs), [support inventory](../implementation.md) and [CG-004](../implementation/conformance-gaps.md#cg-004-native-declaration-and-body-integration) | Checked count-times-stride can exceed int/u32 while fitting target nuint. Array formals/results still reject; struct-field size/mask and native frame representations have narrower implementation limits. Those do not redefine layout validity or justify an ABI/test-state bypass. Keep huge qualification in supported local/nested semantic paths and report remaining field/storage gates separately. |
 
 Upon adoption, grammar/construction own the new expression, initialization/
 expressions own once-only capture and whole publication, and the instruction/
 registry chapters own record-05 value 6 under the exact successor.
-This proposal owns private 102/tag 47 and its scoped 101 supersession; private
-codec documentation must describe that independently selected implementation
-route, not turn it into normative TRRM.
-The field-write amendment owns the Bound suffix and exact 102+FieldWrites/tag
-48 composition; Standard place composition needs implementation, not new
+This proposal owns the Repeat tag-47 payload and once-only seed rules; exact
+private schema selection remains owned by the revision-104 wide-layout
+proposal, not normative TRRM. The field-write amendment owns the Bound suffix
+and tag-48 payload inherited by revision 104; Standard place composition's
+remaining gates are implementation work, not new
 normative allocations. Repeat-only schema directions remain their unchanged bases.
 Complete types, layout/ABI, A2 Copy and A2R1 remain the referenced owners of
 unchanged rules; resource recipes and conformance cases integrate through
@@ -665,9 +662,9 @@ their existing owners. No owner is amended by this proposal.
 
 **Remaining user decision:** approve, amend or reject this repeat contract
 and its exact Standard/private successors, including the field-write composition;
-they remain unapproved and only provisional
-under the quoted authorization. No in-scope evaluation, zero-count, Copy,
-coverage or wire sub-decision is left to implementation. Whole-array ABI,
+they remain unapproved despite provisional implementation. No in-scope
+evaluation, zero-count, Copy, coverage or wire sub-decision is left to
+implementation. Whole-array ABI,
 general generators/owning arrays, other target/schema compositions and wider
 native frame support are independent decisions/work, not prerequisites for
 the proposed semantic-only high-count slice.

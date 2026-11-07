@@ -421,15 +421,24 @@ implementation is provisional evidence, not normative adoption.
   F+S-consumer/F-provider selection, scalar and nested raw-pointer cells
   including `ptr<void>`, dependency and selector comparison, TypeSpec and
   predicate-graph row permutation, source-free re-emission, PE emission, and
-  rejection of changed foreign targets/types/contracts. The NativeAddress/
-  NativeImport selection passes 332/332 with no skips; the local-aggregate
-  native selection passes 16/16, and the analyzer-enabled Debug build passes
-  with zero warnings/errors.
+  rejection of changed foreign targets/types/contracts. The combined
+  NativeAddress/NativeImport/provider/local-aggregate selection passes
+  514/514 with no skips, and the analyzer-enabled Debug build passes with
+  zero warnings/errors.
 
 F+S is deliberately bounded to one selected provider Module and does not
-acquire F-only provider-graph admission. Dedicated NativeOutput regressions
-for every already-admitted F multi-provider/graph edge remain open, although
-the common F edge loop applies the same comparer to each retained Import.
-Nominal ownership mapping, NativeParameter input binding, NativeVTable/
-foreign-interface identity, checked or indirect outputs, and resource
-adoption/release remain separate gates.
+acquire F-only provider-graph admission. Active F regressions now cover
+multiple output Imports including an uncalled second declaration and a changed
+contract on an intermediate provider edge. The common F edge loop applies the
+same comparer to every retained Import. Tests also cover an intermediate
+provider that re-emits an uncalled public output declaration while importing
+and calling a leaf output provider, plus per-edge comparison and changed-
+selector rejection. Co-located root/provider selection is covered; the broader
+and intermediate-provider selection is covered, including a co-located
+intermediate Module artifact, a shared-leaf diamond, a self-edge and a
+two-module cycle through closure validation and PE handoff. NativeParameter-
+free F/F+S provider binding is complete for this bounded provisional slice;
+the candidate remains unapproved. Nominal ownership
+mapping, NativeParameter input binding, NativeVTable/foreign-interface
+identity, checked or indirect outputs, and resource adoption/release remain
+separate gates.

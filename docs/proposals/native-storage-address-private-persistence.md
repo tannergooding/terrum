@@ -36,7 +36,7 @@ continue to require their independently selected complete representations.
 
 The source observations below are retained from the proposal's earlier
 revision-92 inspection; they are not current support claims or test results.
-The current structured writer/reader selects revision 103 and carries u64
+The current structured writer/reader selects revision 104 and carries u64
 tag-35 extents, as tracked in the
 [module inventory](../implementation/modules.md) and
 [conformance handoff](../implementation/conformance-gaps.md). The revision-99
@@ -46,7 +46,7 @@ writer schema.
 | Inspected owner | Relevant fact |
 |---|---|
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), `BoundNativeStorageAddress` | `ElementCount`, `ElementStride` and `ByteExtent` are now `ulong`; the node also retains its local, index, carrier/element/address types and readonly fact. |
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `PutExpression`, `GetExpression` | In the inspected snapshot, writer/header selection was exactly 92; tag 35 wrote three `ulong` operands but read three `ReadInt32` operands, causing 12-byte misframing. The current revision-103 codec reads/writes u64 quantities; the old mismatch is historical and not a current decoder claim. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `PutExpression`, `GetExpression` | In the inspected snapshot, writer/header selection was exactly 92; tag 35 wrote three `ulong` operands but read three `ReadInt32` operands, causing 12-byte misframing. The current revision-104 codec reads/writes u64 quantities; the old mismatch is historical and not a current decoder claim. |
 | [Private module reference](../implementation/modules.md) | Revision 92 carries resolved arithmetic modes, NoThrow retirement, declaration-owned native outputs/output dependencies and reservation tag 41; tag 42 is a provisional private amendment. Private persistence remains distinct from standard interchange. |
 | [`ModuleCompiler.Graph.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.Graph.cs), `ReadGraphLibrary` | Graph-library decoding shares the header/function codecs but has its own module reconstruction and validation path. Ordinary reads alone are not the migration boundary. |
 

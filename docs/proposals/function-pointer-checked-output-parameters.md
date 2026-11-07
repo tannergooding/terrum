@@ -421,17 +421,18 @@ checked-output rows. Do not use Standard convention bytes, graph rows or host
 legacy passing flags in those fields. Preserve exact selected types/contracts
 in references, native sets/graphs and retained provider expectations.
 
-**Implemented revision 92's private i32 type identities do not supply a
-canonical checked-reference type/Body carrier.** The unapproved
+**Implemented revision 104 does not persist the host's complete
+checked-reference types or checked Body operations.** The unapproved
 [shared private companion](checked-reference-private-persistence.md) now
-selects that exact candidate-97 extension; implementation remains a gate.
+selects one exact **candidate-105 composition over 104**, replacing its earlier
+reference-97 candidate; implementation remains a gate.
 Merely allowing nonempty OutputStates or
 writing payload T into `parameterType` would still lose the formal's identity,
-address and authority. The inspected implemented revision 92 must continue to
+address and authority. The implemented revision 104 must continue to
 reject facts it cannot transport; neither its legacy tag-21 output expression
 nor NativeOutput tag 41 is the encoding of this proposal.
 
-The private decision, owned by that candidate-97 companion, supplies a
+The private decision, owned by that candidate-105 companion, supplies a
 lossless complete initialization-reference type-use and checked formation/
 reborrow/store representation across:
 
@@ -446,9 +447,11 @@ Use the companion's shared private complete-type mechanism, not
 function-pointer-only IsInit bits or a second native-output tuple. **This
 checked-output proposal itself assigns no private revision, type code,
 escape, expression tag or optional trailer**; the companion is their sole
-owner. Select exactly its whole composed amended 97 before affected private
-writing/reading is enabled. A revision number alone is not agreement, and
-earlier-97 drafts are not alternate decoders or aliases.
+owner. Select exactly its whole **104 plus explicitly reconciled deltas / 105**
+before affected private writing/reading is enabled. The old reference tags
+42–45 cannot replace 104's existing allocations; the companion uses 49–54.
+A revision number alone is not agreement, and 104 or earlier-97 drafts are
+not alternate decoders or aliases.
 
 This is a blocked transport path, not permission to claim lossless private
 support, silently retain only Standard metadata, strip outputs for native

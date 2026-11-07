@@ -12,13 +12,17 @@ The source, anchor, selector and convention directions referenced below
 remain unapproved/provisional independently of this recommendation.
 
 The [checked-reference private-persistence companion](checked-reference-private-persistence.md)
-now selects the previously missing recursive checked-reference/optional type
-and checked Body carrier, plus ordinary declaration publication facts, as an
-exact amendment to the complete candidate 97. It remains unapproved and
-unimplemented; its explicit composition also retains the later
-foreign-invocation, direct-import expectation and enum amendments. This file
-continues to own pointer invocation rows and `fnptr#i`/address-contract
-references, not a competing checked-reference codec.
+supersedes its earlier reference-97 candidate with one unapproved,
+unimplemented **private-105 composition over implemented 104**. It selects
+recursive reference/optional carriers, declaration publication/implicit
+facts and typed Body operations, including reusable materialization.
+Its explicit composition retains this file's pointer-row/type-reference
+semantics plus the later foreign-invocation vector/raw-output amendment,
+direct-import expectation and enum deltas; it does not inherit a 97 byte
+layout or decoder. This file continues to own pointer invocation rows and
+`fnptr#i`/address-contract references, not a competing checked-reference codec
+or the 105 composition. The standalone historical 97 recommendation below
+is not the implemented 104 schema or an alias for 105.
 
 ## Decision and precise supersession
 

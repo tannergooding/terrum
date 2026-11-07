@@ -340,12 +340,62 @@ Current [support inventory](../implementation/conformance-gaps.md#cg-004-native-
 records implemented bounded Repeat routes and still-open sparse resource
 qualification. In
 [`SemanticVerifier`](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs),
-`RawUnionArrayElementState` now has C plus `Dictionary<ulong, byte[]>`
-overrides. `Clone`, `Common`, writes, `Merge`, surrounding path copies and
-snapshot comparisons traverse/copy retained entries and bytes without this
-complete ledger. Dictionary/HashSet iteration also does not define the
-reference order. Replace or adapt those operations coherently, including
-reservations and failed-root publication, before claiming this recipe.
+`RawUnionArrayElementState` stores C plus an ascending sparse override vector,
+with lower-bound lookup and ordered merge/equality traversal. A growing subset
+of frame, key/path, payload and state-transition work is charged, and
+multi-unit work requests retain all completed units and fail at the first
+unavailable unit. Frame entry preflights its combined work/depth/state claim
+atomically. Operation-scoped input/destination state reservations remain on
+`InitializationState.Clone`, `CopyTo` and snapshot routes when the input is
+not already covered by an owner lease. The callable-root raw-Union map now
+retains a persistent lease between operations; completed output transfers
+into it, and snapshot scopes borrow it without double-counting or disposing
+the root lease. Other output maps now grow incrementally.
+Raw-Union guarantee-union template and override bytes charge seven work units
+per produced byte for two reads, the bitwise combination, and output
+generation. Its sparse-key merge performs both ordered head checks, reads
+each key once, and charges the comparison. `ClearRawUnionArrayFacts`,
+`CopyRawUnionArrayFacts`, `SetRawUnionArrayFacts`, exact element writes to
+existing roots and new roots, including inherited template facts,
+existing/new-root template writes, and existing-root byte-range writes build
+fresh ordered root maps with per-item output reservations. The main
+`MergeRawUnionArrayFacts` and equal-specificity template-state `Merge` outputs
+also construct roots and child overrides incrementally. These remain partial
+and do not yet conform to the full recipe. Unknown-index and byte-range writes
+now build ordered output maps with per-item reservations for existing exact
+roots, matched ancestor-prefix roots and newly introduced roots; completed
+output reservations transfer into tracked snapshot state. The old
+`CopyRawUnionArrayStateMap` write helper is removed. No-match ancestor-prefix
+queries now run a charged existence scan before the single ordered output
+pass and use the ordinary missing-root route, avoiding a discarded candidate
+map. The scan charges path descriptors/segments, first-hit/final-miss, and
+result-mode/cursor-dispatch work; the matched output pass repeats prefix tests.
+This does not establish exact full-recipe charges or receipts. Outcome clones
+retain leases in branch/loop, fixed-point,
+failure/exception, statement-input and temporary proof scopes, with map
+replacement adjusting the owning lease. If/loop paths explicitly release
+condition/outcome and unreachable-branch snapshots, and converged entry/head
+snapshots; iterative loop condition-only clones and post-test inputs now retire
+at their last use. Fixed-point iterations now also retire temporary
+continue/break, body/iterator, post-test condition, back-edge and native-merge
+snapshots at their last use, reset stored Breaks/Continues edge owners after
+transfer, and retain entry/head through convergence.
+Failure-edge state is released on reset/disposal. Other
+raw-Union prefix filters across copy, clear, snapshot, set and lookup routes
+use the charged path predicate; selected template-state clones retain their
+scratch lease through consumption, including CopyOrigin source selection.
+Rebase prefix validation is charged in those routes as well.
+Other call-staging, failure/proof and intermediate loop snapshots still need
+last-use review. Exact last-use retirement, source-proof, complete action
+expansion, receipts and public boundary routes remain open. Remaining
+whole-map sizing/input reservations and other transition costs have not been
+reconciled with the candidate's exact
+first-exhausted-action trace; do not claim exact receipt conformance. A public
+fixed-extent source case currently compiles with 150 sparse replacements and
+observes work-limit exhaustion with 151; this is not a one-unit ledger
+boundary. Preserve
+failed-root publication while completing those routes; physical container
+iteration order is not the accounting order.
 
 `MaximumAnalysisVisits = 100_000` is current implementation support, **not**
 a new accepted proof minimum or this recipe's envelope. It is not changed

@@ -14,6 +14,13 @@ It supersedes the separate-provider recommendations listed under
 source semantics or every remaining RootPin representation candidate.
 The analogy does not select the CLR, .NET's ABI, or a .NET GC implementation.
 
+The focused [common ABI and bootstrap candidate](integrated-gc-runtime-abi.md)
+now recommends exact Windows x64 signatures, records, table/host attachment,
+frames, allocation/publication, barriers and admission handoffs for the gaps
+identified here. It remains a separate unapproved physical-interface proposal:
+this architecture does not adopt it, revise the prior exact RootPin schema or
+claim compiler/runtime support.
+
 ## Problem and scope
 
 The [RootPin runtime candidate](reference-root-pin-runtime.md) supplies useful
@@ -313,7 +320,10 @@ contract violations, not promised detections by table membership checks.
 ## Minimum ABI decisions and prerequisites
 
 This proposal deliberately assigns no export signatures, table sizes, wire
-records, DLL name or numeric IDs. Before independent binaries can target the
+records, DLL name or numeric IDs. The
+[focused ABI candidate](integrated-gc-runtime-abi.md) provisionally answers
+the physical decisions below without changing their approval or independent
+schema/implementation gates. Before independent binaries can target the
 recommendation, the owners must select these exact minimum contracts:
 
 | Required decision | Minimum content to assign |

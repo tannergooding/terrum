@@ -73,7 +73,7 @@ Module's binding context:
 | Import schema I | `Terrum.Interop.NativeImport`: public nongeneric primary semantic attribute schema with the complete arguments below. |
 | Callable schema C | `Terrum.Interop.NativeCallable`: public nongeneric primary semantic attribute schema with exactly the optional named CallConv argument below. |
 | Existing pointer selector P | `Terrum.Interop.NativeCallConv`: the separate registered function-pointer type-use schema; its explicit enum argument binds the same E, not another same-shaped enum. |
-| Existing export role X | `Terrum.Interop.NativeExport`: the registered native-export role whose method form implies C's normalized role. No new export argument or symbol schema is selected here. |
+| Existing export role X | `Terrum.Interop.NativeExport`: the registered native-export role whose method form implies C's normalized role. Its complete source/Core argument schema is not selected here; see the separate [NativeExport source-schema candidate](native-export-source-schema.md). |
 
 | Exact member of E | Public enum value | Existing standard convention byte |
 |---|---:|---:|

@@ -78,15 +78,19 @@ path. Shell quoting/expansion remains the caller's responsibility.
 |---|---|
 | `analyze`, `build`, `build-native-import`, `build-library`, `jit` | Accept the option and deliver the admitted set to the existing options-bearing source compilation factory. |
 | `compile-trrm`, including `--library` | Accept it for source binding. Require ordinal equality between manifest `usingModuleIdentity` and the existing required `--identity`; retain the existing destination-schema and runtime selectors. |
+| `compile-module producer` and `compile-module consumer` | Excluded by this base candidate; a separate unapproved [private-module extension](private-module-source-layout-registration.md) proposes reuse of the exact version-1 manifest for these two source-binding routes only. |
+| `scan-component` and `build-component` | Excluded by this base candidate; a separate unapproved [scanner-component extension](scanner-component-source-layout-registration.md) admits the manifest only for scanner-source compilation, not subject-source compilation. |
+| `frontend-component` | Excluded by this base candidate; a separate unapproved [frontend-component extension](frontend-component-source-layout-registration.md) admits the manifest only for the fixed component-source compilation, not the subject data or frontend fallback commands. |
 | Every other command | Reject the option as usage error; never ignore it or consume it as a source/provider path. |
 
-In particular, syntax-only `check`/`tokens`/`tree`, component prototypes,
+In particular, syntax-only `check`/`tokens`/`tree`,
 `frontend-build`/`frontend-build-library`/`frontend-run`, private
-`compile-module`/`compile-native`/`compile-native-set`/`compile-native-graph`
-producers, and all source-free build/run/validation/catalog commands do not
-accept it. This is deliberately the smallest direct-host plus Standard
-source-producer path, not implicit support in every command that reads source.
-Those excluded source paths have no layout-role selection until explicitly
+`compile-native`/`compile-native-set`/`compile-native-graph` producers, and all
+source-free build/run/validation/catalog commands do not accept it. This is
+deliberately the smallest direct-host plus Standard source-producer path, with
+the separately proposed private-module, scanner-source and frontend-component
+extensions described above. It is not implicit support in every command that reads source. Other
+excluded source paths have no layout-role selection until explicitly
 extended; removing name recognition does not entitle them to a hidden default.
 They remain usable for otherwise supported unconfigured source.
 

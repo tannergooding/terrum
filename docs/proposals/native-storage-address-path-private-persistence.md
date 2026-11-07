@@ -82,7 +82,7 @@ None is amended here.
 
 The source observations below are retained from an earlier inspection
 snapshot, not a live support inventory or test result. The current private
-writer/reader selection is revision 103 and is recorded in the
+writer/reader selection is revision 104 and is recorded in the
 [module inventory](../implementation/modules.md),
 [native inventory](../implementation/native.md) and
 [conformance handoff](../implementation/conformance-gaps.md). Revision 103 is
@@ -93,7 +93,7 @@ candidate's exact agreement or nested-backing support.
 |---|---|
 | [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs), `BoundNativeStorageAddress` | Retains a root `Variable`, final `Index`, carrier/element/address types, three u64 quantities, readonly fact and span. The worktree also has a full-path `Projections` collection with final `Index` alias. That in-memory extension supplies no private byte schema; preserve the existing fields and collection meaning. |
 | Same file, `BoundNativeFixedArrayProjection` and array pointer/path nodes | Represents one immediate array layout plus its original index. Reuse that entry shape; other nodes' full-path lists need not change meaning. |
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `PutExpression`, `GetExpression` | In the inspected snapshot, writer/header selection was exactly 100. Tag 35 used three u64 quantities followed by Boolean and one expression; the earlier revision-99 proposal's revision-92 width mismatch is historical and does not describe the current revision-103 codec. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs), `Write`, `ReadModuleHeader`, `PutExpression`, `GetExpression` | In the inspected snapshot, writer/header selection was exactly 100. Tag 35 used three u64 quantities followed by Boolean and one expression; the earlier revision-99 proposal's revision-92 width mismatch is historical and does not describe the current revision-104 codec. |
 | Same file, `ReadNativeFixedArrayTypes`, `GetPrivateFixedArrayLayout`, `GetFunction` | Mandatory bounded 44-byte array rows follow pointer types. Rows describe nested recipes; runtime-local admission separately rejects excluded nested rows. |
 | Same file, `Calls`, `RequiredStructures`, `RemapNativeTypeIdentities`, `RemapExpression`, `ResolveExpression`; [`BoundTreeTraversal.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundTreeTraversal.cs) | Traversal/remapping generalization is in progress. Every route must retain the additional children/layout identities and final-child alias; changing only the writer loses facts on other routes. |
 | [`ModuleCompiler.Graph.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.Graph.cs), `ReadGraphLibrary`; [`ModuleCompiler.ModuleSets.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.ModuleSets.cs) | Graph libraries share header/table/body codecs but have separate reconstruction/admission. Set/reference merging and graph edges also require the same path/type mappings. |
@@ -105,7 +105,7 @@ and proposal compositions, including working/untracked documents:
 
 | Namespace / existing selection | Consequence for this recommendation |
 |---|---|
-| Legacy private constants through 92, including span/fixed-layout selectors in `ModuleCompiler.TokenSpans.cs` and `ModuleCompiler.FixedLayout.cs` | Historical constants are not additional admitted schemas. The proposal's inspected revision-100 header selection is a source snapshot, not the current revision-103 writer selection. |
+| Legacy private constants through 92, including span/fixed-layout selectors in `ModuleCompiler.TokenSpans.cs` and `ModuleCompiler.FixedLayout.cs` | Historical constants are not additional admitted schemas. The proposal's inspected revision-100 header selection is a source snapshot, not the current revision-104 writer selection. |
 | Private 93 [dependencies](reference-provenance-carriers.md#private-exchange-candidate-revision-93), 94 [wide scalar codec](scalar-wide-value-carriers.md#exact-private-schema-and-composition), 95 [copy-origin summaries](reference-field-value-provenance.md#necessary-private-transport-candidate-95), 96 [foreign identities](native-output-foreign-interface-private-persistence.md#exact-revision-composition), 97 [native composition](native-calling-convention-private-persistence.md#exact-composition-and-selection) and [checked references](checked-reference-private-persistence.md#exact-schema-composition), 98 [interfaces/witnesses](source-interface-witness-private-persistence.md#exact-revision-composition) | Distinct complete candidates; 101 does **not** inherit them numerically or cherry-pick their type/value/contract codecs. |
 | Private 99 [u64 storage-address codec](native-storage-address-private-persistence.md), then 100 [array composition](native-fixed-array-private-persistence.md#allocation-and-exact-selection) | These are the actual base chain. Select **100 plus this delta**, not standalone 99 plus guessed array fields. |
 | **Private i32 101** | No competing private assignment was found. Proposed here, not allocated by the Standard registry. Unrelated decimal exponents, source/scanner operation numbers and descriptor byte sizes are other namespaces. |

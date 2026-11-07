@@ -56,10 +56,22 @@ These are inspected source boundaries, not newly executed validation:
 | [`NativeParameterExtentPersistenceTests.cs`](../../tests/Terrum.CodeAnalysis.Tests/Modules/NativeParameterExtentPersistenceTests.cs) and the [test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj) | The direct replacement regression demonstrates that a consumer expecting extent `uint.MaxValue` currently links against a replacement at `ushort.MaxValue`; the analogous vtable replacement rejects the change. |
 
 The [implementation reference](../implementation/modules.md) records the
-current private revision-103 codec; this candidate remains an unapproved
-expectation-transport amendment and is not part of that selection.
-The missing representation is a private semantic expectation decision,
-not permission to weaken accepted retained-binding obligations.
+current private revision-104 codec. Its current `Contract` now writes
+`DirectNativeImport`, `DirectNativeParameter` and `DirectNativeOutput`
+fingerprint tokens, including numeric convention/resolution and uint input
+extents; stored Function restoration parses the settings. The earlier
+missing-descriptor observations above describe the proposal's source snapshot,
+not a claim that current 104 serializes none of these facts.
+This dedicated import-only record remains unapproved and unimplemented.
+
+The [checked-reference integration](checked-reference-private-persistence.md#direct-descriptor-authority-reconciled-with-104)
+explicitly selects this typed record in its private-105 composition over 104,
+**replacing**, not duplicating, those fingerprints. It preserves this owner's
+record validity/comparison rules while superseding its standalone historical
+97 header/placement for that composition. Its exact type closure,
+reconstruction and replacement checks still need implementation. Neither
+selection permits weakened retained expectations or a second descriptor
+authority.
 
 ## Carrier alternatives
 

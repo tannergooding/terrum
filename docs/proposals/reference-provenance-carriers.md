@@ -405,7 +405,7 @@ defaults. No additional per-row rule-version word is needed.
 
 At the source snapshot used to form this proposal, revision **93** followed
 the inspected private revisions through 89 and the interacting proposals'
-90–92 candidates. The current implementation inventory selects revision 103;
+90–92 candidates. The current implementation inventory selects revision 104;
 93 is therefore a historical candidate assignment, not the current schema or
 an availability claim. This proposal does not revise its exact candidate
 identity. The number denotes an i32 private header value, not `(major,minor)`,
