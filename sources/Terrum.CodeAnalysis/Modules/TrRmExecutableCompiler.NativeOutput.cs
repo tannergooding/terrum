@@ -53,7 +53,7 @@ public static partial class TrRmExecutableCompiler
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         if (schema is not (TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft)
-            || program.Functions.Length != 2
+            || program.Functions.Length < 2
             || program.Structures.Any(static structure =>
                 structure.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement
@@ -77,22 +77,21 @@ public static partial class TrRmExecutableCompiler
         var targetIndex = -1;
         var callerIndex = -1;
         var outputCallCount = 0;
+        var importedFunctionIndices = new List<int>();
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
-            if (function.DirectNativeImport is not null
-                && function.IsExternal
-                && !function.NativeOutputContracts.IsEmpty)
+            if (function.IsExternal)
             {
-                if (targetIndex >= 0)
+                if (function.DirectNativeImport is null)
                 {
                     throw Unsupported(
-                        "A direct NativeOutput Body supports one imported declaration.");
+                        "A direct NativeOutput Body supports DirectNativeImport declarations only.");
                 }
 
-                targetIndex = index;
+                importedFunctionIndices.Add(index);
             }
-            else if (!function.IsExternal)
+            else
             {
                 if (callerIndex >= 0)
                 {
@@ -101,11 +100,6 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 callerIndex = index;
-            }
-            else
-            {
-                throw Unsupported(
-                    "The direct NativeOutput Body contains an unrelated external function.");
             }
 
             if (!BoundTreeTraversal.VisitExpressions(function.Body,
@@ -116,6 +110,13 @@ public static partial class TrRmExecutableCompiler
                             argument is BoundNativeOutputReservation))
                     {
                         outputCallCount++;
+                        if (targetIndex >= 0 && targetIndex != call.Function)
+                        {
+                            throw Unsupported(
+                                "A direct NativeOutput Body calls more than one declaration with output reservations.");
+                        }
+
+                        targetIndex = call.Function;
                     }
                 }))
             {
@@ -124,7 +125,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (targetIndex != 0 || callerIndex != 1 || outputCallCount == 0
+        if (!importedFunctionIndices.Contains(targetIndex)
+            || callerIndex < 0 || outputCallCount == 0
             || (program.EntryPoint >= 0 && program.EntryPoint != callerIndex))
         {
             throw Unsupported(
@@ -149,10 +151,24 @@ public static partial class TrRmExecutableCompiler
                 "The direct NativeOutput call has unsupported declaration or argument facts.");
         }
 
-        if (target.IsModuleReference != (target.ModuleImport is not null))
+        foreach (var importedFunctionIndex in importedFunctionIndices)
         {
-            throw Invalid(
-                "The direct NativeOutput target has inconsistent ModuleImport identity.");
+            var importedFunction = program.Functions[importedFunctionIndex];
+            if (importedFunction.IsModuleReference
+                != (importedFunction.ModuleImport is not null))
+            {
+                throw Invalid(
+                    "A direct NativeOutput import has inconsistent ModuleImport identity.");
+            }
+
+            if (importedFunction.ParameterCount
+                    != importedFunction.Variables.Length
+                || !SemanticVerifierIsValidNativeOutputTarget(
+                    importedFunction, program))
+            {
+                throw Unsupported(
+                    "A direct NativeOutput Body has an invalid retained NativeImport declaration.");
+            }
         }
 
         var outputCalls = CollectDirectNativeOutputCalls(caller);
@@ -474,31 +490,9 @@ public static partial class TrRmExecutableCompiler
                 ? typeSpecRef : 0x1100_0000u | typeSpecRef;
         }
 
-        var targetParameterTypeSpecRefs = new uint[target.ParameterCount];
-        for (var formal = 0; formal < targetParameterTypeSpecRefs.Length;
-            formal++)
-        {
-            targetParameterTypeSpecRefs[formal]
-                = GetTypeSpecRef(target.Variables[formal].Type);
-        }
-
-        var callerParameterTypeSpecRefs = new uint[caller.ParameterCount];
-        for (var formal = 0; formal < callerParameterTypeSpecRefs.Length;
-            formal++)
-        {
-            callerParameterTypeSpecRefs[formal]
-                = GetTypeSpecRef(caller.Variables[formal].Type);
-        }
-
-        var targetResultTypeSpecRef = GetTypeSpecRef(target.ReturnType);
-        var callerResultTypeSpecRef = GetTypeSpecRef(caller.ReturnType);
         var stringsRows = new List<(string Text, int Encoding)> {
             ("", 0),
             (moduleIdentity, 0),
-            (target.Name, 0),
-            (caller.Name, 0),
-            (import.LibraryName, 0),
-            (import.ExportName, 0),
         };
         int AddString(string text, int encoding)
         {
@@ -507,14 +501,58 @@ public static partial class TrRmExecutableCompiler
             return row;
         }
 
-        var providerIdentityStringRow = 0;
-        var providerExportKeyStringRow = 0;
-        if (target.ModuleImport is BoundModuleImport moduleImport)
+        var parameterTypeSpecRefsByFunction
+            = new uint[program.Functions.Length][];
+        var resultTypeSpecRefsByFunction = new uint[program.Functions.Length];
+        var methodNameStringRows = new int[program.Functions.Length];
+        var nativeImportLibraryStringRows = new int[program.Functions.Length];
+        var nativeImportEntryStringRows = new int[program.Functions.Length];
+        var moduleImportProducerStringRows = new int[program.Functions.Length];
+        var moduleImportExportKeyStringRows
+            = new int[program.Functions.Length];
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length; functionIndex++)
         {
-            providerIdentityStringRow = AddString(
-                moduleImport.ProducerIdentity, 0);
-            providerExportKeyStringRow = AddString(moduleImport.ExportKey, 0);
+            var function = program.Functions[functionIndex];
+            methodNameStringRows[functionIndex] = AddString(function.Name, 0);
+            var parameterTypeSpecRefs = new uint[function.ParameterCount];
+            for (var formal = 0; formal < parameterTypeSpecRefs.Length;
+                formal++)
+            {
+                parameterTypeSpecRefs[formal]
+                    = GetTypeSpecRef(function.Variables[formal].Type);
+            }
+
+            parameterTypeSpecRefsByFunction[functionIndex]
+                = parameterTypeSpecRefs;
+            resultTypeSpecRefsByFunction[functionIndex]
+                = GetTypeSpecRef(function.ReturnType);
+            if (function.DirectNativeImport is DirectNativeImport
+                functionImport)
+            {
+                nativeImportLibraryStringRows[functionIndex]
+                    = AddString(functionImport.LibraryName, 0);
+                nativeImportEntryStringRows[functionIndex]
+                    = AddString(functionImport.ExportName, 0);
+            }
+
+            if (function.ModuleImport is BoundModuleImport moduleImport)
+            {
+                moduleImportProducerStringRows[functionIndex]
+                    = AddString(moduleImport.ProducerIdentity, 0);
+                moduleImportExportKeyStringRows[functionIndex]
+                    = AddString(moduleImport.ExportKey, 0);
+            }
         }
+
+        var targetParameterTypeSpecRefs
+            = parameterTypeSpecRefsByFunction[targetIndex];
+        var callerParameterTypeSpecRefs
+            = parameterTypeSpecRefsByFunction[callerIndex];
+        var targetResultTypeSpecRef
+            = resultTypeSpecRefsByFunction[targetIndex];
+        var callerResultTypeSpecRef
+            = resultTypeSpecRefsByFunction[callerIndex];
 
         var typeDefRows = new List<TrRmTypeDefRow>(program.Structures.Length);
         var fieldRows = new List<TrRmFieldDefRow>();
@@ -596,7 +634,10 @@ public static partial class TrRmExecutableCompiler
             TrRmFeatureRow.NativeOutputCellsCandidate,
             new(10, 1),
         };
-        if (!import.Parameters.IsEmpty)
+        if (importedFunctionIndices.Any(functionIndex =>
+                program.Functions[functionIndex].DirectNativeImport
+                    is DirectNativeImport imported
+                && !imported.Parameters.IsEmpty))
         {
             featureRows.Add(
                 TrRmFeatureRow.ForeignInvocationContractsCandidate);
@@ -606,19 +647,44 @@ public static partial class TrRmExecutableCompiler
             featureRows.Count, schema);
 
         var methodRowByFunction = new int[program.Functions.Length];
-        methodRowByFunction[targetIndex] = 1;
-        methodRowByFunction[callerIndex] = 2;
+        for (var index = 0; index < methodRowByFunction.Length; index++)
+        {
+            methodRowByFunction[index] = index + 1;
+        }
+
         var targetMethodRow = methodRowByFunction[targetIndex];
         var callerMethodRow = methodRowByFunction[callerIndex];
-        var moduleRefRows = new List<TrRmModuleRefRow>(1);
-        var functionModuleRefRow = 0;
-        if (target.ModuleImport is BoundModuleImport targetModuleImport)
+        var moduleRefRows = new List<TrRmModuleRefRow>();
+        var moduleRefRowByBinding
+            = new Dictionary<(string ProducerIdentity,
+                uint TargetRequirement, uint RuntimePolicy), int>();
+        var importRows = new List<TrRmImportRow>();
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length; functionIndex++)
         {
-            functionModuleRefRow = 1;
-            moduleRefRows.Add(new TrRmModuleRefRow(
-                providerIdentityStringRow,
-                targetModuleImport.TargetRequirement,
-                targetModuleImport.RuntimePolicy));
+            if (program.Functions[functionIndex].ModuleImport
+                is not BoundModuleImport moduleImport)
+            {
+                continue;
+            }
+
+            var key = (moduleImport.ProducerIdentity,
+                moduleImport.TargetRequirement, moduleImport.RuntimePolicy);
+            if (!moduleRefRowByBinding.TryGetValue(key,
+                    out var moduleRefRow))
+            {
+                moduleRefRow = moduleRefRows.Count + 1;
+                moduleRefRows.Add(new TrRmModuleRefRow(
+                    moduleImportProducerStringRows[functionIndex],
+                    moduleImport.TargetRequirement,
+                    moduleImport.RuntimePolicy));
+                moduleRefRowByBinding.Add(key, moduleRefRow);
+            }
+
+            importRows.Add(new TrRmImportRow(moduleRefRow,
+                moduleImportExportKeyStringRows[functionIndex],
+                0x1600_0000u
+                    | checked((uint)methodRowByFunction[functionIndex])));
         }
 
         var moduleBytes = TrRmModuleTableWriter.Encode([
@@ -640,29 +706,30 @@ public static partial class TrRmExecutableCompiler
             : new TrRmModuleRefTableReader(moduleRefBytes,
                 moduleRefRows.Count, strings, modules);
 
-        var parameterRows = new List<TrRmParamRow>(
-            target.ParameterCount + caller.ParameterCount);
-        for (var formal = 0; formal < target.ParameterCount; formal++)
+        var parameterRows = new List<TrRmParamRow>();
+        var signatureRows = new List<TrRmMethodSigRow>(
+            program.Functions.Length);
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length; functionIndex++)
         {
-            parameterRows.Add(new TrRmParamRow(1, formal,
-                targetParameterTypeSpecRefs[formal], 0));
+            var function = program.Functions[functionIndex];
+            var parameterFirst = function.ParameterCount == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var formal = 0; formal < function.ParameterCount; formal++)
+            {
+                parameterRows.Add(new TrRmParamRow(functionIndex + 1, formal,
+                    parameterTypeSpecRefsByFunction[functionIndex][formal], 0));
+            }
+
+            signatureRows.Add(new TrRmMethodSigRow(
+                resultTypeSpecRefsByFunction[functionIndex], 0,
+                parameterFirst, function.ParameterCount, 0, 0));
         }
 
-        var callerParameterFirst = caller.ParameterCount == 0
-            ? 0 : parameterRows.Count + 1;
-        for (var formal = 0; formal < caller.ParameterCount; formal++)
-        {
-            parameterRows.Add(new TrRmParamRow(2, formal,
-                callerParameterTypeSpecRefs[formal], 0));
-        }
-
-        var signatureBytes = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(targetResultTypeSpecRef, 0,
-                1, target.ParameterCount, 0, 0),
-            new TrRmMethodSigRow(callerResultTypeSpecRef, 0,
-                callerParameterFirst, caller.ParameterCount, 0, 0),
-        ], typeSpecs, parameterRows.Count, 0);
-        var signatures = new TrRmMethodSigTableReader(signatureBytes, 2,
+        var signatureBytes = TrRmMethodSigTableWriter.Encode(signatureRows,
+            typeSpecs, parameterRows.Count, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes,
+            signatureRows.Count,
             typeSpecs, parameterRows.Count, 0);
         var parameterBytes = TrRmParamTableWriter.Encode(parameterRows,
             signatures, typeSpecs, schema);
@@ -670,26 +737,8 @@ public static partial class TrRmExecutableCompiler
             parameterRows.Count, signatures, typeSpecs);
 
         var contractRows = new List<TrRmContractRow>();
-        var contractOwner = 0x1600_0000u | checked((uint)targetMethodRow);
-        contractRows.Add(new TrRmContractRow(contractOwner, 1,
-            new byte[] { 4, 0, 0, 0 }));
-        foreach (var nativeParameter in import.Parameters
-            .OrderBy(static parameter => parameter.ParameterIndex))
-        {
-            var nativeParameterPayload = new byte[12];
-            BinaryPrimitives.WriteUInt32LittleEndian(nativeParameterPayload,
-                checked((uint)nativeParameter.ParameterIndex));
-            nativeParameterPayload[4]
-                = checked((byte)((byte)nativeParameter.Access + 1));
-            nativeParameterPayload[5] = 1;
-            nativeParameterPayload[6]
-                = nativeParameter.Extent == 0 ? (byte)0 : (byte)1;
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                nativeParameterPayload.AsSpan(8), nativeParameter.Extent);
-            contractRows.Add(new TrRmContractRow(contractOwner, 0x0E,
-                nativeParameterPayload));
-        }
-
+        var contractStarts = new int[program.Functions.Length];
+        var contractCounts = new int[program.Functions.Length];
         var predicateGraphs = new List<TrRmPredicateGraphRow>();
         var predicateFootprints
             = new List<TrRmPredicateReadFootprintRow>();
@@ -697,65 +746,8 @@ public static partial class TrRmExecutableCompiler
         var predicateNodes = new List<TrRmPredicateNodeRow>();
         var predicateOperands
             = new List<TrRmPredicateNodeOperandRow>();
-        var selectors = new SortedSet<byte>();
-        foreach (var output in target.NativeOutputContracts)
-        {
-            _ = selectors.Add((byte)output.SuccessSelector);
-            _ = selectors.Add((byte)output.ComplementSelector);
-        }
-
-        var graphBySelector = new Dictionary<byte, int>();
-        uint phaseOrdinal = 0;
-        foreach (var selector in selectors)
-        {
-            var graphRow = predicateGraphs.Count + 1;
-            predicateGraphs.Add(new TrRmPredicateGraphRow(graphRow, graphRow));
-            predicateFootprints.Add(
-                new TrRmPredicateReadFootprintRow(graphRow, 1, 0, 0));
-            predicateRoots.Add(new TrRmPredicateReadRootRow(5, 0));
-            predicateNodes.Add(new TrRmPredicateNodeRow(selector,
-                0xF200_0001, checked((uint)graphRow), 1));
-            predicateOperands.Add(new TrRmPredicateNodeOperandRow(1,
-                checked((uint)graphRow)));
-
-            var predicatePayload = new byte[12];
-            predicatePayload[0] = 3;
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                predicatePayload.AsSpan(4), phaseOrdinal++);
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                predicatePayload.AsSpan(8), checked((uint)graphRow));
-            contractRows.Add(new TrRmContractRow(contractOwner, 0x0B,
-                predicatePayload));
-            graphBySelector.Add(selector, graphRow);
-        }
-
-        foreach (var output in target.NativeOutputContracts)
-        {
-            AddOutputState((byte)output.SuccessState,
-                output.FormalOrdinal,
-                graphBySelector[(byte)output.SuccessSelector]);
-            AddOutputState((byte)output.ComplementState,
-                output.FormalOrdinal,
-                graphBySelector[(byte)output.ComplementSelector]);
-            foreach (var dependency in output.Dependencies)
-            {
-                var dependencyPayload = new byte[12];
-                dependencyPayload[0] = dependency.DestinationKind;
-                dependencyPayload[1] = (byte)dependency.SourceKind;
-                dependencyPayload[2] = (byte)dependency.Relationship;
-                dependencyPayload[3] = (byte)dependency.Phase;
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    dependencyPayload.AsSpan(4),
-                    checked((uint)dependency.DestinationOrdinal));
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    dependencyPayload.AsSpan(8),
-                    checked((uint)dependency.SourceOrdinal));
-                contractRows.Add(new TrRmContractRow(contractOwner, 4,
-                    dependencyPayload));
-            }
-        }
-
-        void AddOutputState(byte state, int formalOrdinal, int graphRow)
+        void AddOutputState(uint owner, byte state, int formalOrdinal,
+            int graphRow)
         {
             var payload = new byte[12];
             BinaryPrimitives.WriteUInt32LittleEndian(payload,
@@ -763,7 +755,99 @@ public static partial class TrRmExecutableCompiler
             BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4),
                 checked((uint)graphRow));
             payload[8] = state;
-            contractRows.Add(new TrRmContractRow(contractOwner, 2, payload));
+            contractRows.Add(new TrRmContractRow(owner, 2, payload));
+        }
+
+        foreach (var importedFunctionIndex in importedFunctionIndices)
+        {
+            var importedFunction = program.Functions[importedFunctionIndex];
+            var importedFunctionImport
+                = importedFunction.DirectNativeImport!;
+            var contractOwner = 0x1600_0000u
+                | checked((uint)methodRowByFunction[importedFunctionIndex]);
+            contractStarts[importedFunctionIndex] = contractRows.Count + 1;
+            contractRows.Add(new TrRmContractRow(contractOwner, 1,
+                new byte[] { 4, 0, 0, 0 }));
+            foreach (var nativeParameter in importedFunctionImport.Parameters
+                .OrderBy(static parameter => parameter.ParameterIndex))
+            {
+                var nativeParameterPayload = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    nativeParameterPayload,
+                    checked((uint)nativeParameter.ParameterIndex));
+                nativeParameterPayload[4]
+                    = checked((byte)((byte)nativeParameter.Access + 1));
+                nativeParameterPayload[5] = 1;
+                nativeParameterPayload[6]
+                    = nativeParameter.Extent == 0 ? (byte)0 : (byte)1;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    nativeParameterPayload.AsSpan(8), nativeParameter.Extent);
+                contractRows.Add(new TrRmContractRow(contractOwner, 0x0E,
+                    nativeParameterPayload));
+            }
+
+            var outputs = importedFunction.NativeOutputContracts;
+            var selectors = new SortedSet<byte>();
+            foreach (var output in outputs)
+            {
+                _ = selectors.Add((byte)output.SuccessSelector);
+                _ = selectors.Add((byte)output.ComplementSelector);
+            }
+
+            var graphBySelector = new Dictionary<byte, int>();
+            uint phaseOrdinal = 0;
+            foreach (var selector in selectors)
+            {
+                var graphRow = predicateGraphs.Count + 1;
+                predicateGraphs.Add(
+                    new TrRmPredicateGraphRow(graphRow, graphRow));
+                predicateFootprints.Add(
+                    new TrRmPredicateReadFootprintRow(graphRow, 1, 0, 0));
+                predicateRoots.Add(new TrRmPredicateReadRootRow(5, 0));
+                predicateNodes.Add(new TrRmPredicateNodeRow(selector,
+                    0xF200_0001, checked((uint)graphRow), 1));
+                predicateOperands.Add(new TrRmPredicateNodeOperandRow(1,
+                    checked((uint)graphRow)));
+
+                var predicatePayload = new byte[12];
+                predicatePayload[0] = 3;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    predicatePayload.AsSpan(4), phaseOrdinal++);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    predicatePayload.AsSpan(8), checked((uint)graphRow));
+                contractRows.Add(new TrRmContractRow(contractOwner, 0x0B,
+                    predicatePayload));
+                graphBySelector.Add(selector, graphRow);
+            }
+
+            foreach (var output in outputs)
+            {
+                AddOutputState(contractOwner, (byte)output.SuccessState,
+                    output.FormalOrdinal,
+                    graphBySelector[(byte)output.SuccessSelector]);
+                AddOutputState(contractOwner, (byte)output.ComplementState,
+                    output.FormalOrdinal,
+                    graphBySelector[(byte)output.ComplementSelector]);
+                foreach (var dependency in output.Dependencies)
+                {
+                    var dependencyPayload = new byte[12];
+                    dependencyPayload[0] = dependency.DestinationKind;
+                    dependencyPayload[1] = (byte)dependency.SourceKind;
+                    dependencyPayload[2] = (byte)dependency.Relationship;
+                    dependencyPayload[3] = (byte)dependency.Phase;
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        dependencyPayload.AsSpan(4),
+                        checked((uint)dependency.DestinationOrdinal));
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        dependencyPayload.AsSpan(8),
+                        checked((uint)dependency.SourceOrdinal));
+                    contractRows.Add(new TrRmContractRow(contractOwner, 4,
+                        dependencyPayload));
+                }
+            }
+
+            contractCounts[importedFunctionIndex] = contractRows.Count
+                - contractStarts[importedFunctionIndex] + 1;
         }
 
         var typeDefBytes = typeDefRows.Count == 0 ? []
@@ -801,10 +885,21 @@ public static partial class TrRmExecutableCompiler
             : new TrRmLayoutFieldTableReader(layoutFieldBytes,
                 layoutFieldRows.Count, layouts, typeDefs, fields);
         var methodRows = new TrRmMethodDefRow[program.Functions.Length];
-        methodRows[targetIndex] = new TrRmMethodDefRow(0, 3, 1,
-            Visibility(target), 1, contractRows.Count, 0);
-        methodRows[callerIndex] = new TrRmMethodDefRow(0, 4, 2,
-            Visibility(caller), 0, 0, 1);
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length; functionIndex++)
+        {
+            var function = program.Functions[functionIndex];
+            var methodRow = functionIndex + 1;
+            methodRows[functionIndex] = function.IsExternal
+                ? new TrRmMethodDefRow(0,
+                    methodNameStringRows[functionIndex], methodRow,
+                    Visibility(function), contractStarts[functionIndex],
+                    contractCounts[functionIndex], 0)
+                : new TrRmMethodDefRow(0,
+                    methodNameStringRows[functionIndex], methodRow,
+                    Visibility(function), 0, 0, 1);
+        }
+
         var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows, strings,
             modules, typeDefs, signatures, contractRows.Count, 1);
         var methods = new TrRmMethodDefTableReader(methodBytes,
@@ -818,19 +913,51 @@ public static partial class TrRmExecutableCompiler
             contractRows.Count, typeDefs, methods, signatures, parameters,
             typeSpecs, 0, features, modules, schema, predicateGraphs.Count);
 
-        var importBytes = functionModuleRefRow == 0 ? []
-            : TrRmImportTableWriter.Encode([
-                new TrRmImportRow(functionModuleRefRow,
-                    providerExportKeyStringRow,
-                    0x1600_0000u | checked((uint)targetMethodRow)),
-            ], strings, moduleRefs, typeDefs, methods, default, default,
+        var importBytes = importRows.Count == 0 ? []
+            : TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
+                typeDefs, methods, default, default, default, default,
+                features, modules, schema);
+        var imports = importRows.Count == 0
+            ? default
+            : new TrRmImportTableReader(importBytes, importRows.Count,
+                strings, moduleRefs, typeDefs, methods, default, default,
                 default, default, features, modules, schema);
-        var nativeImportBytes = TrRmNativeImportTableWriter.Encode([
-            new TrRmNativeImportRow(1, (byte)import.ResolutionMode,
-                (byte)import.ResolutionPolicy,
-                (byte)import.CallingConvention, targetMethodRow, 5, 6),
-        ], strings, methods, fields, typeDefs, default, modules,
-            signatures, parameters, typeSpecs, contracts, layouts);
+        var nativeImportRows = new List<TrRmNativeImportRow>(
+            importedFunctionIndices.Count);
+        foreach (var importedFunctionIndex in importedFunctionIndices)
+        {
+            var importedFunction = program.Functions[importedFunctionIndex];
+            var importedFunctionImport
+                = importedFunction.DirectNativeImport!;
+            nativeImportRows.Add(new TrRmNativeImportRow(1,
+                (byte)importedFunctionImport.ResolutionMode,
+                (byte)importedFunctionImport.ResolutionPolicy,
+                (byte)importedFunctionImport.CallingConvention,
+                methodRowByFunction[importedFunctionIndex],
+                nativeImportLibraryStringRows[importedFunctionIndex],
+                nativeImportEntryStringRows[importedFunctionIndex]));
+        }
+
+        var nativeImportBytes = TrRmNativeImportTableWriter.Encode(
+            nativeImportRows, strings, methods, fields, typeDefs, imports,
+            modules, signatures, parameters, typeSpecs, contracts, layouts);
+        var exportRows = new List<TrRmExportRow>();
+        foreach (var importedFunctionIndex in importedFunctionIndices)
+        {
+            var importedFunction = program.Functions[importedFunctionIndex];
+            if (Visibility(importedFunction) == 2)
+            {
+                exportRows.Add(new TrRmExportRow(
+                    0x1600_0000u | checked((uint)methodRowByFunction[
+                        importedFunctionIndex]),
+                    methodNameStringRows[importedFunctionIndex]));
+            }
+        }
+
+        var exportBytes = exportRows.Count == 0 ? []
+            : TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
+                methods, default, imports, default, default, default,
+                features, modules, schema);
 
         var callerParameterTypeMapTokens = callerParameterTypeSpecRefs
             .Select(CreateStandardBodyTypeMapToken).ToArray();
@@ -1394,12 +1521,14 @@ public static partial class TrRmExecutableCompiler
             new(0x0004, 0, checked((uint)featureRows.Count), featureBytes),
             new(0x0011, 0, checked((uint)typeSpecRows.Count), typeSpecBytes),
             new(0x0016, 0, checked((uint)methodRows.Length), methodBytes),
-            new(0x0017, 0, 2, signatureBytes),
+            new(0x0017, 0, checked((uint)signatureRows.Count),
+                signatureBytes),
             new(0x0018, 0, checked((uint)parameterRows.Count), parameterBytes),
             new(0x001B, 0, checked((uint)contractRows.Count), contractBytes),
             new(0x0020, 0, 1,
                 TrRmVariableTableWriter.EncodeBodies([body])),
-            new(0x0021, 0, 1, nativeImportBytes),
+            new(0x0021, 0, checked((uint)nativeImportRows.Count),
+                nativeImportBytes),
             new(0x0037, 0, checked((uint)predicateGraphs.Count),
                 predicateGraphBytes),
             new(0x0038, 0, checked((uint)predicateFootprints.Count),
@@ -1416,9 +1545,15 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0010, 0,
                 checked((uint)moduleRefRows.Count), moduleRefBytes));
         }
-        if (functionModuleRefRow != 0)
+        if (importRows.Count != 0)
         {
-            sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
+            sections.Add(new TrRmSection(0x001C, 0,
+                checked((uint)importRows.Count), importBytes));
+        }
+        if (exportRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001D, 0,
+                checked((uint)exportRows.Count), exportBytes));
         }
         if (typeDefRows.Count != 0)
         {

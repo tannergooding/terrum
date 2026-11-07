@@ -14312,19 +14312,20 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             bool provider, string outputType = "uint32",
             string selectedSchemaIdentity = schemaIdentity,
             string libraryName = "example.dll",
-            string nativeEntryName = "ReadValue")
+            string nativeEntryName = "ReadValue",
+            string methodName = "ReadValue")
         {
             var visibility = provider ? "public" : "internal";
             var caller = provider ? "" : $$"""
                 int32 Main() {
                     init mut {{outputType}} value;
-                    unsafe { return ReadValue(&init value); }
+                    unsafe { return {{methodName}}(&init value); }
                 }
                 """;
             var source = $$"""
                 [Terrum.Interop.NativeImport(
                     "{{libraryName}}", "{{nativeEntryName}}")]
-                {{visibility}} extern int32 ReadValue(
+                {{visibility}} extern int32 {{methodName}}(
                     [Terrum.Interop.NativeOutput(
                         When: Terrum.Interop.NativeOutputCondition.{{access}})]
                     write ptr<{{outputType}}> value);
@@ -14450,6 +14451,75 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             TrRmExecutableCompiler.LoadStandard(dependencyConsumerInput,
                 rootIdentity, [changedDependencyProvider]));
 
+        const string multiRootIdentity = "native-output-multi-provider-root";
+        const string secondaryProviderIdentity = "ReadAux";
+        var multiSource = """
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            internal extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            [Terrum.Interop.NativeImport("example.dll", "ReadAux")]
+            internal extern int32 ReadAux(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            int32 Main() {
+                init mut uint32 value;
+                unsafe { return ReadValue(&init value); }
+            }
+            """;
+        var multiCompilation = Compilation.Create(SyntaxTree.Parse(multiSource),
+            core);
+        Assert.That(multiCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, multiCompilation.Diagnostics));
+        var multiRootArtifact = TrRmExecutableCompiler.EmitStandard(
+            multiCompilation.Program!, multiRootIdentity, schemaIdentity, 1);
+        var multiRootWithImports = AddRootMethodImports(multiRootArtifact, [
+            ("ReadValue", providerIdentity, "ReadValue"),
+            ("ReadAux", secondaryProviderIdentity, "ReadAux"),
+        ], reuseModuleRefs: false, duplicateSecondMethodName: false);
+        var multiRootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            multiRootWithImports);
+        var primaryProviderInput = new TrRmStandardArtifactInput(schemaIdentity,
+            CreateArtifact(providerIdentity, "NonZero", provider: true));
+        var secondaryProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, CreateArtifact(secondaryProviderIdentity,
+                "NonZero", provider: true, nativeEntryName: "ReadAux",
+                methodName: "ReadAux"));
+        var multiLoaded = TrRmExecutableCompiler.LoadStandard(multiRootInput,
+            multiRootIdentity, [primaryProviderInput, secondaryProviderInput]);
+        Assert.That(multiLoaded.Functions.Single(
+            static function => function.Name == "ReadAux").ModuleImport!
+            .ProducerIdentity, Is.EqualTo(secondaryProviderIdentity));
+
+        var multiReemitted = TrRmExecutableCompiler.EmitStandard(multiLoaded,
+            multiRootIdentity, schemaIdentity, 1);
+        var multiReloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, multiReemitted),
+            multiRootIdentity,
+            [primaryProviderInput, secondaryProviderInput]);
+        Assert.That(multiReloaded.Functions.Single(
+            static function => function.Name == "ReadAux").ModuleImport!
+            .ProducerIdentity, Is.EqualTo(secondaryProviderIdentity));
+        var multiImage = NativeModuleCompiler.EmitStandardExecutable(
+            multiRootInput, multiRootIdentity,
+            [primaryProviderInput, secondaryProviderInput],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(multiImage[0], Is.EqualTo((byte)'M'));
+        Assert.That(multiImage[1], Is.EqualTo((byte)'Z'));
+
+        var changedUncalledProvider = new TrRmStandardArtifactInput(
+            schemaIdentity, CreateArtifact(secondaryProviderIdentity,
+                "NonNegative", provider: true, nativeEntryName: "ReadAux",
+                methodName: "ReadAux"));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(multiRootInput,
+                multiRootIdentity,
+                [primaryProviderInput, changedUncalledProvider]));
+
         var pointerConsumerArtifact = AddRootMethodImports(
             CreateArtifact(rootIdentity, "NonZero", provider: false,
                 outputType: "ptr<void>"),
@@ -14539,6 +14609,122 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     storageAddressConsumerArtifact),
                 rootIdentity,
                 [storageAddressProviderInput, unrelatedProviderInput]));
+    }
+
+    [Test]
+    public void StandardFNativeOutputProviderBindingChecksIntermediateEdges()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "native-output-closure-root";
+        const string intermediateIdentity = "ReadValue";
+        const string leafIdentity = "example.dll";
+        var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            internal extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            int32 Main() {
+                init mut uint32 value;
+                unsafe { return ReadValue(&init value); }
+            }
+            """), core);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var rootArtifact = AddRootMethodImports(
+            TrRmExecutableCompiler.EmitStandard(rootCompilation.Program!,
+                rootIdentity, schemaIdentity, 1),
+            [("ReadValue", intermediateIdentity, "ReadValue")],
+            reuseModuleRefs: false, duplicateSecondMethodName: false);
+
+        var intermediateCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+                public extern int32 ReadValue(
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                    write ptr<uint32> value);
+
+                [Terrum.Interop.NativeImport("example.dll", "ReadAux")]
+                internal extern int32 ReadAux(
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                    write ptr<uint32> value);
+
+                internal int32 Bind() {
+                    init mut uint32 value;
+                    unsafe { return ReadAux(&init value); }
+                }
+                """), core);
+        Assert.That(intermediateCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                intermediateCompilation.Diagnostics));
+        var intermediateArtifact = AddRootMethodImports(
+            TrRmExecutableCompiler.EmitStandard(
+                intermediateCompilation.Program!, intermediateIdentity,
+                schemaIdentity, 1),
+            [("ReadAux", leafIdentity, "ReadAux")],
+            reuseModuleRefs: false, duplicateSecondMethodName: false);
+
+        byte[] CreateStandaloneOutputProvider(string moduleIdentity,
+            string methodName, string access)
+        {
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+                [Terrum.Interop.NativeImport(
+                    "example.dll", "{{methodName}}")]
+                public extern int32 {{methodName}}(
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.{{access}})]
+                    write ptr<uint32> value);
+                """), core);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                moduleIdentity, schemaIdentity, 1);
+        }
+
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var intermediateInput = new TrRmStandardArtifactInput(schemaIdentity,
+            intermediateArtifact);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            CreateStandaloneOutputProvider(leafIdentity, "ReadAux",
+                "NonZero"));
+        var intermediateLoaded = TrRmExecutableCompiler.LoadStandard(
+            intermediateInput, intermediateIdentity, [leafInput]);
+        var reemittedIntermediate = TrRmExecutableCompiler.EmitStandard(
+            intermediateLoaded, intermediateIdentity, schemaIdentity, 1);
+        var reloadedIntermediate = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reemittedIntermediate),
+            intermediateIdentity, [leafInput]);
+        var uncalledOutput = reloadedIntermediate.Functions.Single(
+            static function => function.Name == "ReadValue");
+        Assert.That(uncalledOutput.IsPrivate || uncalledOutput.IsInternal,
+            Is.False);
+        Assert.That(reloadedIntermediate.Functions.Single(
+            static function => function.Name == "ReadAux")
+            .ModuleImport!.ProducerIdentity, Is.EqualTo(leafIdentity));
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [intermediateInput, leafInput]);
+        Assert.That(loaded.Functions.Single(
+            static function => function.Name == "ReadValue")
+            .ModuleImport!.ProducerIdentity, Is.EqualTo(intermediateIdentity));
+        var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
+            rootIdentity, [intermediateInput, leafInput],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[0], Is.EqualTo((byte)'M'));
+        Assert.That(image[1], Is.EqualTo((byte)'Z'));
+
+        var changedLeaf = new TrRmStandardArtifactInput(schemaIdentity,
+            CreateStandaloneOutputProvider(leafIdentity, "ReadAux",
+                "NonNegative"));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity,
+                [intermediateInput, changedLeaf]));
     }
 
     [TestCase(true, 1)]
@@ -15760,6 +15946,335 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             left.Kind.CompareTo(right.Kind));
         var result = TrRmArtifactWriter.Encode(sections,
             TrRmArtifactSchema.ForeignInvocationDraft);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(result));
+        return result;
+    }
+
+    private static byte[] AddUncalledNativeOutputProviderImport(
+        byte[] providerArtifact, string leafIdentity, string methodName)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationDraft;
+        var index = TrRmArtifactIndex.ForForeignInvocationDraft(
+            providerArtifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        Assert.That(tables.Modules.Count, Is.EqualTo(1));
+        Assert.That(tables.Methods.Count, Is.EqualTo(1));
+        Assert.That(tables.Methods.GetBodyRow(1), Is.Zero);
+        Assert.That(tables.ModuleRefs.Count, Is.Zero);
+        Assert.That(tables.Imports.Count, Is.Zero);
+        Assert.That(tables.Exports.HasExportForMethod(1), Is.True);
+        Assert.That(tables.Contracts.GetOutputStateContracts(1), Is.Not.Empty);
+        Assert.That(tables.Contracts.GetNativeParameters(1), Is.Empty);
+
+        var stringRows = new List<(string Text, int Encoding)>(
+            tables.Strings.Count + 2);
+        for (var row = 1; row <= tables.Strings.Count; row++)
+        {
+            stringRows.Add((tables.Strings.DecodeNamespace(row), 0));
+        }
+
+        int AddString(string text)
+        {
+            stringRows.Add((text, 0));
+            return stringRows.Count;
+        }
+
+        var methodNameStringRow = AddString(methodName);
+        var leafIdentityStringRow = AddString(leafIdentity);
+        var exportKeyStringRow = AddString(methodName);
+        var entryNameStringRow = AddString(methodName);
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
+        var strings = new TrRmStringTableReader(stringsBytes, stringRows.Count);
+        var moduleIdentityStringRow = FindStringRow(strings, stringRows.Count,
+            tables.Modules.GetIdentity(1));
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(1);
+        var (moduleRefStart, _) = tables.Modules.GetModuleRefRange(1);
+        var (typeDefStart, _) = tables.Modules.GetTypeDefRange(1);
+        var (methodStart, _) = tables.Modules.GetMethodDefRange(1);
+        var (sourceFileStart, _) = tables.Modules.GetSourceFileRange(1);
+        var (featureStart, featureCount)
+            = tables.Modules.GetFeatureRange(1);
+        var moduleRows = new[] {
+            new TrRmModuleRow(moduleIdentityStringRow, targetRequirement,
+                runtimePolicy, 0, moduleRefStart, typeDefStart, methodStart,
+                sourceFileStart, featureStart, featureCount),
+        };
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows, strings,
+            1, tables.TypeDefs.Count, 2, tables.Modules.SourceFileCount,
+            tables.Features.Count);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 1,
+            tables.TypeDefs.Count, 2, tables.Modules.SourceFileCount,
+            tables.Features.Count);
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
+            new TrRmModuleRefRow(leafIdentityStringRow,
+                targetRequirement, runtimePolicy),
+        ], strings, modules);
+        var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1,
+            strings, modules);
+
+        var typeSpecRows = new List<ReadOnlyMemory<byte>>(
+            tables.TypeSpecs.Count);
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            typeSpecRows.Add(tables.TypeSpecs
+                .GetTypeSpecBytes(checked((uint)row)).ToArray());
+        }
+
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            tables.TypeDefs.Count, 1, tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            methodDefCount: 2,
+            predicateCaptureCount: tables.PredicateCaptures.Count);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Count, tables.TypeDefs.Count, 1,
+            tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema, 2,
+            tables.PredicateCaptures.Count);
+        Assert.That(index.TryGetSection(0x0017, out var signatureBytes,
+            out var signatureCount), Is.True);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes,
+            signatureCount, typeSpecs, tables.Signatures.ParamCount,
+            tables.GenericParams.Count);
+        Assert.That(index.TryGetSection(0x0018, out var parameterBytes,
+            out var parameterCount), Is.True);
+        var parameters = new TrRmParamTableReader(parameterBytes,
+            parameterCount, signatures, typeSpecs);
+
+        var contractRows = new List<TrRmContractRow>(
+            tables.Contracts.Count * 2);
+        var methodContractCount = 0;
+        var (methodContractStart, methodContractRangeCount)
+            = tables.Methods.GetContractRange(1);
+        for (var contractIndex = 0;
+            contractIndex < methodContractRangeCount; contractIndex++)
+        {
+            var row = tables.Contracts
+                .GetRow(methodContractStart + contractIndex).ToArray();
+            var kind = BinaryPrimitives.ReadUInt16LittleEndian(row.AsSpan(4));
+            var payload = row.AsSpan(8).ToArray();
+            contractRows.Add(new TrRmContractRow(
+                BinaryPrimitives.ReadUInt32LittleEndian(row), kind, payload));
+            var duplicatedPayload = payload.ToArray();
+            if (kind == 2)
+            {
+                var graph = BinaryPrimitives.ReadUInt32LittleEndian(
+                    duplicatedPayload.AsSpan(4));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    duplicatedPayload.AsSpan(4),
+                    checked(graph + (uint)tables.PredicateGraphs.Count));
+            }
+            else if (kind == 0x0B)
+            {
+                var graph = BinaryPrimitives.ReadUInt32LittleEndian(
+                    duplicatedPayload.AsSpan(8));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    duplicatedPayload.AsSpan(8),
+                    checked(graph + (uint)tables.PredicateGraphs.Count));
+            }
+
+            contractRows.Add(new TrRmContractRow(0x1600_0002u, kind,
+                duplicatedPayload));
+            methodContractCount++;
+        }
+
+        var graphRows = new List<TrRmPredicateGraphRow>(
+            tables.PredicateGraphs.Count * 2);
+        var footprintRows = new List<TrRmPredicateReadFootprintRow>(
+            tables.PredicateReadFootprints.Count * 2);
+        var rootRows = new List<TrRmPredicateReadRootRow>(
+            tables.PredicateReadRoots.Count * 2);
+        var nodeRows = new List<TrRmPredicateNodeRow>(
+            tables.PredicateNodes.Count * 2);
+        var operandRows = new List<TrRmPredicateNodeOperandRow>(
+            tables.PredicateNodeOperands.Count * 2);
+        for (var row = 1; row <= tables.PredicateReadFootprints.Count; row++)
+        {
+            var rootStart = tables.PredicateReadFootprints
+                .GetRootFirstRow(row);
+            var rootCount = tables.PredicateReadFootprints
+                .GetRootRowCount(row);
+            footprintRows.Add(new TrRmPredicateReadFootprintRow(
+                rootStart, rootCount,
+                tables.PredicateReadFootprints.GetDependencyFirstRow(row),
+                tables.PredicateReadFootprints.GetDependencyRowCount(row)));
+            footprintRows.Add(new TrRmPredicateReadFootprintRow(
+                rootCount == 0 ? 0
+                    : checked(rootStart
+                        + tables.PredicateReadRoots.Count),
+                rootCount, 0, 0));
+        }
+
+        for (var row = 1; row <= tables.PredicateReadRoots.Count; row++)
+        {
+            var root = new TrRmPredicateReadRootRow(
+                tables.PredicateReadRoots.GetRootKind(row),
+                tables.PredicateReadRoots.GetRootIdentity(row));
+            rootRows.Add(root);
+            rootRows.Add(root);
+        }
+
+        for (var row = 1; row <= tables.PredicateNodeOperands.Count; row++)
+        {
+            var operandKind = tables.PredicateNodeOperands.GetOperandKind(row);
+            var operandRef = tables.PredicateNodeOperands.GetOperandRef(row);
+            operandRows.Add(new TrRmPredicateNodeOperandRow(operandKind,
+                operandRef));
+            Assert.That(operandKind, Is.EqualTo((byte)1));
+            operandRows.Add(new TrRmPredicateNodeOperandRow(operandKind,
+                checked(operandRef
+                    + (uint)tables.PredicateReadRoots.Count)));
+        }
+
+        for (var row = 1; row <= tables.PredicateNodes.Count; row++)
+        {
+            var node = new TrRmPredicateNodeRow(
+                tables.PredicateNodes.GetNodeKind(row),
+                tables.PredicateNodes.GetResultTypeSpecRef(row),
+                tables.PredicateNodes.GetOperandFirstRow(row),
+                tables.PredicateNodes.GetOperandCount(row));
+            nodeRows.Add(node);
+            nodeRows.Add(new TrRmPredicateNodeRow(node.NodeKind,
+                node.ResultTypeSpecRef,
+                checked(node.OperandFirstRow
+                    + (uint)tables.PredicateNodeOperands.Count),
+                node.OperandCount));
+        }
+
+        for (var row = 1; row <= tables.PredicateGraphs.Count; row++)
+        {
+            var graph = new TrRmPredicateGraphRow(
+                tables.PredicateGraphs.GetRootNodeRow(row),
+                tables.PredicateGraphs.GetReadFootprintRow(row));
+            graphRows.Add(graph);
+            graphRows.Add(new TrRmPredicateGraphRow(
+                checked(graph.RootNodeRow
+                    + tables.PredicateNodes.Count),
+                checked(graph.ReadFootprintRow
+                    + tables.PredicateReadFootprints.Count)));
+        }
+
+        Assert.That(tables.PredicateReadDependencies.Count, Is.Zero);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, contractRows.Count, schema);
+        var methodRows = new[] {
+            new TrRmMethodDefRow(0,
+                FindStringRow(strings, stringRows.Count,
+                    tables.Methods.GetName(1)),
+                tables.Methods.GetSignature(1),
+                tables.Methods.GetFlags(1), 1,
+                tables.Methods.GetContractRange(1).Count, 0),
+            new TrRmMethodDefRow(0, methodNameStringRow,
+                tables.Methods.GetSignature(1), 1,
+                tables.Contracts.Count + 1, methodContractCount, 0),
+        };
+        var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows, strings,
+            modules, typeDefs, signatures, contractRows.Count, 0);
+        var methods = new TrRmMethodDefTableReader(methodBytes,
+            methodRows.Length, strings, modules, typeDefs, signatures,
+            contractRows.Count, 0);
+        var predicateGraphBytes = TrRmPredicateGraphTableWriter.Encode(
+            graphRows, nodeRows.Count, footprintRows.Count);
+        var predicateFootprintBytes
+            = TrRmPredicateReadFootprintTableWriter.Encode(
+                footprintRows, rootRows.Count, 0);
+        var predicateRootBytes = TrRmPredicateReadRootTableWriter.Encode(
+            rootRows, 0, 0, schema);
+        var predicateNodeBytes = TrRmPredicateNodeTableWriter.Encode(
+            nodeRows, operandRows.Count, typeSpecs, schema);
+        var predicateCounts = new TrRmPredicateTableRowCounts(
+            rootRows.Count, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var predicateOperandBytes
+            = TrRmPredicateNodeOperandTableWriter.Encode(operandRows,
+                predicateCounts, schema);
+        var contractBytes = TrRmContractTableWriter
+            .EncodeForeignInvocationDraft(contractRows, typeDefs, methods,
+                signatures, parameters, typeSpecs, tables.Features, modules,
+                graphRows.Count, schema);
+        var contracts = new TrRmContractTableReader(contractBytes,
+            contractRows.Count, typeDefs, methods, signatures, parameters,
+            typeSpecs, 0, tables.Features, modules, schema, graphRows.Count);
+        var importBytes = TrRmImportTableWriter.Encode([
+            new TrRmImportRow(1, exportKeyStringRow, 0x1600_0002u),
+        ], strings, moduleRefs, typeDefs, methods, default, default, default,
+            default, tables.Features, modules, schema);
+        var imports = new TrRmImportTableReader(importBytes, 1, strings,
+            moduleRefs, typeDefs, methods, default, default, default, default,
+            tables.Features, modules, schema);
+        var firstNativeImport = tables.StandardNativeImports
+            .GetImportForMethod(1);
+        var nativeImportBytes = TrRmNativeImportTableWriter.Encode([
+            firstNativeImport,
+            new TrRmNativeImportRow(1,
+                firstNativeImport.ResolutionMode,
+                firstNativeImport.ResolutionPolicy,
+                firstNativeImport.CallConv, 2,
+                firstNativeImport.LibraryNameStringRow, entryNameStringRow),
+        ], strings, methods, default, typeDefs, imports, modules,
+            signatures, parameters, typeSpecs, contracts, default);
+        var sections = new List<TrRmSection>(index.SectionCount + 3);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            switch (kind)
+            {
+                case 0x0001:
+                    sections.Add(new TrRmSection(kind, flags, 1,
+                        moduleBytes));
+                    break;
+                case 0x0002:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)stringRows.Count, stringsBytes));
+                    break;
+                case 0x0016:
+                    sections.Add(new TrRmSection(kind, flags, 2,
+                        methodBytes));
+                    break;
+                case 0x001B:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)contractRows.Count, contractBytes));
+                    break;
+                case 0x0021:
+                    sections.Add(new TrRmSection(kind, flags, 2,
+                        nativeImportBytes));
+                    break;
+                case 0x0037:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)graphRows.Count, predicateGraphBytes));
+                    break;
+                case 0x0038:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)footprintRows.Count, predicateFootprintBytes));
+                    break;
+                case 0x0039:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)rootRows.Count, predicateRootBytes));
+                    break;
+                case 0x003B:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)nodeRows.Count, predicateNodeBytes));
+                    break;
+                case 0x003C:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)operandRows.Count, predicateOperandBytes));
+                    break;
+                default:
+                    sections.Add(new TrRmSection(kind, flags,
+                        (uint)recordCount, bytes.ToArray()));
+                    break;
+            }
+        }
+
+        sections.Add(new TrRmSection(0x0010, 0, 1, moduleRefBytes));
+        sections.Add(new TrRmSection(0x001C, 0, 1, importBytes));
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        var result = TrRmArtifactWriter.Encode(sections, schema);
         _ = TrRmStructuralMetadataValidator
             .ValidateForeignInvocationDraftAndGetExecutionTables(
                 TrRmArtifactIndex.ForForeignInvocationDraft(result));
