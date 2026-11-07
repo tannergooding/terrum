@@ -266,8 +266,10 @@ The hosted compiler supports primitive binary `<<`, `>>` and `>>>`, plus stateme
 `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`
 for initialized writable `int32`, `uint32`, `int64` and `uint64` places.
 Binary shifts take one of those four integer types as the left operand.
-Arithmetic and bitwise right operands must match the place type; shift counts
-are `int32` and follow the existing checked shift-count rules. The destination
+Arithmetic and bitwise right operands must match the place type. Shift counts
+may use any mandatory fixed/native integer type; an otherwise contextual count
+receives `int32` context. Validate the original count without converting it.
+The destination
 address and old value are captured before the right operand runs once, and
 checked computation completes before writeback. Earlier place/right-operand
 effects are not rolled back on failure. These operations reuse existing
