@@ -28,8 +28,8 @@ public sealed partial class CliTests
     public async Task ScalarFrontendSupportsOneFileScopedNamespaceInCompleteProgramsAsync()
     {
         const string source = "namespace Demo.Tools; alias Scalar = int32; "
-            + "Scalar Main() { return Add(20, 22); } "
-            + "public Scalar Add(Scalar left, Scalar right) { return left + right; }";
+            + "Scalar Main() { return Add(42, 0); } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left; }";
         var root = RepositoryRoot();
         var directory = TerrumProjectPaths.SourceDirectory(root);
         var namespaceStart = source.IndexOf("Demo.Tools", StringComparison.Ordinal);
