@@ -7,18 +7,19 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Bootstrap;
 
-public sealed class BootstrapInt32MainReturnComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class BootstrapInt32MainReturnComponentTests
 {
     private static readonly string[] s_frontendComponents = [
         "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange",
@@ -555,9 +556,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(
             ["tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainLeaf", "tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainReturn"], VerifyEmitterSource)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers.ToImmutableArray(), policy);
+        var compilation = CompileWithLayoutCore(trees, [.. buffers], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         Assert.That(jit.ExitCode, Is.EqualTo(0));
@@ -570,7 +575,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         {
             var snapshotOffset = jit.BufferOffsets[5];
             var actual = Enumerable.Range(0, 16)
-                .Select(index => ReadInt32(jit.Data, snapshotOffset + index * sizeof(int)));
+                .Select(index => ReadInt32(jit.Data, snapshotOffset + (index * sizeof(int))));
             Assert.That(actual, Is.EqualTo(expected.Skip(2)));
         }
     }
@@ -611,9 +616,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Add(new HostBuffer("BootstrapImageBytes", PrimitiveType.Int32,
                 [.. new int[1536]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         const int expectedImageLength = 0x600;
@@ -906,7 +915,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var mainDeclarationStart = sourceText.IndexOf(
             "public int32 Main", StringComparison.Ordinal);
         var mainBodyStart = mainDeclarationStart >= 0
-            ? sourceText.IndexOf('{', mainDeclarationStart)
+            ? sourceText.IndexOf('{', mainDeclarationStart, System.StringComparison.Ordinal)
             : -1;
         var mainReturnStart = mainBodyStart >= 0
             ? sourceText.IndexOf("return ", mainBodyStart, StringComparison.Ordinal)
@@ -914,7 +923,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var returnExpression = mainReturnStart >= 0
             ? sourceText[(mainReturnStart + "return ".Length)..].TrimStart()
             : string.Empty;
-        var returnOpenParen = returnExpression.IndexOf('(');
+        var returnOpenParen = returnExpression.IndexOf('(', System.StringComparison.Ordinal);
         var returnOperator = returnExpression.IndexOfAny(['+', '-', '*', '/', '%', ';']);
         var returnsCall = returnExpression.Length > 0
             && (char.IsLetter(returnExpression[0]) || returnExpression[0] == '_')
@@ -1080,8 +1089,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 ? bootstrapMainLocalValueCapacity
                 : source.Length;
             sourceBuffers = sourceBuffers
-                .Where(static buffer => buffer.Name != "BootstrapMainLocalNames"
-                    && buffer.Name != "BootstrapMainLocalValues")
+                .Where(static buffer => buffer.Name is not "BootstrapMainLocalNames"
+                    and not "BootstrapMainLocalValues")
                 .ToImmutableArray()
                 .Add(new HostBuffer("BootstrapMainLocalNames", PrimitiveType.Int32,
                     [.. new int[localNameCapacity]], true))
@@ -1098,9 +1107,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainLeaf");
         var trees = await ReadComponentsAsync(components, VerifyBootstrapSourceEmitter)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         Assert.That(jit.ExitCode, Is.EqualTo(0));
@@ -1237,7 +1250,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
     public Task BootstrapDirectMainLocalExpressionRejectsInsufficientTableCapacityAsync(
         BoundRuntimePolicy policy, bool shortNameTable, bool twoLocals)
     {
-        string sourceText = twoLocals
+        var sourceText = twoLocals
             ? "public int32 Main() { int32 value = 40; int32 next = value + 1; return next + 2 * 3; }"
             : "public int32 Main() { int32 value = 40; return value + 2 * 3; }";
         var source = SourceText.From(sourceText);
@@ -1311,7 +1324,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var beyondSource = prefix + new string('(', nestingDepth + 1) + "40"
             + new string(')', nestingDepth + 1) + new string(' ', paddingLength) + suffix;
         Assert.That(beyondSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength + 2));
-        Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
+        _ = Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit: true, value: 40, foldMainExpression: true);
     }
@@ -1392,7 +1405,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         Assert.That(forwardingCount > 256, Is.True);
         var beyondSource = CreateBootstrapParameterlessCallChainSource("42", forwardingCount + 1);
         Assert.That(beyondSource.Length > ScannerHost.MaximumSourceLength, Is.True);
-        Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
+        _ = Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
         await AssertBootstrapParameterlessCallChainAsync(
             policy, sourceText, forwardingCount, 42).ConfigureAwait(true);
         await AssertBootstrapParameterlessCallChainAsync(
@@ -1538,7 +1551,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         Assert.That(localCount > 256, Is.True);
         var beyondSource = CreateBootstrapParameterlessHelperBlockChainSource(localCount + 1);
         Assert.That(beyondSource.Length > ScannerHost.MaximumSourceLength, Is.True);
-        Assert.Throws<ArgumentException>(
+        _ = Assert.Throws<ArgumentException>(
             () => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
         await AssertBootstrapParameterlessCallChainAsync(
             policy, sourceText, 1, 42).ConfigureAwait(true);
@@ -1572,23 +1585,23 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var source = new System.Text.StringBuilder("internal int32 Leaf() { ");
         for (var index = 0; index < localCount; index++)
         {
-            source.Append("int32 value").Append(index).Append(" = ");
+            _ = source.Append("int32 value").Append(index).Append(" = ");
             if (index == 0)
             {
-                source.Append("42");
+                _ = source.Append("42");
             }
             else
             {
-                source.Append("value").Append(index - 1).Append(" + 0");
+                _ = source.Append("value").Append(index - 1).Append(" + 0");
             }
-            source.Append("; ");
+            _ = source.Append("; ");
         }
-        source.Append("return value").Append(localCount - 1)
+        _ = source.Append("return value").Append(localCount - 1)
             .Append("; } internal int32 Hop() => Leaf(); public int32 Main() => Hop();");
         return source.ToString();
     }
 
-    private async Task AssertBootstrapParameterlessCallChainAsync(
+    private static async Task AssertBootstrapParameterlessCallChainAsync(
         BoundRuntimePolicy policy, string sourceText, int forwardingCount, int value,
         int? leftOperand = null, int rightOperand = 0, bool subtraction = false,
         bool shortCode = false, bool shortImage = false)
@@ -1601,7 +1614,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var helperOffset = functionCount * 14;
         var codeLength = helperOffset + leaf.Length;
         var metadataOffset = (codeLength + 3) & ~3;
-        var virtualSize = metadataOffset + functionCount * 20;
+        var virtualSize = metadataOffset + (functionCount * 20);
         var imageLength = 0x400 + ((virtualSize + 0x1FF) & ~0x1FF);
         var buffers = CreateBootstrapSourceBuffers(SourceText.From(sourceText))
             .Add(new HostBuffer("BootstrapCodeBytes", PrimitiveType.Int32,
@@ -1616,9 +1629,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainPeImage");
         var trees = await ReadComponentsAsync(components, EndToEndBootstrapSourceOnly)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         var expectedExit = shortCode ? -1 : shortImage ? -2 : imageLength;
         Assert.That(execution.ExitCode, Is.EqualTo(expectedExit));
@@ -1635,14 +1652,14 @@ public sealed class BootstrapInt32MainReturnComponentTests
         for (var index = 0; index < code.Length; index++)
         {
             var emitted = ReadInt32(execution.Data,
-                execution.BufferOffsets[buffers.Length - 4] + index * sizeof(int));
+                execution.BufferOffsets[buffers.Length - 4] + (index * sizeof(int)));
             Assert.That(emitted, Is.InRange(0, byte.MaxValue));
             code[index] = (byte)emitted;
         }
         for (var index = 0; index < image.Length; index++)
         {
             var emitted = ReadInt32(execution.Data,
-                execution.BufferOffsets[buffers.Length - 2] + index * sizeof(int));
+                execution.BufferOffsets[buffers.Length - 2] + (index * sizeof(int)));
             Assert.That(emitted, Is.InRange(0, byte.MaxValue));
             image[index] = (byte)emitted;
         }
@@ -1657,15 +1674,21 @@ public sealed class BootstrapInt32MainReturnComponentTests
         for (var index = 0; index < functionCount; index++)
         {
             Assert.That(code.AsSpan(index * 14, 14).ToArray(), Is.EqualTo(frame));
-            var recordOffset = 0x400 + metadataOffset + index * 12;
-            Assert.That(ReadInt32(image, recordOffset), Is.EqualTo(0x1000 + index * 14));
-            Assert.That(ReadInt32(image, recordOffset + 4), Is.EqualTo(0x1000 + (index + 1) * 14));
-            var unwindOffset = metadataOffset + functionCount * 12 + index * 8;
+            var recordOffset = 0x400 + metadataOffset + (index * 12);
+            Assert.That(ReadInt32(image, recordOffset), Is.EqualTo(0x1000 + (index * 14)));
+            Assert.That(ReadInt32(image, recordOffset + 4), Is.EqualTo(0x1000 + ((index + 1) * 14)));
+            var unwindOffset = metadataOffset + (functionCount * 12) + (index * 8);
             Assert.That(ReadInt32(image, recordOffset + 8), Is.EqualTo(0x1000 + unwindOffset));
             AssertBootstrapCallChainUnwindInfo(image, 0x400 + unwindOffset, 0x28, 4);
         }
         Assert.That(image.AsSpan(0x400, codeLength).ToArray(), Is.EqualTo(code));
-        {var __nunitItems0 = image.AsSpan(0x400 + virtualSize).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem4 in __nunitItems0) { Assert.That(__nunitItem4, Is.EqualTo(0)); } });}
+        {
+            var __nunitItems0 = image.AsSpan(0x400 + virtualSize).ToArray();
+            Assert.Multiple(() => {
+    foreach (var __nunitItem4 in __nunitItems0)
+    {
+        Assert.That(__nunitItem4, Is.EqualTo(0)); } });
+        }
         Assert.That(await ExecuteImageAsync(image).ConfigureAwait(true), Is.EqualTo(value));
         foreach (var probeForwarder in new[] { true, false })
         {
@@ -1694,8 +1717,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var localNameCapacity = shortNameTable ? 2 : source.Length;
         var localValueCapacity = shortNameTable ? source.Length : 2;
         var buffers = CreateBootstrapSourceBuffers(source)
-            .Where(static buffer => buffer.Name != "BootstrapMainLocalNames"
-                && buffer.Name != "BootstrapMainLocalValues")
+            .Where(static buffer => buffer.Name is not "BootstrapMainLocalNames"
+                and not "BootstrapMainLocalValues")
             .ToImmutableArray()
             .Add(new HostBuffer("BootstrapMainLocalNames", PrimitiveType.Int32,
                 [.. new int[localNameCapacity]], true))
@@ -1711,9 +1734,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainLeaf");
         var trees = await ReadComponentsAsync(components, VerifyBootstrapSourceEmitter)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         Assert.That(jit.ExitCode, Is.EqualTo(0));
@@ -1747,9 +1774,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainLeaf");
         var trees = await ReadComponentsAsync(components, VerifyBootstrapSourceEmitter)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         Assert.That(jit.ExitCode, Is.EqualTo(0));
@@ -1883,10 +1914,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var callAlignmentProbeArgumentCount = helperArguments?.Length
             ?? (operation >= 7 ? operation - 6 : 0);
         var shouldProbeCallFrame = forceNativeProbe
-            || helperArgumentCount >= 1
+            || (helperArgumentCount >= 1
                 && (helperArguments is null
-                    || helperArguments.SequenceEqual(Enumerable.Range(1, helperArgumentCount))
-                        && !sourceText.Contains("firstValue", StringComparison.Ordinal));
+                    || (helperArguments.SequenceEqual(Enumerable.Range(1, helperArgumentCount))
+                        && !sourceText.Contains("firstValue", StringComparison.Ordinal))));
         var requiredCodeLength = helperArgumentCount >= 1
             ? GetStackArgumentCodeLength(helperArgumentCount, helperMultiplication)
             : 0;
@@ -1906,18 +1937,22 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Add(new HostBuffer("BootstrapImageBytes", PrimitiveType.Int32,
                 [.. new int[imageCapacity]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         var expectedImageLength = helperArgumentCount > 0
             ? GetStackArgumentImageLength(helperArgumentCount, helperMultiplication)
             : 0x600;
         var addition = operation == 1
-            || operation == 6 && sourceText.Contains(" + ", StringComparison.Ordinal);
+            || (operation == 6 && sourceText.Contains(" + ", StringComparison.Ordinal));
         var subtraction = operation == 2
-            || operation == 6 && sourceText.Contains(" - ", StringComparison.Ordinal);
+            || (operation == 6 && sourceText.Contains(" - ", StringComparison.Ordinal));
         var expected = CreateExpectedBytes(true, value,
             addition, subtraction, operation == 3,
             operation == 4, operation == 5, firstOperand, secondOperand,
@@ -2057,15 +2092,17 @@ public sealed class BootstrapInt32MainReturnComponentTests
         BoundRuntimePolicy policy)
     {
         static string CreateSource(int forwardingCount)
-            => CreateBootstrapHelperCallChainSource(
-                [17], "", useMainLocal: false, forwardingCount: forwardingCount);
+        {
+            return CreateBootstrapHelperCallChainSource(
+                        [17], "", useMainLocal: false, forwardingCount: forwardingCount);
+        }
 
         var minimumForwardingCount = 1;
         var maximumForwardingCount = ScannerHost.MaximumSourceLength;
         while (minimumForwardingCount < maximumForwardingCount)
         {
             var forwardingCount = minimumForwardingCount
-                + (maximumForwardingCount - minimumForwardingCount + 1) / 2;
+                + ((maximumForwardingCount - minimumForwardingCount + 1) / 2);
             if (CreateSource(forwardingCount).Length <= ScannerHost.MaximumSourceLength)
             {
                 minimumForwardingCount = forwardingCount;
@@ -2121,7 +2158,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumArgumentCount < maximumArgumentCount)
         {
             var argumentCount = minimumArgumentCount
-                + (maximumArgumentCount - minimumArgumentCount + 1) / 2;
+                + ((maximumArgumentCount - minimumArgumentCount + 1) / 2);
             if (CreateCase(argumentCount, forwardingCount).SourceText.Length
                 <= ScannerHost.MaximumSourceLength)
             {
@@ -2204,7 +2241,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumLocalCount < maximumLocalCount)
         {
             var localCount = minimumLocalCount
-                + (maximumLocalCount - minimumLocalCount + 1) / 2;
+                + ((maximumLocalCount - minimumLocalCount + 1) / 2);
             if (CreateSource(localCount).Length <= ScannerHost.MaximumSourceLength)
             {
                 minimumLocalCount = localCount;
@@ -2271,8 +2308,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
             """;
         var buffers = CreateBootstrapSourceBuffers(source)
-            .Where(static buffer => buffer.Name != "BootstrapMainLocalNames"
-                && buffer.Name != "BootstrapMainLocalValues")
+            .Where(static buffer => buffer.Name is not "BootstrapMainLocalNames"
+                and not "BootstrapMainLocalValues")
             .ToImmutableArray()
             .Add(new HostBuffer("BootstrapMainLocalNames", PrimitiveType.Int32,
                 [.. new int[shortNameTable ? 2 : source.Length]], true))
@@ -2290,9 +2327,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainPeImage");
         var trees = await ReadComponentsAsync(components, rejectSource)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         Assert.That(execution.ExitCode, Is.EqualTo(0));
         Assert.That(ReadInt32(execution.Data,
@@ -2388,7 +2429,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         const string helper =
             "internal int32 Sum2(int32 first, int32 second) => first + second;";
 
-        string CreateSource(int localCount)
+        static string CreateSource(int localCount)
         {
             var declarations = string.Join(" ", Enumerable.Range(0, localCount)
                 .Select(index => index == 0
@@ -2403,7 +2444,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumLocalCount < maximumLocalCount)
         {
             var localCount = minimumLocalCount
-                + (maximumLocalCount - minimumLocalCount + 1) / 2;
+                + ((maximumLocalCount - minimumLocalCount + 1) / 2);
             if (CreateSource(localCount).Length <= ScannerHost.MaximumSourceLength)
             {
                 minimumLocalCount = localCount;
@@ -2419,7 +2460,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
         Assert.That(CreateSource(minimumLocalCount + 1).Length > ScannerHost.MaximumSourceLength, Is.True);
         return EmitsOnlyTheDirectSourceSubsetAsync(
-            policy, sourceText, true, minimumLocalCount * 2 - 1,
+            policy, sourceText, true, (minimumLocalCount * 2) - 1,
             helperArguments: [minimumLocalCount, minimumLocalCount - 1]);
     }
     [TestCase(BoundRuntimePolicy.FailFast,true)]
@@ -2526,7 +2567,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumGroupingDepth < maximumGroupingDepth)
         {
             var groupingDepth = minimumGroupingDepth
-                + (maximumGroupingDepth - minimumGroupingDepth + 1) / 2;
+                + ((maximumGroupingDepth - minimumGroupingDepth + 1) / 2);
             var candidateExpression = "-("
                 + new string('(', groupingDepth)
                 + "-(1+2)"
@@ -2592,7 +2633,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumGroupingDepth < maximumGroupingDepth)
         {
             var groupingDepth = minimumGroupingDepth
-                + (maximumGroupingDepth - minimumGroupingDepth + 1) / 2;
+                + ((maximumGroupingDepth - minimumGroupingDepth + 1) / 2);
             if (CreateSource(groupingDepth).Length <= ScannerHost.MaximumSourceLength)
             {
                 minimumGroupingDepth = groupingDepth;
@@ -2638,7 +2679,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumGroupingDepth < maximumGroupingDepth)
         {
             var groupingDepth = minimumGroupingDepth
-                + (maximumGroupingDepth - minimumGroupingDepth + 1) / 2;
+                + ((maximumGroupingDepth - minimumGroupingDepth + 1) / 2);
             if (CreateSource(groupingDepth).Length <= ScannerHost.MaximumSourceLength)
             {
                 minimumGroupingDepth = groupingDepth;
@@ -2684,7 +2725,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumLocalCount < maximumLocalCount)
         {
             var localCount = minimumLocalCount
-                + (maximumLocalCount - minimumLocalCount + 1) / 2;
+                + ((maximumLocalCount - minimumLocalCount + 1) / 2);
             if (CreateSource(localCount).Length <= ScannerHost.MaximumSourceLength)
             {
                 minimumLocalCount = localCount;
@@ -2727,8 +2768,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
             """;
         var buffers = CreateBootstrapSourceBuffers(source)
-            .Where(static buffer => buffer.Name != "BootstrapMainLocalNames"
-                && buffer.Name != "BootstrapMainLocalValues")
+            .Where(static buffer => buffer.Name is not "BootstrapMainLocalNames"
+                and not "BootstrapMainLocalValues")
             .ToImmutableArray()
             .Add(new HostBuffer("BootstrapMainLocalNames", PrimitiveType.Int32,
                 [.. new int[shortNameTable ? 1 : source.Length]], true))
@@ -2746,9 +2787,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainPeImage");
         var trees = await ReadComponentsAsync(components, rejectSource)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         Assert.That(execution.ExitCode, Is.EqualTo(0));
         Assert.That(ReadInt32(execution.Data,
@@ -2946,9 +2991,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainLeaf");
         var trees = await ReadComponentsAsync(components, rejectSource)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))();
         Assert.That(NativeJit.ExecuteWithData(
             program, (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
@@ -2968,7 +3017,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
             expectImageRejection: true);
     }
 
-    private async Task AssertBootstrapHelperCallChainAsync(
+    private static async Task AssertBootstrapHelperCallChainAsync(
         BoundRuntimePolicy policy, int[] arguments, string operation,
         int expectedResult, bool useMainLocal, bool verifyNestedUnwind = false,
         int imageCapacity = 65536, bool expectImageRejection = false,
@@ -3002,9 +3051,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Add(new HostBuffer("BootstrapImageBytes", PrimitiveType.Int32,
                 [.. new int[imageCapacity]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
 
         var codeLength = ReadInt32(execution.Data,
@@ -3034,7 +3087,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         for (var index = 0; index < code.Length; index++)
         {
             var value = ReadInt32(execution.Data,
-                execution.BufferOffsets[buffers.Length - 4] + index * sizeof(int));
+                execution.BufferOffsets[buffers.Length - 4] + (index * sizeof(int)));
             Assert.That(value, Is.InRange(0, byte.MaxValue));
             code[index] = (byte)value;
         }
@@ -3056,13 +3109,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var forwardingLength = forwardingFunctionEnd - mainFunctionEnd;
         for (var forwardingIndex = 0; forwardingIndex < forwardingCount; forwardingIndex++)
         {
-            var forwardingStart = mainFunctionEnd + forwardingIndex * forwardingLength;
+            var forwardingStart = mainFunctionEnd + (forwardingIndex * forwardingLength);
             AssertBootstrapCallChainFrameProlog(code, forwardingStart, frameSize);
             var copyOffset = forwardingStart + prologLength;
             for (var argumentIndex = 4; argumentIndex < arguments.Length; argumentIndex++)
             {
-                var incomingOffset = frameSize + 0x28 + (argumentIndex - 4) * 8;
-                var outgoingOffset = 0x20 + (argumentIndex - 4) * 8;
+                var incomingOffset = frameSize + 0x28 + ((argumentIndex - 4) * 8);
+                var outgoingOffset = 0x20 + ((argumentIndex - 4) * 8);
                 copyOffset = AssertBootstrapForwardedStackArgument(
                     code, copyOffset, incomingOffset, outgoingOffset);
             }
@@ -3077,14 +3130,14 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var metadataOffset = (codeLength + 3) & ~3;
         var functionCount = forwardingCount + 1;
         var functionTableSize = functionCount * 12;
-        var sectionVirtualSize = metadataOffset + functionCount * 20;
+        var sectionVirtualSize = metadataOffset + (functionCount * 20);
         var functionTableRva = 0x1000 + metadataOffset;
         var functionTableOffset = 0x400 + metadataOffset;
         var image = new byte[expectedImageLength];
         var imageBytesOffset = execution.BufferOffsets[buffers.Length - 2];
         for (var index = 0; index < image.Length; index++)
         {
-            var value = ReadInt32(execution.Data, imageBytesOffset + index * sizeof(int));
+            var value = ReadInt32(execution.Data, imageBytesOffset + (index * sizeof(int)));
             Assert.That(value, Is.InRange(0, byte.MaxValue));
             image[index] = (byte)value;
         }
@@ -3093,20 +3146,26 @@ public sealed class BootstrapInt32MainReturnComponentTests
         for (var functionIndex = 0; functionIndex < functionCount; functionIndex++)
         {
             var functionStart = functionIndex == 0 ? 0
-                : mainFunctionEnd + (functionIndex - 1) * forwardingLength;
+                : mainFunctionEnd + ((functionIndex - 1) * forwardingLength);
             var functionEnd = functionIndex == 0 ? mainFunctionEnd
                 : functionStart + forwardingLength;
-            var functionOffset = functionTableOffset + functionIndex * 12;
+            var functionOffset = functionTableOffset + (functionIndex * 12);
             Assert.That(ReadInt32(image, functionOffset), Is.EqualTo(0x1000 + functionStart));
             Assert.That(ReadInt32(image, functionOffset + 4), Is.EqualTo(0x1000 + functionEnd));
-            Assert.That(ReadInt32(image, functionOffset + 8), Is.EqualTo(functionTableRva + functionTableSize + functionIndex * 8));
+            Assert.That(ReadInt32(image, functionOffset + 8), Is.EqualTo(functionTableRva + functionTableSize + (functionIndex * 8)));
             AssertBootstrapCallChainUnwindInfo(
-                image, functionTableOffset + functionTableSize + functionIndex * 8,
+                image, functionTableOffset + functionTableSize + (functionIndex * 8),
                 frameSize, prologLength);
         }
         Assert.That(ReadInt32(image, 0x190), Is.EqualTo(sectionVirtualSize));
         Assert.That(image.AsSpan(0x400, codeLength).ToArray().Select(static value => (int)value), Is.EqualTo(code.Select(static value => (int)value)));
-        {var __nunitItems1 = image.AsSpan(0x400 + sectionVirtualSize).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem12 in __nunitItems1) { Assert.That(__nunitItem12, Is.EqualTo(0)); } });}
+        {
+            var __nunitItems1 = image.AsSpan(0x400 + sectionVirtualSize).ToArray();
+            Assert.Multiple(() => {
+    foreach (var __nunitItem12 in __nunitItems1)
+    {
+        Assert.That(__nunitItem12, Is.EqualTo(0)); } });
+        }
 
         Assert.That(await ExecuteImageAsync(image).ConfigureAwait(true), Is.EqualTo(expectedResult));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(expectedImageLength));
@@ -3133,8 +3192,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
     {
         var leafNames = Enumerable.Range(0, arguments.Length)
             .Select(index => arguments.Length <= 32 ? $"b{index}"
-                : string.Concat("p", (char)('a' + index / 26),
-                    (char)('a' + index % 26)))
+                : string.Concat("p", (char)('a' + (index / 26)),
+                    (char)('a' + (index % 26))))
             .ToArray();
         var forwardingNames = leafNames;
         var leafParameters = string.Join(",", leafNames.Select(static name => $"int32 {name}"));
@@ -3143,8 +3202,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             ? leafNames[0]
             : string.Join(operation, leafNames);
         var forwardingArguments = string.Join(",", forwardingNames);
-        var mainArguments = mainArgumentExpressions ?? arguments.Select(static argument =>
-            argument.ToString(CultureInfo.InvariantCulture)).ToArray();
+        var mainArguments = mainArgumentExpressions ?? [.. arguments.Select(static argument =>
+            argument.ToString(CultureInfo.InvariantCulture))];
         if (useMainLocal && mainArgumentExpressions is null)
         {
             mainArguments[0] = "firstValue";
@@ -3182,7 +3241,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var codeLength = GetBootstrapCallChainCodeLength(
             argumentCount, multiplication, forwardingCount);
         var sectionVirtualSize = ((codeLength + 3) & ~3)
-            + (forwardingCount + 1) * 20;
+            + ((forwardingCount + 1) * 20);
         var sectionRawSize = (sectionVirtualSize + 0x1FF) & ~0x1FF;
         return 0x400 + sectionRawSize;
     }
@@ -3200,14 +3259,14 @@ public sealed class BootstrapInt32MainReturnComponentTests
             + 5 + epilogueLength;
         for (var argumentIndex = 4; argumentIndex < argumentCount; argumentIndex++)
         {
-            var incomingOffset = frameSize + 0x28 + (argumentIndex - 4) * 8;
-            var outgoingOffset = 0x20 + (argumentIndex - 4) * 8;
+            var incomingOffset = frameSize + 0x28 + ((argumentIndex - 4) * 8);
+            var outgoingOffset = 0x20 + ((argumentIndex - 4) * 8);
             forwardingLength += (incomingOffset > 0x7F ? 7 : 4)
                 + (outgoingOffset > 0x7F ? 7 : 4);
         }
         var baseCodeLength = GetStackArgumentCodeLength(argumentCount, multiplication);
         return (mainFunctionEnd, mainFunctionEnd + forwardingLength,
-            baseCodeLength + forwardingCount * forwardingLength);
+            baseCodeLength + (forwardingCount * forwardingLength));
     }
 
     private static int AssertBootstrapForwardedStackArgument(
@@ -3250,7 +3309,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var (mainFunctionEnd, forwardingFunctionEnd, _) = GetBootstrapCallChainLayout(
             argumentCount, multiplication: false, forwardingCount: forwardingCount);
         var forwardingLength = forwardingFunctionEnd - mainFunctionEnd;
-        var leafStart = mainFunctionEnd + forwardingCount * forwardingLength;
+        var leafStart = mainFunctionEnd + (forwardingCount * forwardingLength);
         var codeOffset = 0x400
             + (probeForwardingHelper ? mainFunctionEnd : leafStart);
         var probeImage = (byte[])image.Clone();
@@ -3298,9 +3357,9 @@ public sealed class BootstrapInt32MainReturnComponentTests
         Assert.That(image[offset + 2], Is.EqualTo(largeFrame ? 2 : 1));
         Assert.That(image[offset + 3], Is.EqualTo(0));
         Assert.That(image[offset + 4], Is.EqualTo(prologLength));
-        Assert.That(image[offset + 5], Is.EqualTo(largeFrame ? 0x01 : ((frameSize / 8 - 1) << 4) | 0x02));
-        Assert.That(image[offset + 6], Is.EqualTo(largeFrame ? frameSize / 8 & 0xFF : 0));
-        Assert.That(image[offset + 7], Is.EqualTo(largeFrame ? frameSize / 8 >> 8 & 0xFF : 0));
+        Assert.That(image[offset + 5], Is.EqualTo(largeFrame ? 0x01 : (((frameSize / 8) - 1) << 4) | 0x02));
+        Assert.That(image[offset + 6], Is.EqualTo(largeFrame ? (frameSize / 8) & 0xFF : 0));
+        Assert.That(image[offset + 7], Is.EqualTo(largeFrame ? ((frameSize / 8) >> 8) & 0xFF : 0));
     }
     [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-7, 6);",-42,new int[] { -7, 6 })]
     [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-7, 6);",-42,new int[] { -7, 6 })]
@@ -3373,7 +3432,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         => await AssertParameterizedArithmeticRejectsBeforePublicationAsync(
             policy, sourceText).ConfigureAwait(true);
 
-    private async Task AssertParameterizedArithmeticRejectsBeforePublicationAsync(
+    private static async Task AssertParameterizedArithmeticRejectsBeforePublicationAsync(
         BoundRuntimePolicy policy, string sourceText,
         string? shortWorkspace = null, int workspaceCapacity = 0)
     {
@@ -3400,9 +3459,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Append("tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainPeImage");
         var trees = await ReadComponentsAsync(components, RejectBootstrapSourcePublication)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         Assert.That(jit.ExitCode, Is.EqualTo(0));
@@ -3468,7 +3531,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         {
             codeLength += argumentIndex < 2 ? 5
                 : argumentIndex < 4 ? 6
-                : 0x20 + (argumentIndex - 4) * 8 > 0x7F ? 11 : 8;
+                : 0x20 + ((argumentIndex - 4) * 8) > 0x7F ? 11 : 8;
         }
         codeLength += largeFrame ? 13 : 10;
         codeLength += 3;
@@ -3477,16 +3540,16 @@ public sealed class BootstrapInt32MainReturnComponentTests
             codeLength += multiplication
                 ? argumentIndex == 1 ? 3
                     : argumentIndex < 4 ? 4
-                    : 0x28 + (argumentIndex - 4) * 8 > 0x7F ? 8 : 5
+                    : 0x28 + ((argumentIndex - 4) * 8) > 0x7F ? 8 : 5
                 : argumentIndex == 1 ? 2
                     : argumentIndex < 4 ? 3
-                    : 0x28 + (argumentIndex - 4) * 8 > 0x7F ? 7 : 4;
+                    : 0x28 + ((argumentIndex - 4) * 8) > 0x7F ? 7 : 4;
         }
         return codeLength;
     }
 
     private static int GetStackArgumentFrameSize(int argumentCount)
-        => ((0x20 + Math.Max(argumentCount - 4, 0) * 8 + 8 + 15) & ~15) - 8;
+        => ((0x20 + (Math.Max(argumentCount - 4, 0) * 8) + 8 + 15) & ~15) - 8;
 
     private static int GetStackArgumentCountForCodeLength(int codeLength)
     {
@@ -3509,7 +3572,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         {
             callerEndOffset += argumentIndex < 2 ? 5
                 : argumentIndex < 4 ? 6
-                : 0x20 + (argumentIndex - 4) * 8 > 0x7F ? 11 : 8;
+                : 0x20 + ((argumentIndex - 4) * 8) > 0x7F ? 11 : 8;
         }
         return callerEndOffset;
     }
@@ -3521,7 +3584,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         while (minimumArgumentCount < maximumArgumentCount)
         {
             var argumentCount = minimumArgumentCount
-                + (maximumArgumentCount - minimumArgumentCount + 1) / 2;
+                + ((maximumArgumentCount - minimumArgumentCount + 1) / 2);
             var source = CreateStackArgumentSource(
                 argumentCount, new int[argumentCount],
                 compactNames: true, compactSyntax: true);
@@ -3536,7 +3599,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
 
         var arguments = Enumerable.Range(0, minimumArgumentCount)
-            .Select(static index => index % 9 + 1)
+            .Select(static index => (index % 9) + 1)
             .ToArray();
         var sourceText = CreateStackArgumentSource(
             minimumArgumentCount, arguments, compactNames: true, compactSyntax: true);
@@ -3643,7 +3706,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
         cases.Add((declaration
-            + $"public int32 Main() {{ int32 firstValue = 1; int32 lastValue = {argumentCount / 2} + {argumentCount - argumentCount / 2}; "
+            + $"public int32 Main() {{ int32 firstValue = 1; int32 lastValue = {argumentCount / 2} + {argumentCount - (argumentCount / 2)}; "
             + $"return {helperName}(firstValue, "
             + string.Join(", ", positive[1..^1]) + ", lastValue); }",
             positive, true));
@@ -3769,9 +3832,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Add(new HostBuffer("BootstrapImageBytes", PrimitiveType.Int32,
                 [.. new int[1536]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))();
 
         Assert.That(NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
@@ -3805,7 +3872,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
             GetStackArgumentImageLength(arguments.Length) - 1);
     }
 
-    private async Task RejectOverCapacityBootstrapPeImageAsync(
+    private static async Task RejectOverCapacityBootstrapPeImageAsync(
         BoundRuntimePolicy policy, string sourceText,
         int argumentCount, int imageCapacity)
     {
@@ -3823,9 +3890,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .Add(new HostBuffer("BootstrapImageBytes", PrimitiveType.Int32,
                 [.. new int[imageCapacity]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [1], true));
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = CompileWithLayoutCore(trees, buffers, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
 
         Assert.That(NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(0));
         Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
@@ -3955,15 +4026,27 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return standardOutput;
     }
 
+    private static Compilation CompileWithLayoutCore(
+        IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        BoundRuntimePolicy policy)
+        => Compilation.Create(trees, buffers, new CompilationOptions {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+
     private static async Task<byte[]> PublishAndAuditFrontendAsync(
         SourceText source, BoundRuntimePolicy policy)
     {
         var trees = await ReadComponentsAsync(s_frontendComponents, PublishFrontendSource)
             .ConfigureAwait(true);
-        var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source), policy);
+        var compilation = CompileWithLayoutCore(trees, ScalarFrontendHost.CreateBuffers(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var execution = NativeJit.ExecuteWithData(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), (NativeRuntimePolicy)policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual16 = compilation.Program;
+                Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual16!;
+            }))(), (NativeRuntimePolicy)policy);
         Assert.That(execution.ExitCode, Is.EqualTo(0));
 
         var summary = execution.Data.AsSpan(
@@ -3981,8 +4064,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
     private static ImmutableArray<HostBuffer> CreateBootstrapSourceBuffers(SourceText source)
     {
         var buffers = ScalarFrontendHost.CreateBuffers(source)
-            .Where(static buffer => buffer.Name != "Frontend"
-                && buffer.Name != "FrontendProgram")
+            .Where(static buffer => buffer.Name is not "Frontend"
+                and not "FrontendProgram")
             .ToImmutableArray();
         return buffers
             .Add(new HostBuffer("BootstrapCallArgumentValues", PrimitiveType.Int32,
@@ -4018,7 +4101,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         for (var index = 0; index < expected[1]; index++)
         {
             Assert.That(ReadInt32(execution.Data,
-                execution.BufferOffsets[codeBytesBuffer] + index * sizeof(int)), Is.EqualTo(expected[index + 2]));
+                execution.BufferOffsets[codeBytesBuffer] + (index * sizeof(int))), Is.EqualTo(expected[index + 2]));
         }
     }
 
@@ -4052,7 +4135,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         for (var index = 0; index < image.Length; index++)
         {
             var value = ReadInt32(execution.Data,
-                imageBytesOffset + index * sizeof(int));
+                imageBytesOffset + (index * sizeof(int)));
             Assert.That(value, Is.InRange(0, byte.MaxValue));
             image[index] = (byte)value;
         }
@@ -4089,14 +4172,18 @@ public sealed class BootstrapInt32MainReturnComponentTests
             Assert.That(image[unwindInfoOffset + 4], Is.EqualTo(prologSize));
             Assert.That(image[unwindInfoOffset + 5], Is.EqualTo(usesLargeAllocation
                     ? 0x01
-                    : ((stackFrameSize / 8 - 1) << 4) | 0x02));
-            Assert.That(image[unwindInfoOffset + 6], Is.EqualTo(usesLargeAllocation ? stackFrameSize / 8 & 0xFF : 0));
-            Assert.That(image[unwindInfoOffset + 7], Is.EqualTo(usesLargeAllocation ? stackFrameSize / 8 >> 8 & 0xFF : 0));
-            {var __nunitItems2 = image.AsSpan(0x400 + expected[1],
-                metadataOffset - expected[1]).ToArray();            Assert.Multiple(() => {
+                    : (((stackFrameSize / 8) - 1) << 4) | 0x02));
+            Assert.That(image[unwindInfoOffset + 6], Is.EqualTo(usesLargeAllocation ? (stackFrameSize / 8) & 0xFF : 0));
+            Assert.That(image[unwindInfoOffset + 7], Is.EqualTo(usesLargeAllocation ? ((stackFrameSize / 8) >> 8) & 0xFF : 0));
+            {
+                var __nunitItems2 = image.AsSpan(0x400 + expected[1],
+                metadataOffset - expected[1]).ToArray();
+                Assert.Multiple(() => {
                 foreach (var __nunitItem17 in __nunitItems2)
-                { Assert.That(__nunitItem17, Is.EqualTo(0)); }
-            });}
+                {
+        Assert.That(__nunitItem17, Is.EqualTo(0)); }
+            });
+            }
         }
         else
         {
@@ -4111,7 +4198,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
         Assert.That(ReadInt32(image, 0x1AC), Is.EqualTo(0x60000020));
         Assert.That(image.AsSpan(0x400, expected[1]).ToArray(), Is.EqualTo(expected.Skip(2).Take(expected[1]).Select(static value => (byte)value)));
         var usedTextSize = hasUnwindInfo ? sectionVirtualSize : expected[1];
-        {var __nunitItems3 = image.AsSpan(0x400 + usedTextSize).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem18 in __nunitItems3) { Assert.That(__nunitItem18, Is.EqualTo(0)); } });}
+        {
+            var __nunitItems3 = image.AsSpan(0x400 + usedTextSize).ToArray();
+            Assert.Multiple(() => {
+    foreach (var __nunitItem18 in __nunitItems3)
+    {
+        Assert.That(__nunitItem18, Is.EqualTo(0)); } });
+        }
         return image;
     }
 
@@ -4296,8 +4389,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     expected[4] = 0xEC;
                     expected[5] = stackFrameSize;
                 }
-                var arguments = helperArguments ?? new[]
-                {
+                var arguments = helperArguments ??
+                [
                     argumentCount == 1 ? value : firstOperand,
                     secondOperand, thirdOperand, fourthOperand,
                     fifthOperand, sixthOperand, seventhOperand, eighthOperand,
@@ -4306,7 +4399,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     sixteenthOperand, seventeenthOperand, eighteenthOperand, nineteenthOperand, twentiethOperand,
                     twentyFirstOperand, twentySecondOperand, twentyThirdOperand, twentyFourthOperand,
                     twentyFifthOperand, twentySixthOperand,
-                };
+                ];
                 var setupOffset = probeFrame ? 0x32 : longFrame ? 7 : 4;
                 for (var argumentIndex = 0; argumentIndex < argumentCount; argumentIndex++)
                 {
@@ -4337,7 +4430,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     else
                     {
                         expected[setupOffset + 2] = 0xC7;
-                        var stackOffset = 0x20 + (argumentIndex - 4) * 8;
+                        var stackOffset = 0x20 + ((argumentIndex - 4) * 8);
                         if (stackOffset > 0x7F)
                         {
                             expected[setupOffset + 3] = 0x84;
@@ -4354,7 +4447,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                         {
                             expected[setupOffset + 3] = 0x44;
                             expected[setupOffset + 4] = 0x24;
-                            expected[setupOffset + 5] = 0x20 + (argumentIndex - 4) * 8;
+                            expected[setupOffset + 5] = 0x20 + ((argumentIndex - 4) * 8);
                             immediateOffset = setupOffset + 4;
                             instructionLength = 8;
                         }
@@ -4421,7 +4514,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     }
                     else if (helperMultiplication)
                     {
-                        var stackOffset = 0x28 + (argumentIndex - 4) * 8;
+                        var stackOffset = 0x28 + ((argumentIndex - 4) * 8);
                         expected[stackReadOffset] = 0x0F;
                         expected[stackReadOffset + 1] = 0xAF;
                         if (stackOffset > 0x7F)
@@ -4466,7 +4559,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     else
                     {
                         expected[stackReadOffset] = helperSubtraction ? 0x2B : 0x03;
-                        var stackOffset = 0x28 + (argumentIndex - 4) * 8;
+                        var stackOffset = 0x28 + ((argumentIndex - 4) * 8);
                         if (stackOffset > 0x7F)
                         {
                             expected[stackReadOffset + 1] = 0x84;
@@ -4535,7 +4628,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                         expected[setupOffset + 2] = 0xC7;
                         expected[setupOffset + 3] = 0x44;
                         expected[setupOffset + 4] = 0x24;
-                        expected[setupOffset + 5] = 0x20 + (argumentIndex - 4) * 8;
+                        expected[setupOffset + 5] = 0x20 + ((argumentIndex - 4) * 8);
                         immediateOffset = setupOffset + 4;
                         instructionLength = 8;
                     }
@@ -4571,7 +4664,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     expected[stackReadOffset] = 0x03;
                     expected[stackReadOffset + 1] = 0x44;
                     expected[stackReadOffset + 2] = 0x24;
-                    expected[stackReadOffset + 3] = 0x28 + (argumentIndex - 4) * 8;
+                    expected[stackReadOffset + 3] = 0x28 + ((argumentIndex - 4) * 8);
                     stackReadOffset += 4;
                 }
                 expected[stackReadOffset] = 0xC3;
@@ -5039,7 +5132,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(verificationSource, "bootstrap-int32-main-return.terrum"));
-        return components.ToImmutableArray();
+        return [.. components];
     }
 
     private static string RepositoryRoot()

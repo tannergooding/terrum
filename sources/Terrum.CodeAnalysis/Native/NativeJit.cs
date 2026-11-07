@@ -89,7 +89,7 @@ public static unsafe partial class NativeJit
         }
 
         var invocationProgram = program with {
-            Buffers = [source with { Values = ImmutableArray.CreateRange(source.Values.ToArray()) }],
+            Buffers = [source with { Values = [.. source.Values.ToArray()] }],
             IsInvocationSourceBound = true,
         };
         var code = EmitCode(invocationProgram, runtimePolicy);
@@ -136,7 +136,7 @@ public static unsafe partial class NativeJit
         SourceText source, NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
         => ExecuteWithScalarFrontendProfileCore(program, source,
             (BoundRuntimePolicy)runtimePolicy, SourceArithmeticProfile.Development,
-            registrarAssembly, null);
+            registrarAssembly, null, null);
 
     /// <summary>Executes the complete frontend component and binds subject source with the selected options.</summary>
     public static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfile(BoundProgram program,
@@ -146,12 +146,14 @@ public static unsafe partial class NativeJit
         ArgumentNullException.ThrowIfNull(source);
         Compilation.ValidateOptions(options);
         return ExecuteWithScalarFrontendProfileCore(program, source, options.RuntimePolicy,
-            options.SourceArithmeticProfile, registrarAssembly, options.NativeCoreRegistration);
+            options.SourceArithmeticProfile, registrarAssembly, options.NativeCoreRegistration,
+            options.LayoutCoreRegistration);
     }
 
     private static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfileCore(BoundProgram program,
         SourceText source, BoundRuntimePolicy boundPolicy, SourceArithmeticProfile sourceArithmeticProfile,
-        string? registrarAssembly, NativeCoreRegistrationSet? nativeCoreRegistration)
+        string? registrarAssembly, NativeCoreRegistrationSet? nativeCoreRegistration,
+        LayoutCoreRegistrationSet? layoutCoreRegistration)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(source);
@@ -178,6 +180,7 @@ public static unsafe partial class NativeJit
                 SourceArithmeticProfile = sourceArithmeticProfile,
                 RuntimePolicy = boundPolicy,
                 NativeCoreRegistration = nativeCoreRegistration,
+                LayoutCoreRegistration = layoutCoreRegistration,
             });
     }
 
@@ -212,8 +215,12 @@ public static unsafe partial class NativeJit
         {
             SemanticVerifier.VerifyWithDirectNativeImports(
                 program, nativeLoweringAgreement);
-            throw new NotSupportedException(
-                "The selected native lowering agreement is recognized but not implemented.");
+            if (nativeLoweringAgreement
+                != CompilationOptions.WindowsX64RootlessReferencesAgreement)
+            {
+                throw new NotSupportedException(
+                    "The selected native lowering agreement is not implemented for direct native imports.");
+            }
         }
         if (!program.Functions.Any(static function => function.DirectNativeImport is not null))
         {
@@ -228,7 +235,9 @@ public static unsafe partial class NativeJit
             throw new PlatformNotSupportedException("Native JIT requires a Windows x64 process.");
         }
 
-        var (code, imports) = NativeEmitter.EmitCodeWithDirectNativeImports(program, runtimePolicy);
+        var (code, imports) = NativeEmitter.EmitCodeWithDirectNativeImports(
+            program, runtimePolicy,
+            nativeLoweringAgreement: nativeLoweringAgreement);
         ValidateBufferMetadata(program, code);
         var (modules, distinctImports)
             = CreateSystem32ImportModules(imports);
@@ -379,7 +388,7 @@ public static unsafe partial class NativeJit
                 throw new ArgumentException("Native buffer order does not match the bound program.", nameof(code));
             }
 
-            var bufferData = buffer.Values.Length == 0 ? Span<byte>.Empty : code.Data.AsSpan(expected);
+            var bufferData = buffer.Values.Length == 0 ? [] : code.Data.AsSpan(expected);
             foreach (var value in buffer.Values)
             {
                 if (BinaryPrimitives.ReadInt32LittleEndian(bufferData[..sizeof(int)]) != value)
@@ -441,7 +450,7 @@ public static unsafe partial class NativeJit
         {
             if (functions[index - 1].Start >= functions[index].Start)
             {
-                sortedFunctions = code.Functions.ToArray();
+                sortedFunctions = [.. code.Functions];
                 Array.Sort(sortedFunctions, static (left, right) => left.Start.CompareTo(right.Start));
                 functions = sortedFunctions;
                 break;
@@ -469,8 +478,8 @@ public static unsafe partial class NativeJit
 
         foreach (var function in functions)
         {
-            var allocationSize = function.StackSize
-                - (function.UsesFramePointer ? 8 : 0);
+            var allocationSize
+                = NativeUnwind.StackProbeAllocationSize(function);
             var requiresProbe = allocationSize > NativeUnwind.StackProbeThreshold;
             var prologLength = NativeUnwind.PrologSize(function);
             if (function.Start < previousEnd || function.Start < 0 || function.End > text.Length
@@ -479,8 +488,15 @@ public static unsafe partial class NativeJit
                 || function.UsesStackProbe != requiresProbe
                 || (function.UsesStackProbe && !function.UsesFramePointer)
                 || (function.StackSize & 15) != 8
+                || (function.UsesAlignedFrame
+                    ? !function.UsesFramePointer || function.UsesParentFrame
+                        || function.StackAlignment is < 32 or > 8192
+                        || (function.StackAlignment
+                            & (function.StackAlignment - 1)) != 0
+                    : function.StackAlignment != 0)
                 || (function.IsStackProbeHelper
                     && (function.StackSize != 40 || function.UsesFramePointer
+                        || function.UsesAlignedFrame
                         || function.UsesParentFrame || function.UsesStackProbe
                         || !function.ExceptionScopes.IsEmpty))
                 || (!function.ExceptionScopes.IsEmpty && (function.ExceptionHandler < 0
@@ -783,7 +799,7 @@ public static unsafe partial class NativeJit
             }
             else
             {
-                dataSnapshot = Array.Empty<byte>();
+                dataSnapshot = [];
             }
             return exitCode;
         }
@@ -869,6 +885,11 @@ public static unsafe partial class NativeJit
         NativeFunctionRange[] stackProbeHelpers)
     {
         var start = function.Start;
+        if (function.UsesAlignedFrame)
+        {
+            return HasValidAlignedProlog(text, function,
+                stackProbeHelpers);
+        }
         if (!function.UsesFramePointer)
         {
             return !function.UsesStackProbe
@@ -914,6 +935,72 @@ public static unsafe partial class NativeJit
             + BinaryPrimitives.ReadInt32LittleEndian(text[(start + 7)..]));
         return stackProbeHelpers.Length == 1
             && probeTarget == stackProbeHelpers[0].Start;
+    }
+
+    private static bool HasValidAlignedProlog(ReadOnlySpan<byte> text,
+        NativeFunctionRange function,
+        NativeFunctionRange[] stackProbeHelpers)
+    {
+        var start = function.Start;
+        var allocationSize
+            = NativeUnwind.StackFrameAllocationSize(function);
+        var probeSize
+            = NativeUnwind.StackProbeAllocationSize(function);
+        if (!function.UsesFramePointer || function.UsesParentFrame
+            || function.StackAlignment is < 32 or > 8192
+            || (function.StackAlignment & (function.StackAlignment - 1)) != 0
+            || text[start] != 0x55
+            || text[start + 1] != 0x41 || text[start + 2] != 0x54
+            || text[start + 3] != 0x49 || text[start + 4] != 0x89
+            || text[start + 5] != 0xE4
+            || text[start + 6] != 0x48 || text[start + 7] != 0x81
+            || text[start + 8] != 0xEC
+            || BinaryPrimitives.ReadInt32LittleEndian(
+                text[(start + 9)..]) != 8)
+        {
+            return false;
+        }
+
+        var mainAllocationOffset = 13;
+        if (function.UsesStackProbe)
+        {
+            if (text[start + 13] != 0xB8
+                || BinaryPrimitives.ReadInt32LittleEndian(
+                    text[(start + 14)..]) != probeSize
+                || text[start + 18] != 0xE8)
+            {
+                return false;
+            }
+
+            var probeTarget = checked(start + 23
+                + BinaryPrimitives.ReadInt32LittleEndian(
+                    text[(start + 19)..]));
+            if (stackProbeHelpers.Length != 1
+                || probeTarget != stackProbeHelpers[0].Start)
+            {
+                return false;
+            }
+
+            mainAllocationOffset = 23;
+        }
+
+        var alignmentOffset = mainAllocationOffset + 7;
+        var framePointerOffset = alignmentOffset + 7;
+        return text[start + mainAllocationOffset] == 0x48
+            && text[start + mainAllocationOffset + 1] == 0x81
+            && text[start + mainAllocationOffset + 2] == 0xEC
+            && BinaryPrimitives.ReadInt32LittleEndian(
+                text[(start + mainAllocationOffset + 3)..])
+                    == allocationSize
+            && text[start + alignmentOffset] == 0x48
+            && text[start + alignmentOffset + 1] == 0x81
+            && text[start + alignmentOffset + 2] == 0xE4
+            && BinaryPrimitives.ReadInt32LittleEndian(
+                text[(start + alignmentOffset + 3)..])
+                    == -function.StackAlignment
+            && text[start + framePointerOffset] == 0x48
+            && text[start + framePointerOffset + 1] == 0x89
+            && text[start + framePointerOffset + 2] == 0xE5;
     }
 
     private static bool IsValidStackProbeHelper(ReadOnlySpan<byte> text,

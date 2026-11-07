@@ -2,15 +2,16 @@
 
 using System;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Graphs;
 
-public sealed class NativeGraphBoundaryTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeGraphBoundaryTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -29,7 +30,7 @@ public sealed class NativeGraphBoundaryTests
         var root = Root("int32 Main() { return Value15(); }", [providers[^1]], policy);
         NativeModuleCompiler.ValidateGraph(root, providers);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, providers,
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(16));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(16));
 
         var extra = Leaf("public int32 Extra() { return 0; }", "Extra", "Extra", policy);
         _ = Assert.Throws<ModuleContractException>(() =>
@@ -52,11 +53,11 @@ public sealed class NativeGraphBoundaryTests
         var originalFirstReader = (byte[])firstReader.Clone();
         var originalSecondReader = (byte[])secondReader.Clone();
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root,
-            [second, firstReader, first, secondReader], TimeSpan.FromSeconds(10), Policy), Is.EqualTo(42));
+            [second, firstReader, first, secondReader], TimeSpan.FromSeconds(10), Policy).ConfigureAwait(false), Is.EqualTo(42));
 
         var replacement = Leaf("public int32 GetVersion() { return 21; }", "GetVersion", "LeafV1", Policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root,
-            [firstReader, secondReader, second, replacement], TimeSpan.FromSeconds(10), Policy), Is.EqualTo(43));
+            [firstReader, secondReader, second, replacement], TimeSpan.FromSeconds(10), Policy).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(root, Is.EqualTo(originalRoot));
         Assert.That(firstReader, Is.EqualTo(originalFirstReader));
         Assert.That(secondReader, Is.EqualTo(originalSecondReader));
@@ -66,7 +67,11 @@ public sealed class NativeGraphBoundaryTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             [export], identity, policy);
     }
 
@@ -76,7 +81,11 @@ public sealed class NativeGraphBoundaryTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeModuleCompiler.CreateGraphReference(dependencies), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+        return NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(),
             [export], identity, dependencies, policy);
     }
 
@@ -85,7 +94,11 @@ public sealed class NativeGraphBoundaryTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             NativeModuleCompiler.CreateGraphReference(dependencies), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
+        return NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(),
             dependencies, policy);
     }
 }

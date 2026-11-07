@@ -7,17 +7,17 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed partial class NativeSourceImportTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed partial class NativeSourceImportTests
 {
     [Test]
     public void Utf16ZLiteralCannotBeForwardedToAnUnannotatedUnsafeFunction()
@@ -41,7 +41,7 @@ public sealed partial class NativeSourceImportTests
         var source = $$"""
             namespace Terrum.Interop;
             struct NativeImport { int32 Value; }
-            [NoThrow]
+
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
             extern uint32 CurrentThreadId();
             void Main() {}
@@ -59,7 +59,7 @@ public sealed partial class NativeSourceImportTests
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(6, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
                 ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
             """;
@@ -105,7 +105,7 @@ public sealed partial class NativeSourceImportTests
 
         var addressSource = declaration + """
             int32 Main() {
-                InlineArray<char16, 2> text = [char16(65), char16(0)];
+                [char16; 2] text = [char16(65), char16(0)];
                 unsafe {
                     return NativeFfiUtf16Z(&text[0], 1, 2,
                         utf16z("second"), 3, utf16z("third"));
@@ -137,7 +137,7 @@ public sealed partial class NativeSourceImportTests
         var source = """
             [Terrum.Interop.NativeImport("fixture.dll", "NativeFfiUtf16Z")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int32 NativeFfiUtf16Z(ptr<char16> text);
             int32 Main() {
                 unsafe {
@@ -147,7 +147,11 @@ public sealed partial class NativeSourceImportTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
 
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImports(
             program with { NativeUtf16ZLiterals = [] }, NativeRuntimePolicy.FailFast))!;
@@ -167,11 +171,11 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var source = $$"""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
-            [NoThrow]
+
             extern unsafe uint32 CurrentThreadId();
 
             [Terrum.Interop.NativeImport("kernel32.dll", "Sleep")]
-            [NoThrow]
+
             extern unsafe void Sleep(uint32 milliseconds);
 
             int32 Main() {
@@ -188,7 +192,11 @@ public sealed partial class NativeSourceImportTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         Assert.That(program.Functions.Count(static function => function.IsExternal), Is.EqualTo(2));
 
         var image = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
@@ -237,20 +245,20 @@ public sealed partial class NativeSourceImportTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
-            [NoThrow]
+
             extern unsafe uint32 CurrentThreadId();
 
             [Terrum.Interop.NativeImport("KERNEL32.DLL", "GetCurrentThreadId")]
-            [NoThrow]
+
             extern unsafe uint32 CurrentThreadIdAgain();
 
             [Terrum.Interop.NativeImport("Kernel32.Dll", "lstrlenW")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int32 WideLength(ptr<char16> value);
 
             [Terrum.Interop.NativeImport("KERNEL32.DLL", "Sleep")]
-            [NoThrow]
+
             extern unsafe void Sleep(uint32 milliseconds);
 
             int32 Main() {
@@ -274,7 +282,7 @@ public sealed partial class NativeSourceImportTests
 
         var execution = NativeJit.ExecuteWithData(compilation.Program!, NativeRuntimePolicy.FailFast);
         Assert.That(execution.ExitCode, Is.Zero);
-        Assert.That(execution.BufferOffsets, Is.EqualTo(new[] { 0, 8 }));
+        Assert.That(execution.BufferOffsets, Is.EqualTo([0, 8]));
         Assert.That(execution.Data, Is.EqualTo(new byte[] {
             0x78, 0x56, 0x34, 0x12, 0x89, 0x67, 0x45, 0x23, 0x9A, 0x78, 0x56, 0x34,
         }));
@@ -288,17 +296,17 @@ public sealed partial class NativeSourceImportTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("ucrtbase.dll", "_abs64")]
-            [NoThrow]
+
             extern unsafe int64 Absolute(int64 value);
 
             [Terrum.Interop.NativeImport("ucrtbase.dll", "_rotl64")]
-            [NoThrow]
+
             extern unsafe uint64 Rotate(uint64 value, int32 count);
 
             [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int32 Compare(
                 ptr<char16> first, int32 firstLength,
                 ptr<char16> second, int32 secondLength, int32 ignoreCase);

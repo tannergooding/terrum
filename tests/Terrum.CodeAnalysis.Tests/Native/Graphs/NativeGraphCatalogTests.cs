@@ -7,15 +7,16 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Graphs;
 
-public sealed class NativeGraphCatalogTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeGraphCatalogTests
 {
     private static BoundProgram Compile(string source, NativeRuntimePolicy policy,
         CompilationReference? reference = null, bool library = true)
@@ -27,7 +28,11 @@ public sealed class NativeGraphCatalogTests
             : reference is null ? Compilation.Create(tree, (BoundRuntimePolicy)policy)
                 : Compilation.Create(tree, reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static byte[] Producer(string name, int value, NativeRuntimePolicy policy, bool incompatible = false,
@@ -76,7 +81,7 @@ public sealed class NativeGraphCatalogTests
         Assert.That(selectedRoot, Is.EqualTo(persistedRoot));
         NativeModuleCompiler.ValidateGraph(selectedRoot, selectedProviders);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(selectedRoot, selectedProviders,
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(44));
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
@@ -85,7 +90,7 @@ public sealed class NativeGraphCatalogTests
         var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
             configuration, frameworkDirectory.Name, "terrumc.exe");
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(selectedRoot, selectedProviders, apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(44));
         selectedRoot[0] ^= 1;
         selectedProviders[0][0] ^= 1;
         Assert.That(selection.Consumer.ToArray(), Is.EqualTo(persistedRoot));

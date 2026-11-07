@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [Test]
     public async Task WrappingIntegerConversionsMatchLowBitsAcrossAotAndJitAsync()

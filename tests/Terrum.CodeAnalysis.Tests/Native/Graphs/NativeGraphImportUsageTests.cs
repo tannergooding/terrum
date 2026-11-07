@@ -6,25 +6,27 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Graphs;
 
-public sealed class NativeGraphImportUsageTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeGraphImportUsageTests
 {
     private const string ProducerSource = """
         [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Child {
             public int32 Value;
-            [NoThrow] public Child(int32 value) { Value = value; }
-            [NoThrow] [Cleanup] public void Close() {}
+             public Child(int32 value) { Value = value; }
+             [Cleanup] public void Close() {}
         }
         [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Parent {
             public Child Owned;
-            [NoThrow] public Parent(int32 value) { Owned = new Child(value); }
+             public Parent(int32 value) { Owned = new Child(value); }
         }
         public Parent Make() { return new Parent(40); }
         """;
@@ -34,12 +36,24 @@ public sealed class NativeGraphImportUsageTests
     {
         var syntax = SyntaxTree.Parse(source);
         var runtime = (BoundRuntimePolicy)policy;
+        var options = new CompilationOptions {
+            RuntimePolicy = runtime,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
         var compilation = library
-            ? reference is null ? Compilation.CreateLibrary(syntax, runtime)
-                : Compilation.CreateLibrary(syntax, reference, runtime)
-            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), runtime);
+            ? reference is null ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.CreateLibrary(syntax, reference, options)
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => {
+                var __nunitActual0 = reference;
+                Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>());
+                return (CompilationReference)__nunitActual0!;
+            }))(), options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -54,7 +68,7 @@ public sealed class NativeGraphImportUsageTests
             }
             """, policy, NativeModuleCompiler.CreateReference(leaf), library: false), leaf, policy);
         NativeModuleCompiler.Validate(pair, leaf);
-        Assert.That(await NativeModuleCompiler.RunAsync(pair, leaf, TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(pair, leaf, TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
 
         var addition = NativeModuleCompiler.CreateProducer(Compile(
             "public int32 Add() { return 2; }", policy), ["Add"], "Addition", policy);
@@ -67,15 +81,15 @@ public sealed class NativeGraphImportUsageTests
             [leaf, addition], policy);
         NativeModuleCompiler.ValidateConsumerSet(set, [addition, leaf]);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(set, [leaf, addition],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         var originalPair = pair.ToArray();
         var originalSet = set.ToArray();
         var replacement = NativeModuleCompiler.CreateProducer(Compile(
             ProducerSource.Replace("new Parent(40)", "new Parent(41)", StringComparison.Ordinal), policy),
             ["Make", "Child.Close"], "Leaf", policy);
-        Assert.That(await NativeModuleCompiler.RunAsync(pair, replacement, TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+        Assert.That(await NativeModuleCompiler.RunAsync(pair, replacement, TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(set, [addition, replacement],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(pair, Is.EqualTo(originalPair));
         Assert.That(set, Is.EqualTo(originalSet));
     }
@@ -89,7 +103,7 @@ public sealed class NativeGraphImportUsageTests
         var pair = NativeModuleCompiler.CreateConsumer(Compile(
             "int32 Main() { Parent value = Make(); return value.Owned.Value; }", Policy,
             NativeModuleCompiler.CreateReference(leaf), library: false), leaf, Policy);
-        Assert.That(pair[4], Is.EqualTo(2));
+        Assert.That(pair[4], Is.EqualTo(3));
         var damagedPair = pair.ToArray();
         var offset = 18 + damagedPair[7] + damagedPair[8];
         var count = ReadCount(damagedPair, ref offset);
@@ -113,7 +127,7 @@ public sealed class NativeGraphImportUsageTests
             "int32 Main() { Parent value = Make(); return value.Owned.Value + Add(); }", Policy,
             NativeModuleCompiler.CreateReferenceSet([leaf, addition]), library: false),
             [leaf, addition], Policy);
-        Assert.That(set[4], Is.EqualTo(2));
+        Assert.That(set[4], Is.EqualTo(3));
         var damagedSet = set.ToArray();
         offset = 16;
         for (var dependency = 0; dependency < 2; dependency++)

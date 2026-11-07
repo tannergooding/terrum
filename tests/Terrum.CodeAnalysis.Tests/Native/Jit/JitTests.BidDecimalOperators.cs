@@ -11,7 +11,8 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed partial class JitTests
 {
     private static readonly (string Name, PrimitiveType Type, int Width, int Precision,
         int CoefficientBits, int ExponentBits, int Bias, int MinimumQuantum,
@@ -43,7 +44,7 @@ public sealed partial class JitTests
         {
             foreach (var operation in operations)
             {
-                source.Append(operation.Comparison ? "bool " : format.Name + " ")
+                _ = source.Append(operation.Comparison ? "bool " : format.Name + " ")
                     .Append(format.Name).Append(operation.Name)
                     .Append('(').Append(format.Name).Append(" left, ")
                     .Append(format.Name).AppendLine(" right) {")
@@ -52,7 +53,7 @@ public sealed partial class JitTests
             }
             AppendUpdateFunction(source, format.Name);
         }
-        source.AppendLine("int32 Main() {");
+        _ = source.AppendLine("int32 Main() {");
         var check = 0;
         foreach (var format in s_bidDecimalFormats)
         {
@@ -68,28 +69,28 @@ public sealed partial class JitTests
                         ? expected.Low != 0 ? "true" : "false"
                         : DecimalLiteral(format, expected);
                     check++;
-                    source.Append("    if (").Append(format.Name).Append(operation.Name)
+                    _ = source.Append("    if (").Append(format.Name).Append(operation.Name)
                         .Append('(').Append(DecimalLiteral(format, left)).Append(", ")
                         .Append(DecimalLiteral(format, right)).Append(") != ")
                         .Append(expectedText).Append(") { return ").Append(check).AppendLine("; }");
                 }
             }
             check++;
-            source.Append("    if (!Update").Append(format.Name)
+            _ = source.Append("    if (!Update").Append(format.Name)
                 .Append("()) { return ").Append(check).AppendLine("; }");
-            source.Append("    ").Append(format.Name).Append(" infinity")
+            _ = source.Append("    ").Append(format.Name).Append(" infinity")
                 .Append(format.Name).Append("Value = ").Append(format.Name)
                 .Append("(1) / ").Append(format.Name).AppendLine("(0);");
-            source.Append("    ").Append(format.Name).Append(" nan")
+            _ = source.Append("    ").Append(format.Name).Append(" nan")
                 .Append(format.Name).Append("Value = ").Append(format.Name)
                 .Append("(0) / ").Append(format.Name).AppendLine("(0);");
             check++;
-            source.Append("    if (infinity").Append(format.Name)
+            _ = source.Append("    if (infinity").Append(format.Name)
                 .Append("Value <= ").Append(format.Name).Append("(1) || !(infinity")
                 .Append(format.Name).Append("Value > ").Append(format.Name)
                 .AppendLine("(1))) { return " + check.ToString(CultureInfo.InvariantCulture) + "; }");
             check++;
-            source.Append("    if (nan").Append(format.Name).Append("Value == nan")
+            _ = source.Append("    if (nan").Append(format.Name).Append("Value == nan")
                 .Append(format.Name).Append("Value || !(nan").Append(format.Name)
                 .Append("Value != nan").Append(format.Name).Append("Value) || nan")
                 .Append(format.Name).Append("Value < ").Append(format.Name)
@@ -99,14 +100,14 @@ public sealed partial class JitTests
                 .Append(format.Name).Append("Value >= ").Append(format.Name)
                 .AppendLine("(1)) { return " + check.ToString(CultureInfo.InvariantCulture) + "; }");
             check++;
-            source.Append("    ").Append(format.Name).Append(" negativeZero")
+            _ = source.Append("    ").Append(format.Name).Append(" negativeZero")
                 .Append(format.Name).Append(" = -").Append(format.Name)
                 .AppendLine("(0.00);");
-            source.Append("    if (!(").Append(format.Name).Append("(1) / negativeZero")
+            _ = source.Append("    if (!(").Append(format.Name).Append("(1) / negativeZero")
                 .Append(format.Name).Append(" < ").Append(format.Name)
                 .Append("(0))) { return ").Append(check).AppendLine("; }");
         }
-        source.AppendLine("    if (decimal32(1e96) * decimal32(10) != decimal32(1) / decimal32(0)")
+        _ = source.AppendLine("    if (decimal32(1e96) * decimal32(10) != decimal32(1) / decimal32(0)")
             .AppendLine("        || decimal32(1e-101) / decimal32(2) != decimal32(0)")
             .AppendLine("        || decimal32(1e-101) / decimal32(1) != decimal32(1e-101)")
             .AppendLine("        || decimal64(1e384) * decimal64(10) != decimal64(1) / decimal64(0)")
@@ -116,7 +117,7 @@ public sealed partial class JitTests
             .AppendLine("        || decimal128(1e-6176) / decimal128(2) != decimal128(0)")
             .AppendLine("        || decimal128(1e-6176) / decimal128(1) != decimal128(1e-6176)")
             .AppendLine("        || decimal128(1e1000) % decimal128(3) != decimal128(1)) { return 200; }");
-        source.AppendLine("    return 42;")
+        _ = source.AppendLine("    return 42;")
             .AppendLine("}");
         var program = source.ToString();
         await AssertFailFastExecutionAsync(program, 42).ConfigureAwait(true);
@@ -125,7 +126,7 @@ public sealed partial class JitTests
 
     private static void AppendUpdateFunction(StringBuilder source, string type)
     {
-        source.Append("bool Update").Append(type).AppendLine("() {")
+        _ = source.Append("bool Update").Append(type).AppendLine("() {")
             .Append("    mut ").Append(type).Append(" value = ").Append(type).AppendLine("(1.20);")
             .Append("    ").Append(type).Append(" previous = value++;").AppendLine()
             .Append("    ").Append(type).Append(" prefix = ++value;").AppendLine()
@@ -162,7 +163,7 @@ public sealed partial class JitTests
             int ExponentBits, int Bias, int MinimumQuantum, int MaximumQuantum,
             int MaximumAdjusted) format, BigInteger coefficient, int exponent, bool negative)
     {
-        var raw = (negative ? BigInteger.One << (format.Width - 1) : BigInteger.Zero);
+        var raw = negative ? BigInteger.One << (format.Width - 1) : BigInteger.Zero;
         var encodedExponent = new BigInteger(exponent + format.Bias);
         var shortLimit = BigInteger.One << format.CoefficientBits;
         raw |= coefficient < shortLimit

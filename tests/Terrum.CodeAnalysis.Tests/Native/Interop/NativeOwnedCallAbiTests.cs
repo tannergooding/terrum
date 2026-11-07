@@ -7,11 +7,11 @@ using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Tests.Semantics;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
@@ -285,7 +285,10 @@ internal sealed class NativeOwnedCallAbiTests
         var root = directory?.FullName ?? throw new DirectoryNotFoundException("Could not find the repository.");
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             File.ReadAllText(Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests", "Native",
-                "Ownership", "Fixtures", name))), (BoundRuntimePolicy)policy);
+                "Ownership", "Fixtures", name))), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return compilation.Program ?? throw new AssertionException("Expected the native ABI library.");
     }

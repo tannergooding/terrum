@@ -5,7 +5,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -20,7 +20,7 @@ public sealed partial class JitTests
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             int32 Main() {
                 init Pair pair;

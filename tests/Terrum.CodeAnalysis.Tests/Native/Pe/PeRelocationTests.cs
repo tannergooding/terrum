@@ -6,17 +6,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection.PortableExecutable;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Pe;
 
-public sealed class PeRelocationTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class PeRelocationTests
 {
     internal const string Source = """
         struct Pair {
@@ -96,12 +97,20 @@ public sealed class PeRelocationTests
 
             var unused = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Unused() { return 0; }"));
             Assert.That(unused.HasErrors, Is.False, string.Join(Environment.NewLine, unused.Diagnostics));
-            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = unused.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Unused"]);
+            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = unused.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(), ["Unused"]);
             var moduleCompilation = Compilation.Create(SyntaxTree.Parse(ModuleSource));
             Assert.That(moduleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, moduleCompilation.Diagnostics));
             await File.WriteAllBytesAsync(producer, producerBytes).ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumer, ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = moduleCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producerBytes)).ConfigureAwait(true);
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = moduleCompilation.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))(), producerBytes)).ConfigureAwait(true);
             var framework = new DirectoryInfo(AppContext.BaseDirectory);
             var configuration = framework.Parent?.Name ?? throw new InvalidOperationException("Missing configuration.");
             var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -117,6 +126,40 @@ public sealed class PeRelocationTests
         }
     }
 
+    [Test]
+    public async Task NativeExportedExecutableRunsWithAnExportDirectoryAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeExport(EntryName: "Probe")]
+            int32 Probe(int32 value) { return value; }
+
+            int32 Main() { unsafe { return Probe(42); } }
+            """), new CompilationOptions {
+            NativeCoreRegistration = NativeCoreRegistrationTests.CreateRegistration(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var image = NativeEmitter.Emit(compilation.Program!,
+            NativeRuntimePolicy.FailFast);
+        using (var reader = new PEReader(new MemoryStream(image)))
+        {
+            Assert.That(reader.PEHeaders.PEHeader!.ExportTableDirectory.RelativeVirtualAddress,
+                Is.GreaterThan(0));
+        }
+
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-export-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            await RunAsync(path, [], 42).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
+    }
+
     internal static BoundProgram Compile(string source)
     {
         ImmutableArray<HostBuffer> buffers = [
@@ -125,7 +168,11 @@ public sealed class PeRelocationTests
         ];
         var compilation = Compilation.Create(SyntaxTree.Parse(source), buffers);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
     }
 
     private static void ValidateLayout(byte[] image)
@@ -134,7 +181,11 @@ public sealed class PeRelocationTests
         using var reader = new PEReader(stream);
         Assert.That(reader.PEHeaders.CoffHeader.Machine, Is.EqualTo(Machine.Amd64));
         Assert.That((int)reader.PEHeaders.CoffHeader.Characteristics & 1, Is.EqualTo(0));
-        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual3 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual3, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual3!; }))();
+        var header = ((global::System.Func<PEHeader>)(() => {
+            var __nunitActual3 = reader.PEHeaders.PEHeader;
+            Assert.That(__nunitActual3, Is.TypeOf<PEHeader>());
+            return (PEHeader)__nunitActual3!;
+        }))();
         Assert.That(header.Magic, Is.EqualTo(PEMagic.PE32Plus));
         Assert.That(header.ImageBase, Is.EqualTo(0x140000000UL));
         Assert.That(header.SectionAlignment, Is.EqualTo(0x1000));

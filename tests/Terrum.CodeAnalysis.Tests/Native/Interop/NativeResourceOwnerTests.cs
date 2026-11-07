@@ -2,22 +2,23 @@
 
 using System;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class NativeResourceOwnerTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeResourceOwnerTests
 {
     private const string OwnerSource = """
         [Terrum.Interop.NativeImport("fixture.dll", "AcquireResource")]
-        [NoThrow]
+
         extern unsafe int32 AcquireResource();
 
         [Terrum.Interop.NativeImport("fixture.dll", "ReleaseResource")]
-        [NoThrow]
+
         extern unsafe void ReleaseResource(int32 handle);
 
         public unique struct ResourceOwner {
@@ -27,7 +28,7 @@ public sealed class NativeResourceOwnerTests
                 Handle = handle;
             }
 
-            [NoThrow] [Cleanup]
+             [Cleanup]
             public void Close() {
                 unsafe { ReleaseResource(Handle); }
             }
@@ -59,11 +60,11 @@ public sealed class NativeResourceOwnerTests
         var source = SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int64 Observe(ptr<void> context, uint32 message,
                 uint64 wParam, int64 lParam);
 
-            [NoThrow] [Terrum.Interop.NativeCallable]
+             [Terrum.Interop.NativeCallable]
             unsafe int64 GenericCallback(ptr<void> context,
                 uint32 message, uint64 wParam, int64 lParam) {
                 unsafe { return Observe(context, message, wParam, lParam); }

@@ -4,13 +4,13 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(4)]
     [TestCase(7)]

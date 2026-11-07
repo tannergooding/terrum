@@ -701,34 +701,50 @@ internal static class NativeSourceGrantClassifier
             }
         }
 
-        static bool IsSupportedWorkspaceIntrinsic(BoundFunction function) =>
-            function.Intrinsic is BoundIntrinsic.BufferTryCreate or BoundIntrinsic.BufferCount
+        static bool IsSupportedWorkspaceIntrinsic(BoundFunction function)
+        {
+            return function.Intrinsic is BoundIntrinsic.BufferTryCreate or BoundIntrinsic.BufferCount
                 or BoundIntrinsic.BufferRead or BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend
             && NativeBufferIntrinsics.Matches(function);
+        }
 
-        static bool IsWorkspaceType(PrimitiveType type) =>
-            type == PrimitiveType.OwnedInt32Buffer || IsBufferView(type);
+        static bool IsWorkspaceType(PrimitiveType type)
+        {
+            return type == PrimitiveType.OwnedInt32Buffer || IsBufferView(type);
+        }
 
-        static bool IsBufferView(PrimitiveType type) =>
-            type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView;
+        static bool IsBufferView(PrimitiveType type)
+        {
+            return type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView;
+        }
 
-        static bool IsWorkspaceLocal(BoundFunction function, int variable) =>
-            IsValidLocal(function, variable) && IsWorkspaceType(function.Variables[variable].Type);
+        static bool IsWorkspaceLocal(BoundFunction function, int variable)
+        {
+            return IsValidLocal(function, variable) && IsWorkspaceType(function.Variables[variable].Type);
+        }
 
-        static bool IsOwnerLocal(BoundFunction function, int variable) =>
-            IsValidLocal(function, variable)
+        static bool IsOwnerLocal(BoundFunction function, int variable)
+        {
+            return IsValidLocal(function, variable)
             && function.Variables[variable].Type == PrimitiveType.OwnedInt32Buffer;
+        }
 
-        static bool IsBufferViewLocal(BoundFunction function, int variable) =>
-            IsValidLocal(function, variable)
+        static bool IsBufferViewLocal(BoundFunction function, int variable)
+        {
+            return IsValidLocal(function, variable)
             && variable >= function.ParameterCount && IsBufferView(function.Variables[variable].Type);
+        }
 
-        static bool IsMutableBufferViewLocal(BoundFunction function, int variable) =>
-            IsBufferViewLocal(function, variable)
+        static bool IsMutableBufferViewLocal(BoundFunction function, int variable)
+        {
+            return IsBufferViewLocal(function, variable)
             && function.Variables[variable].Type == PrimitiveType.MutableInt32BufferView;
+        }
 
-        static bool IsValidLocal(BoundFunction function, int variable) =>
-            (uint)variable < (uint)function.Variables.Length;
+        static bool IsValidLocal(BoundFunction function, int variable)
+        {
+            return (uint)variable < (uint)function.Variables.Length;
+        }
     }
 
     internal static bool IsScalar(PrimitiveType type) =>

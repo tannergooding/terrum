@@ -2,15 +2,16 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
-public sealed class NativeManagedClassTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeManagedClassTests
 {
     [TestCase(16,true)]
     [TestCase(17,true)]
@@ -183,7 +184,11 @@ public sealed class NativeManagedClassTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var pair = global::System.Linq.Enumerable.Single(program.Classes, item => item.Name == "Pair");
         Assert.That(pair.Fields.Count(field => ManagedClassTypes.IsManaged(field.Type)), Is.EqualTo(3));
         Assert.That(pair.Fields[0].IsMutable, Is.False);
@@ -265,7 +270,11 @@ public sealed class NativeManagedClassTests
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var module = ModuleCompiler.CreateProducer(program, ["Proof"]);
         var reference = ModuleCompiler.CreateReference(module);
         Assert.That(reference.Structures, Is.Empty);
@@ -273,7 +282,17 @@ public sealed class NativeManagedClassTests
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Create"]))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Create"],
             (NativeRuntimePolicy)policy))!;
-        Assert.That(NativeEmitter.EmitLibrary(program, ["Proof"], (NativeRuntimePolicy)policy), Is.Not.Empty);
+        if (policy == BoundRuntimePolicy.CheckedExceptions)
+        {
+            _ = Assert.Throws<ArgumentException>(() =>
+                NativeEmitter.EmitLibrary(program, ["Proof"],
+                    (NativeRuntimePolicy)policy))!;
+        }
+        else
+        {
+            Assert.That(NativeEmitter.EmitLibrary(program, ["Proof"],
+                (NativeRuntimePolicy)policy), Is.Not.Empty);
+        }
     }
     [TestCase("""
         class Leaf {

@@ -31,8 +31,8 @@ bool FailOutput(out write ManagedNode node) {
 
 unique struct CollectOnDrop {
     int32 Tag;
-    [NoThrow] public CollectOnDrop(int32 tag) { Tag = tag; }
-    [Cleanup] [NoThrow] public void Close() { ManagedHeap.Collect(); }
+     public CollectOnDrop(int32 tag) { Tag = tag; }
+    [Cleanup]  public void Close() { ManagedHeap.Collect(); }
 }
 
 ManagedNode ReturnKept() {

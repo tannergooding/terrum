@@ -387,6 +387,30 @@ internal sealed partial class PeCompiler
                     element.Layout.ElementCount,
                     element.Layout.ElementStride);
                 break;
+            case BoundNativeFixedArrayPathElement element:
+                var function = _program.Functions[_currentFunction];
+                var projections = element.Projections;
+                var carrierType = element.FieldPlace?.Type
+                    ?? ((uint)element.Variable
+                        < (uint)function.Variables.Length
+                            ? function.Variables[element.Variable].Type
+                            : PrimitiveType.Void);
+                if ((uint)element.Variable
+                        >= (uint)function.Variables.Length
+                    || projections.IsDefaultOrEmpty
+                    || carrierType != projections[0].Layout.CarrierType
+                    || element.Type
+                        != projections[^1].Layout.ElementType
+                    || !NativeFixedArrayContract.MatchesPath(carrierType,
+                        projections, _program, out _, out var leafLayout)
+                    || leafLayout != projections[^1].Layout)
+                {
+                    throw new InvalidOperationException(
+                        "The checked-reference nested array element place is invalid.");
+                }
+                EmitNativeFixedArrayPathAddress(element.Variable,
+                    projections, spill, fieldPlace: element.FieldPlace);
+                break;
             case BoundFieldRead field:
                 if (ManagedClassTypes.IsClass(field.Receiver.Type))
                 {
@@ -403,8 +427,8 @@ internal sealed partial class PeCompiler
                     var classField = @class.Fields[field.Field];
                     var fieldSize = Size(field.Type);
                     if (classField.Type != field.Type || fieldSize <= 0
-                        || classField.Size != fieldSize || classField.Offset < 0
-                        || classField.Offset > @class.Size - fieldSize
+                        || classField.Size != (ulong)fieldSize
+                        || classField.Offset > (ulong)(@class.Size - fieldSize)
                         || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                             field.Type, _program.Structures, _program.Classes,
                             _program.EnumDefinitions.Length, _program.CheckedReferenceTypes))
@@ -418,7 +442,8 @@ internal sealed partial class PeCompiler
                     _code.Load64(Spill(spill));
                     _code.Store64(supportSlot);
                     _code.Load64(Spill(spill));
-                    _code.PointerOffset(32 + classField.Offset);
+                    _code.PointerOffset(checked(32
+                        + NativeLayoutOffset(classField.Offset)));
                     break;
                 }
                 var receiverIndex = (int)field.Receiver.Type - 100;
@@ -449,7 +474,7 @@ internal sealed partial class PeCompiler
                 var offset = fields[field.Field].Offset;
                 if (offset != 0)
                 {
-                    _code.PointerOffset(offset);
+                    _code.PointerOffset(NativeLayoutOffset(offset));
                 }
                 break;
             default:
@@ -611,15 +636,17 @@ internal sealed partial class PeCompiler
                 {
                     continue;
                 }
-                if (field.Size != Size(field.Type) || field.Offset < 0
-                    || field.Offset > @class.Size - field.Size)
+                if (field.Size != (ulong)Size(field.Type)
+                    || field.Offset > (ulong)(@class.Size
+                        - NativeLayoutSize(field.Size)))
                 {
                     throw new InvalidOperationException(
                         "The normal-backed class handle field layout is invalid.");
                 }
 
                 _code.Load64(supportSlot);
-                _code.PointerOffset(32 + field.Offset);
+                _code.PointerOffset(checked(32
+                    + NativeLayoutOffset(field.Offset)));
                 _code.Load64(addressSlot, destinationRegister: true);
                 _code.Bytes(0x48, 0x39, 0xD0);
                 var anotherField = _code.JumpIf(0x85);
@@ -915,12 +942,8 @@ internal sealed partial class PeCompiler
 
             var field = _program.Structures[ownerIndex].Fields[
                 projection.Field];
-            if (field.Offset < 0)
-            {
-                throw new InvalidOperationException(
-                    "A fixed-array field write has an invalid field offset.");
-            }
-            fieldOffset = checked(fieldOffset + field.Offset);
+            fieldOffset = checked(fieldOffset
+                + NativeLayoutOffset(field.Offset));
             targetType = field.Type;
         }
         if (targetType != write.Value.Type)

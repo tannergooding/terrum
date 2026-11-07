@@ -2,9 +2,9 @@
 public unique struct Ticket
 {
     public int32 Id;
-    [NoThrow] public Ticket(int32 id) { Id = id; }
-    [NoThrow] [Cleanup] public void Close() {}
-    [NoThrow] public int32 Read() { return Id; }
+     public Ticket(int32 id) { Id = id; }
+     [Cleanup] public void Close() {}
+     public int32 Read() { return Id; }
 }
 
 [Blittable] [Layout(LayoutKind.Sequential)]
@@ -12,13 +12,13 @@ public unique struct WideTicket
 {
     public int64 Signed;
     public uint64 Unsigned;
-    [NoThrow] public WideTicket(int64 signed, uint64 unsigned)
+     public WideTicket(int64 signed, uint64 unsigned)
     {
         Signed = signed;
         Unsigned = unsigned;
     }
-    [NoThrow] [Cleanup] public void Close() {}
-    [NoThrow] public bool Matches()
+     [Cleanup] public void Close() {}
+     public bool Matches()
     {
         return Signed == int64.MinValue && Unsigned == uint64.MaxValue;
     }
@@ -125,8 +125,8 @@ public unique struct Bundle
         require Child.Read() == id;
     }
 
-    [NoThrow] [Cleanup] public void Close() {}
-    [NoThrow] public int32 ReadChild() { return Child.Read(); }
+     [Cleanup] public void Close() {}
+     public int32 ReadChild() { return Child.Read(); }
 }
 
 [Blittable] [Layout(LayoutKind.Sequential)]
@@ -144,8 +144,8 @@ public unique struct WideBundle
         Tail = uint32.MaxValue;
     }
 
-    [NoThrow] [Cleanup] public void Close() {}
-    [NoThrow] public int32 ReadChild() { return Child.Read(); }
+     [Cleanup] public void Close() {}
+     public int32 ReadChild() { return Child.Read(); }
 }
 
 public Bundle MakeBundle() { return new Bundle(40); }

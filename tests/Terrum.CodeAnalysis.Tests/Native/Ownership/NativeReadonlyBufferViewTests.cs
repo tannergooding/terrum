@@ -6,18 +6,18 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Tests.Semantics;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Ownership;
 
-public sealed class NativeReadonlyBufferViewTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeReadonlyBufferViewTests
 {
     private const string Buffer = """
         int32 Main() {
@@ -58,7 +58,11 @@ public sealed class NativeReadonlyBufferViewTests
             StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(safeSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var entry = program.Functions[program.EntryPoint];
         var owner = global::System.Linq.Enumerable.Single(entry.Variables, static variable => variable.Name == "ownerA");
         var ownerSlot = entry.Variables.IndexOf(owner);
@@ -78,8 +82,16 @@ public sealed class NativeReadonlyBufferViewTests
 
         BoundStatement ReplaceIndex(BoundReturn result, BoundCall call)
         {
-            var view = ((global::System.Func<BoundViewRead>)(() => { var __nunitActual1 = call.Arguments[1]; Assert.That(__nunitActual1, Is.TypeOf<BoundViewRead>()); return (BoundViewRead)__nunitActual1!; }))();
-            var observe = ((global::System.Func<BoundCall>)(() => { var __nunitActual2 = view.Index; Assert.That(__nunitActual2, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual2!; }))();
+            var view = ((global::System.Func<BoundViewRead>)(() => {
+                var __nunitActual1 = call.Arguments[1];
+                Assert.That(__nunitActual1, Is.TypeOf<BoundViewRead>());
+                return (BoundViewRead)__nunitActual1!;
+            }))();
+            var observe = ((global::System.Func<BoundCall>)(() => {
+                var __nunitActual2 = view.Index;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundCall>());
+                return (BoundCall)__nunitActual2!;
+            }))();
             var output = new BoundOutArgument(ownerSlot, false, PrimitiveType.OwnedInt32Buffer, observe.Span);
             var invalidating = new BoundCall(replacement, [output], PrimitiveType.Bool, observe.Span);
             changed = true;
@@ -111,7 +123,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), policy);
         Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = provider.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), ["Read"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = provider.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(2, out var raw);
@@ -122,7 +138,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = client.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = client.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(), producer);
         Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(22));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -136,7 +156,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), policy);
         Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = provider.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), ["Read"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = provider.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(2, out var raw);
@@ -147,7 +171,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = client.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = client.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), producer);
         Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(22));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -161,7 +189,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), policy);
         Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = provider.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), ["Read"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = provider.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(5, out var raw);
@@ -175,7 +207,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = client.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = client.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))(), producer);
         Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(30));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -198,7 +234,11 @@ public sealed class NativeReadonlyBufferViewTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), policy).ConfigureAwait(true), Is.EqualTo(24));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))(), policy).ConfigureAwait(true), Is.EqualTo(24));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -217,7 +257,11 @@ public sealed class NativeReadonlyBufferViewTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), policy).ConfigureAwait(true), Is.EqualTo(23));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))(), policy).ConfigureAwait(true), Is.EqualTo(23));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -241,7 +285,11 @@ public sealed class NativeReadonlyBufferViewTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), policy).ConfigureAwait(true), Is.EqualTo(34));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))(), policy).ConfigureAwait(true), Is.EqualTo(34));
     }
     [TestCase(-1,0)]
     [TestCase(1,0)]
@@ -350,7 +398,11 @@ public sealed class NativeReadonlyBufferViewTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))(), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
     [TestCase(-1)]
     [TestCase(4)]
@@ -365,7 +417,11 @@ public sealed class NativeReadonlyBufferViewTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), BoundRuntimePolicy.FailFast)
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))(), BoundRuntimePolicy.FailFast)
                 .ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -386,7 +442,11 @@ public sealed class NativeReadonlyBufferViewTests
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))(), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -460,13 +520,33 @@ public sealed class NativeReadonlyBufferViewTests
             int32 Main() { return 42; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))();
         var function = global::System.Linq.Enumerable.Single(program.Functions, static item => item.Name.EndsWith(".Find", StringComparison.Ordinal));
-        var scope = ((global::System.Func<BoundViewScope>)(() => { var __nunitActual16 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual16, Is.TypeOf<BoundViewScope>()); return (BoundViewScope)__nunitActual16!; }))();
-        var loan = ((global::System.Func<BoundFieldLoan>)(() => { var __nunitActual17 = scope.Owner; Assert.That(__nunitActual17, Is.TypeOf<BoundFieldLoan>()); return (BoundFieldLoan)__nunitActual17!; }))();
-        var field = ((global::System.Func<BoundFieldRead>)(() => { var __nunitActual18 = loan.Place; Assert.That(__nunitActual18, Is.TypeOf<BoundFieldRead>()); return (BoundFieldRead)__nunitActual18!; }))();
+        var scope = ((global::System.Func<BoundViewScope>)(() => {
+            var __nunitActual16 = global::System.Linq.Enumerable.Single(function.Body.Statements);
+            Assert.That(__nunitActual16, Is.TypeOf<BoundViewScope>());
+            return (BoundViewScope)__nunitActual16!;
+        }))();
+        var loan = ((global::System.Func<BoundFieldLoan>)(() => {
+            var __nunitActual17 = scope.Owner;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundFieldLoan>());
+            return (BoundFieldLoan)__nunitActual17!;
+        }))();
+        var field = ((global::System.Func<BoundFieldRead>)(() => {
+            var __nunitActual18 = loan.Place;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundFieldRead>());
+            return (BoundFieldRead)__nunitActual18!;
+        }))();
         Assert.That(field.Field, Is.EqualTo(0));
-        Assert.That(((global::System.Func<BoundRead>)(() => { var __nunitActual19 = field.Receiver; Assert.That(__nunitActual19, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual19!; }))().Variable, Is.EqualTo(0));
+        Assert.That(((global::System.Func<BoundRead>)(() => {
+            var __nunitActual19 = field.Receiver;
+            Assert.That(__nunitActual19, Is.TypeOf<BoundRead>());
+            return (BoundRead)__nunitActual19!;
+        }))().Variable, Is.EqualTo(0));
         var replacement = new BoundAssignment(0,
             new BoundRead(0, function.Variables[0].Type, scope.Span), scope.Span);
         var forgedScope = scope with {
@@ -647,7 +727,11 @@ public sealed class NativeReadonlyBufferViewTests
             int32 Main() { return 42; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = compilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual20 = compilation.Program;
+            Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual20!;
+        }))();
         var structure = global::System.Linq.Enumerable.Single(program.Structures);
         var field = global::System.Linq.Enumerable.Single(structure.Fields);
         var forged = program with {
@@ -671,7 +755,7 @@ public sealed class NativeReadonlyBufferViewTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Read");
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -690,13 +774,33 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = compilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual21 = compilation.Program;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual21!;
+        }))();
         var function = global::System.Linq.Enumerable.Single(program.Functions, static item => item.Name == "Read");
         var index = program.Functions.IndexOf(function);
-        var owner = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual22 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual22, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual22!; }))();
-        var view = ((global::System.Func<BoundViewScope>)(() => { var __nunitActual23 = global::System.Linq.Enumerable.Single(owner.Body.Statements); Assert.That(__nunitActual23, Is.TypeOf<BoundViewScope>()); return (BoundViewScope)__nunitActual23!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual24 = global::System.Linq.Enumerable.Single(view.Body.Statements); Assert.That(__nunitActual24, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual24!; }))();
-        var read = ((global::System.Func<BoundViewRead>)(() => { var __nunitActual25 = result.Value; Assert.That(__nunitActual25, Is.TypeOf<BoundViewRead>()); return (BoundViewRead)__nunitActual25!; }))();
+        var owner = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual22 = global::System.Linq.Enumerable.Single(function.Body.Statements);
+            Assert.That(__nunitActual22, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual22!;
+        }))();
+        var view = ((global::System.Func<BoundViewScope>)(() => {
+            var __nunitActual23 = global::System.Linq.Enumerable.Single(owner.Body.Statements);
+            Assert.That(__nunitActual23, Is.TypeOf<BoundViewScope>());
+            return (BoundViewScope)__nunitActual23!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual24 = global::System.Linq.Enumerable.Single(view.Body.Statements);
+            Assert.That(__nunitActual24, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual24!;
+        }))();
+        var read = ((global::System.Func<BoundViewRead>)(() => {
+            var __nunitActual25 = result.Value;
+            Assert.That(__nunitActual25, Is.TypeOf<BoundViewRead>());
+            return (BoundViewRead)__nunitActual25!;
+        }))();
 
         Reject(view with { Start = new BoundMove(0, PrimitiveType.OwnedInt32Buffer, view.Span) });
         Reject(view with {
@@ -753,7 +857,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), policy);
         Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = provider.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(), ["Read"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual26 = provider.Program;
+            Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual26!;
+        }))(), ["Read"]);
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-16"));
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -768,7 +876,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = client.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual27 = client.Program;
+            Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual27!;
+        }))(), producer);
         Assert.That(ModuleCompiler.GetNativeProfileVersion(consumer, true), Is.EqualTo("native-16"));
         Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -777,7 +889,11 @@ public sealed class NativeReadonlyBufferViewTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = compilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))(), policy).ConfigureAwait(true);
+        return await RunAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual28 = compilation.Program;
+            Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual28!;
+        }))(), policy).ConfigureAwait(true);
     }
 
     private static async Task<int> RunAsync(BoundProgram program, BoundRuntimePolicy policy)

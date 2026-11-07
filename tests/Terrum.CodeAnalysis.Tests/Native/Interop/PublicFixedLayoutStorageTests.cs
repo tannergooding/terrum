@@ -4,20 +4,25 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class PublicFixedLayoutStorageTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class PublicFixedLayoutStorageTests
 {
     private const string Library = """
         [Blittable] [Layout(LayoutKind.Sequential)]
@@ -52,7 +57,7 @@ public sealed class PublicFixedLayoutStorageTests
         Assert.That(global::System.Linq.Enumerable.Single(FixedLayoutStorage.Validate(program.Structures)), Is.EqualTo(width));
         SemanticVerifier.VerifyLibrary(program);
         var producer = ModuleCompiler.CreateProducer(program, ["Check"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var retained = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Structures);
         Assert.That(retained.IsSequential, Is.True);
         Assert.That(retained.BlittableTargetRequirement, Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
@@ -86,6 +91,160 @@ public sealed class PublicFixedLayoutStorageTests
         Assert.That(FixedLayoutStorage.Validate(program.Structures),
             Is.EqualTo([width]));
         SemanticVerifier.VerifyLibrary(program);
+    }
+
+    [Test]
+    public void PackingAndAlignmentFactsSurvivePrivateModuleRoundTrip()
+    {
+        var program = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Packing: 1, Alignment: 32)]
+            public struct Pair {
+                public uint8 Tag;
+                public uint32 Value;
+            }
+            public int32 Read(Pair pair) { return int32(pair.Value); }
+            """);
+        var original = program.Structures.Single();
+        Assert.That((original.Packing, original.DeclaredAlignment,
+            original.Alignment, original.RequiredAlignment),
+            Is.EqualTo((1, (int?)32, 32, 32)));
+        Assert.That(original.Fields.Select(static field => field.Offset),
+            Is.EqualTo([0, 1]));
+
+        var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
+        var retained = ModuleCompiler.CreateReference(producer)
+            .Structures.Single();
+        Assert.That((retained.Packing, retained.DeclaredAlignment,
+            retained.Alignment, retained.RequiredAlignment),
+            Is.EqualTo((1, (int?)32, 32, 32)));
+        Assert.That(retained.Fields.Select(static field => field.Offset),
+            Is.EqualTo([0, 1]));
+
+        var forged = (byte[])producer.Clone();
+        var position = LocateStructures(forged)["Pair"].RequiredAlignment;
+        BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(position, 4), 1);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(forged))!;
+    }
+
+    [Test]
+    public void PrivateReplacementRejectsPackingChangesWithIdenticalGeometry()
+    {
+        const string prefix = """
+            [Blittable]
+            """;
+        const string suffix = """
+            public struct Value {
+                public uint8 Data;
+                public Value(uint8 data) { Data = data; }
+            }
+            public Value Make() { return new Value(uint8(42)); }
+            public int32 Read(Value value) { return int32(value.Data); }
+            """;
+        var originalProgram = CompileLibrary(prefix
+            + "[Layout(LayoutKind.Sequential, Packing: 1)]" + Environment.NewLine
+            + suffix);
+        var producer = ModuleCompiler.CreateProducer(originalProgram,
+            ["Make", "Read"]);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() { return Read(Make()); }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(compilation.Program!,
+            producer);
+
+        var replacementProgram = CompileLibrary(prefix
+            + "[Layout(LayoutKind.Sequential, Packing: 16)]" + Environment.NewLine
+            + suffix);
+        var replacement = ModuleCompiler.CreateProducer(replacementProgram,
+            ["Make", "Read"]);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(consumer, replacement))!;
+    }
+
+    [Test]
+    public async Task PackedOverAlignedPrivateLayoutRunsAfterSourceFreeRelinkingAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var producerProgram = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Packing: 1, Alignment: 32)]
+            public struct Packet {
+                public mut uint8 Tag;
+                public mut uint64 Middle;
+                public mut uint8 Tail;
+                public Packet(uint8 tag, uint64 middle, uint8 tail) {
+                    Tag = tag; Middle = middle; Tail = tail;
+                }
+            }
+            public Packet Make() {
+                return new Packet(uint8(17), uint64(1234567890123456789),
+                    uint8(29));
+            }
+            """);
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["Make"]);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut Packet first = Make();
+                mut [Packet; 2] values = [first, first];
+                values[1].Tag = uint8(91);
+                values[1].Middle = uint64(987654321098765432);
+                if (values[0].Tag != uint8(17)
+                    || values[0].Middle != uint64(1234567890123456789)
+                    || values[0].Tail != uint8(29)
+                    || values[1].Tag != uint8(91)
+                    || values[1].Middle != uint64(987654321098765432)
+                    || values[1].Tail != uint8(29)) {
+                    return 1;
+                }
+                return 0;
+            }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(compilation.Program!,
+            producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+
+        Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast),
+            Is.Zero);
+        var image = NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast);
+        var directory = TestArtifactPaths.CreateDirectory(
+            "private-overaligned-layout-");
+        try
+        {
+            var path = Path.Combine(directory, "private-overaligned.exe");
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(false);
+            using var process = Process.Start(new ProcessStartInfo(path) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = directory,
+            }) ?? throw new InvalidOperationException(
+                "Could not start the private-layout native program.");
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(false);
+                Assert.That(process.ExitCode, Is.Zero);
+            }
+            finally
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(false);
+                }
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(false);
+        }
     }
 
     [Test]
@@ -172,7 +331,7 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("conflicting-access")]
     public void InvalidCommitmentsFailProductionStorageAndSemanticVerification(string change)
     {
-        var program = Commit(CompileLibrary(Library));
+        var program = CompileLibrary(Library);
         var leaf = program.Structures[0];
         var packet = program.Structures[1];
         var invalid = change switch {
@@ -209,7 +368,7 @@ public sealed class PublicFixedLayoutStorageTests
         if (change == "missing-root")
         {
             // No root claim is inferred; public Sequential still fails the legacy executable check.
-            Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo(new[] { 4, 0 }));
+            Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo([4, 0]));
         }
         else
         {
@@ -258,6 +417,9 @@ public sealed class PublicFixedLayoutStorageTests
                 [new BoundStructField("Value", terminal ? PrimitiveType.Int32 : (PrimitiveType)(100 + next), 0, 4)], 4) {
                 IsSequential = true,
                 BlittableTargetRequirement = 1,
+                Packing = 16,
+                Alignment = 4,
+                RequiredAlignment = 1,
             });
         }
         _ = Assert.Throws<NotSupportedException>(() => FixedLayoutStorage.Validate(structures.ToImmutable()))!;
@@ -272,16 +434,22 @@ public sealed class PublicFixedLayoutStorageTests
             };
             structures.RemoveAt(128);
         }
-        {var __nunitItems0 = FixedLayoutStorage.Validate(structures.ToImmutable());        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0, Is.EqualTo(4)); } });}
+        {
+            var __nunitItems0 = FixedLayoutStorage.Validate(structures.ToImmutable());
+            Assert.Multiple(() => {
+    foreach (var __nunitItem0 in __nunitItems0)
+    {
+        Assert.That(__nunitItem0, Is.EqualTo(4)); } });
+        }
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void IndependentReplacementRetainsNominalStorageAndPublicFieldAccess(BoundRuntimePolicy policy)
     {
-        var program = Commit(CompileLibrary(Library, policy));
-        Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo(new[] { 4, 4 }));
+        var program = CompileLibrary(Library, policy);
+        Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo([4, 4]));
         Assert.That(program.Structures[1].Size, Is.EqualTo(12));
-        Assert.That(program.Structures[1].Fields.Select(static field => field.Offset), Is.EqualTo(new[] { 0, 4, 8 }));
+        Assert.That(program.Structures[1].Fields.Select(static field => field.Offset), Is.EqualTo([0, 4, 8]));
         var producer = ModuleCompiler.CreateProducer(program, ["Make"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -293,8 +461,12 @@ public sealed class PublicFixedLayoutStorageTests
             }
             """), reference, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), producer);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
         var snapshot = SHA256.HashData(consumer);
         var replacementProgram = CompileLibrary(
             "[Blittable] [Layout(LayoutKind.Sequential)] public struct Other { public uint64 Value; } "
@@ -322,7 +494,11 @@ public sealed class PublicFixedLayoutStorageTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Make(42).Item.Value; }"), ModuleCompiler.CreateReference(original));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), original);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), original);
         if (change == "commitment")
         {
             var uncommitted = baseProgram with {
@@ -368,11 +544,15 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("field-width",8)]
     public void ForgedProducerAndConsumerStorageMetadataRejectsBeforeExecution(string fact, int value)
     {
-        var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
+        var producer = ModuleCompiler.CreateProducer(CompileLibrary(Library), ["Make"]);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Make(42).Item.Value; }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(), producer);
         foreach (var original in new[] { producer, consumer })
         {
             var forged = (byte[])original.Clone();
@@ -389,6 +569,16 @@ public sealed class PublicFixedLayoutStorageTests
             if (fact == "sequential")
             {
                 forged[position] = (byte)value;
+            }
+            else if (fact == "size")
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    forged.AsSpan(position, sizeof(ulong)), (ulong)value);
+            }
+            else if (fact is "field-offset" or "field-width")
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    forged.AsSpan(position, sizeof(ulong)), (ulong)value);
             }
             else
             {
@@ -410,14 +600,14 @@ public sealed class PublicFixedLayoutStorageTests
     [Test]
     public void ErasingEveryCommitmentOrReinterpretingAnOldRevisionRejects()
     {
-        var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
+        var producer = ModuleCompiler.CreateProducer(CompileLibrary(Library), ["Make"]);
         var erased = (byte[])producer.Clone();
         foreach (var positions in LocateStructures(erased).Values)
         {
             BinaryPrimitives.WriteInt32LittleEndian(erased.AsSpan(positions.Target, 4), 0);
         }
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(erased))!;
-        foreach (var revision in new[] { 76, 77, 79 })
+        foreach (var revision in new[] { 76, 77, 79, 102, 103 })
         {
             var forged = (byte[])producer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), revision);
@@ -427,20 +617,33 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("Packet value = Make(42); value.Item.Value = 0; return 0;","TRM3008")]
     [TestCase("mut Packet value = Make(42); value.Prefix = char16(0); return 0;","TRM3008")]
     [TestCase("Packet value = Make(42); return value.Item;","TRM3007")]
-    [TestCase("init Packet value; return value.Item.Value;","TRM3016")]
+    [TestCase("init Packet value; return value.Item.Value;","TRM3023")]
+    [TestCase("init Packet value; return int32(value.Prefix);","TRM3023")]
     public void CommittedPublicFieldsKeepOrdinaryMutationTypeAndInitializationRules(string body, string code)
     {
-        var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
+        var producer = ModuleCompiler.CreateProducer(CompileLibrary(Library), ["Make"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.That(reference.Structures.Any(static structure =>
+            structure.IsUnique), Is.False);
+        var leaf = reference.Structures.Single(static structure =>
+            structure.Name == "Leaf");
+        var packet = reference.Structures.Single(static structure =>
+            structure.Name == "Packet");
+        Assert.That(packet.Fields.Single(static field => field.Name == "Item").Type,
+            Is.EqualTo((PrimitiveType)(100
+                + reference.Structures.IndexOf(leaf))));
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"),
-            ModuleCompiler.CreateReference(producer));
+            reference);
         Assert.That(compilation.HasErrors, Is.True);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == code), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase(false)]
     [TestCase(true)]
     public void ImportedFixedFieldsRetainUnsafeCallerAuthority(bool authorized)
     {
-        var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(UnsafeLibrary())), ["Make"]);
+        var producer = ModuleCompiler.CreateProducer(CompileLibrary(UnsafeLibrary()), ["Make"]);
         var body = authorized ? "unsafe { return Make(42).Item.Value; }" : "return Make(42).Item.Value;";
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"),
             ModuleCompiler.CreateReference(producer));
@@ -451,13 +654,29 @@ public sealed class PublicFixedLayoutStorageTests
             return;
         }
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(program, producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         var main = program.Functions[program.EntryPoint];
-        var scope = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual5 = global::System.Linq.Enumerable.Single(main.Body.Statements); Assert.That(__nunitActual5, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual5!; }))();
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual6 = global::System.Linq.Enumerable.Single(scope.Body.Statements); Assert.That(__nunitActual6, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual6!; }))();
-        var read = ((global::System.Func<BoundFieldRead>)(() => { var __nunitActual7 = result.Value; Assert.That(__nunitActual7, Is.TypeOf<BoundFieldRead>()); return (BoundFieldRead)__nunitActual7!; }))();
+        var scope = ((global::System.Func<BoundUnsafe>)(() => {
+            var __nunitActual5 = global::System.Linq.Enumerable.Single(main.Body.Statements);
+            Assert.That(__nunitActual5, Is.TypeOf<BoundUnsafe>());
+            return (BoundUnsafe)__nunitActual5!;
+        }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual6 = global::System.Linq.Enumerable.Single(scope.Body.Statements);
+            Assert.That(__nunitActual6, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual6!;
+        }))();
+        var read = ((global::System.Func<BoundFieldRead>)(() => {
+            var __nunitActual7 = result.Value;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundFieldRead>());
+            return (BoundFieldRead)__nunitActual7!;
+        }))();
         var forgedMain = main with {
             Body = main.Body with {
                 Statements = [scope with {
@@ -476,23 +695,35 @@ public sealed class PublicFixedLayoutStorageTests
     public void FixedCommitmentsDoNotBypassPrivateAccessOrBooleanValidity()
     {
         const string Source = """
-            public struct Box {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Box {
                 int32 Secret;
                 public Box(int32 value) { Secret = value; }
                 public int32 Read() { return Secret; }
             }
             int32 Main() { Box value = new Box(42); return value.Read(); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source),
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Commit(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))());
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         SemanticVerifier.Verify(program);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         var privateAccess = Compilation.Create(SyntaxTree.Parse(
-            Source.Replace("value.Read()", "value.Secret", StringComparison.Ordinal)));
+            Source.Replace("value.Read()", "value.Secret", StringComparison.Ordinal)),
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(global::System.Linq.Enumerable.Any(privateAccess.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
 
-        var booleanProgram = Commit(CompileLibrary(Library));
+        var booleanProgram = CompileLibrary(Library);
         var constructor = booleanProgram.Functions.Single(static function => function.DeclaringStruct == "Packet"
             && function.IsConstructor);
         var assignment = global::System.Linq.Enumerable.Single(constructor.Body.Statements.OfType<BoundFieldAssignment>(), static statement => statement.Value.Type == PrimitiveType.Bool);
@@ -519,11 +750,21 @@ public sealed class PublicFixedLayoutStorageTests
         var producer = NativeModuleCompiler.CreateProducer(sourceProgram,
             ["Make"], "FixedLeaf", nativePolicy);
         var reference = NativeModuleCompiler.CreateGraphReference([producer]);
-        {var __nunitItems1 = reference.Structures;        Assert.Multiple(() => { foreach (var __nunitItem9 in __nunitItems1) { Assert.That(__nunitItem9.BlittableTargetRequirement, Is.EqualTo(1)); } });}
+        {
+            var __nunitItems1 = reference.Structures;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem9 in __nunitItems1)
+    {
+        Assert.That(__nunitItem9.BlittableTargetRequirement, Is.EqualTo(1)); } });
+        }
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Make(42).Item.Value; }"),
             reference, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(),
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))(),
             [producer], nativePolicy);
         var replacement = NativeModuleCompiler.CreateProducer(CompileLibrary(
             Library.Replace("new Packet(value)", "new Packet(value + 1)", StringComparison.Ordinal), policy),
@@ -544,7 +785,11 @@ public sealed class PublicFixedLayoutStorageTests
     public void RegisteredSourceLayoutAttributesSelectTheFixedLayoutCommitment(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            source + " public int32 Check(Box value) { return value.Value; }"));
+            source + " public int32 Check(Box value) { return value.Value; }"),
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var structure = global::System.Linq.Enumerable.Single(compilation.Program!.Structures);
@@ -576,17 +821,19 @@ public sealed class PublicFixedLayoutStorageTests
 
     private static BoundProgram CompileLibrary(string source, BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = policy,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
     }
-
-    private static BoundProgram Commit(BoundProgram program) => program with {
-        Structures = [.. program.Structures.Select(static structure => structure with {
-            IsSequential = true,
-            BlittableTargetRequirement = FixedLayoutStorage.WindowsX64TargetRequirement,
-        })],
-    };
 
     private static string UnsafeLibrary() => Library
         .Replace("public mut int32 Value", "public unsafe mut int32 Value", StringComparison.Ordinal)
@@ -598,7 +845,7 @@ public sealed class PublicFixedLayoutStorageTests
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
         var formatVersion = reader.ReadInt32();
-        Assert.That(formatVersion, Is.EqualTo(101));
+        Assert.That(formatVersion, Is.EqualTo(104));
         _ = ReadString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();
@@ -616,12 +863,25 @@ public sealed class PublicFixedLayoutStorageTests
                 _ = reader.ReadByte();
             }
             var size = (int)stream.Position;
-            _ = reader.ReadInt32();
+            _ = reader.ReadUInt64();
             _ = reader.ReadBytes(4);
             var target = (int)stream.Position;
             _ = reader.ReadInt32();
             var sequential = (int)stream.Position;
             _ = reader.ReadBoolean();
+            var packing = (int)stream.Position;
+            _ = reader.ReadInt32();
+            var hasDeclaredAlignment = reader.ReadBoolean();
+            var declaredAlignment = hasDeclaredAlignment
+                ? (int)stream.Position : -1;
+            if (hasDeclaredAlignment)
+            {
+                _ = reader.ReadInt32();
+            }
+            var alignment = (int)stream.Position;
+            _ = reader.ReadInt32();
+            var requiredAlignment = (int)stream.Position;
+            _ = reader.ReadInt32();
             if (reader.ReadBoolean())
             {
                 _ = ReadString(reader);
@@ -632,16 +892,32 @@ public sealed class PublicFixedLayoutStorageTests
             {
                 var fieldName = ReadString(reader);
                 var position = (int)stream.Position;
-                fields.Add(fieldName, new FieldPositions(position, position + 4, position + 8));
-                _ = reader.ReadBytes(16);
+                fields.Add(fieldName, new FieldPositions(position,
+                    position + sizeof(int), position + sizeof(int) + sizeof(ulong)));
+                _ = reader.ReadBytes(sizeof(int) + (2 * sizeof(ulong))
+                    + (4 * sizeof(byte)));
             }
-            result.Add(name, new StructurePositions(size, target, sequential, fields));
+            result.Add(name, new StructurePositions(size, target, sequential,
+                packing, declaredAlignment, alignment, requiredAlignment,
+                fields));
         }
         return result;
     }
 
-    private static string ReadString(BinaryReader reader) => Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32()));
+    private static string ReadString(BinaryReader reader)
+    {
+        var lengthPosition = reader.BaseStream.Position;
+        var length = reader.ReadInt32();
+        if (length < 0 || length > reader.BaseStream.Length - reader.BaseStream.Position)
+        {
+            throw new InvalidDataException(
+                $"Invalid private string length {length} at byte {lengthPosition}.");
+        }
+        return Encoding.UTF8.GetString(reader.ReadBytes(length));
+    }
 
-    private sealed record StructurePositions(int Size, int Target, int Sequential, Dictionary<string, FieldPositions> Fields);
+    private sealed record StructurePositions(int Size, int Target,
+        int Sequential, int Packing, int DeclaredAlignment, int Alignment,
+        int RequiredAlignment, Dictionary<string, FieldPositions> Fields);
     private sealed record FieldPositions(int Type, int Offset, int Size);
 }

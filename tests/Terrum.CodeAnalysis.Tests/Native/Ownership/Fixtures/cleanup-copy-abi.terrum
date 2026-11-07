@@ -1,4 +1,4 @@
-[NoThrow]
+
 public unsafe int32 ReleaseCleanupSemaphore(ptr<void> semaphore, int32 count, ptr<int32> previous) {
     return 0;
 }
@@ -6,7 +6,7 @@ public unsafe int32 ReleaseCleanupSemaphore(ptr<void> semaphore, int32 count, pt
 public unique struct Child {
     ptr<void> Semaphore;
     public unsafe Child(ptr<void> semaphore) { unsafe { Semaphore = semaphore; } }
-    [NoThrow] [Cleanup] public void Close() {
+     [Cleanup] public void Close() {
         unsafe { ReleaseCleanupSemaphore(Semaphore, 1, null); }
     }
 }
@@ -18,7 +18,7 @@ public unique struct Parent {
         unsafe { Value = new Child(semaphore); }
         Marker = int64.MinValue;
     }
-    [NoThrow] [Cleanup] public void Close() {}
+     [Cleanup] public void Close() {}
 }
 
 public unique struct Envelope {

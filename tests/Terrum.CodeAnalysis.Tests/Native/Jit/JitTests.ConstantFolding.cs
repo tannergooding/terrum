@@ -5,17 +5,17 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
     public Task FoldedScalarNoThrowResultsAgreeAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """
-            [NoThrow] int32 Fold() {
+             int32 Fold() {
                 return int32(uint32(42)) + int32(uint64.MaxValue % uint64(100));
             }
-            [NoThrow] uint64 Bits() { return uint64.MaxValue - 1; }
+             uint64 Bits() { return uint64.MaxValue - 1; }
             int32 Main() {
                 if (Bits() != uint64.MaxValue - 1) { return 0; }
                 return Fold() - 15;
@@ -29,7 +29,7 @@ public sealed partial class JitTests
     public Task FoldedConstantComparisonsAgreeAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """
-            [NoThrow] int32 Check() {
+             int32 Check() {
                 require uint64.MaxValue > uint64(int64.MaxValue);
                 require char16(65535) >= char16(65535);
                 require (true && !false) == true;

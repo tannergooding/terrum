@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed partial class NativeManagedClassModuleTests
+internal sealed partial class NativeManagedClassModuleTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]

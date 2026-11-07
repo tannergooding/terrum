@@ -5,15 +5,17 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativeLoopTransferModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeLoopTransferModuleTests
 {
     private const string StructuredLeaf = """
         public int32 Leaf() {
@@ -37,7 +39,7 @@ public sealed class NativeLoopTransferModuleTests
             ["Leaf"], "NodeB", policy);
         var replacementProgram = Compile(StructuredLeaf, policy);
         var semantic = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
-        Assert.That(VersionOf(semantic), Is.EqualTo(101));
+        Assert.That(VersionOf(semantic), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(semantic);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
             int32 Main() {
@@ -46,7 +48,7 @@ public sealed class NativeLoopTransferModuleTests
                 return answer;
             }
             """, policy, reference, library: false), semantic);
-        Assert.That(VersionOf(consumer), Is.EqualTo(101));
+        Assert.That(VersionOf(consumer), Is.EqualTo(104));
         SemanticVerifier.Verify(ModuleCompiler.Link(consumer, semantic));
         var downgraded = (byte[])semantic.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 50);
@@ -103,7 +105,7 @@ public sealed class NativeLoopTransferModuleTests
     public void CurrentSemanticFormatRoundTripsNearestLoopAndForIterator(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Leaf"]);
-        Assert.That(VersionOf(producer), Is.EqualTo(101));
+        Assert.That(VersionOf(producer), Is.EqualTo(104));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11"));
         _ = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
@@ -113,7 +115,7 @@ public sealed class NativeLoopTransferModuleTests
                 return result;
             }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.That(VersionOf(consumer), Is.EqualTo(101));
+        Assert.That(VersionOf(consumer), Is.EqualTo(104));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "Leaf" && !function.IsExternal),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Advance"),Is.True);
@@ -124,7 +126,7 @@ public sealed class NativeLoopTransferModuleTests
                 return sum;
             }
             """, policy), ["Leaf"]);
-        Assert.That(VersionOf(old), Is.EqualTo(101));
+        Assert.That(VersionOf(old), Is.EqualTo(104));
         _ = ModuleCompiler.CreateReference(old);
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -219,7 +221,7 @@ public sealed class NativeLoopTransferModuleTests
         var policy = NativeRuntimePolicy.FailFast;
         var oldProgram = Compile("public int32 Leaf() { return 42; }", policy);
         var old = ModuleCompiler.CreateProducer(oldProgram, ["Leaf"]);
-        Assert.That(VersionOf(old), Is.EqualTo(101));
+        Assert.That(VersionOf(old), Is.EqualTo(104));
         var classProgram = Compile("""
             class Box {
                 public int32 Value;
@@ -228,12 +230,12 @@ public sealed class NativeLoopTransferModuleTests
             public int32 Leaf() { require Box.TryCreate(out var box); return box.Value; }
             """, policy);
         var classOnly = ModuleCompiler.CreateProducer(classProgram, ["Leaf"]);
-        Assert.That(VersionOf(classOnly), Is.EqualTo(101));
+        Assert.That(VersionOf(classOnly), Is.EqualTo(104));
         _ = ModuleCompiler.CreateReference(classOnly);
         var copyProgram = Compile(File.ReadAllText(Path.Combine(RepositoryRoot(),
             "samples", "DependencyGraphServicing", "managed-copy-class-leaf.terrum")), policy);
         var copy = ModuleCompiler.CreateProducer(copyProgram, ["Leaf"]);
-        Assert.That(VersionOf(copy), Is.EqualTo(101));
+        Assert.That(VersionOf(copy), Is.EqualTo(104));
         _ = ModuleCompiler.CreateReference(copy);
         foreach (var (legacy, program) in new[] {
             (old, oldProgram), (classOnly, classProgram), (copy, copyProgram),
@@ -245,7 +247,7 @@ public sealed class NativeLoopTransferModuleTests
             _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalid))!;
         }
         var transferred = ModuleCompiler.CreateProducer(Compile(ClassLeaf, policy), ["Leaf"]);
-        Assert.That(VersionOf(transferred), Is.EqualTo(101));
+        Assert.That(VersionOf(transferred), Is.EqualTo(104));
         var downgraded = (byte[])transferred.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 19);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded))!;
@@ -271,12 +273,30 @@ public sealed class NativeLoopTransferModuleTests
         CompilationReference? reference = null, bool library = true)
     {
         var syntax = SyntaxTree.Parse(source);
+        var boundPolicy = (BoundRuntimePolicy)policy;
+        var nativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var options = new CompilationOptions {
+            RuntimePolicy = boundPolicy,
+            NativeCoreRegistration = nativeRegistration,
+            LayoutCoreRegistration
+                = NativeCoreRegistrationTests.CreateLayoutRegistration(
+                    nativeRegistration),
+        };
         var compilation = library
-            ? reference is null ? Compilation.CreateLibrary(syntax, (BoundRuntimePolicy)policy)
-                : Compilation.CreateLibrary(syntax, reference, (BoundRuntimePolicy)policy)
-            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), (BoundRuntimePolicy)policy);
+            ? reference is null ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.CreateLibrary(syntax, reference, options)
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => {
+                var __nunitActual0 = reference;
+                Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>());
+                return (CompilationReference)__nunitActual0!;
+            }))(), options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static string Apphost()

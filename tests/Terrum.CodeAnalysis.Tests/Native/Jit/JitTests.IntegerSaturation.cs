@@ -5,18 +5,30 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
+    private static readonly string[] s_saturatingConversionExportNames = [
+        "SaturateInt32ToInt64", "SaturateInt32ToUInt64",
+        "SaturateUInt32ToInt64", "SaturateUInt32ToUInt64",
+        "SaturateUInt32ToInt32", "SaturateInt32ToUInt32",
+        "SaturateInt64ToInt32", "SaturateInt64ToUInt32",
+        "SaturateUInt64ToInt32", "SaturateUInt64ToUInt32",
+        "SaturateUInt64ToInt64", "SaturateInt64ToUInt64",
+        "SaturateInt32ToChar16", "SaturateUInt32ToChar16",
+        "SaturateInt64ToChar16", "SaturateUInt64ToChar16",
+        "SaturateChar16ToInt32", "SaturateChar16ToUInt32",
+        "SaturateChar16ToInt64", "SaturateChar16ToUInt64",
+    ];
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingIntegerConversionsClampAcrossIndependentModuleAotAndJitAsync(
@@ -144,26 +156,24 @@ public sealed partial class JitTests
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(component, componentPath),
             (BoundRuntimePolicy)policy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var exports = new[] {
-            "SaturateInt32ToInt64", "SaturateInt32ToUInt64",
-            "SaturateUInt32ToInt64", "SaturateUInt32ToUInt64",
-            "SaturateUInt32ToInt32", "SaturateInt32ToUInt32",
-            "SaturateInt64ToInt32", "SaturateInt64ToUInt32",
-            "SaturateUInt64ToInt32", "SaturateUInt64ToUInt32",
-            "SaturateUInt64ToInt64", "SaturateInt64ToUInt64",
-            "SaturateInt32ToChar16", "SaturateUInt32ToChar16",
-            "SaturateInt64ToChar16", "SaturateUInt64ToChar16",
-            "SaturateChar16ToInt32", "SaturateChar16ToUInt32",
-            "SaturateChar16ToInt64", "SaturateChar16ToUInt64",
-        }.Select(name => $"Terrum.CodeAnalysis.Numerics64.{name}").ToArray();
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = library.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), exports);
+        var exports = s_saturatingConversionExportNames
+            .Select(name => $"Terrum.CodeAnalysis.Numerics64.{name}").ToArray();
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = library.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), exports);
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerSource = "using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n"
             + assertions + "\nreturn 42;\n}";
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource), reference,
             (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = consumerCompilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));

@@ -7,7 +7,7 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed partial class NativeManagedClassModuleTests
+internal sealed partial class NativeManagedClassModuleTests
 {
     [Test]
     public async Task CheckedGraphFailuresCanUnwindIntoGeneratedCallersAsync()

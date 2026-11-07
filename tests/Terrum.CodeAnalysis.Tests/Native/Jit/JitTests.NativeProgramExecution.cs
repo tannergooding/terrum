@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     internal static async Task AssertProgramExecutionAsync(
         BoundProgram program, int expected, NativeRuntimePolicy policy)

@@ -5,7 +5,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed class NestedOwnerFieldOperationTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NestedOwnerFieldOperationTests
 {
     private const string OwnerSource = """
         unique struct Child {

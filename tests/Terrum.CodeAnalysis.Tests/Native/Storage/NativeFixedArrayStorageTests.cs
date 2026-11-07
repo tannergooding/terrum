@@ -2,20 +2,22 @@
 
 using System;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using Terrum.CodeAnalysis.Syntax;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Semantics;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
-public sealed class NativeFixedArrayStorageTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeFixedArrayStorageTests
 {
     private static BoundNativeFixedArrayLayout GetFixedArrayLayout(
         BoundProgram program, string variableName)
@@ -28,11 +30,34 @@ public sealed class NativeFixedArrayStorageTests
         return layout;
     }
 
+    private static CompilationOptions LayoutOptions(
+        BoundRuntimePolicy runtimePolicy)
+        => new() {
+            RuntimePolicy = runtimePolicy,
+            LayoutCoreRegistration =
+                LayoutCoreRegistrationTestData.Create(),
+        };
+
+    private static CompilationOptions WithLayoutRegistration(
+        CompilationOptions options)
+    {
+        if (options.LayoutCoreRegistration is not null)
+        {
+            return options;
+        }
+
+        var registration
+            = options.NativeCoreRegistration is NativeCoreRegistrationSet native
+                ? NativeCoreRegistrationTests.CreateLayoutRegistration(native)
+                : LayoutCoreRegistrationTestData.Create();
+        return options with { LayoutCoreRegistration = registration };
+    }
+
     [Test]
     public void CheckedFixedArrayStorageAdmitsUnrelatedBlittableAggregates()
     {
         var source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct Measurement {
                 int64 First;
                 int64 Second;
@@ -52,7 +77,7 @@ public sealed class NativeFixedArrayStorageTests
                 return int32(values[index].GetThird());
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
 
@@ -74,7 +99,7 @@ public sealed class NativeFixedArrayStorageTests
                 return int32(values[2]);
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
 
@@ -86,7 +111,7 @@ public sealed class NativeFixedArrayStorageTests
     public void RawUnionPayloadCoverageRemainsPerFixedArrayElement()
     {
         const string prefix = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Sparse {
                 public uint8 First;
                 public uint32 Last;
@@ -96,7 +121,7 @@ public sealed class NativeFixedArrayStorageTests
                 }
             }
 
-            [Blittable] [Layout(Union)]
+            [Blittable] [Layout(LayoutKind.Union)]
             public struct RawWord {
                 public mut uint64 Wide;
                 public mut Sparse Padded;
@@ -119,7 +144,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), MakePadded()];
                     unsafe { return values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(firstWide.HasErrors, Is.False,
             string.Join(Environment.NewLine, firstWide.Diagnostics));
 
@@ -130,7 +155,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), MakePadded()];
                     unsafe { return values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(secondWide.HasErrors, Is.True,
             string.Join(Environment.NewLine, secondWide.Diagnostics));
 
@@ -141,7 +166,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), new RawWord(2)];
                     unsafe { return values[index].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicAllWide.HasErrors, Is.False,
             string.Join(Environment.NewLine, dynamicAllWide.Diagnostics));
 
@@ -152,7 +177,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), MakePadded()];
                     unsafe { return values[index].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicMixed.HasErrors, Is.True,
             string.Join(Environment.NewLine, dynamicMixed.Diagnostics));
 
@@ -164,7 +189,7 @@ public sealed class NativeFixedArrayStorageTests
                     values[1] = MakePadded();
                     unsafe { return values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(constantElementWrite.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 constantElementWrite.Diagnostics));
@@ -177,7 +202,7 @@ public sealed class NativeFixedArrayStorageTests
                     values[1] = MakePadded();
                     unsafe { return values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(constantWrittenElement.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 constantWrittenElement.Diagnostics));
@@ -190,7 +215,7 @@ public sealed class NativeFixedArrayStorageTests
                     values[index] = MakePadded();
                     unsafe { return values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(unknownElementWrite.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 unknownElementWrite.Diagnostics));
@@ -206,7 +231,7 @@ public sealed class NativeFixedArrayStorageTests
                     }
                     unsafe { return values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(branchElementWrite.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 branchElementWrite.Diagnostics));
@@ -221,7 +246,7 @@ public sealed class NativeFixedArrayStorageTests
                     }
                     unsafe { return values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(branchWrittenElement.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 branchWrittenElement.Diagnostics));
@@ -235,7 +260,7 @@ public sealed class NativeFixedArrayStorageTests
                     values[0] = MakePadded();
                     unsafe { return copy[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(copiedSnapshot.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 copiedSnapshot.Diagnostics));
@@ -248,7 +273,7 @@ public sealed class NativeFixedArrayStorageTests
                         [new RawWord(2), new RawWord(3)]];
                     unsafe { return values[1][0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(nestedElement.HasErrors, Is.False,
             string.Join(Environment.NewLine, nestedElement.Diagnostics));
 
@@ -260,7 +285,7 @@ public sealed class NativeFixedArrayStorageTests
                         [new RawWord(2), new RawWord(3)]];
                     unsafe { return values[0][index].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicNestedElement.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 dynamicNestedElement.Diagnostics));
@@ -273,7 +298,7 @@ public sealed class NativeFixedArrayStorageTests
                         [new RawWord(2), new RawWord(3)]];
                     unsafe { return values[row][0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicOuterFull.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 dynamicOuterFull.Diagnostics));
@@ -286,7 +311,7 @@ public sealed class NativeFixedArrayStorageTests
                         [new RawWord(2), new RawWord(3)]];
                     unsafe { return values[row][1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicOuterMixed.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 dynamicOuterMixed.Diagnostics));
@@ -300,7 +325,7 @@ public sealed class NativeFixedArrayStorageTests
                     values[0][1] = MakePadded();
                     unsafe { return values[0][0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(nestedPathWrite.HasErrors, Is.False,
             string.Join(Environment.NewLine, nestedPathWrite.Diagnostics));
 
@@ -313,7 +338,7 @@ public sealed class NativeFixedArrayStorageTests
                     values[row][1] = MakePadded();
                     unsafe { return values[0][1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicOuterPathWrite.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 dynamicOuterPathWrite.Diagnostics));
@@ -323,7 +348,7 @@ public sealed class NativeFixedArrayStorageTests
     public void LargeRawUnionArrayGeometryUsesU64WithoutElementExpansion()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Sparse {
                 public uint8 First;
                 public uint32 Last;
@@ -333,7 +358,7 @@ public sealed class NativeFixedArrayStorageTests
                 }
             }
 
-            [Blittable] [Layout(Union)]
+            [Blittable] [Layout(LayoutKind.Union)]
             public struct RawWord {
                 public mut uint64 Wide;
                 public mut Sparse Padded;
@@ -345,7 +370,7 @@ public sealed class NativeFixedArrayStorageTests
             public uint64 Value() { return 0; }
             """;
         var compilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
@@ -383,7 +408,7 @@ public sealed class NativeFixedArrayStorageTests
     public void FixedArrayFieldPlaceBindsOnAnInitializedLocalCopyAggregate()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Holder {
                 public mut [uint32; 2] Values;
             }
@@ -395,7 +420,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
         var compilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
@@ -404,12 +429,12 @@ public sealed class NativeFixedArrayStorageTests
     public void FixedArrayFieldPlaceCanTraverseNestedCopyFields()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Inner {
                 public mut [uint32; 2] Values;
             }
 
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Outer {
                 public mut Inner Inner;
                 public mut uint32 Tail;
@@ -425,7 +450,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(NativeJit.Execute(
@@ -439,7 +464,7 @@ public sealed class NativeFixedArrayStorageTests
     public void RawUnionPayloadCoverageRemainsPerFixedArrayFieldElement()
     {
         const string prefix = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Sparse {
                 public uint8 First;
                 public uint32 Last;
@@ -449,7 +474,7 @@ public sealed class NativeFixedArrayStorageTests
                 }
             }
 
-            [Blittable] [Layout(Union)]
+            [Blittable] [Layout(LayoutKind.Union)]
             public struct RawWord {
                 public mut uint64 Wide;
                 public mut Sparse Padded;
@@ -464,7 +489,7 @@ public sealed class NativeFixedArrayStorageTests
                 return value;
             }
 
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Envelope {
                 public mut [RawWord; 2] Values;
             }
@@ -478,7 +503,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), new RawWord(2)];
                     unsafe { return envelope.Values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fullField.HasErrors, Is.False,
             string.Join(Environment.NewLine, fullField.Diagnostics));
 
@@ -490,7 +515,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), new RawWord(2)];
                     unsafe { return envelope.Values[index].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicFullField.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 dynamicFullField.Diagnostics));
@@ -504,7 +529,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), MakePadded()];
                     unsafe { return envelope.Values[index].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicMixedField.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 dynamicMixedField.Diagnostics));
@@ -517,7 +542,7 @@ public sealed class NativeFixedArrayStorageTests
                         new RawWord(1), MakePadded()];
                     unsafe { return envelope.Values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(mixedField.HasErrors, Is.True,
             string.Join(Environment.NewLine, mixedField.Diagnostics));
 
@@ -531,7 +556,7 @@ public sealed class NativeFixedArrayStorageTests
                     envelope.Values[0] = MakePadded();
                     unsafe { return copy.Values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fieldCopy.HasErrors, Is.False,
             string.Join(Environment.NewLine, fieldCopy.Diagnostics));
 
@@ -544,7 +569,7 @@ public sealed class NativeFixedArrayStorageTests
                     envelope.Values = source;
                     unsafe { return envelope.Values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fieldCopyFromLocal.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 fieldCopyFromLocal.Diagnostics));
@@ -558,7 +583,7 @@ public sealed class NativeFixedArrayStorageTests
                     envelope.Values[1] = MakePadded();
                     unsafe { return envelope.Values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fieldWriteKeepsSibling.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 fieldWriteKeepsSibling.Diagnostics));
@@ -572,7 +597,7 @@ public sealed class NativeFixedArrayStorageTests
                     envelope.Values[1] = MakePadded();
                     unsafe { return int32(envelope.Values[0].Wide); }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fieldElementExecution.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 fieldElementExecution.Diagnostics));
@@ -606,7 +631,7 @@ public sealed class NativeFixedArrayStorageTests
                             + envelope.Values[1].Wide);
                     }
                 }
-                """), BoundRuntimePolicy.CheckedExceptions);
+                """), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
         Assert.That(failedFieldReplacement.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 failedFieldReplacement.Diagnostics));
@@ -625,7 +650,7 @@ public sealed class NativeFixedArrayStorageTests
                     envelope.Values[1] = MakePadded();
                     unsafe { return envelope.Values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fieldWriteInvalidatesElement.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 fieldWriteInvalidatesElement.Diagnostics));
@@ -640,7 +665,7 @@ public sealed class NativeFixedArrayStorageTests
                     envelope.Values[index] = MakePadded();
                     unsafe { return envelope.Values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(dynamicFieldWriteInvalidatesAll.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 dynamicFieldWriteInvalidatesAll.Diagnostics));
@@ -657,7 +682,7 @@ public sealed class NativeFixedArrayStorageTests
                     }
                     unsafe { return envelope.Values[1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(branchFieldWriteKeepsSibling.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 branchFieldWriteKeepsSibling.Diagnostics));
@@ -674,7 +699,7 @@ public sealed class NativeFixedArrayStorageTests
                     }
                     unsafe { return envelope.Values[0].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(branchFieldWriteInvalidatesElement.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 branchFieldWriteInvalidatesElement.Diagnostics));
@@ -684,7 +709,7 @@ public sealed class NativeFixedArrayStorageTests
     public void RawUnionPayloadCoverageRemainsPerNestedFixedArrayFieldElement()
     {
         const string prefix = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Sparse {
                 public uint8 First;
                 public uint32 Last;
@@ -694,7 +719,7 @@ public sealed class NativeFixedArrayStorageTests
                 }
             }
 
-            [Blittable] [Layout(Union)]
+            [Blittable] [Layout(LayoutKind.Union)]
             public struct RawWord {
                 public mut uint64 Wide;
                 public mut Sparse Padded;
@@ -709,7 +734,7 @@ public sealed class NativeFixedArrayStorageTests
                 return value;
             }
 
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct NestedEnvelope {
                 public mut [[RawWord; 2]; 2] Rows;
             }
@@ -724,7 +749,7 @@ public sealed class NativeFixedArrayStorageTests
                         [new RawWord(3), new RawWord(4)]];
                     unsafe { return int32(envelope.Rows[1][0].Wide); }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fullNestedField.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 fullNestedField.Diagnostics));
@@ -743,7 +768,7 @@ public sealed class NativeFixedArrayStorageTests
                         [new RawWord(3), new RawWord(4)]];
                     unsafe { return envelope.Rows[0][1].Wide; }
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(mixedNestedField.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 mixedNestedField.Diagnostics));
@@ -819,7 +844,7 @@ public sealed class NativeFixedArrayStorageTests
                 signatureCompilation.Diagnostics));
 
         const string fieldRuntimeCall = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct RuntimeTable {
                 private [uint32; const (RuntimeCount())] Items;
             }
@@ -827,14 +852,15 @@ public sealed class NativeFixedArrayStorageTests
             public int32 Value() { return 42; }
             """;
         var fieldRuntimeCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(fieldRuntimeCall));
+            SyntaxTree.Parse(fieldRuntimeCall),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fieldRuntimeCompilation.Diagnostics.Any(
             static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine,
                 fieldRuntimeCompilation.Diagnostics));
 
         const string fieldOverflowCall = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct OverflowTable {
                 private [uint32; const (Overflow())] Items;
             }
@@ -844,7 +870,8 @@ public sealed class NativeFixedArrayStorageTests
             public int32 Value() { return 42; }
             """;
         var fieldOverflowCompilation = Compilation.CreateLibrary(
-            SyntaxTree.Parse(fieldOverflowCall));
+            SyntaxTree.Parse(fieldOverflowCall),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(fieldOverflowCompilation.Diagnostics.Any(
             static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine,
@@ -855,7 +882,7 @@ public sealed class NativeFixedArrayStorageTests
     public void ConstEvalCallsCanDetermineArrayFieldExtents()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct Table {
                 private [uint32; const (Count())] Items;
             }
@@ -865,7 +892,8 @@ public sealed class NativeFixedArrayStorageTests
             }
             public int32 Value() { return 42; }
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
@@ -901,7 +929,7 @@ public sealed class NativeFixedArrayStorageTests
                 alias Row<T> = [T; const (Count())];
                 alias Words = [uint32; const (Count())];
                 alias RowAlias = Words;
-                [Blittable] [Layout(Sequential)]
+                [Blittable] [Layout(LayoutKind.Sequential)]
                 struct Table {
                     private Row<uint32> Items;
                 }
@@ -912,7 +940,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """);
         var compilation = Compilation.Create([entry, definitions],
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -942,7 +970,7 @@ public sealed class NativeFixedArrayStorageTests
             int32 Main() { return 0; }
             """;
         var runtimeCompilation = Compilation.Create(
-            SyntaxTree.Parse(runtimeCall), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(runtimeCall), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(runtimeCompilation.Program, Is.Null);
         Assert.That(runtimeCompilation.HasErrors, Is.True);
 
@@ -954,7 +982,7 @@ public sealed class NativeFixedArrayStorageTests
             int32 Main() { return 0; }
             """;
         var overflowCompilation = Compilation.Create(
-            SyntaxTree.Parse(overflowCall), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(overflowCall), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(overflowCompilation.Program, Is.Null);
         Assert.That(overflowCompilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True,
@@ -975,7 +1003,7 @@ public sealed class NativeFixedArrayStorageTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -988,7 +1016,7 @@ public sealed class NativeFixedArrayStorageTests
     public void TypedNativePointerCanAddressACheckedFixedArrayFieldElement()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct Envelope {
                 public mut [uint32; 3] Values;
             }
@@ -1005,7 +1033,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
-            BoundRuntimePolicy.CheckedExceptions);
+            LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1021,7 +1049,7 @@ public sealed class NativeFixedArrayStorageTests
     public void CheckedReferenceCanAddressFixedArrayFieldElement()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct Envelope {
                 public mut [uint32; 3] Values;
             }
@@ -1035,7 +1063,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(NativeJit.Execute(
@@ -1043,6 +1071,183 @@ public sealed class NativeFixedArrayStorageTests
                 ?? throw new AssertionException(
                     "Expected the array-field reference program."),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void CheckedReferenceReadPreservesFixedArrayUnionCoverage(
+        bool fieldRoot)
+    {
+        static string Source(string seedField, string seedValue,
+            bool fieldRoot)
+        {
+            var holderDeclaration = fieldRoot
+                ? "[Blittable] [Layout(LayoutKind.Sequential)]\n"
+                    + "struct Holder { public mut [RawWord; 2] Values; }"
+                : string.Empty;
+            var storageInitialization = fieldRoot
+                ? "init mut Holder holder;\n"
+                    + "holder.Values = [initial; 2];\n"
+                    + "write ref<RawWord> selected = ref holder.Values[1];"
+                : "mut [RawWord; 2] values = [initial; 2];\n"
+                    + "write ref<RawWord> selected = ref values[1];";
+            return $$"""
+                [Blittable] [Layout(LayoutKind.Union)]
+                struct RawWord {
+                    public mut uint8 Low;
+                    public mut uint64 Wide;
+                }
+
+                {{holderDeclaration}}
+
+                int32 Main() {
+                    init mut RawWord initial;
+                    unsafe { initial.{{seedField}} = {{seedValue}}; }
+                    {{storageInitialization}}
+                    RawWord copied = *selected;
+                    unsafe { return int32(copied.Wide); }
+                }
+                """;
+        }
+
+        var preserved = Compilation.Create(SyntaxTree.Parse(
+            Source("Wide", "uint64(42)", fieldRoot)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(preserved.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+
+        var invalidated = Compilation.Create(SyntaxTree.Parse(
+            Source("Low", "uint8(7)", fieldRoot)),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+    }
+
+    [Test]
+    public void DynamicCheckedReferenceReadRequiresCommonUnionCoverage()
+    {
+        const string source = """
+            [Blittable] [Layout(LayoutKind.Union)]
+            struct RawWord {
+                public mut uint8 Low;
+                public mut uint64 Wide;
+            }
+
+            int32 Main() {
+                init mut RawWord wide;
+                unsafe { wide.Wide = uint64(42); }
+                init mut RawWord narrow;
+                unsafe { narrow.Low = uint8(7); }
+                mut [RawWord; 2] values = [wide, narrow];
+                mut uint64 index = uint64(0);
+                write ref<RawWord> selected = ref values[index];
+                RawWord copied = *selected;
+                unsafe { return int32(copied.Wide); }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void CheckedReferenceReadPreservesNestedArrayUnionCoverage()
+    {
+        static string Source(string seedField, string seedValue)
+        {
+            return $$"""
+                [Blittable] [Layout(LayoutKind.Union)]
+                struct RawWord {
+                    public mut uint8 Low;
+                    public mut uint64 Wide;
+                }
+
+                int32 Main() {
+                    init mut RawWord initial;
+                    unsafe { initial.{{seedField}} = {{seedValue}}; }
+                    mut [[RawWord; 2]; 2] values
+                        = [[initial; 2]; 2];
+                    write ref<RawWord> selected = ref values[1][0];
+                    RawWord copied = *selected;
+                    unsafe { return int32(copied.Wide); }
+                }
+                """;
+        }
+
+        var preserved = Compilation.Create(SyntaxTree.Parse(
+            Source("Wide", "uint64(42)")),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(preserved.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+
+        var invalidated = Compilation.Create(SyntaxTree.Parse(
+            Source("Low", "uint8(7)")),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+    }
+
+    [Test]
+    public void CheckedReferenceToUnionFieldRetainsTypedValidity()
+    {
+        static string Source(string seedField, string seedValue)
+        {
+            return $$"""
+                [Blittable] [Layout(LayoutKind.Union)]
+                struct RawWord {
+                    public mut uint8 Low;
+                    public mut uint64 Wide;
+                }
+
+                int32 Main() {
+                    init mut RawWord initial;
+                    unsafe { initial.{{seedField}} = {{seedValue}}; }
+                    mut [RawWord; 2] values = [initial; 2];
+                    unsafe {
+                        write ref<uint64> selected = ref values[1].Wide;
+                        return int32(*selected);
+                    }
+                }
+                """;
+        }
+
+        var preserved = Compilation.Create(SyntaxTree.Parse(
+            Source("Wide", "uint64(42)")),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(preserved.HasErrors, Is.False,
+            string.Join(Environment.NewLine, preserved.Diagnostics));
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(preserved.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+
+        var invalidated = Compilation.Create(SyntaxTree.Parse(
+            Source("Low", "uint8(7)")),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(invalidated.HasErrors, Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
+        Assert.That(invalidated.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"), Is.True,
+            string.Join(Environment.NewLine, invalidated.Diagnostics));
     }
 
     [Test]
@@ -1062,7 +1267,7 @@ public sealed class NativeFixedArrayStorageTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1103,11 +1308,11 @@ public sealed class NativeFixedArrayStorageTests
                 return 100;
             }
             """;
-        var options = new CompilationOptions {
+        var options = WithLayoutRegistration(new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
             NativeCoreRegistration
                 = NativeCoreRegistrationTests.CreateRegistration(),
-        };
+        });
         var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1141,7 +1346,7 @@ public sealed class NativeFixedArrayStorageTests
                 ptr<uint32> memory,
                 uint64 byteCount);
 
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct Envelope {
                 public mut [uint32; 3] Values;
             }
@@ -1163,11 +1368,11 @@ public sealed class NativeFixedArrayStorageTests
                 return 100;
             }
             """;
-        var options = new CompilationOptions {
+        var options = WithLayoutRegistration(new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
             NativeCoreRegistration
                 = NativeCoreRegistrationTests.CreateRegistration(),
-        };
+        });
         var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1191,7 +1396,10 @@ public sealed class NativeFixedArrayStorageTests
         var structures = ImmutableArray.Create(new BoundStruct("Node", [
             new BoundStructField("Next", NativePointerTypes.Type(0), 0,
                 sizeof(ulong)),
-        ], sizeof(ulong)));
+        ], sizeof(ulong)) {
+            Alignment = sizeof(ulong),
+            RequiredAlignment = 1,
+        });
         var pointers = ImmutableArray.Create(
             new NativePointerTypeDefinition((PrimitiveType)100, false));
         Assert.That(NativePointerTypeContract.IsValidTable(pointers,
@@ -1214,7 +1422,7 @@ public sealed class NativeFixedArrayStorageTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
 
         Assert.That(compilation.HasErrors, Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1226,9 +1434,8 @@ public sealed class NativeFixedArrayStorageTests
     public void FixedArraysRejectNonBlittableElementsAndPositiveEmptyInitialization()
     {
         const string nonBlittable = """
-            [Layout(Sequential)]
             struct Measurement {
-                int64 Value;
+                private int64 Value;
                 public Measurement(int64 value) { Value = value; }
             }
             int32 Main() {
@@ -1243,10 +1450,38 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
 
-        Assert.That(Compilation.Create(SyntaxTree.Parse(nonBlittable),
-            BoundRuntimePolicy.FailFast).Program, Is.Null);
+        var nonBlittableCompilation = Compilation.Create(
+            SyntaxTree.Parse(nonBlittable),
+            LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(nonBlittableCompilation.Program, Is.Null);
+        Assert.That(nonBlittableCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine,
+                nonBlittableCompilation.Diagnostics));
         Assert.That(Compilation.Create(SyntaxTree.Parse(positiveEmpty),
             BoundRuntimePolicy.FailFast).Program, Is.Null);
+    }
+
+    [Test]
+    public void ZeroCountFixedArrayStillRequiresASupportedElementType()
+    {
+        const string source = """
+            struct Measurement {
+                private int64 Value;
+                public Measurement(int64 value) { Value = value; }
+            }
+            int32 Main() {
+                [Measurement; 0] values = [];
+                return 0;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
@@ -1322,7 +1557,7 @@ public sealed class NativeFixedArrayStorageTests
     public void FixedArrayTypeIdentityIsCanonicalByElementAndCount()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct FixedArrayFields {
                 private [uint32; 2] Pair;
                 private [uint16; 2] NarrowPair;
@@ -1339,7 +1574,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1373,6 +1608,55 @@ public sealed class NativeFixedArrayStorageTests
     }
 
     [Test]
+    public void FixedArrayTypeTableRejectsTheFirstEntryBeyondItsCapacity()
+    {
+        const int tableCapacity = 100_000;
+        const int valuesPerFunction = 128;
+        var source = new StringBuilder(4_500_000);
+        var functionIndex = 0;
+        for (var firstType = 0;
+            firstType < tableCapacity + 1;
+            firstType += valuesPerFunction, functionIndex++)
+        {
+            _ = source.Append("int32 Build").Append(
+                    functionIndex.ToString(CultureInfo.InvariantCulture))
+                .AppendLine("() {");
+            var count = Math.Min(valuesPerFunction,
+                tableCapacity + 1 - firstType);
+            for (var localIndex = 0; localIndex < count; localIndex++)
+            {
+                var elementCount = firstType + localIndex;
+                var countText = elementCount.ToString(
+                    CultureInfo.InvariantCulture);
+                _ = source.Append("    [uint8; ").Append(countText)
+                    .Append("] Value")
+                    .Append(localIndex.ToString(
+                        CultureInfo.InvariantCulture))
+                    .Append(" = [uint8(0); ").Append(countText)
+                    .AppendLine("];");
+            }
+            _ = source.AppendLine("    return 0;");
+            _ = source.AppendLine("}");
+        }
+
+        var text = source.ToString();
+        var firstRejectedType = text.IndexOf(
+            $"[uint8; {tableCapacity}]",
+            StringComparison.Ordinal);
+        Assert.That(firstRejectedType, Is.GreaterThanOrEqualTo(0));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "TRM3030"
+            && diagnostic.Span.Start == firstRejectedType), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void ZeroPayloadArrayStillRequiresEveryElement()
     {
         const string source = """
@@ -1402,7 +1686,7 @@ public sealed class NativeFixedArrayStorageTests
                 [void; 2] values = [()];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(incomplete.Program, Is.Null);
         Assert.That(incomplete.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True,
@@ -1435,7 +1719,7 @@ public sealed class NativeFixedArrayStorageTests
     public void SameNamedInlineArrayDeclarationRemainsNominal()
     {
         const string source = """
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct InlineArray {
                 public int32 Value;
                 public InlineArray(int32 value) { Value = value; }
@@ -1447,7 +1731,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
-            BoundRuntimePolicy.FailFast);
+            LayoutOptions(BoundRuntimePolicy.FailFast));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1482,7 +1766,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
 
-        var failFast = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        var failFast = Compilation.Create(SyntaxTree.Parse(source), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(failFast.HasErrors, Is.False, string.Join(Environment.NewLine, failFast.Diagnostics));
         SemanticVerifier.Verify(BoundProgramTestHelpers.MarkNoFailureProof(
             failFast.Program!, "Main", "Index"));
@@ -1490,7 +1774,7 @@ public sealed class NativeFixedArrayStorageTests
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(checkedExceptions.HasErrors, Is.False,
             string.Join(Environment.NewLine, checkedExceptions.Diagnostics));
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(
             BoundProgramTestHelpers.MarkNoFailureProof(checkedExceptions.Program!, "Main", "Index")));
     }
 
@@ -1570,7 +1854,7 @@ public sealed class NativeFixedArrayStorageTests
                 [uint32; 3] values = [10, 20, 30];
                 return int32(values[{{indexExpression}}]);
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.Program, Is.Null);
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True,
@@ -1593,7 +1877,7 @@ public sealed class NativeFixedArrayStorageTests
                     [uint32; 3] values = [10, 20, 30];
                     return int32({{expression}});
                 }
-                """), BoundRuntimePolicy.FailFast);
+                """), LayoutOptions(BoundRuntimePolicy.FailFast));
 
             Assert.That(compilation.Program, Is.Null, expression);
             Assert.That(compilation.Diagnostics.Any(static diagnostic =>
@@ -1678,7 +1962,7 @@ public sealed class NativeFixedArrayStorageTests
                 [[uint32; 0]; 2] values = [[], []];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(zeroExtent.HasErrors, Is.False,
             string.Join(Environment.NewLine, zeroExtent.Diagnostics));
         Assert.That(NativeJit.Execute(zeroExtent.Program!,
@@ -1689,7 +1973,7 @@ public sealed class NativeFixedArrayStorageTests
                 [[void; 2]; 2] values = [[(), ()], [(), ()]];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(zeroPayload.HasErrors, Is.False,
             string.Join(Environment.NewLine, zeroPayload.Diagnostics));
         Assert.That(NativeJit.Execute(zeroPayload.Program!,
@@ -1702,7 +1986,7 @@ public sealed class NativeFixedArrayStorageTests
                 values[1] = values[0];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(nestedWrites.HasErrors, Is.False,
             string.Join(Environment.NewLine, nestedWrites.Diagnostics));
         Assert.That(NativeJit.Execute(nestedWrites.Program!,
@@ -1713,7 +1997,7 @@ public sealed class NativeFixedArrayStorageTests
                 [[uint32; 2]; 2] values = [[1], [3, 4]];
                 return 0;
             }
-            """), BoundRuntimePolicy.FailFast);
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(incomplete.Program, Is.Null);
         Assert.That(incomplete.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True,
@@ -1837,7 +2121,7 @@ public sealed class NativeFixedArrayStorageTests
             }
             """;
         var threeDimensionCompilation = Compilation.Create(
-            SyntaxTree.Parse(threeDimensions), BoundRuntimePolicy.CheckedExceptions);
+            SyntaxTree.Parse(threeDimensions), LayoutOptions(BoundRuntimePolicy.CheckedExceptions));
         Assert.That(threeDimensionCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 threeDimensionCompilation.Diagnostics));

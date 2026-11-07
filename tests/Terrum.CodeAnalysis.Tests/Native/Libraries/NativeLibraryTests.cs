@@ -5,14 +5,16 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
 using System.Reflection.PortableExecutable;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Libraries;
 
-public sealed class NativeLibraryTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeLibraryTests
 {
     internal const string Source = """
         [Blittable] [Layout(LayoutKind.Sequential)] public struct Twelve {
@@ -46,9 +48,16 @@ public sealed class NativeLibraryTests
 
     internal static BoundProgram Compile(string source = Source)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     internal static string[] Exports => ["TryWide", "Evaluate", "MakeWide", "MakeTwelve"];
@@ -64,7 +73,11 @@ public sealed class NativeLibraryTests
         using var stream = new MemoryStream(image);
         using var reader = new PEReader(stream);
         var headers = reader.PEHeaders;
-        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual1 = headers.PEHeader; Assert.That(__nunitActual1, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual1!; }))();
+        var header = ((global::System.Func<PEHeader>)(() => {
+            var __nunitActual1 = headers.PEHeader;
+            Assert.That(__nunitActual1, Is.TypeOf<PEHeader>());
+            return (PEHeader)__nunitActual1!;
+        }))();
         Assert.That(header.AddressOfEntryPoint, Is.EqualTo(0));
         Assert.That((int)headers.CoffHeader.Characteristics & 0x2000, Is.Not.EqualTo(0));
         Assert.That((int)headers.CoffHeader.Characteristics & 1, Is.EqualTo(0));
@@ -201,7 +214,7 @@ public sealed class NativeLibraryTests
             .Select(index => ReadName(Read32(Offset(nameTable) + (4 * index))))
             .ToArray();
 
-        Assert.That(names, Is.EqualTo(new[] { "Callback|Native", "Ordinary" }));
+        Assert.That(names, Is.EqualTo(["Callback|Native", "Ordinary"]));
 
         var collision = program with
         {
@@ -211,9 +224,15 @@ public sealed class NativeLibraryTests
         _ = Assert.Throws<ArgumentException>(() =>
             NativeEmitter.EmitLibrary(collision, ["Ordinary"], NativeRuntimePolicy.FailFast))!;
 
-        int Read32(int offset) => BinaryPrimitives.ReadInt32LittleEndian(image.AsSpan(offset, 4));
+        int Read32(int offset)
+        {
+            return BinaryPrimitives.ReadInt32LittleEndian(image.AsSpan(offset, 4));
+        }
 
-        int Offset(int rva) => checked(exportOffset + rva - section.VirtualAddress);
+        int Offset(int rva)
+        {
+            return checked(exportOffset + rva - section.VirtualAddress);
+        }
 
         string ReadName(int rva)
         {
@@ -260,9 +279,16 @@ public sealed class NativeLibraryTests
     public void AllowsAbsentPrimitiveDeclaringStructOwner()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public int32 Value; public int32 Read() { return 42; } }"));
+            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public int32 Value; public int32 Read() { return 42; } }"),
+            new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var function = global::System.Linq.Enumerable.Single(program.Functions);
         var primitiveOwner = program with {
             Functions = program.Functions.SetItem(0, function with {

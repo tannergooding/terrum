@@ -3,8 +3,8 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Globalization;
+using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -17,7 +17,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [Test]
     public async Task WideIntegerCoreOperatorsExecuteAcrossAotAndJitAsync()
@@ -284,8 +284,8 @@ public sealed partial class JitTests
             AppendDivisionCheck(source, "uint128", "UnsignedQuotient", "UnsignedRemainder",
                 dividend, divisor, signed: false);
         }
-        source.AppendLine("return 42;");
-        source.AppendLine("}");
+        _ = source.AppendLine("return 42;");
+        _ = source.AppendLine("}");
 
         await AssertFailFastExecutionAsync(source.ToString(), 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source.ToString(), 42).ConfigureAwait(true);
@@ -329,10 +329,10 @@ public sealed partial class JitTests
             var unsignedLeft = RandomUnsignedInteger128(random);
             var unsignedRight = RandomUnsignedInteger128(random);
             AppendMultiplicationCheck(source, "uint128", "UnsignedProduct",
-                unsignedLeft, unsignedRight, unsignedLeft * unsignedRight & signedMask);
+                unsignedLeft, unsignedRight, (unsignedLeft * unsignedRight) & signedMask);
         }
-        source.AppendLine("return 42;");
-        source.AppendLine("}");
+        _ = source.AppendLine("return 42;");
+        _ = source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()), new CompilationOptions {
             SourceArithmeticProfile = SourceArithmeticProfile.Release,
@@ -414,8 +414,8 @@ public sealed partial class JitTests
             AppendArithmeticCheck(source, "SubtractUnsigned", "uint128", unsignedLeft, unsignedRight,
                 (unsignedLeft - unsignedRight) & mask);
         }
-        source.AppendLine("return 42;");
-        source.AppendLine("}");
+        _ = source.AppendLine("return 42;");
+        _ = source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()), new CompilationOptions {
             SourceArithmeticProfile = SourceArithmeticProfile.Release,
@@ -475,7 +475,7 @@ public sealed partial class JitTests
 
     private static BigInteger SignedProduct(BigInteger left, BigInteger right)
     {
-        var raw = left * right & ((BigInteger.One << 128) - BigInteger.One);
+        var raw = (left * right) & ((BigInteger.One << 128) - BigInteger.One);
         return raw >= (BigInteger.One << 127) ? raw - (BigInteger.One << 128) : raw;
     }
 
@@ -485,7 +485,7 @@ public sealed partial class JitTests
         var leftText = left.ToString(CultureInfo.InvariantCulture);
         var rightText = right.ToString(CultureInfo.InvariantCulture);
         var expectedText = expected.ToString(CultureInfo.InvariantCulture);
-        source.Append("if (").Append(function).Append('(').Append(type).Append('(')
+        _ = source.Append("if (").Append(function).Append('(').Append(type).Append('(')
             .Append(leftText).Append("), ").Append(type).Append('(').Append(rightText).Append(")) != ")
             .Append(type).Append('(').Append(expectedText).AppendLine(")) { return 1; }");
     }
@@ -496,7 +496,7 @@ public sealed partial class JitTests
         var leftText = left.ToString(CultureInfo.InvariantCulture);
         var rightText = right.ToString(CultureInfo.InvariantCulture);
         var expectedText = expected.ToString(CultureInfo.InvariantCulture);
-        source.Append("if (").Append(function).Append('(').Append(type).Append('(')
+        _ = source.Append("if (").Append(function).Append('(').Append(type).Append('(')
             .Append(leftText).Append("), ").Append(type).Append('(').Append(rightText).Append(")) != ")
             .Append(type).Append('(').Append(expectedText).AppendLine(")) { return 1; }");
     }
@@ -510,7 +510,7 @@ public sealed partial class JitTests
         var remainder = dividend % divisor;
         var quotientText = quotient.ToString(CultureInfo.InvariantCulture);
         var remainderText = remainder.ToString(CultureInfo.InvariantCulture);
-        source.Append("if (").Append(quotientFunction).Append('(').Append(type).Append('(')
+        _ = source.Append("if (").Append(quotientFunction).Append('(').Append(type).Append('(')
             .Append(dividendText).Append("), ").Append(type).Append('(').Append(divisorText).Append(")) != ")
             .Append(type).Append('(').Append(quotientText).Append(") || ")
             .Append(remainderFunction).Append('(').Append(type).Append('(').Append(dividendText)

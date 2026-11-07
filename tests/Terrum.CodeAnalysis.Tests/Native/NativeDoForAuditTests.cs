@@ -2,14 +2,15 @@
 
 using System;
 using System.Buffers.Binary;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native;
 
-public sealed class NativeDoForAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeDoForAuditTests
 {
     [TestCase("")]
     [TestCase("true")]
@@ -19,9 +20,9 @@ public sealed class NativeDoForAuditTests
         var text = $"public int32 Value() {{ for (;{condition};) {{ }} }}";
         var fixture = new Projection(text, condition.Length == 0 ? 0 : 1, 3);
         var loop = text.IndexOf("for", StringComparison.Ordinal);
-        var first = text.IndexOf(';', loop);
-        var close = text.IndexOf(')', first);
-        fixture.Statement(0, 12, 3, condition.Length == 0 ? -1 : 0, loop, text.IndexOf('}', close) + 1);
+        var first = text.IndexOf(';', loop, System.StringComparison.Ordinal);
+        var close = text.IndexOf(')', first, System.StringComparison.Ordinal);
+        fixture.Statement(0, 12, 3, condition.Length == 0 ? -1 : 0, loop, text.IndexOf('}', close, System.StringComparison.Ordinal) + 1);
         fixture.Statement(1, 13, 0, -1, first, first + 1);
         fixture.Statement(2, 13, 0, -1, close, close + 1);
         if (condition.Length != 0)
@@ -30,7 +31,7 @@ public sealed class NativeDoForAuditTests
         }
         if (condition == "false")
         {
-            Assert.Throws<ArgumentException>(() => fixture.Bind());
+            _ = Assert.Throws<ArgumentException>(fixture.Bind);
             return;
         }
         fixture.Bind();
@@ -51,9 +52,9 @@ public sealed class NativeDoForAuditTests
         var fixture = new Projection(text, 3, 4);
         var loop = text.IndexOf("for", StringComparison.Ordinal);
         var declaration = text.IndexOf("int32 x", StringComparison.Ordinal);
-        var delimiter = text.IndexOf(';', declaration);
+        var delimiter = text.IndexOf(';', declaration, System.StringComparison.Ordinal);
         var condition = text.IndexOf("true", StringComparison.Ordinal);
-        var close = text.IndexOf(')', condition);
+        var close = text.IndexOf(')', condition, System.StringComparison.Ordinal);
         var result = text.IndexOf("return", StringComparison.Ordinal);
         fixture.Words[299] = 1;
         fixture.Words[300] = 1;
@@ -62,7 +63,7 @@ public sealed class NativeDoForAuditTests
         fixture.Node(0, 3, 1, delimiter - 2, 2, -1, 42);
         fixture.Node(1, 20, 5, condition, 4, -1, 0);
         fixture.Node(2, 0, 1, result + 7, 1, 1, 0);
-        fixture.Statement(0, 12, 4, 1, loop, text.IndexOf('}', result) + 1);
+        fixture.Statement(0, 12, 4, 1, loop, text.IndexOf('}', result, System.StringComparison.Ordinal) + 1);
         fixture.Statement(1, 1, 1, 0, declaration, delimiter);
         fixture.Statement(2, 13, 0, -1, close, close + 1);
         fixture.Statement(3, 8, 0, 2, result, result + 9);
@@ -100,7 +101,7 @@ public sealed class NativeDoForAuditTests
         fixture.Statement(2, 8, 0, 2, result, result + 10);
         if (escapedRead)
         {
-            Assert.Throws<ArgumentException>(() => fixture.Bind());
+            _ = Assert.Throws<ArgumentException>(fixture.Bind);
             return;
         }
         fixture.Bind();
@@ -114,14 +115,14 @@ public sealed class NativeDoForAuditTests
         const string text = "public int32 Value() { for (; true;) { break; } return 42; }";
         var fixture = new Projection(text, 2, 5);
         var loop = text.IndexOf("for", StringComparison.Ordinal);
-        var first = text.IndexOf(';', loop);
+        var first = text.IndexOf(';', loop, System.StringComparison.Ordinal);
         var condition = text.IndexOf("true", StringComparison.Ordinal);
-        var close = text.IndexOf(')', condition);
+        var close = text.IndexOf(')', condition, System.StringComparison.Ordinal);
         var transfer = text.IndexOf("break", StringComparison.Ordinal);
         var result = text.IndexOf("return", StringComparison.Ordinal);
         fixture.Node(0, 20, 5, condition, 4, -1, 0);
         fixture.Node(1, 3, 1, result + 7, 2, -1, 42);
-        fixture.Statement(0, 12, 4, 0, loop, text.IndexOf('}', transfer) + 1);
+        fixture.Statement(0, 12, 4, 0, loop, text.IndexOf('}', transfer, System.StringComparison.Ordinal) + 1);
         fixture.Statement(1, 13, 0, -1, first, first + 1);
         fixture.Statement(2, 13, 0, -1, close, close + 1);
         fixture.Statement(3, 6, 0, -1, transfer, transfer + 6);
@@ -161,13 +162,13 @@ public sealed class NativeDoForAuditTests
         {
             var previous = Words[index];
             Words[index] = value;
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(_source, Bytes()));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(_source, Bytes()));
             Words[index] = previous;
         }
 
         internal void Node(int index, int operation, int type, int start, int length, int left, int low)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             Words[offset] = operation;
             Words[offset + 1] = type;
             Words[offset + 2] = start;
@@ -179,7 +180,7 @@ public sealed class NativeDoForAuditTests
 
         internal void Statement(int index, int kind, int slot, int root, int start, int end)
         {
-            var offset = 332 + index * 5;
+            var offset = 332 + (index * 5);
             Words[offset] = kind;
             Words[offset + 1] = slot;
             Words[offset + 2] = root;

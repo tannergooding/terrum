@@ -10,19 +10,19 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Native.SourceGrants;
 
-public sealed class NativeSourceGrantLibraryTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeSourceGrantLibraryTests
 {
     private const string ReadScalarExport = "Terrum.CodeAnalysis.ReadUtf16ScalarChecked";
     private const string DecodeScalarExport = "Terrum.CodeAnalysis.DecodeUtf16Scalar";
@@ -87,7 +87,11 @@ public sealed class NativeSourceGrantLibraryTests
                 public int32 GetValue(int32 at) { return ReadValue(at); }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        var sourceFreeProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = sourceFree.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var sourceFreeProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = sourceFree.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var sourceFreeArtifact = NativeEmitter.EmitLibraryWithSourceGrant(sourceFreeProgram,
             ["Terrum.CodeAnalysis.GetValue"], NativeRuntimePolicy.FailFast);
         Assert.That(global::System.Linq.Enumerable.Single(sourceFreeArtifact.Exports).SourceDependent, Is.False);
@@ -100,7 +104,11 @@ public sealed class NativeSourceGrantLibraryTests
                 public int32 GetValue(int32 at) { return ReadValue(at); }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        var sourceDependentProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = sourceDependent.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var sourceDependentProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = sourceDependent.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var sourceDependentArtifact = NativeEmitter.EmitLibraryWithSourceGrant(sourceDependentProgram,
             ["Terrum.CodeAnalysis.GetValue"], NativeRuntimePolicy.FailFast);
         Assert.That(global::System.Linq.Enumerable.Single(sourceDependentArtifact.Exports).SourceDependent, Is.True);
@@ -120,7 +128,11 @@ public sealed class NativeSourceGrantLibraryTests
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             ["Terrum.CodeAnalysis.GetValue"], NativeRuntimePolicy.FailFast);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
@@ -137,8 +149,12 @@ public sealed class NativeSourceGrantLibraryTests
         var rangeCompilation = Compilation.CreateLibrary(
             [SyntaxTree.Parse(File.ReadAllText(sourceRangePath), sourceRangePath)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        var rangeProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = rangeCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(rangeProgram,
+        var rangeProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = rangeCompilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(rangeProgram,
             ["Terrum.CodeAnalysis.SourceRange.TryCreate"], NativeRuntimePolicy.FailFast));
 
         var outputParameters = Compilation.CreateLibrary(
@@ -162,10 +178,14 @@ public sealed class NativeSourceGrantLibraryTests
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
         Assert.That(outputParameters.HasErrors, Is.False, string.Join(Environment.NewLine, outputParameters.Diagnostics));
-        var outputParameterProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = outputParameters.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
+        var outputParameterProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = outputParameters.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             outputParameterProgram, ["Terrum.CodeAnalysis.TryReadSource"], NativeRuntimePolicy.FailFast));
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             outputParameterProgram, ["Terrum.CodeAnalysis.TryInitializeSource"], NativeRuntimePolicy.FailFast));
 
         var ownedExport = Compilation.CreateLibrary(
@@ -179,8 +199,12 @@ public sealed class NativeSourceGrantLibraryTests
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
         Assert.That(ownedExport.HasErrors, Is.False, string.Join(Environment.NewLine, ownedExport.Diagnostics));
-        var ownedExportProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = ownedExport.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
+        var ownedExportProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = ownedExport.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             ownedExportProgram, ["Terrum.CodeAnalysis.CreateOwnedSourceResult"], NativeRuntimePolicy.FailFast));
 
         var managedCall = Compilation.CreateLibrary(
@@ -193,8 +217,12 @@ public sealed class NativeSourceGrantLibraryTests
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
         Assert.That(managedCall.HasErrors, Is.False, string.Join(Environment.NewLine, managedCall.Diagnostics));
-        var managedProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = managedCall.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(managedProgram,
+        var managedProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = managedCall.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(managedProgram,
             ["Terrum.CodeAnalysis.ReadSourceAndCollect"], NativeRuntimePolicy.FailFast));
 
         var unsupportedCallee = Compilation.CreateLibrary(
@@ -213,8 +241,12 @@ public sealed class NativeSourceGrantLibraryTests
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
         Assert.That(unsupportedCallee.HasErrors, Is.False, string.Join(Environment.NewLine, unsupportedCallee.Diagnostics));
-        var unsupportedCalleeProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = unsupportedCallee.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
-        Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
+        var unsupportedCalleeProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = unsupportedCallee.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             unsupportedCalleeProgram, ["Terrum.CodeAnalysis.ReadSourceAndCount"], NativeRuntimePolicy.FailFast));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -232,7 +264,11 @@ public sealed class NativeSourceGrantLibraryTests
                 """)],
             [sourceBuffer], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             ["Terrum.CodeAnalysis.ReadFromSourceEnd"], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
@@ -257,11 +293,11 @@ public sealed class NativeSourceGrantLibraryTests
                     maximumSource.ToCharArray(), 16_384), Is.EqualTo((int)'x'));
                 if (policy == BoundRuntimePolicy.CheckedExceptions)
                 {
-                    Assert.Throws<TargetInvocationException>(() =>
+                    _ = Assert.Throws<TargetInvocationException>(() =>
                         bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A'], 0));
-                    Assert.Throws<TargetInvocationException>(() =>
+                    _ = Assert.Throws<TargetInvocationException>(() =>
                         bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A'], 2));
-                    Assert.Throws<TargetInvocationException>(() =>
+                    _ = Assert.Throws<TargetInvocationException>(() =>
                         bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", [], 1));
                 }
             }
@@ -290,7 +326,11 @@ public sealed class NativeSourceGrantLibraryTests
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), [LineCountExport], (NativeRuntimePolicy)policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = compilation.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))(), [LineCountExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-line-count-{Guid.NewGuid():N}.dll");
@@ -335,7 +375,11 @@ public sealed class NativeSourceGrantLibraryTests
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), [SourceLengthExport], (NativeRuntimePolicy)policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual10 = compilation.Program;
+                Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual10!;
+            }))(), [SourceLengthExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-length-{Guid.NewGuid():N}.dll");
@@ -380,7 +424,11 @@ public sealed class NativeSourceGrantLibraryTests
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), [SourceCodeUnitExport], (NativeRuntimePolicy)policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual11 = compilation.Program;
+                Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual11!;
+            }))(), [SourceCodeUnitExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-code-unit-{Guid.NewGuid():N}.dll");
@@ -449,7 +497,11 @@ public sealed class NativeSourceGrantLibraryTests
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), [CanGetSourceRangeExport],
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual12 = compilation.Program;
+                Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual12!;
+            }))(), [CanGetSourceRangeExport],
             (NativeRuntimePolicy)policy);
         var export = global::System.Linq.Enumerable.Single(artifact.Exports);
         Assert.That(export.SourceDependent, Is.True);
@@ -508,7 +560,11 @@ public sealed class NativeSourceGrantLibraryTests
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual13 = compilation.Program;
+                Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual13!;
+            }))(),
             [AnalyzeStringEscapePackedExport], (NativeRuntimePolicy)policy);
         var export = global::System.Linq.Enumerable.Single(artifact.Exports);
         Assert.That(export.SourceDependent, Is.True);
@@ -553,17 +609,17 @@ public sealed class NativeSourceGrantLibraryTests
                     ("\\n", 2, 1, 0, 0, false),
                     ("\\n", 0, 0, 0, 0, false),
                 ];
-                foreach (var item in cases)
+                foreach (var (Source, Start, Length, Scalar, Consumed, HasError) in cases)
                 {
-                    var canAnalyze = item.Start >= 0 && item.Length > 0
-                        && item.Start <= item.Source.Length
-                        && item.Length <= item.Source.Length - item.Start
-                        && item.Source[item.Start] == '\\';
+                    var canAnalyze = Start >= 0 && Length > 0
+                        && Start <= Source.Length
+                        && Length <= Source.Length - Start
+                        && Source[Start] == '\\';
                     var expected = canAnalyze
-                        ? PackStringEscapeResult(item.Scalar, item.Consumed, item.HasError)
+                        ? PackStringEscapeResult(Scalar, Consumed, HasError)
                         : 0u;
                     Assert.That(bindings.Invoke<uint>(AnalyzeStringEscapePackedExport,
-                        item.Source.ToCharArray(), item.Start, item.Length), Is.EqualTo(expected));
+                        Source.ToCharArray(), Start, Length), Is.EqualTo(expected));
                 }
 
                 var maximumSource = new string('x', 16_382) + "\\n";
@@ -610,7 +666,11 @@ public sealed class NativeSourceGrantLibraryTests
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual14 = compilation.Program;
+                Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual14!;
+            }))(),
             [AnalyzeCharacterLiteralPackedExport, CharacterLiteralScalarExport], (NativeRuntimePolicy)policy);
         Assert.That(artifact.Exports.Length, Is.EqualTo(2));
         var packedExport = global::System.Linq.Enumerable.Single(artifact.Exports, static item => item.Name == AnalyzeCharacterLiteralPackedExport);
@@ -657,13 +717,13 @@ public sealed class NativeSourceGrantLibraryTests
                     ("'A'", int.MaxValue, 1, 0),
                     ("'A'", 4, 1, 0),
                 ];
-                foreach (var item in cases)
+                foreach (var (Source, Start, Length, Expected) in cases)
                 {
-                    Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, item.Source.ToCharArray(),
-                            item.Start, item.Length), Is.EqualTo(item.Expected));
-                    int expectedScalar = (item.Expected & 3) == 1 ? (int)(item.Expected >> 2) : -1;
-                    Assert.That(bindings.Invoke<int>(CharacterLiteralScalarExport, item.Source.ToCharArray(),
-                            item.Start, item.Length), Is.EqualTo(expectedScalar));
+                    Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, Source.ToCharArray(),
+                            Start, Length), Is.EqualTo(Expected));
+                    var expectedScalar = (Expected & 3) == 1 ? (int)(Expected >> 2) : -1;
+                    Assert.That(bindings.Invoke<int>(CharacterLiteralScalarExport, Source.ToCharArray(),
+                            Start, Length), Is.EqualTo(expectedScalar));
                 }
 
                 Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, [], 0, 0), Is.EqualTo(PackCharacterLiteralError(1, 0, 0)));
@@ -719,7 +779,11 @@ public sealed class NativeSourceGrantLibraryTests
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual15 = compilation.Program;
+                Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual15!;
+            }))(),
             [StringLiteralScalarCountExport], (NativeRuntimePolicy)policy);
         var export = global::System.Linq.Enumerable.Single(artifact.Exports);
         Assert.That(export.SourceDependent, Is.True);
@@ -767,14 +831,14 @@ public sealed class NativeSourceGrantLibraryTests
                     ("\"A\"", 1, 3, -1),
                     ("\"A\"", 3, 0, -1),
                 ];
-                foreach (var item in cases)
+                foreach (var (Source, Start, Length, Expected) in cases)
                 {
-                    Assert.That(bindings.Invoke<int>(StringLiteralScalarCountExport, item.Source.ToCharArray(),
-                            item.Start, item.Length), Is.EqualTo(item.Expected));
-                    if (item.Start == 0 && item.Length == item.Source.Length && item.Length >= 2)
+                    Assert.That(bindings.Invoke<int>(StringLiteralScalarCountExport, Source.ToCharArray(),
+                            Start, Length), Is.EqualTo(Expected));
+                    if (Start == 0 && Length == Source.Length && Length >= 2)
                     {
-                        var lexed = Lexer.Lex(SourceText.From(item.Source));
-                        if (item.Expected >= 0)
+                        var lexed = Lexer.Lex(SourceText.From(Source));
+                        if (Expected >= 0)
                         {
                             Assert.That(lexed.Diagnostics, Is.Empty);
                         }
@@ -831,7 +895,11 @@ public sealed class NativeSourceGrantLibraryTests
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual16 = compilation.Program;
+                Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual16!;
+            }))(),
             [StringLiteralScalarAtExport], (NativeRuntimePolicy)policy);
         var export = global::System.Linq.Enumerable.Single(artifact.Exports);
         Assert.That(export.SourceDependent, Is.True);
@@ -939,7 +1007,11 @@ public sealed class NativeSourceGrantLibraryTests
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual17 = compilation.Program;
+                Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual17!;
+            }))(),
             [StringLiteralEncodedLengthExport, StringNameRowByteLengthExport,
                 StringNamespaceRowByteLengthExport], (NativeRuntimePolicy)policy);
         var export = global::System.Linq.Enumerable.Single(artifact.Exports, static item => item.Name == StringLiteralEncodedLengthExport);
@@ -985,7 +1057,7 @@ public sealed class NativeSourceGrantLibraryTests
                 }
                 int? TryGetStringRowLength(string text, bool isName)
                 {
-                    if ((isName && text.Length == 0) || text.Contains('\0'))
+                    if ((isName && text.Length == 0) || text.Contains('\0', System.StringComparison.Ordinal))
                     {
                         return null;
                     }
@@ -1153,7 +1225,11 @@ public sealed class NativeSourceGrantLibraryTests
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), [SourceOffsetExport], (NativeRuntimePolicy)policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual18 = compilation.Program;
+                Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual18!;
+            }))(), [SourceOffsetExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-offset-{Guid.NewGuid():N}.dll");
@@ -1206,11 +1282,17 @@ public sealed class NativeSourceGrantLibraryTests
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual19 = compilation.Program;
+                Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual19!;
+            }))(),
             [SourceLineNumberExport, SourceCharacterPositionExport, SourceOffsetExport],
             (NativeRuntimePolicy)policy);
         Assert.That(artifact.Exports.Length, Is.EqualTo(3));
-        {var __nunitItems0 = artifact.Exports;        Assert.Multiple(() => {
+        {
+            var __nunitItems0 = artifact.Exports;
+            Assert.Multiple(() => {
             foreach (var __nunitItem20 in __nunitItems0)
             {
                 {
@@ -1218,7 +1300,8 @@ public sealed class NativeSourceGrantLibraryTests
                     Assert.That(__nunitItem20.ReturnType, Is.EqualTo(PrimitiveType.Int32));
                 }
             }
-        });}
+        });
+        }
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceLineNumberExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceCharacterPositionExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceOffsetExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
@@ -1275,7 +1358,11 @@ public sealed class NativeSourceGrantLibraryTests
         }], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = compilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual21 = compilation.Program;
+                Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual21!;
+            }))(),
             [SourceOffsetExport, SourceLineContentEndExport, SourceLineEndExport],
             (NativeRuntimePolicy)policy);
         var contentEnd = global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceLineContentEndExport);
@@ -1399,10 +1486,10 @@ public sealed class NativeSourceGrantLibraryTests
             ParseChar16Export, ParseInt32Export, ParseInt64Export, ParseUInt32Export, ParseUInt64Export,
             ReadScalarExport];
         Assert.That(actualExportNames, Is.EqualTo(expectedExportNames));
-        var packedEscape = global::System.Linq.Enumerable.Single(exports, static export => export.Name == AnalyzeStringEscapePackedExport);
-        Assert.That(packedEscape.SourceDependent, Is.True);
-        Assert.That(packedEscape.ReturnType, Is.EqualTo(PrimitiveType.UInt32));
-        Assert.That(packedEscape.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var (Name, SourceDependent, ReturnType, ParameterTypes) = global::System.Linq.Enumerable.Single(exports, static export => export.Name == AnalyzeStringEscapePackedExport);
+        Assert.That(SourceDependent, Is.True);
+        Assert.That(ReturnType, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
         var packedCharacterLiteral = global::System.Linq.Enumerable.Single(exports, static export => export.Name == AnalyzeCharacterLiteralPackedExport);
         Assert.That(packedCharacterLiteral.SourceDependent, Is.True);
         Assert.That(packedCharacterLiteral.ReturnType, Is.EqualTo(PrimitiveType.UInt32));
@@ -1580,7 +1667,11 @@ public sealed class NativeSourceGrantLibraryTests
         };
         var compilation = Compilation.CreateLibrary(trees, [sourceBuffer], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = compilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual22 = compilation.Program;
+            Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual22!;
+        }))();
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             [DecodeScalarExport, ReadScalarExport], (NativeRuntimePolicy)policy);
 
@@ -1618,7 +1709,11 @@ public sealed class NativeSourceGrantLibraryTests
                 {
                     var exception = Assert.Throws<TargetInvocationException>(() =>
                         bindings.Invoke<int>(ReadScalarExport, null, 0, 0))!;
-                    _ = ((global::System.Func<SEHException>)(() => { var __nunitActual23 = exception.InnerException; Assert.That(__nunitActual23, Is.TypeOf<SEHException>()); return (SEHException)__nunitActual23!; }))();
+                    _ = ((global::System.Func<SEHException>)(() => {
+                        var __nunitActual23 = exception.InnerException;
+                        Assert.That(__nunitActual23, Is.TypeOf<SEHException>());
+                        return (SEHException)__nunitActual23!;
+                    }))();
                 }
 
                 _ = Parallel.For(0, 32, index => {

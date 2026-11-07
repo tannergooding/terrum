@@ -2,19 +2,22 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class DirectNativeImportTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class DirectNativeImportTests
 {
     private const string ImportDeclaration = """
         [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
@@ -62,7 +65,7 @@ public sealed class DirectNativeImportTests
                 return -1;
             }
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var import = compilation.Program!.Functions.Single(static function =>
@@ -115,12 +118,58 @@ public sealed class DirectNativeImportTests
                 return -1;
             }
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var import = compilation.Program!.Functions.Single(static function =>
             function.Name == "TryReadValue");
         Assert.That(import.NativeOutputContracts.Single().PointeeType, Is.EqualTo(PrimitiveType.UInt32));
+    }
+
+    [Test]
+    public void NativeParameterEnumPointeeRequiresTargetBlittability()
+    {
+        const string source = """
+            [Terrum.Interop.NativeImport("sensor.dll", "ReadColor")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            public extern int32 ReadColor(ptr<Color> color);
+            """;
+
+        var supported = CompileWithBlittableRequirement(source,
+            FixedLayoutStorage.WindowsX64TargetRequirement);
+        Assert.That(supported.HasErrors, Is.False,
+            string.Join(Environment.NewLine, supported.Diagnostics));
+        var import = supported.Program!.Functions.Single(
+            static function => function.Name == "ReadColor");
+        Assert.That(import.DirectNativeImport!.Parameters.Single()
+                .PointeeType,
+            Is.EqualTo(BoundEnumTypes.Type(0)));
+
+        var unsupported = CompileWithBlittableRequirement(source, 0);
+        Assert.That(unsupported.HasErrors, Is.True,
+            "An enum without the selected target's Blittable commitment cannot cross NativeParameter.");
+
+        static Compilation CompileWithBlittableRequirement(
+            string source, int blittableTargetRequirement)
+        {
+            var enumType = BoundEnumTypes.Type(0);
+            var origin = new BoundPrivateNominalTypeOrigin(enumType,
+                BoundPrivateNominalOriginKind.OwnedDefinition,
+                IsExported: true, UsingModuleIdentity: "provider",
+                LocalDeclarationKey: "types.color");
+            var color = BoundEnumDefinition.CreatePrivate(origin, "Color",
+                PrimitiveType.Int32, [
+                    new BoundPrivateEnumMemberSnapshot("Red", 1, true,
+                        "member.red"),
+                ], isPublic: true, isPrimary: true, isFlags: false,
+                blittableTargetRequirement);
+            var reference = new CompilationReference([], [],
+                BoundRuntimePolicy.FailFast, enumDefinitions: [color],
+                privateNominalTypeOrigins: [origin]);
+            return Compilation.CreateLibrary(SyntaxTree.Parse(source),
+                reference,
+                NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+        }
     }
 
     [TestCase(false)]
@@ -147,7 +196,7 @@ public sealed class DirectNativeImportTests
             """ + parameterAttributes + """
                 write ptr<Packet> packet);
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -156,13 +205,13 @@ public sealed class DirectNativeImportTests
         var output = import.NativeOutputContracts.Single();
         Assert.That(output.FormalOrdinal, Is.EqualTo(1));
         Assert.That(output.Dependencies,
-            Is.EqualTo(new[]
-            {
+            Is.EqualTo(
+            [
                 new NativeOutputDependency(2,
                     NativeOutputDependencySourceKind.Formal,
                     NativeOutputDependencyRelationship.Forward,
                     NativeOutputPublicationPhase.NormalCompletion, 1, 0),
-            }));
+            ]));
         Assert.That(import.DependencyContracts, Has.Length.EqualTo(2));
     }
 
@@ -179,7 +228,7 @@ public sealed class DirectNativeImportTests
         var dependency = declaresDependency
             ? "[param(packet): DependsOn(nameof(source))]\n"
             : "";
-        var compilation = Compilation.Create(SyntaxTree.Parse(PacketDeclaration + dependency + """
+        var compilation = Create(SyntaxTree.Parse(PacketDeclaration + dependency + """
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             [Terrum.Interop.NativeImport("sensor.dll", "AcquirePacket")]
             extern int32 AcquirePacket(
@@ -221,7 +270,7 @@ public sealed class DirectNativeImportTests
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
             """;
-        var explicitEmpty = Compilation.CreateLibrary(SyntaxTree.Parse(PacketDeclaration + """
+        var explicitEmpty = CreateLibrary(SyntaxTree.Parse(PacketDeclaration + """
             [param(packet): DependsOn()]
             [Terrum.Interop.NativeImport("sensor.dll", "TryReadPacket")]
             extern int32 TryReadPacket(
@@ -232,13 +281,13 @@ public sealed class DirectNativeImportTests
             string.Join(Environment.NewLine, explicitEmpty.Diagnostics));
         Assert.That(explicitEmpty.Program!.Functions.Single(static function =>
                 function.Name == "TryReadPacket").NativeOutputContracts.Single().Dependencies,
-            Is.EqualTo(new[]
-            {
+            Is.EqualTo(
+            [
                 new NativeOutputDependency(2,
                     NativeOutputDependencySourceKind.Empty,
                     NativeOutputDependencyRelationship.Empty,
                     NativeOutputPublicationPhase.NormalCompletion, 0, 0),
-            }));
+            ]));
 
         var invalidSources = new[]
         {
@@ -278,7 +327,7 @@ public sealed class DirectNativeImportTests
 
         foreach (var source in invalidSources)
         {
-            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+            var compilation = CreateLibrary(SyntaxTree.Parse(source));
             Assert.That(compilation.Program, Is.Null,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             Assert.That(compilation.Diagnostics.Any(static diagnostic =>
@@ -290,7 +339,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void SemanticVerifierRejectsForgedNativeOutputDependencySources()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
@@ -320,8 +369,7 @@ public sealed class DirectNativeImportTests
             ],
         };
 
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with
-        {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(functionIndex,
                 function with { NativeOutputContracts = [forgedOutput] }),
         }));
@@ -330,10 +378,8 @@ public sealed class DirectNativeImportTests
             BoundDependencyRelation.DependsOn,
             BoundDependencyDestination.InitializedOutput, 1,
             [new BoundDependencySource(BoundDependencySourceKind.Formal, 1)]);
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with
-        {
-            Functions = program.Functions.SetItem(functionIndex, function with
-            {
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(functionIndex, function with {
                 DependencyContracts = [selfSource],
                 NativeOutputContracts =
                 [
@@ -434,7 +480,7 @@ public sealed class DirectNativeImportTests
 
         foreach (var source in cases)
         {
-            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+            var compilation = CreateLibrary(SyntaxTree.Parse(source));
             Assert.That(compilation.HasErrors, Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
         }
     }
@@ -455,7 +501,7 @@ public sealed class DirectNativeImportTests
                 [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.{{condition}})]
                 write ptr<Packet> packet);
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var declaration = compilation.Program!.Functions.Single(static function =>
@@ -466,7 +512,7 @@ public sealed class DirectNativeImportTests
         Assert.That((byte)normalizedOutput.SuccessSelector, Is.EqualTo(expectedSelector));
         Assert.That((byte)normalizedOutput.ComplementSelector, Is.EqualTo(expectedComplement));
 
-        var omitted = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var omitted = CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
@@ -478,7 +524,7 @@ public sealed class DirectNativeImportTests
         Assert.That(omitted.Program, Is.Null);
         Assert.That(omitted.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
 
-        var legacy = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var legacy = CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
@@ -487,8 +533,8 @@ public sealed class DirectNativeImportTests
             extern int32 ReadPacket(write ptr<Packet> packet);
             """));
         Assert.That(legacy.Program, Is.Null);
-        Assert.That(legacy.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM1001"
-            || diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(legacy.Diagnostics.Any(static diagnostic => diagnostic.Code is "TRM1001"
+            or "TRM3030"), Is.True);
     }
 
     [Test]
@@ -533,7 +579,7 @@ public sealed class DirectNativeImportTests
                 """, HasErrors: true),
         };
 
-        foreach (var testCase in cases)
+        foreach (var (Body, HasErrors) in cases)
         {
             var source = """
                 [Blittable]
@@ -551,12 +597,12 @@ public sealed class DirectNativeImportTests
                     init Packet value;
                     init Packet otherValue;
                     unsafe {
-                """ + testCase.Body + """
+                """ + Body + """
                     }
                 }
                 """;
-            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-            Assert.That(compilation.HasErrors, Is.EqualTo(testCase.HasErrors),
+            var compilation = CreateLibrary(SyntaxTree.Parse(source));
+            Assert.That(compilation.HasErrors, Is.EqualTo(HasErrors),
                 string.Join(Environment.NewLine, compilation.Diagnostics));
         }
     }
@@ -564,7 +610,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void NativeOutputReservationCannotBeForwardedAsAPointer()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Count; }
@@ -591,7 +637,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void NativeOutputReservationCancelsWhenALaterArgumentFails()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
                 [Blittable]
                 [Layout(LayoutKind.Sequential)]
                 struct Packet {
@@ -621,6 +667,47 @@ public sealed class DirectNativeImportTests
 
         Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void NativeOutputReservationCancelsBeforeInvokeWhenALaterArgumentFails()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentProcess")]
+            extern ptr<void> GetCurrentProcess();
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "DuplicateHandle")]
+            extern unsafe int32 DuplicateHandle(ptr<void> sourceProcess,
+                ptr<void> sourceHandle, ptr<void> targetProcess,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<ptr<void>> targetHandle,
+                uint32 desiredAccess, bool inheritHandle, uint32 options);
+
+            [DoesNotReturn] uint32 Fail() { require false; }
+
+            int32 Main() {
+                unsafe {
+                    ptr<void> process = GetCurrentProcess();
+                    init ptr<void> duplicate;
+                    try {
+                        DuplicateHandle(process, process, process,
+                            &init duplicate, 0, false, Fail());
+                    } catch {
+                        duplicate = process;
+                        return duplicate == process ? 42 : -1;
+                    }
+                }
+                return -2;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
     [Test]
@@ -660,7 +747,7 @@ public sealed class DirectNativeImportTests
                 return -1;
             }
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -669,7 +756,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void SourceAuthoredImportEmitsTheNamedWindowsBinding()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(ImportDeclaration + """
+        var compilation = Create(SyntaxTree.Parse(ImportDeclaration + """
             int32 Main() {
                 mut int64 counter = 0;
                 unsafe {
@@ -693,7 +780,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeImportBindsOpaqueContextAndWritableBlittableRecord()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct FixtureRectangle {
                 int32 Left;
@@ -744,7 +831,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeImportAcceptsNestedBlittableStructThroughTypedPointer()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct FixtureHeader {
                 uint64 First;
@@ -798,12 +885,14 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void DirectNativeImportAcceptsGenericFunctionPointerParameters()
+    public void DirectNativeImportAcceptsNativeCallableFunctionPointerParameters()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "InvokeCallback")]
             public unsafe extern int32 InvokeCallback(
-                fnptr<NativeAbi, int32, int32> callback, int32 value);
+                [Terrum.Interop.NativeCallConv(
+                    Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                fnptr<int32, int32> callback, int32 value);
 
 
             [Terrum.Interop.NativeCallable]
@@ -828,7 +917,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void RetiredNativeStorageRecordOrdinalIsRejectedAsAValueType()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Identity(int32 value) { return value; }
             int32 Main() { return Identity(42); }
             """));
@@ -851,7 +940,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void NativeStorageAddressIsNotAnExposedSourceType()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "ConsumeStorage")]
             extern int32 ConsumeStorage(Terrum.Interop.NativeStorageAddress value);
 
@@ -867,7 +956,7 @@ public sealed class DirectNativeImportTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
                     ptr<void> first = null;
@@ -885,7 +974,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void BlittableRecordsCarryOpaquePointerFieldsThroughDirectImports()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct FixturePointerRecord {
                 public ptr<void> Context;
@@ -921,7 +1010,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeImportSupportsOpaquePointerAndFloatingResultsThroughTrRm()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireContext")]
             public extern ptr<void> AcquireContext();
 
@@ -965,7 +1054,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportsRoundTripTypedPointerAndFunctionPointerValues()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireValue")]
             public extern ptr<int32> AcquireValue();
 
@@ -973,11 +1062,11 @@ public sealed class DirectNativeImportTests
             public extern int32 ReadValue(ptr<int32> value);
 
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireCallback")]
-            public extern fnptr<NativeAbi, int32, int32> AcquireCallback();
+            public extern [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> AcquireCallback();
 
             [Terrum.Interop.NativeImport("fixture.dll", "InvokeCallback")]
             public extern int32 InvokeCallback(
-                fnptr<NativeAbi, int32, int32> callback, int32 value);
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> callback, int32 value);
             """));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
@@ -1019,7 +1108,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeImportPreservesTypedPointerResults()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireValue")]
             public extern ptr<int32> AcquireValue();
             """));
@@ -1037,7 +1126,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeImportDoesNotTreatWindowHandleTypesAsGenericAbiValues()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "ReadHandle")]
             public extern int32 ReadHandle(Terrum.Interop.Windows.HWND value);
             """));
@@ -1049,7 +1138,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportRoundTripsWritableOpaquePointerResult()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireContext")]
             public extern ptr<void> AcquireContext();
             """));
@@ -1082,7 +1171,7 @@ public sealed class DirectNativeImportTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
 
             extern unsafe uint32 GetCurrentThreadId();
@@ -1106,7 +1195,7 @@ public sealed class DirectNativeImportTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             [Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
@@ -1134,7 +1223,7 @@ public sealed class DirectNativeImportTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+        var compilation = Create(SyntaxTree.Parse($$"""
             [Terrum.Interop.NativeImport("ntdll.dll", "RtlCompareMemory")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
             [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
@@ -1148,9 +1237,10 @@ public sealed class DirectNativeImportTests
                 unsafe {
                     try {
                         return int32(RtlCompareMemory(
-                            &values[selectedIndex], &expected[0], 2)) - 2;
+                            &values[selectedIndex++], &expected[0], 2)) - 2
+                            + selectedIndex - {{index + 1}};
                     } catch {
-                        return 7;
+                        return selectedIndex == {{index + 1}} ? 7 : 8;
                     }
                 }
             }
@@ -1165,7 +1255,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void NativeParameterRejectsConstantArrayAddressPastItsRequestedSuffix()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("ntdll.dll", "RtlCompareMemory")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
             [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
@@ -1189,7 +1279,7 @@ public sealed class DirectNativeImportTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct SystemTime {
                 char16 Year;
@@ -1240,7 +1330,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeImportAcceptsOpaquePointersAndWritableBlittableAggregates()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct NativeRectangle {
                 public int32 Left;
@@ -1303,7 +1393,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeImportAcceptsLargeBlittableAggregateInput()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct NativePacket {
                 public uint64 First;
@@ -1355,7 +1445,7 @@ public sealed class DirectNativeImportTests
             [Terrum.Interop.NativeImport("example.dll", "ConsumeOpaque")]
             extern int32 ConsumeOpaque(ptr<OpaquePayload> value);
             """;
-        var transported = Compilation.Create(SyntaxTree.Parse(declarations + """
+        var transported = Create(SyntaxTree.Parse(declarations + """
             unsafe int32 ForwardOpaque(ptr<OpaquePayload> value) {
                 unsafe { return ConsumeOpaque(value); }
             }
@@ -1365,7 +1455,7 @@ public sealed class DirectNativeImportTests
         Assert.That(transported.HasErrors, Is.False,
             string.Join(Environment.NewLine, transported.Diagnostics));
 
-        var exposed = Compilation.Create(SyntaxTree.Parse(declarations + """
+        var exposed = Create(SyntaxTree.Parse(declarations + """
             unsafe int32 ExposeOpaque() {
                 OpaquePayload value = new OpaquePayload(1);
                 unsafe { return ConsumeOpaque(&value); }
@@ -1381,7 +1471,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void UnsafeSourceFunctionsCanRelayOpaquePointersWithExplicitAuthorization()
     {
-        var accepted = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var accepted = CreateLibrary(SyntaxTree.Parse("""
             unsafe int32 Consume(ptr<void> window) { return 42; }
             unsafe int32 Forward(ptr<void> window) {
                 unsafe { return Consume(window); }
@@ -1390,7 +1480,7 @@ public sealed class DirectNativeImportTests
         Assert.That(accepted.HasErrors, Is.False,
             string.Join(Environment.NewLine, accepted.Diagnostics));
 
-        var rejected = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var rejected = CreateLibrary(SyntaxTree.Parse("""
             unsafe int32 Consume(ptr<void> window) { return 42; }
             int32 Forward() { return Consume(null); }
             """));
@@ -1409,13 +1499,13 @@ public sealed class DirectNativeImportTests
         const string NonBlittable = """
             struct NativeRectangle { public int32 Left; }
             """;
-        var unsupportedLayout = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var unsupportedLayout = CreateLibrary(SyntaxTree.Parse(
             NonBlittable + Import));
         Assert.That(unsupportedLayout.Program, Is.Null);
         Assert.That(unsupportedLayout.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True);
 
-        var readonlyBacking = Compilation.Create(SyntaxTree.Parse("""
+        var readonlyBacking = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct NativeRectangle {
                 public int32 Left;
@@ -1454,7 +1544,7 @@ public sealed class DirectNativeImportTests
                 ptr<void> module, write ptr<NativeRectangle> rectangle);
             """;
 
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -1481,17 +1571,17 @@ public sealed class DirectNativeImportTests
                 NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
         ]));
 
-        var executable = Compilation.Create(SyntaxTree.Parse(Source + "\nint32 Main() { return 0; }"));
+        var executable = Create(SyntaxTree.Parse(Source + "\nint32 Main() { return 0; }"));
         Assert.That(executable.HasErrors, Is.False,
             string.Join(Environment.NewLine, executable.Diagnostics));
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(executable.Program!, "unapproved-native-handle-write"));
     }
 
     [Test]
     public void SourceAuthoredImportRequiresUnsafeCallers()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(ImportDeclaration + """
+        var compilation = Create(SyntaxTree.Parse(ImportDeclaration + """
             int32 Main() {
                 mut int64 counter = 0;
                 return QueryPerformanceCounter(&counter);
@@ -1503,9 +1593,9 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void NativeImportRejectsLegacyCatalogKeySyntax()
+    public void NativeImportOneArgumentIsTheLiteralLibraryName()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("test.catalog.key")]
 
             extern unsafe uint32 ReadCounter();
@@ -1513,15 +1603,18 @@ public sealed class DirectNativeImportTests
             int32 Main() { return 0; }
             """));
 
-        Assert.That(compilation.Program, Is.Null);
-        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+        Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+        var import = compilation.Program!.Functions.Single(static function =>
+            function.Name == "ReadCounter").DirectNativeImport!;
+        Assert.That(import.LibraryName, Is.EqualTo("test.catalog.key"));
+        Assert.That(import.ExportName, Is.EqualTo("ReadCounter"));
     }
 
     [Test]
     public void SourceAuthoredNativeParameterRequiresMatchingWritableLocal()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(ImportDeclaration + """
+        var compilation = Create(SyntaxTree.Parse(ImportDeclaration + """
             int32 Main() {
                 mut int32 counter = 0;
                 unsafe { return QueryPerformanceCounter(&counter); }
@@ -1545,14 +1638,14 @@ public sealed class DirectNativeImportTests
                 unsafe { return ReadValue(&value); }
             }
             """;
-        var declarationOnly = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var declarationOnly = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             public extern int32 ReadValue(ptr<int32> value);
             """));
         Assert.That(declarationOnly.HasErrors, Is.False,
             string.Join(Environment.NewLine, declarationOnly.Diagnostics));
-        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        var compilation = Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -1566,7 +1659,7 @@ public sealed class DirectNativeImportTests
             NativeEmitter.EmitWithNativeImports(compilation.Program, NativeRuntimePolicy.FailFast)),
             Does.Contain("ReadValue"));
 
-        var missingMetadata = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+        var missingMetadata = Create(SyntaxTree.Parse(Source.Replace(
             "[Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]",
             "", StringComparison.Ordinal)));
         Assert.That(missingMetadata.HasErrors, Is.False,
@@ -1574,11 +1667,11 @@ public sealed class DirectNativeImportTests
         var rawImport = missingMetadata.Program!.Functions.Single(static function =>
             function.Name == "ReadValue").DirectNativeImport!;
         Assert.That(rawImport.Parameters, Is.Empty);
-        var unauthorizedWrite = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+        var unauthorizedWrite = Create(SyntaxTree.Parse(Source.Replace(
             "Read, NoEscape", "Write, NoEscape", StringComparison.Ordinal)));
         Assert.That(unauthorizedWrite.Program, Is.Null);
         Assert.That(unauthorizedWrite.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
-        var safeCaller = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+        var safeCaller = Create(SyntaxTree.Parse(Source.Replace(
             "unsafe { return ReadValue(&value); }", "return ReadValue(&value);",
             StringComparison.Ordinal)));
         Assert.That(safeCaller.Program, Is.Null);
@@ -1616,7 +1709,7 @@ public sealed class DirectNativeImportTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        var compilation = Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -1641,12 +1734,12 @@ public sealed class DirectNativeImportTests
         Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
             compilation.Program, NativeRuntimePolicy.FailFast)), Does.Contain("ReadSourceFixture"));
 
-        var wrongElementType = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+        var wrongElementType = Create(SyntaxTree.Parse(Source.Replace(
             "ptr<char16> sourceFile", "ptr<uint32> sourceFile", StringComparison.Ordinal)));
         Assert.That(wrongElementType.Program, Is.Null);
         Assert.That(wrongElementType.HasErrors, Is.True);
 
-        var safeCaller = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+        var safeCaller = Create(SyntaxTree.Parse(Source.Replace(
             "unsafe {", "{", StringComparison.Ordinal)));
         Assert.That(safeCaller.Program, Is.Null);
         Assert.That(safeCaller.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
@@ -1655,7 +1748,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportRoundTripsUnboundedCharacterPointerInput()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "ReadUtf16Path")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             public extern int32 ReadUtf16Path(ptr<char16> path);
@@ -1677,7 +1770,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void UnsafeWrapperCanCallDirectImportWithStringLiteralPointer()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "ReadUtf16Path")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             extern int32 ReadUtf16Path(ptr<char16> path);
@@ -1715,7 +1808,7 @@ public sealed class DirectNativeImportTests
                 unsafe { return ReadUtf16Path(utf16z("{{value}}")); }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1735,7 +1828,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativePointerInputSurvivesPrivateSemanticMetadataAndIsRevalidated()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
             public extern int32 ReadValue(ptr<int32> value);
@@ -1745,7 +1838,7 @@ public sealed class DirectNativeImportTests
 
         var artifact = ModuleCompiler.CreateProducer(compilation.Program!, ["ReadValue"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(101));
+            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(106));
         var reference = ModuleCompiler.CreateReference(artifact);
         var import = reference.Functions.Single(static function =>
             function.Name == "ReadValue").DirectNativeImport!;
@@ -1768,11 +1861,11 @@ public sealed class DirectNativeImportTests
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(parameterOrdinalOffset, sizeof(int)), 1);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
     }
 
     [Test]
-    public void PrivateRevision101EncodesStorageAddressExtentsAndEmptyPath()
+    public void PrivateRevision106EncodesStorageAddressExtentsAndEmptyPath()
     {
         const string source = """
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
@@ -1784,22 +1877,22 @@ public sealed class DirectNativeImportTests
                 unsafe { return ReadValue(&value); }
             }
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+        var compilation = CreateLibrary(SyntaxTree.Parse(source),
             BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = ModuleCompiler.CreateProducer(compilation.Program!,
             ["Exercise"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(101));
+            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(106));
         var oldRevision = (byte[])artifact.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             oldRevision.AsSpan(sizeof(int), sizeof(int)), 100);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(oldRevision));
 
         var addressOffset = -1;
-        for (var offset = sizeof(int) * 2; offset <= artifact.Length - 75; offset++)
+        for (var offset = sizeof(int) * 2; offset <= artifact.Length - 55; offset++)
         {
             if (artifact[offset] == 35
                 && BinaryPrimitives.ReadInt32LittleEndian(
@@ -1833,7 +1926,7 @@ public sealed class DirectNativeImportTests
 
         var highCount = artifact.ToArray();
         highCount[addressOffset + 32] = 0x80;
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(highCount));
     }
 
@@ -1850,11 +1943,11 @@ public sealed class DirectNativeImportTests
             extern int32 ObserveValues(ptr<uint32> values);
 
             int32 Main() {
-                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                [uint32; {{backingCount}}] values = [{{values}}];
                 unsafe { return ObserveValues(&values[0]); }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1887,7 +1980,7 @@ public sealed class DirectNativeImportTests
             extern int32 ObserveValues(ptr<uint32> values);
 
             int32 Main() {
-                InlineArray<uint32, 3> values = [1, 2, 3];
+                [uint32; 3] values = [1, 2, 3];
                 unsafe {
                     ptr<uint32> pointer = &values[{{index}}];
                     ptr<uint32> forwarded = pointer;
@@ -1895,7 +1988,7 @@ public sealed class DirectNativeImportTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1924,7 +2017,7 @@ public sealed class DirectNativeImportTests
             extern int32 ObserveValues(ptr<uint32> values);
 
             unsafe int32 Forward(ptr<uint32> opaque, bool chooseOpaque) {
-                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                [uint32; {{backingCount}}] values = [{{values}}];
                 unsafe {
                     ptr<uint32> local = &values[0];
                     ptr<uint32> selected = chooseOpaque ? opaque : local;
@@ -1934,7 +2027,7 @@ public sealed class DirectNativeImportTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1952,7 +2045,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void PositiveDirectNativeParameterExtentAcceptsOpaqueInputAtUnsafeCall()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
             extern int32 ObserveValues(ptr<uint32> values);
@@ -1973,7 +2066,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void PositiveDirectNativeParameterExtentAcceptsOpaqueImportResultAtUnsafeCall()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "GetValues")]
             extern ptr<uint32> GetValues();
 
@@ -2003,7 +2096,7 @@ public sealed class DirectNativeImportTests
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
             extern int32 ObserveValues(ptr<uint32> values);
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldBind),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2030,7 +2123,7 @@ public sealed class DirectNativeImportTests
                 unsafe { return ObserveValues(null); }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2050,7 +2143,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void SemanticVerifierRejectsTypedNullForPositiveNativeParameterExtent()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             extern int32 ObserveValues(ptr<uint32> values);
@@ -2076,13 +2169,13 @@ public sealed class DirectNativeImportTests
                 function with { DirectNativeImport = invalidImport }),
         };
 
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalidProgram));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalidProgram));
     }
 
     [Test]
     public void BlittableAggregateNativeParameterSurvivesTypeRemappingAndIsRevalidated()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct UnusedPrefix { public int32 Value; }
             [Blittable] [Layout(LayoutKind.Sequential)]
@@ -2128,13 +2221,13 @@ public sealed class DirectNativeImportTests
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(parameterTypeOffset, sizeof(int)), int.MaxValue);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
     }
 
     [Test]
     public void TrRmNativeImportRoundTripsNativeParameterPointerInput()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             public extern int32 ReadValue(ptr<int32> value);
@@ -2149,11 +2242,11 @@ public sealed class DirectNativeImportTests
             function.Name == "ReadValue");
         var import = loadedFunction.DirectNativeImport!;
         Assert.That(import.Parameters,
-            Is.EqualTo(new[]
-            {
+            Is.EqualTo(
+            [
                 new DirectNativeParameter(0, PrimitiveType.Int32,
                     NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 1),
-            }));
+            ]));
         var parameterType = loadedFunction.Variables[0].Type;
         Assert.That(NativePointerTypes.IsType(parameterType), Is.True);
         Assert.That(loaded.NativePointerTypes[NativePointerTypes.Index(parameterType)],
@@ -2190,7 +2283,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmAddressBodyRoundTripsTypedReadonlyScalarLocalAddresses()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadSigned")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             extern void ReadSigned(ptr<int32> value);
@@ -2252,7 +2345,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmAddressBodyRejectsMalformedPointersBackingAndUnsafeScope()
     {
-        var sourceWithoutUnsafeScope = Compilation.Create(SyntaxTree.Parse("""
+        var sourceWithoutUnsafeScope = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadSigned")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             extern void ReadSigned(ptr<int32> value);
@@ -2265,7 +2358,7 @@ public sealed class DirectNativeImportTests
             """));
         Assert.That(sourceWithoutUnsafeScope.HasErrors, Is.True);
 
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadSigned")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             extern void ReadSigned(ptr<int32> value);
@@ -2332,7 +2425,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportRoundTripsBlittableAggregatePointerDependency()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct TransportIdentity {
                 public uint32 Source;
@@ -2382,10 +2475,22 @@ public sealed class DirectNativeImportTests
         Assert.That(reference.Structures.Select(static structure => structure.Name),
             Is.EqualTo(["TransportIdentity", "TransportHeader"]));
         var consumer = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "FillHeader")]
+            extern unsafe int32 FillHeader(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<TransportHeader> header);
+
             int32 Main() {
-                unsafe { return InspectHeader(null); }
+                init TransportHeader header;
+                unsafe {
+                    if (FillHeader(&init header) == 0) { return -1; }
+                    TransportHeader copied = header;
+                    return InspectHeader(&copied);
+                }
             }
-            """), reference);
+            """), reference,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.FailFast));
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
 
@@ -2408,7 +2513,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportRoundTripsAndBoundsLargeNativeParameterExtents()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ObserveValues")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
             public extern int32 ObserveValues(ptr<uint32> values);
@@ -2432,7 +2537,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportRoundTripsNestedNativeParameterPointerInput()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "WritePointer")]
             [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
             public extern int32 WritePointer(write ptr<ptr<void>> value);
@@ -2446,11 +2551,11 @@ public sealed class DirectNativeImportTests
         var import = loaded.Functions.Single(static function =>
             function.Name == "WritePointer").DirectNativeImport!;
         Assert.That(import.Parameters,
-            Is.EqualTo(new[]
-            {
+            Is.EqualTo(
+            [
                 new DirectNativeParameter(0, PrimitiveType.NativeRawPointer,
                     NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
-            }));
+            ]));
 
         var reference = TrRmExecutableCompiler
             .CreateDevelopmentNativeConventionsDraftReference(artifact);
@@ -2471,7 +2576,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportRoundTripsVoidPointeeNativeParameter()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "InspectPointer")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             public extern int32 InspectPointer(ptr<void> value);
@@ -2485,17 +2590,17 @@ public sealed class DirectNativeImportTests
         var import = loaded.Functions.Single(static function =>
             function.Name == "InspectPointer").DirectNativeImport!;
         Assert.That(import.Parameters,
-            Is.EqualTo(new[]
-            {
+            Is.EqualTo(
+            [
                 new DirectNativeParameter(0, PrimitiveType.Void,
                     NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
-            }));
+            ]));
     }
 
     [Test]
     public void TrRmNativeImportRejectsMalformedNativeParameterContract()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             public extern int32 ReadValue(ptr<int32> value);
@@ -2514,7 +2619,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void SignedNonnegativeNativeOutputIsRejectedByDevelopmentTrRm()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
@@ -2536,10 +2641,10 @@ public sealed class DirectNativeImportTests
         Assert.That(normalizedOutput.ComplementSelector,
             Is.EqualTo(NativeOutputSelector.Negative));
 
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(compilation.Program!, "signed-native-output"));
 
-        var invalid = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var invalid = CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
@@ -2555,7 +2660,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void SignedNonnegativeNativeOutputSurvivesPrivateNativeDependencies()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
@@ -2578,7 +2683,7 @@ public sealed class DirectNativeImportTests
         var program = compilation.Program!;
         var semanticProducer = ModuleCompiler.CreateProducer(program, ["AcquireAndReturn"]);
         var reference = ModuleCompiler.CreateReference(semanticProducer);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+        var consumerCompilation = Create(SyntaxTree.Parse(
             "int32 Main() { return AcquireAndReturn(); }"), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -2611,7 +2716,7 @@ public sealed class DirectNativeImportTests
                 return int32(value.Value);
             }
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -2641,7 +2746,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativeOutputCanBeCombinedWithOneNativeProducerDependency()
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 ProviderValue() { return 40; }"));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
@@ -2665,7 +2770,8 @@ public sealed class DirectNativeImportTests
                 }
                 return -1;
             }
-            """), NativeModuleCompiler.CreateReference(provider));
+            """), NativeModuleCompiler.CreateReference(provider),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
@@ -2682,7 +2788,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void DirectNativePointerInputCanBeCombinedWithOneNativeProducerDependency()
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 ProviderValue() { return 40; }"));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
@@ -2700,7 +2806,11 @@ public sealed class DirectNativeImportTests
                 if (status == 0) { return -1; }
                 return ProviderValue() + value;
             }
-            """), NativeModuleCompiler.CreateReference(provider));
+            """), NativeModuleCompiler.CreateReference(provider),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration = NativeCoreRegistrationTests.CreateRegistration(),
+            });
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
@@ -2733,13 +2843,13 @@ public sealed class DirectNativeImportTests
                 return int32(value.Value);
             }
             """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = ModuleCompiler.CreateProducer(compilation.Program!, ["ReadAndReturn"]);
         var malformed = artifact.ToArray();
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(malformed.AsSpan(4, sizeof(int))),
-            Is.EqualTo(92));
+            Is.EqualTo(106));
         var functionName = Encoding.UTF8.GetBytes("ReadValue");
         var nameRecord = new byte[sizeof(int) + functionName.Length];
         BinaryPrimitives.WriteInt32LittleEndian(nameRecord, functionName.Length);
@@ -2750,19 +2860,19 @@ public sealed class DirectNativeImportTests
         var contractLength = BinaryPrimitives.ReadInt32LittleEndian(
             malformed.AsSpan(contractLengthOffset, sizeof(int)));
         var outputCountOffset = contractLengthOffset + sizeof(int) + contractLength
-            + 3 * sizeof(byte);
+            + (3 * sizeof(byte));
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
             malformed.AsSpan(outputCountOffset, sizeof(int))), Is.EqualTo(1));
         var successSelectorOffset = outputCountOffset + 18;
         malformed[successSelectorOffset] = byte.MaxValue;
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
     }
 
     [Test]
     public void DirectWritablePointerParameterDoesNotInventOutputValidity()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             extern int32 ReadValue(write ptr<int32> value);
             int32 Main() { return 0; }
@@ -2782,7 +2892,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void SourceAuthoredNestedPointerWriteUsesAnOpaquePointerValue()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(OpaquePointerImportDeclaration + """
+        var compilation = Create(SyntaxTree.Parse(OpaquePointerImportDeclaration + """
             int32 Main() {
                 mut ptr<void> result = null;
                 unsafe {
@@ -2802,7 +2912,7 @@ public sealed class DirectNativeImportTests
     [Test]
     public void TrRmNativeImportRoundTripsNestedPointerWrite()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse(OpaquePointerImportDeclaration));
+        var provider = CreateLibrary(SyntaxTree.Parse(OpaquePointerImportDeclaration));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
         var artifact = TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
@@ -2891,9 +3001,37 @@ public sealed class DirectNativeImportTests
             TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(malformed));
     }
 
+    private static Compilation Create(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(tree,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation Create(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(tree, reference, runtimePolicy);
+
+    private static Compilation Create(IEnumerable<SyntaxTree> trees,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(trees,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation CreateLibrary(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.CreateLibrary(tree,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation CreateLibrary(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.CreateLibrary(tree, reference, runtimePolicy);
+
     private static byte[] EmitPublicImportArtifact()
     {
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse(PublicImportDeclaration));
+        var provider = CreateLibrary(SyntaxTree.Parse(PublicImportDeclaration));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
         return TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
@@ -2951,9 +3089,9 @@ public sealed class DirectNativeImportTests
 
         var offsetTableBytes = checked((count + 1) * sizeof(uint));
         var first = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-            artifact.AsSpan(sectionOffset + (row - 1) * sizeof(uint), sizeof(uint))));
+            artifact.AsSpan(sectionOffset + ((row - 1) * sizeof(uint)), sizeof(uint))));
         var last = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-            artifact.AsSpan(sectionOffset + row * sizeof(uint), sizeof(uint))));
+            artifact.AsSpan(sectionOffset + (row * sizeof(uint)), sizeof(uint))));
         if ((uint)byteOffset >= (uint)(last - first))
         {
             throw new ArgumentOutOfRangeException(nameof(byteOffset));
@@ -2971,9 +3109,9 @@ public sealed class DirectNativeImportTests
         for (var row = 1; row <= count; row++)
         {
             var first = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-                artifact.AsSpan(sectionOffset + (row - 1) * sizeof(uint), sizeof(uint))));
+                artifact.AsSpan(sectionOffset + ((row - 1) * sizeof(uint)), sizeof(uint))));
             var last = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-                artifact.AsSpan(sectionOffset + row * sizeof(uint), sizeof(uint))));
+                artifact.AsSpan(sectionOffset + (row * sizeof(uint)), sizeof(uint))));
             var rowBytes = artifact.AsSpan(sectionOffset + offsetTableBytes + first, last - first);
             if (rowBytes.SequenceEqual(expected))
             {
@@ -3206,7 +3344,7 @@ public sealed class DirectNativeImportTests
         var count = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12, sizeof(uint))));
         for (var entry = 0; entry < count; entry++)
         {
-            var directoryOffset = 32 + entry * 16;
+            var directoryOffset = 32 + (entry * 16);
             if (BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(directoryOffset, sizeof(ushort)))
                 == sectionKind)
             {

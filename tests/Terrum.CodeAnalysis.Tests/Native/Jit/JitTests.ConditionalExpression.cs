@@ -5,7 +5,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false,false,42)]
     [TestCase(false,true,unchecked((int)0xE0540003))]

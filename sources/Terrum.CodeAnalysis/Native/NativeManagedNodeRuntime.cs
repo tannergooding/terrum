@@ -53,7 +53,8 @@ internal sealed partial class PeCompiler
             && ContainsNormalBackingReferenceValue(function.ReturnType, _program))
         {
             var returnValue = checked((int)AlignOffset(_returnSlots[functionIndex]
-                + (IsIndirectResult(function.ReturnType) ? 8 : 0), 16));
+                + (IsIndirectResult(function.ReturnType) ? 8 : 0),
+                ScratchAlignment(function.ReturnType)));
             foreach (var leaf in NormalBackingReferenceLeaves(
                 function.ReturnType, _program))
             {
@@ -149,7 +150,8 @@ internal sealed partial class PeCompiler
                     if (ContainsNormalBackingReferenceValue(field.Type, _program))
                     {
                         maximumReferenceValueSize = Math.Max(
-                            maximumReferenceValueSize, field.Size);
+                            maximumReferenceValueSize,
+                            NativeLayoutSize(field.Size));
                     }
                 }
             }
@@ -933,7 +935,8 @@ internal sealed partial class PeCompiler
                 {
                     if (ManagedClassTypes.IsManaged(field.Type))
                     {
-                        (managedFieldOffsets ??= []).Add(field.Offset);
+                        (managedFieldOffsets ??= []).Add(
+                            NativeLayoutOffset(field.Offset));
                     }
                 }
                 _code.Int32(managedFieldOffsets?.Count ?? 0);

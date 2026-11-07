@@ -2,14 +2,15 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
-public sealed class NativeManagedClassVerifierTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeManagedClassVerifierTests
 {
     private const string Source = """
         mut class Leaf {
@@ -57,7 +58,11 @@ public sealed class NativeManagedClassVerifierTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(Compilation.GetNativeProfileVersion(program), Is.EqualTo("native-19"));
         Assert.That(compilation.NativeProfileVersion, Is.EqualTo("native-19"));
     }
@@ -109,7 +114,11 @@ public sealed class NativeManagedClassVerifierTests
             "public int32 Export() { return 42; }"));
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = producerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Export"]);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = producerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), ["Export"]);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             class Leaf {
                 public int32 Value;
@@ -118,7 +127,11 @@ public sealed class NativeManagedClassVerifierTests
             int32 Main() { return Export(); }
             """), ModuleCompiler.CreateReference(producer));
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = consumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var consumer = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = consumerCompilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         Assert.That(ModuleCompiler.CreateConsumer(consumer, producer), Is.Not.Empty);
         var imported = global::System.Linq.Enumerable.Single(consumer.Functions, static function => function.IsExternal);
         var malformed = consumer with {
@@ -161,7 +174,11 @@ public sealed class NativeManagedClassVerifierTests
             public int32 Export() { return 42; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         SemanticVerifier.VerifyLibrary(program);
         Assert.That(ModuleCompiler.CreateProducer(program, ["Export"]), Is.Not.Empty);
         var descriptorOnly = program with {
@@ -175,7 +192,7 @@ public sealed class NativeManagedClassVerifierTests
     }
     [TestCase("struct Copy { public int64 Value; public Copy(int64 value) { Value = value; } }",true)]
     [TestCase("struct Copy { public int64 First; public int64 Second; public Copy(int64 value) { First = value; Second = value; } }",true)]
-    [TestCase("unique struct Copy { public int32 Value; public Copy(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} }",false)]
+    [TestCase("unique struct Copy { public int32 Value; public Copy(int32 value) { Value = value; }  [Cleanup] public void Close() {} }",false)]
     public void ClassConstructorArgumentsRequireCopyRatherThanOwningValues(string declaration, bool allowed)
     {
         var source = declaration + Environment.NewLine + """
@@ -189,7 +206,11 @@ public sealed class NativeManagedClassVerifierTests
         if (allowed)
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))());
+            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = compilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))());
         }
         else
         {
@@ -213,19 +234,33 @@ public sealed class NativeManagedClassVerifierTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))();
         var factoryIndex = FindFactory(program);
         var factory = program.Functions[factoryIndex];
         var constructorIndex = factory.ClassConstructor;
         var constructor = program.Functions[constructorIndex];
         BoundStruct[] structures = [
-            new BoundStruct("Copy8", [new BoundStructField("Value", PrimitiveType.Int64, 0, 8)], 8),
+            new BoundStruct("Copy8", [new BoundStructField("Value", PrimitiveType.Int64, 0, 8)], 8)
+            {
+                Alignment = 8,
+                RequiredAlignment = 1,
+            },
             new BoundStruct("Copy16", [
                 new BoundStructField("First", PrimitiveType.Int64, 0, 8),
                 new BoundStructField("Second", PrimitiveType.Int64, 8, 8),
-            ], 16),
+            ], 16)
+            {
+                Alignment = 8,
+                RequiredAlignment = 1,
+            },
             new BoundStruct("Owner", [new BoundStructField("Value", PrimitiveType.Int32, 0, 4)], 4) {
                 IsUnique = true,
+                Alignment = 4,
+                RequiredAlignment = 1,
             },
         ];
         foreach (var structure in structures)
@@ -289,7 +324,11 @@ public sealed class NativeManagedClassVerifierTests
             }
             """));
         Assert.That(allowed.HasErrors, Is.False, string.Join(Environment.NewLine, allowed.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = allowed.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = allowed.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))();
         var factory = program.Functions[FindFactory(program)];
         Assert.That(factory.IsPrivate, Is.True);
         Assert.That(factory.IsInternal, Is.False);
@@ -324,7 +363,11 @@ public sealed class NativeManagedClassVerifierTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        _ = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        _ = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))();
     }
     [TestCase("Value = 0;")]
     [TestCase("this.Value = 0;")]
@@ -399,7 +442,11 @@ public sealed class NativeManagedClassVerifierTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))());
+        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))());
     }
 
     [Test]
@@ -419,15 +466,27 @@ public sealed class NativeManagedClassVerifierTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))();
         var main = program.Functions[program.EntryPoint];
         var view = Array.FindIndex(main.Variables.ToArray(),
             static variable => variable.Name == "view");
         var projection = new BoundReadonlyProjection(
             new BoundRead(view, (PrimitiveType)ManagedClassTypes.First, main.Span),
             (PrimitiveType)ManagedClassTypes.First, main.Span);
-        var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual10 = main.Body.Statements[^1]; Assert.That(__nunitActual10, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual10!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual11 = returned.Value; Assert.That(__nunitActual11, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual11!; }))();
+        var returned = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual10 = main.Body.Statements[^1];
+            Assert.That(__nunitActual10, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual10!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual11 = returned.Value;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual11!;
+        }))();
         var forged = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(main.Body.Statements.Length - 1,
@@ -454,7 +513,11 @@ public sealed class NativeManagedClassVerifierTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))();
     }
 
     private static int FindFactory(BoundProgram program) =>

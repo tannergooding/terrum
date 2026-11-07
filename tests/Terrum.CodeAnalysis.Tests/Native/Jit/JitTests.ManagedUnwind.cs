@@ -5,7 +5,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase("""
         int32 Main() {
@@ -80,7 +80,7 @@ public sealed partial class JitTests
         unique struct CollectOnExit {
             private int32 _value;
             public CollectOnExit() { _value = 0; }
-            [Cleanup][NoThrow] public void Close() {
+            [Cleanup] public void Close() {
                 int32 collected = ManagedHeap.Collect();
             }
         }

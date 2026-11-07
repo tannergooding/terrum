@@ -7,7 +7,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class UnsupportedQualifiedInteropAttributeTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class UnsupportedQualifiedInteropAttributeTests
 {
     [TestCase("[Terrum.Interop.UnregisteredContract]")]
     public void UnsupportedQualifiedInteropAttributeUsesGenericDiagnostic(string attribute)

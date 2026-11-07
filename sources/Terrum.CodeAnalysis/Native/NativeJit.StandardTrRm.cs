@@ -21,7 +21,7 @@ public static unsafe partial class NativeJit
             || plan.RuntimePolicy != runtimePolicy)
         {
             throw new NotSupportedException(
-                "The bounded Standard F JIT route supports fail-fast only.");
+                "The bounded Standard TRRM JIT route supports fail-fast only.");
         }
         if (!OperatingSystem.IsWindows()
             || RuntimeInformation.ProcessArchitecture != Architecture.X64)
@@ -32,6 +32,11 @@ public static unsafe partial class NativeJit
 
         var (program, bindings) = plan.CreateLoweringInputs(
             TrRmStandardNativeOperation.Execute);
+        if (plan.IsLocalAggregateLayoutPlan)
+        {
+            return Execute(program, runtimePolicy, registrarAssembly);
+        }
+
         if (program.EntryPoint < 0)
         {
             throw new ArgumentException(

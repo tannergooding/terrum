@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -22,21 +23,76 @@ internal static class PeImage
             return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left.DllName, right.DllName);
         });
 
-    internal static byte[] Build(NativeCode native) => BuildCore(native, null);
+    internal static byte[] Build(NativeCode native)
+        => BuildCore(native, null, library: false);
 
-    internal static byte[] BuildLibrary(NativeCode native, IReadOnlyList<(string Name, int Index)> exports) =>
-        BuildCore(native, exports);
+    internal static byte[] BuildExecutable(NativeCode native,
+        IReadOnlyList<(string Name, int Index)> exports)
+        => BuildCore(native, exports, library: false);
 
-    private static byte[] BuildCore(NativeCode native, IReadOnlyList<(string Name, int Index)>? exports)
+    internal static byte[] BuildLibrary(NativeCode native,
+        IReadOnlyList<(string Name, int Index)> exports)
+        => BuildCore(native, exports, library: true);
+
+    private static byte[] BuildCore(NativeCode native,
+        IReadOnlyList<(string Name, int Index)>? exports, bool library)
     {
-        var library = exports is not null;
-        var code = native.Code;
+        try
+        {
+            return BuildCoreChecked(native, exports, library);
+        }
+        catch (OverflowException exception)
+        {
+            throw new NotSupportedException(
+                "Native PE image, import, unwind or displacement layout exceeds signed x64 capacity.",
+                exception);
+        }
+    }
+
+    private static byte[] BuildCoreChecked(NativeCode native,
+        IReadOnlyList<(string Name, int Index)>? exports, bool library)
+    {
+        var exportThunks = native.NativeExportThunks;
+        if (!library && !exportThunks.IsEmpty)
+        {
+            throw new ArgumentException("Executable images cannot contain library export thunks.", nameof(native));
+        }
+        var sourceCode = native.Code;
+        var codeLength = checked(sourceCode.Length + (6 * exportThunks.Length));
+        if (codeLength > Array.MaxLength)
+        {
+            throw new NotSupportedException(
+                "Native PE code section exceeds the host byte-array capacity.");
+        }
+        var code = codeLength == sourceCode.Length ? sourceCode : new byte[codeLength];
+        if (codeLength != sourceCode.Length)
+        {
+            sourceCode.CopyTo(code, 0);
+        }
+        var thunkOffsets = new Dictionary<int, int>(exportThunks.Length);
+        for (var index = 0; index < exportThunks.Length; index++)
+        {
+            var thunk = exportThunks[index];
+            var offset = checked(sourceCode.Length + (index * 6));
+            if (thunk.FunctionIndex < 0 || thunk.FunctionIndex >= native.SourceFunctionOffsets.Length
+                || native.SourceFunctionOffsets[thunk.FunctionIndex] != -1
+                || string.IsNullOrEmpty(thunk.Name) || thunk.Import.FunctionName != thunk.Name
+                || !thunkOffsets.TryAdd(thunk.FunctionIndex, offset)
+                || exports is null || !exports.Contains((thunk.Name, thunk.FunctionIndex)))
+            {
+                throw new ArgumentException("A direct-import export thunk is malformed or unselected.",
+                    nameof(native));
+            }
+            // The leaf jump preserves the foreign call's original ABI frame and return path.
+            code[offset] = 0xFF;
+            code[offset + 1] = 0x25;
+        }
         var entry = native.AotEntryPoint;
         var functions = native.Functions;
         var importOffsets = native.ExitProcessFixups;
         var readOnlyLength = native.ReadOnlyDataLength;
         var writableLength = native.Data.Length - readOnlyLength;
-        var imports = BuildImports(native);
+        var imports = BuildImports(native, exportThunks);
         var importTableSize = imports.Bytes.Length;
         var textRva = TextRva;
         var dataRva = Align(textRva + code.Length, SectionAlignment);
@@ -72,6 +128,11 @@ internal static class PeImage
         var xdataFile = checked(pdataFile + Align(pdataSize, FileAlignment));
         var exportFile = checked(xdataFile + Align(xdataSize, FileAlignment));
         var fileSize = checked(exportFile + Align(exportSize, FileAlignment));
+        if (fileSize < 0 || fileSize > Array.MaxLength)
+        {
+            throw new NotSupportedException(
+                "Native PE file exceeds the host byte-array capacity.");
+        }
         var image = new byte[fileSize];
         code.CopyTo(image, textFile);
         imports.Bytes.CopyTo(image, dataFile);
@@ -87,6 +148,13 @@ internal static class PeImage
         {
             Write32(image, textFile + fixup.DisplacementOffset, imports.Displacement(fixup.DllName,
                 fixup.ExportName, dataRva, textRva, fixup.DisplacementOffset));
+        }
+        for (var index = 0; index < exportThunks.Length; index++)
+        {
+            var thunk = exportThunks[index];
+            var offset = checked(sourceCode.Length + (index * 6));
+            Write32(image, textFile + offset + 2, imports.Displacement(thunk.Import.DllName,
+                thunk.Import.ExportName, dataRva, textRva, offset + 2));
         }
         foreach (var fixup in native.DataFixups)
         {
@@ -126,8 +194,10 @@ internal static class PeImage
             for (var i = 0; i < count; i++)
             {
                 var (name, index) = exports[i];
-                var sourceOffset = index >= 0 && index < native.SourceFunctionOffsets.Length
-                    ? native.SourceFunctionOffsets[index] : -1;
+                var sourceOffset = thunkOffsets.TryGetValue(index, out var thunkOffset)
+                    ? thunkOffset
+                    : index >= 0 && index < native.SourceFunctionOffsets.Length
+                        ? native.SourceFunctionOffsets[index] : -1;
                 if (sourceOffset < 0 || sourceOffset >= code.Length)
                 {
                     throw new ArgumentException("Export does not name an emitted source function.", nameof(exports));
@@ -149,7 +219,7 @@ internal static class PeImage
         var coff = pe + 4;
         Write16(image, coff, (int)NativeTargetProfile.CoffMachine);
         Write16(image, coff + 2, 4 + (readOnlyLength == 0 ? 0 : 1)
-            + (writableLength == 0 ? 0 : 1) + (library ? 1 : 0));
+            + (writableLength == 0 ? 0 : 1) + (exportSize == 0 ? 0 : 1));
         Write16(image, coff + 16, 0xF0);
         Write16(image, coff + 18, library ? 0x2022 : 0x0022); // DLL/executable, large-address-aware
         var optional = coff + 20;
@@ -176,7 +246,7 @@ internal static class PeImage
         Write64(image, optional + 88, 0x100000);
         Write64(image, optional + 96, 0x1000);
         Write32(image, optional + 108, 16);
-        if (library)
+        if (exportSize != 0)
         {
             Write32(image, optional + 112, exportRva);
             Write32(image, optional + 112 + 4, exportSize);
@@ -202,7 +272,7 @@ internal static class PeImage
         }
         Section(section++, ".pdata", pdataSize, pdataRva, pdataFile, 0x40000040);
         Section(section++, ".xdata", xdataSize, xdataRva, xdataFile, 0x40000040);
-        if (library)
+        if (exportSize != 0)
         {
             Section(section, ".edata", exportSize, exportRva, exportFile, 0x40000040);
         }
@@ -220,7 +290,8 @@ internal static class PeImage
         return image;
     }
 
-    private static ImportTable BuildImports(NativeCode native)
+    private static ImportTable BuildImports(NativeCode native,
+        IReadOnlyList<NativeExportThunk> exportThunks)
     {
         var groups = new List<ImportGroup> { new("KERNEL32.dll") };
         var groupsByName = new Dictionary<string, ImportGroup>(StringComparer.OrdinalIgnoreCase)
@@ -230,17 +301,11 @@ internal static class PeImage
         groups[0].AddSymbol("ExitProcess");
         foreach (var fixup in native.NativeImports)
         {
-            if (!groupsByName.TryGetValue(fixup.DllName, out var group))
-            {
-                group = new ImportGroup(fixup.DllName);
-                groups.Add(group);
-                groupsByName.Add(fixup.DllName, group);
-            }
-            else if (group != groups[0])
-            {
-                group.PreferDllName(fixup.DllName);
-            }
-            group.AddSymbol(fixup.ExportName);
+            AddImport(fixup.DllName, fixup.ExportName);
+        }
+        foreach (var thunk in exportThunks)
+        {
+            AddImport(thunk.Import.DllName, thunk.Import.ExportName);
         }
         if (groups.Count > 2)
         {
@@ -287,7 +352,13 @@ internal static class PeImage
             group.Name = at;
             at = checked(at + group.DllName.Length + 1);
         }
-        var bytes = new byte[Align(at, 8)];
+        var importTableLength = Align(at, 8);
+        if (importTableLength < 0 || importTableLength > Array.MaxLength)
+        {
+            throw new NotSupportedException(
+                "Native PE import table exceeds the host byte-array capacity.");
+        }
+        var bytes = new byte[importTableLength];
         for (var index = 0; index < groups.Count; index++)
         {
             var group = groups[index];
@@ -299,6 +370,21 @@ internal static class PeImage
             WriteAscii(bytes, group.Name, group.DllName);
         }
         return new ImportTable(bytes, groups, targets, descriptors, iatStart, iatSize);
+
+        void AddImport(string dllName, string exportName)
+        {
+            if (!groupsByName.TryGetValue(dllName, out var group))
+            {
+                group = new ImportGroup(dllName);
+                groups.Add(group);
+                groupsByName.Add(dllName, group);
+            }
+            else if (group != groups[0])
+            {
+                group.PreferDllName(dllName);
+            }
+            group.AddSymbol(exportName);
+        }
     }
 
     private sealed class ImportGroup(string dllName)

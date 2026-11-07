@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [Test]
     public async Task CheckedInt32PredicatesMatchWidenedArithmeticAcrossAotAndJitAsync()
@@ -136,11 +136,11 @@ public sealed partial class JitTests
                 var difference = (BigInteger)left - right;
                 var product = (BigInteger)left * right;
                 checks.Add($"CanAddInt64({leftLiteral}, {rightLiteral}) != "
-                    + (sum >= long.MinValue && sum <= long.MaxValue ? "true" : "false"));
+                    + (sum >= (BigInteger)long.MinValue && sum <= (BigInteger)long.MaxValue ? "true" : "false"));
                 checks.Add($"CanSubtractInt64({leftLiteral}, {rightLiteral}) != "
-                    + (difference >= long.MinValue && difference <= long.MaxValue ? "true" : "false"));
+                    + (difference >= (BigInteger)long.MinValue && difference <= (BigInteger)long.MaxValue ? "true" : "false"));
                 checks.Add($"CanMultiplyInt64({leftLiteral}, {rightLiteral}) != "
-                    + (product >= long.MinValue && product <= long.MaxValue ? "true" : "false"));
+                    + (product >= (BigInteger)long.MinValue && product <= (BigInteger)long.MaxValue ? "true" : "false"));
                 checks.Add($"CanDivideInt64({leftLiteral}, {rightLiteral}) != "
                     + (right != 0 && (left != long.MinValue || right != -1) ? "true" : "false"));
                 checks.Add($"CanRemainderInt64({leftLiteral}, {rightLiteral}) != "

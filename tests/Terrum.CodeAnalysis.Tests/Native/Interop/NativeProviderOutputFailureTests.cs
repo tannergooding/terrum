@@ -6,11 +6,11 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Tests.Semantics;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
@@ -68,12 +68,18 @@ internal sealed class NativeProviderOutputFailureTests
     {
         var root = RepositoryRoot();
         var sample = Path.Combine(root, "samples", "Win32Dx11Triangle");
+        var nativeRegistration = NativeCoreRegistrationTests.CreateRegistration();
         var compilation = Compilation.Create([
             SyntaxTree.Parse(File.ReadAllText(Path.Combine(root,
                 "tests", "Terrum.CodeAnalysis.Tests", "Native", "Interop", "Fixtures", "dx11-provider-failure-outputs.terrum"))),
             SyntaxTree.Parse(File.ReadAllText(Path.Combine(sample, "dx11-api.terrum"))),
             SyntaxTree.Parse(File.ReadAllText(Path.Combine(sample, "win32-api.terrum"))),
-        ], BoundRuntimePolicy.CheckedExceptions);
+        ], new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeCoreRegistration = nativeRegistration,
+            LayoutCoreRegistration = NativeCoreRegistrationTests.CreateLayoutRegistration(
+                nativeRegistration),
+        });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return NativeEmitter.EmitWithNativeImports(

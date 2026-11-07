@@ -6,15 +6,16 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativeManagedNodeModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeManagedNodeModuleTests
 {
     private const string Original = "public int32 Leaf() { return 40; }";
     private const string Middle = "public int32 Middle() { return Leaf() + 1; }";
@@ -36,9 +37,9 @@ public sealed class NativeManagedNodeModuleTests
         NativeModuleCompiler.ValidateGraph(root, [middle, original]);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(44));
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
@@ -47,9 +48,9 @@ public sealed class NativeManagedNodeModuleTests
         var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
             configuration, frameworkDirectory.Name, "terrumc.exe");
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, original], apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(44));
         Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
         Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
@@ -85,7 +86,7 @@ public sealed class NativeManagedNodeModuleTests
     {
         var program = Compile(Sample(), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-18"));
         var profile = (byte[])contract.Clone();
         var label = Encoding.UTF8.GetBytes("native-18");
@@ -134,8 +135,7 @@ public sealed class NativeManagedNodeModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded))!;
 
         var import = (byte[])package.Clone();
-        var imageOffset = 18 + import[7] + import[8] + 2
-            + BinaryPrimitives.ReadInt32LittleEndian(import.AsSpan(10, 4));
+        var imageOffset = NativePackageTestHelpers.ImageOffset(import);
         var heapName = import.AsSpan(imageOffset,
             BinaryPrimitives.ReadInt32LittleEndian(import.AsSpan(14, 4))).IndexOf("HeapAlloc\0"u8);
         Assert.That(heapName >= 0, Is.True);
@@ -163,9 +163,17 @@ public sealed class NativeManagedNodeModuleTests
         var compilation = library
             ? reference is null ? Compilation.CreateLibrary(syntax, boundPolicy)
                 : Compilation.CreateLibrary(syntax, reference, boundPolicy)
-            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), boundPolicy);
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => {
+                var __nunitActual0 = reference;
+                Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>());
+                return (CompilationReference)__nunitActual0!;
+            }))(), boundPolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static string Sample()

@@ -1,18 +1,18 @@
 mut class Leaf {
     public mut int32 Value;
-    [NoThrow] public Leaf(int32 value) { Value = value; }
+     public Leaf(int32 value) { Value = value; }
 }
 
 mut class Pair {
     public write Leaf First;
     public Leaf Second;
     public ManagedNode Extra;
-    [NoThrow] public Pair(write Leaf first, Leaf second, ManagedNode extra) {
+     public Pair(write Leaf first, Leaf second, ManagedNode extra) {
         First = first;
         Second = second;
         Extra = extra;
     }
-    [NoThrow] public int32 ReadFirst() { return First.Value; }
+     public int32 ReadFirst() { return First.Value; }
     public int32 Sum() { return First.Value + Second.Value + Extra.Value; }
 }
 
@@ -20,7 +20,7 @@ struct FactoryPayload {
     public int64 First;
     public int32 Second;
     public int32 Third;
-    [NoThrow] public FactoryPayload(int64 first) {
+     public FactoryPayload(int64 first) {
         First = first;
         Second = 20;
         Third = 22;
@@ -35,7 +35,7 @@ class CollectingPair {
     public uint64 Bits;
     public FactoryPayload First;
     public bool Ready;
-    [NoThrow] public CollectingPair(int32 marker, uint64 bits, FactoryPayload first,
+     public CollectingPair(int32 marker, uint64 bits, FactoryPayload first,
         bool ready, Leaf child, FactoryPayload data) {
         Left = child;
         ManagedHeap.Collect();
@@ -50,22 +50,22 @@ class CollectingPair {
 
 struct PointerBits {
     public uint64 Value;
-    [NoThrow] public PointerBits(uint64 value) { Value = value; }
+     public PointerBits(uint64 value) { Value = value; }
 }
 
 class ScalarBox {
     public PointerBits Bits;
-    [NoThrow] public ScalarBox(PointerBits bits) { Bits = bits; }
+     public ScalarBox(PointerBits bits) { Bits = bits; }
 }
 
 class CopyBox {
     public FactoryPayload Value;
-    [NoThrow] public CopyBox(int32 marker, bool ready, uint64 bits, FactoryPayload value) { Value = value; }
+     public CopyBox(int32 marker, bool ready, uint64 bits, FactoryPayload value) { Value = value; }
 }
 
 mut class ReplaceableEdge {
     public mut write Leaf Item;
-    [NoThrow] public ReplaceableEdge(write Leaf item) { Item = item; }
+     public ReplaceableEdge(write Leaf item) { Item = item; }
 }
 
 write ReplaceableEdge CreateReplaceableEdge() {

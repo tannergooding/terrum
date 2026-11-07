@@ -3,18 +3,19 @@
 using System;
 using System.Buffers.Binary;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class RetainedImportContractTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class RetainedImportContractTests
 {
-    [TestCase("[NoThrow] public int32 Leaf() { return 42; }",        "[NoThrow] int32 Main() { return Leaf(); }","|NoThrow|MayReturn","|MayThrow|MayReturn")]
-    [TestCase("[DoesNotReturn] public void Leaf() { while (true) {} }",        "int32 Main() { Leaf(); }","|MayThrow|DoesNotReturn","|MayThrow|MayReturn")]
-    public void LinkingDoesNotUpgradeTheConsumersRecordedPromises(
+    [TestCase("[DoesNotReturn] public void Leaf() { while (true) {} }",
+        "int32 Main() { Leaf(); }", "|DoesNotReturn", "|MayReturn")]
+    public void LinkingRejectsWeakenedConsumerNonReturnPromises(
         string leafSource, string consumerSource, string originalPromise, string weakenedPromise)
     {
         ArgumentNullException.ThrowIfNull(originalPromise);
@@ -22,7 +23,12 @@ public sealed class RetainedImportContractTests
         var compilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             ModuleCompiler.CreateReference(producer));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), producer);
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         _ = ModuleCompiler.Link(consumer, producer);
 
         var corrupted = WeakenLeafImport(consumer, originalPromise, weakenedPromise);
@@ -36,9 +42,13 @@ public sealed class RetainedImportContractTests
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Leaf(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), producer);
         var original = (byte[])consumer.Clone();
-        var replacement = Producer("[NoThrow] public int32 Leaf() { return 43; }");
+        var replacement = Producer(" public int32 Leaf() { return 43; }");
         _ = ModuleCompiler.Link(consumer, replacement);
         Assert.That(consumer, Is.EqualTo(original));
     }
@@ -47,7 +57,12 @@ public sealed class RetainedImportContractTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Leaf"]);
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
+        return ModuleCompiler.CreateProducer(program, ["Leaf"]);
     }
 
     private static byte[] WeakenLeafImport(byte[] consumer, string originalPromise, string weakenedPromise)

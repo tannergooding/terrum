@@ -7,15 +7,17 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativeModuleSetsTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeModuleSetsTests
 {
     private const string Alpha = "public int32 Alpha() { return 20; }";
     private const string Beta = "public int32 Beta() { return 22; }";
@@ -35,9 +37,14 @@ public sealed class NativeModuleSetsTests
 
     private static byte[] Producer(string source, string[] exports, string identity)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             exports, identity, NativeRuntimePolicy.FailFast);
     }
 
@@ -46,9 +53,15 @@ public sealed class NativeModuleSetsTests
 
     private static byte[] Producer(string source, string[] exports, string identity, NativeRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                (BoundRuntimePolicy)policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(),
             exports, identity, policy);
     }
 
@@ -57,18 +70,29 @@ public sealed class NativeModuleSetsTests
     private static byte[] MakeConsumerSource(string source, params byte[][] producers)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
-            NativeModuleCompiler.CreateReferenceSet(producers));
+            NativeModuleCompiler.CreateReferenceSet(producers),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
+        return NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(),
             producers, NativeRuntimePolicy.FailFast);
     }
 
     private static byte[] MakeConsumerSource(string source, NativeRuntimePolicy policy, params byte[][] producers)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
-            NativeModuleCompiler.CreateReferenceSet(producers), (BoundRuntimePolicy)policy);
+            NativeModuleCompiler.CreateReferenceSet(producers),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                (BoundRuntimePolicy)policy));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
+        return NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(),
             producers, policy);
     }
 
@@ -246,13 +270,13 @@ public sealed class NativeModuleSetsTests
         NativeModuleCompiler.ValidateConsumerSet(bytes, [alpha, beta]);
         Assert.That(NativeModuleCompiler.InspectConsumerSet(bytes).Dependencies, Is.EqualTo(["First", "Second"]));
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(bytes, [beta, alpha],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(42));
         var alphaReplacement = Producer(Alpha.Replace("20", "21", StringComparison.Ordinal), "Alpha", "First");
         var betaReplacement = Producer(Beta.Replace("22", "23", StringComparison.Ordinal), "Beta", "Second");
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(bytes, [alphaReplacement, beta],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(bytes, [betaReplacement, alpha],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(bytes, Is.EqualTo(unchanged));
     }
 
@@ -311,7 +335,7 @@ public sealed class NativeModuleSetsTests
         NativeModuleCompiler.ValidateConsumerSet(consumer, [secondProvider, outputProvider]);
         var malformed = WithUpdatedSetChecksum(consumer, bytes =>
             bytes[NativeOutputSelectorOffset(bytes, "QueryPerformanceCounter")] = byte.MaxValue);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => NativeModuleCompiler.InspectConsumerSet(malformed));
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer,
             [secondProvider, outputProvider], TimeSpan.FromSeconds(30), policy)
@@ -385,7 +409,11 @@ public sealed class NativeModuleSetsTests
 
         var compilation = Compilation.Create(SyntaxTree.Parse(Consumer), reference);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(),
+        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(),
             providers, NativeRuntimePolicy.FailFast);
 
         Assert.That(NativeModuleCompiler.InspectConsumerSet(consumer).Dependencies, Is.EqualTo(["AProvider", "ZProvider"]));
@@ -417,7 +445,11 @@ public sealed class NativeModuleSetsTests
         var checkedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(Beta),
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(checkedCompilation.HasErrors, Is.False);
-        var checkedBeta = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = checkedCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(),
+        var checkedBeta = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = checkedCompilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(),
             ["Beta"], "Second", NativeRuntimePolicy.CheckedExceptions);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(consumer,
             [alpha, checkedBeta]))!;
@@ -461,24 +493,24 @@ public sealed class NativeModuleSetsTests
 
         NativeModuleCompiler.ValidateConsumerSet(consumer, providers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
-            consumer, providers, TimeSpan.FromSeconds(30), policy), Is.Zero);
+            consumer, providers, TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.Zero);
 
         var malformed = WithUpdatedSetChecksum(consumer, bytes =>
             bytes[DirectExpectationStringOffset(bytes, "ReadCounter", 3)] = (byte)'/');
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => NativeModuleCompiler.InspectConsumerSet(malformed));
 
         var changedProvider = Producer(CounterOutputImport.Replace(
                 "QueryPerformanceCounter", "QueryPerformanceFrequency", StringComparison.Ordinal),
             "ReadCounter", "CounterProvider", policy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(consumer,
                 [changedProvider, helperProvider]));
         var uncalledConsumer = MakeConsumerSource(
             "int32 Main() { return 0; }", policy, providers);
         Assert.That(SetMachineImportCount(uncalledConsumer), Is.Zero);
         NativeModuleCompiler.ValidateConsumerSet(uncalledConsumer, providers);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(uncalledConsumer,
                 [changedProvider, helperProvider]));
     }
@@ -565,7 +597,11 @@ public sealed class NativeModuleSetsTests
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
                 BoundRuntimePolicy.CheckedExceptions);
             Assert.That(compilation.HasErrors, Is.False);
-            return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(),
+            return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = compilation.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(),
                 [name], identity, NativeRuntimePolicy.CheckedExceptions);
         }
 
@@ -574,10 +610,14 @@ public sealed class NativeModuleSetsTests
         var sources = Compilation.Create(SyntaxTree.Parse(Consumer),
             NativeModuleCompiler.CreateReferenceSet([first, second]), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(sources.HasErrors, Is.False);
-        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = sources.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(),
+        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = sources.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))(),
             [second, first], NativeRuntimePolicy.CheckedExceptions);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [first, second],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(false), Is.EqualTo(42));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(consumer,
             [Producer(Alpha, "Alpha", "First"), second]))!;
     }
@@ -607,7 +647,11 @@ public sealed class NativeModuleSetsTests
         var compilation = Compilation.Create(SyntaxTree.Parse(ConsumerSource), references,
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(),
+        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))(),
             [outputProvider, second], policy);
         var originalConsumer = (byte[])consumer.Clone();
 
@@ -634,13 +678,21 @@ public sealed class NativeModuleSetsTests
             """), (BoundRuntimePolicy)policy);
         Assert.That(initializerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, initializerCompilation.Diagnostics));
         var initializer = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = initializerCompilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), ["Initialize"], "Initializer", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = initializerCompilation.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))(), ["Initialize"], "Initializer", policy);
 
         var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Beta() { return 22; }"), (BoundRuntimePolicy)policy);
         Assert.That(secondCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, secondCompilation.Diagnostics));
         var second = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = secondCompilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), ["Beta"], "Second", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual10 = secondCompilation.Program;
+                Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual10!;
+            }))(), ["Beta"], "Second", policy);
 
         const string ConsumerSource = """
             int32 Main() {
@@ -654,7 +706,11 @@ public sealed class NativeModuleSetsTests
             (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = consumerCompilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), [initializer, second], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual11 = consumerCompilation.Program;
+                Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual11!;
+            }))(), [initializer, second], policy);
         NativeModuleCompiler.ValidateConsumerSet(consumer, [second, initializer]);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, initializer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
@@ -675,13 +731,21 @@ public sealed class NativeModuleSetsTests
             """), (BoundRuntimePolicy)policy);
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = providerCompilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual12 = providerCompilation.Program;
+                Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual12!;
+            }))(),
             ["TryGet", "Initialize"], "Provider", policy);
         var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Beta() { return 0; }"), (BoundRuntimePolicy)policy);
         Assert.That(secondCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, secondCompilation.Diagnostics));
         var second = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = secondCompilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), ["Beta"], "Second", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual13 = secondCompilation.Program;
+                Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual13!;
+            }))(), ["Beta"], "Second", policy);
 
         const string ConsumerSource = """
             int32 Main() {
@@ -696,7 +760,11 @@ public sealed class NativeModuleSetsTests
             (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = consumerCompilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), [provider, second], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual14 = consumerCompilation.Program;
+                Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual14!;
+            }))(), [provider, second], policy);
 
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [provider, second],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
@@ -717,14 +785,22 @@ public sealed class NativeModuleSetsTests
             """), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(initializerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, initializerCompilation.Diagnostics));
         var initializer = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = initializerCompilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual15 = initializerCompilation.Program;
+                Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual15!;
+            }))(),
             ["FailAfterWrite", "Fill"], "Initializer", policy);
 
         var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Beta() { return 22; }"), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(secondCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, secondCompilation.Diagnostics));
         var second = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = secondCompilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), ["Beta"], "Second", policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual16 = secondCompilation.Program;
+                Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual16!;
+            }))(), ["Beta"], "Second", policy);
 
         const string ConsumerSource = """
             int32 Main() {
@@ -744,7 +820,11 @@ public sealed class NativeModuleSetsTests
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateConsumerSet(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = consumerCompilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(), [initializer, second], policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual17 = consumerCompilation.Program;
+                Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual17!;
+            }))(), [initializer, second], policy);
         NativeModuleCompiler.ValidateConsumerSet(consumer, [second, initializer]);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, initializer],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
@@ -793,7 +873,7 @@ public sealed class NativeModuleSetsTests
             """;
         var executable = MakeConsumerSource(Source, provider, first);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(executable, [first, provider],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.EqualTo(42));
     }
 
     [Test]
@@ -809,7 +889,11 @@ public sealed class NativeModuleSetsTests
         var result = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Box value = Alpha(); return value.Value + Beta(); }"), reference);
         Assert.That(result.HasErrors, Is.False);
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = result.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = result.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))();
         var probe = new BoundFunction("Box.Probe", PrimitiveType.Void, [], 0,
             new BoundBlock([new BoundReturn(null, default)], default), default) {
             DeclaringStruct = "Box",

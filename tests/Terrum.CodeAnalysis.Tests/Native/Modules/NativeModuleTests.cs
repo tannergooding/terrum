@@ -11,15 +11,17 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativeModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeModuleTests
 {
     private const string Provider = """
         [Blittable] [Layout(LayoutKind.Sequential)] public struct Twelve {
@@ -75,9 +77,15 @@ public sealed class NativeModuleTests
         string source,
         BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
-        var result = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
+        var result = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                policy));
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = result.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = result.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
 
     private static byte[] Producer(string source = Provider, string identity = "Example", string[]? exports = null) =>
@@ -85,9 +93,16 @@ public sealed class NativeModuleTests
 
     private static BoundProgram CompileConsumer(string source, byte[] producer)
     {
-        var result = Compilation.Create(SyntaxTree.Parse(source), NativeModuleCompiler.CreateReference(producer));
+        var result = Compilation.Create(SyntaxTree.Parse(source),
+            NativeModuleCompiler.CreateReference(producer),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.FailFast));
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = result.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = result.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static byte[] ConsumerPackage(byte[] producer, string source = Consumer) =>
@@ -99,21 +114,15 @@ public sealed class NativeModuleTests
             ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), boundPolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Run"], identity, policy);
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), ["Run"], identity, policy);
     }
 
     private static int PackageContractOffset(byte[] artifact)
-    {
-        var at = 18 + artifact[7] + artifact[8];
-        var count = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
-        at += 2;
-        for (var index = 0; index < count; index++)
-        {
-            var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
-            at += 2 + length;
-        }
-        return at;
-    }
+        => NativePackageTestHelpers.ContractOffset(artifact);
 
     private static byte[] WithoutPackageMachineImport(byte[] artifact, string name)
     {
@@ -186,13 +195,13 @@ public sealed class NativeModuleTests
     {
         var producer = Producer();
         var consumer = ConsumerPackage(producer);
-        Assert.That(producer[4], Is.EqualTo(2));
-        Assert.That(consumer[4], Is.EqualTo(2));
+        Assert.That(producer[4], Is.EqualTo(3));
+        Assert.That(consumer[4], Is.EqualTo(3));
 
         foreach (var artifact in new[] { producer, consumer })
         {
             var previousVersion = (byte[])artifact.Clone();
-            previousVersion[4] = 1;
+            previousVersion[4] = 2;
             SHA256.HashData(previousVersion.AsSpan(0, previousVersion.Length - 32))
                 .CopyTo(previousVersion, previousVersion.Length - 32);
             _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(previousVersion))!;
@@ -226,7 +235,9 @@ public sealed class NativeModuleTests
         var consumer = ConsumerPackage(provider, """
             int32 Main() {
                 unsafe {
-                    fnptr<NativeAbi, int32, int32> identity = &Identity;
+                    [Terrum.Interop.NativeCallConv(
+                        Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    fnptr<int32, int32> identity = &Identity;
                     return identity(42);
                 }
             }
@@ -324,7 +335,8 @@ public sealed class NativeModuleTests
             public uint32 ReadProviderThreadId() {
                 unsafe { return ProviderThreadId(); }
             }
-            """));
+            """),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(providerCompilation.Program!,
@@ -339,7 +351,8 @@ public sealed class NativeModuleTests
                     return ConsumerThreadId() != 0 && ReadProviderThreadId() != 0 ? 0 : -1;
                 }
             }
-            """), ModuleCompiler.CreateReference(producer));
+            """), ModuleCompiler.CreateReference(producer),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer);
@@ -349,7 +362,7 @@ public sealed class NativeModuleTests
     }
 
     [Test]
-    public void StandardTrRmSystemDirectoryImportRemainsQualifiedInLibraryEmission()
+    public void DevelopmentNativeConventionImportRemainsQualifiedInLibraryEmission()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -361,12 +374,17 @@ public sealed class NativeModuleTests
             public uint32 ReadThreadId() {
                 unsafe { return ThreadId(); }
             }
-            """));
+            """),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "system-directory-import");
-        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var artifact =
+            TrRmExecutableCompiler.EmitDevelopmentNativeConventionsDraft(
+                compilation.Program!, "system-directory-import");
+        var loaded =
+            TrRmExecutableCompiler.LoadDevelopmentNativeConventionsDraft(
+                artifact);
         var library = NativeEmitter.EmitLibraryWithNativeImports(
             loaded, ["ReadThreadId"], NativeRuntimePolicy.FailFast);
 
@@ -413,11 +431,15 @@ public sealed class NativeModuleTests
             NativeModuleCompiler.CreateReference(original), boundPolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = consumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), original, policy);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual3 = consumerCompilation.Program;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual3!;
+            }))(), original, policy);
         NativeModuleCompiler.Validate(consumer, original);
         NativeModuleCompiler.Validate(consumer, replacement);
-        Assert.That(await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)), Is.EqualTo(42));
-        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)), Is.EqualTo(43));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)).ConfigureAwait(false), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)).ConfigureAwait(false), Is.EqualTo(43));
 
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(
             RedirectFirstExport(original, lastRange: true)))!;
@@ -471,7 +493,11 @@ public sealed class NativeModuleTests
         var image = PackageImageOffset(changed);
         using var reader = new PEReader(new MemoryStream(changed, image,
             BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(14, 4))));
-        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual4 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual4, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual4!; }))();
+        var header = ((global::System.Func<PEHeader>)(() => {
+            var __nunitActual4 = reader.PEHeaders.PEHeader;
+            Assert.That(__nunitActual4, Is.TypeOf<PEHeader>());
+            return (PEHeader)__nunitActual4!;
+        }))();
         var pdata = global::System.Linq.Enumerable.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
         var edata = global::System.Linq.Enumerable.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".edata");
         var at = image + pdata.PointerToRawData + (lastRange ? header.ExceptionTableDirectory.Size - 12 : 0);
@@ -728,7 +754,7 @@ public sealed class NativeModuleTests
             {
                 try
                 {
-                    await using var imageLock = File.Open(Path.Combine(directory, "consumer.exe"), FileMode.Open, FileAccess.Read, FileShare.Read);
+                    await using var imageLock = File.Open(Path.Combine(directory, "consumer.exe"), FileMode.Open, FileAccess.Read, FileShare.Read).ConfigureAwait(false);
                     heldLock = true;
                     await Task.Delay(1000).ConfigureAwait(true);
                 }

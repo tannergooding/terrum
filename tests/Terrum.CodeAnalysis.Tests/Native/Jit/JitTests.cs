@@ -7,18 +7,19 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Tests.Cli;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     private const string OwnedBufferProgram = """
         int32 Main() {
@@ -109,24 +110,24 @@ public sealed partial class JitTests
     [TestCase("int32 Main() { mut int32 x = 42; try { try { return x; } finally { x = 1; } } finally { x = 2; } }",42)]
     [TestCase("int32 Main() { mut int32 x = 42; try { if (x == 42) { return x; } x = 1; } finally { x = 0; } return x; }",42)]
     [TestCase("int32 Choose(bool first) { mut int32 x = 42; try { if (first) { return x; } x = 7; return x; } finally { int32 local = 1; x = local; } } int32 Main() { return Choose(true) & 42; }",42)]
-    [TestCase("int32 Main() { int64 result = Read(4294967338); if (result == 4294967338) { return 42; } return 0; } int64 Read(int64 x) { mut int64 local = x; try { return local; } finally { local = 0; Clobber(); } } [NoThrow] void Clobber() { mut int64 x = 1; x = 2; }",42)]
-    [TestCase("struct V { public int32 A; public int32 B; public int32 C; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }",42)]
-    [TestCase("struct V { public int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }",42)]
-    [TestCase("struct V { public mut int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local.A = 0; Clobber(1, 2, 3, 4, 5, 6); } } [NoThrow] void Clobber(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { } int32 Main() { V v = Take(new V(42)); return v.A; }",42)]
+    [TestCase("int32 Main() { int64 result = Read(4294967338); if (result == 4294967338) { return 42; } return 0; } int64 Read(int64 x) { mut int64 local = x; try { return local; } finally { local = 0; Clobber(); } }  void Clobber() { mut int64 x = 1; x = 2; }",42)]
+    [TestCase("struct V { public int32 A; public int32 B; public int32 C;  public V(int32 a) { A = a; B = 2; C = 3; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }",42)]
+    [TestCase("struct V { public int32 A; public int32 B; public int32 C; public int32 D;  public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }",42)]
+    [TestCase("struct V { public mut int32 A; public int32 B; public int32 C; public int32 D;  public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local.A = 0; Clobber(1, 2, 3, 4, 5, 6); } }  void Clobber(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { } int32 Main() { V v = Take(new V(42)); return v.A; }",42)]
     [TestCase("struct V { public int32 A; public int32 B; public V() { try { A = 42; } finally { B = 0; } } } int32 Main() { V value = new V(); return value.A; }",42)]
     [TestCase("int32 Main() { mut int32 state = 0; try { try { state = 0; } finally { state = 1; } } finally { if (state == 1) { state = 42; } else { state = 0; } } return state; }",42)]
-    [TestCase("bool Take(out int32 x) { x = 42; try { return true; } finally { Clobber(); } } [NoThrow] void Clobber() { mut int32 x = 1; x = 0; } int32 Main() { require Take(out var x); return x; }",42)]
+    [TestCase("bool Take(out int32 x) { x = 42; try { return true; } finally { Clobber(); } }  void Clobber() { mut int32 x = 1; x = 0; } int32 Main() { require Take(out var x); return x; }",42)]
     [TestCase("bool Take(out int32 x) { try { return true; } finally { x = 42; } } int32 Main() { require Take(out var x); return x; }",42)]
     [TestCase("bool Take(out int32 x) { try { return false; } finally { x = 42; } } int32 Main() { mut int32 x = 9; bool ok = Take(out x); if (ok) { return 0; } return 42; }",42)]
     [TestCase("bool Take(out int32 x) { x = 42; mut bool ok = true; try { return ok; } finally { ok = false; } } int32 Main() { require Take(out var x); return x; }",42)]
-    [TestCase("int32 Main() { mut int32 value = 0; try { try { value = 1; } finally { value = Sixth(1, 2, 3, 4, 5, 42); } } finally { value = Sixth(1, 2, 3, 4, 5, value); } return value; } [NoThrow] int32 Sixth(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return f; }",42)]
+    [TestCase("int32 Main() { mut int32 value = 0; try { try { value = 1; } finally { value = Sixth(1, 2, 3, 4, 5, 42); } } finally { value = Sixth(1, 2, 3, 4, 5, value); } return value; }  int32 Sixth(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return f; }",42)]
     [TestCase("struct Value { public int32 A; public int32 B; public int32 C; public Value(int32 a) { A = a; B = 2; C = 3; } } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a + b + c + d + e + f; } int32 Main() { Value value = new Value(42); return Mix(value.A, 2, 3, 4, 5, 6); }",62)]
-    [TestCase("[NoThrow] int32 Value() { return 42; } bool Take(out int32 result) { try { return true; } finally { result = Value(); } } int32 Main() { require Take(out var result); return result; }",42)]
+    [TestCase(" int32 Value() { return 42; } bool Take(out int32 result) { try { return true; } finally { result = Value(); } } int32 Main() { require Take(out var result); return result; }",42)]
     [TestCase("int32 Main() { mut int32 value = 0; try { value = 1; } finally { try { value = 2; } finally { value = 42; } } return value; }",42)]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } int32 Main() { Item item = new Item(42); return item.Read(); }",42)]
-    [TestCase("unique struct Item { public int64 Value; public int32 Tag; public Item(int64 value) { Value = value; Tag = 1; } [NoThrow] [Cleanup] public void Close() {} } Item Take() { Item item = new Item(42); return move item; } int32 Main() { Item item = Take(); return int32(item.Value); }",42)]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } int32 Take(int32 a, int32 b, int32 c, int32 d, int32 e, Item item) { return item.Value; } int32 Main() { Item item = new Item(42); return Take(1, 2, 3, 4, 5, move item); }",42)]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } bool Fill(out Item item) { item = new Item(42); return true; } int32 Main() { require Fill(out var item); return item.Value; }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {}  public int32 Read() { return Value; } } int32 Main() { Item item = new Item(42); return item.Read(); }",42)]
+    [TestCase("unique struct Item { public int64 Value; public int32 Tag; public Item(int64 value) { Value = value; Tag = 1; }  [Cleanup] public void Close() {} } Item Take() { Item item = new Item(42); return move item; } int32 Main() { Item item = Take(); return int32(item.Value); }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {} } int32 Take(int32 a, int32 b, int32 c, int32 d, int32 e, Item item) { return item.Value; } int32 Main() { Item item = new Item(42); return Take(1, 2, 3, 4, 5, move item); }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {} } bool Fill(out Item item) { item = new Item(42); return true; } int32 Main() { require Fill(out var item); return item.Value; }",42)]
     [TestCase("""
         struct Info {
             public int32 Offset;
@@ -136,8 +137,8 @@ public sealed partial class JitTests
         unique struct Token {
             public int32 Id;
             public Token(int32 id) { Id = id; }
-            [NoThrow] [Cleanup] public void Close() {}
-            [NoThrow] public int32 Read() { return Id; }
+             [Cleanup] public void Close() {}
+             public int32 Read() { return Id; }
         }
         unique struct Result {
             public Info Data;
@@ -149,8 +150,8 @@ public sealed partial class JitTests
                 Tail = 0;
                 require Child.Read() == id;
             }
-            [NoThrow] [Cleanup] public void Close() {}
-            [NoThrow] public int32 Read() { return Child.Read(); }
+             [Cleanup] public void Close() {}
+             public int32 Read() { return Child.Read(); }
         }
         Result Relay(Result value) { return move value; }
         bool Fill(out Result value) { value = Relay(new Result(40)); return true; }
@@ -162,17 +163,31 @@ public sealed partial class JitTests
     private static async Task AssertFailFastExecutionAsync(string source, int expected, params string[] sourcePaths)
     {
         AssertWindowsX64();
-        var compilation = Compilation.Create(await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true));
+        var compilation = Compilation.Create(
+            await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true),
+            new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var directory = TestArtifactPaths.CreateDirectory("jit-tests");
         var image = Path.Combine(directory, $"jit-{Guid.NewGuid():N}.exe");
+        var layoutManifest = Path.Combine(directory,
+            $"layout-{Guid.NewGuid():N}.json");
 
         try
         {
+            await File.WriteAllTextAsync(layoutManifest,
+                CliTests.CreateLayoutCoreManifest("sample.jit"))
+                .ConfigureAwait(true);
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
             (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) { UseShellExecute = false, CreateNoWindow = true }, []).ConfigureAwait(true);
-            var jit = CliStart("jit", "-", "--runtime", "fail-fast");
+            var jit = CliStart("jit", "-", "--runtime", "fail-fast",
+                "--layout-core-manifest", layoutManifest);
             foreach (var path in sourcePaths)
             {
                 jit.ArgumentList.Add("--source");
@@ -187,6 +202,7 @@ public sealed partial class JitTests
         finally
         {
             File.Delete(image);
+            File.Delete(layoutManifest);
         }
     }
     [TestCase("int32 Main() { unsafe { try { return Divide(42, 0); } catch { return 42; } } } int32 Divide(int32 a, int32 b) { return a / b; }",42)]
@@ -198,22 +214,22 @@ public sealed partial class JitTests
     [TestCase("int32 Main() { unsafe { try { require Fail(); } catch { return 42; } } return 0; } bool Fail() { return false; }",42)]
     [TestCase("int32 Main() { unsafe { try { return int32(uint32.MaxValue); } catch { return 42; } } }",42)]
     [TestCase("int32 Main() { mut int64 value = 42; unsafe { try { return int32(Take(value)); } catch { return 0; } } } int64 Take(int64 value) { try { return value; } finally { int64 ignored = 0; } }",42)]
-    [TestCase("struct V { public int32 A; public int32 B; public int32 C; [NoThrow] public V(int32 x) { A = x; B = 1; C = 2; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }",42)]
-    [TestCase("struct V { public int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 x) { A = x; B = 1; C = 2; D = 3; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }",42)]
+    [TestCase("struct V { public int32 A; public int32 B; public int32 C;  public V(int32 x) { A = x; B = 1; C = 2; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }",42)]
+    [TestCase("struct V { public int32 A; public int32 B; public int32 C; public int32 D;  public V(int32 x) { A = x; B = 1; C = 2; D = 3; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }",42)]
     [TestCase("bool Take(bool fail, out int32 x) { unsafe { try { x = 42; require !fail; return true; } catch { return false; } } } int32 Main() { require Take(false, out var x); return x; }",42)]
     [TestCase("bool Take(bool fail, out int32 x) { unsafe { try { x = 42; require !fail; return true; } catch { return false; } } } int32 Main() { mut int32 x = 9; bool ok = Take(true, out x); if (ok) { return 0; } return 42; }",42)]
-    [TestCase("[NoThrow] bool Initialize(out int32 value) { value = 42; return true; } bool Fail() { require false; return false; } bool Take(bool enter, out int32 value) { unsafe { try { if (enter && Initialize(out value) && Fail()) { return true; } return false; } catch { return value == 42; } } } int32 Main() { require Take(true, out var value); if (Take(false, out var absent)) { return 1; } return value; }",42)]
-    [TestCase("[NoThrow] int32 Sixth(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return f; } bool Take(out int32 value) { unsafe { try { try { require false; } finally { value = Sixth(1, 2, 3, 4, 5, 42); } } catch { return true; } } return false; } int32 Main() { require Take(out var value); return value; }",42)]
+    [TestCase(" bool Fail() { require false; return false; } bool Take(bool enter, out int32 value) { unsafe { try { if (enter) { value = 42; if (Fail()) { return true; } } return false; } catch { return value == 42; } } } int32 Main() { require Take(true, out var value); if (Take(false, out var absent)) { return 1; } return value; }",42)]
+    [TestCase(" int32 Sixth(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return f; } bool Take(out int32 value) { unsafe { try { try { require false; } finally { value = Sixth(1, 2, 3, 4, 5, 42); } } catch { value = 42; return true; } } return false; } int32 Main() { require Take(out var value); return value; }",42)]
     [TestCase("struct Value { public int32 A; public int32 B; public int32 C; public Value(int32 a, bool fail) { A = a; require !fail; B = 2; C = 3; } } int32 Main() { mut Value value = new Value(42, false); unsafe { try { value = new Value(0, true); } catch { return value.A; } } return 0; }",42)]
     [TestCase("int32 Main() { return 2147483647 + 1; }",unchecked((int)0xE0540001))]
     [TestCase("int32 Main() { return 42 / 0; }",unchecked((int)0xE0540002))]
     [TestCase("int32 Main() { require false; return 0; }",unchecked((int)0xE0540003))]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } int32 Main() { mut Item item = new Item(42); unsafe { try { item = new Item(42 / 0); } catch { return item.Read(); } } return 0; }",42)]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } int32 Main() { mut Item item = new Item(7); item = new Item(42); return item.Value; }",42)]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } bool Fill(bool accepted, out Item item) { item = new Item(42); return accepted; } int32 Main() { bool rejected = Fill(false, out var absent); if (rejected) { return 0; } require Fill(true, out var item); return item.Value; }",42)]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } void Take(Item first, int32 second) {} int32 Main() { unsafe { try { Take(new Item(7), 1 / 0); } catch { return 42; } } return 0; }",42)]
-    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } bool Fill(out Item output) { output = new Item(42); return output.Value == 42 && output.Read() == 42; } int32 Main() { require Fill(out var item); return item.Value; }",42)]
-    [TestCase("unique struct Item { public int32 A; public int32 B; public int32 C; public Item(int32 a) { A = a; B = a + 1; C = a + 2; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return C; } } bool Refill(out Item output) { output = new Item(7); Item moved = move output; output = new Item(40); return output.C == 42 && output.Read() == 42; } int32 Main() { require Refill(out var item); return item.C; }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {}  public int32 Read() { return Value; } } int32 Main() { mut Item item = new Item(42); unsafe { try { item = new Item(42 / 0); } catch { return item.Read(); } } return 0; }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {} } int32 Main() { mut Item item = new Item(7); item = new Item(42); return item.Value; }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {} } bool Fill(bool accepted, out Item item) { item = new Item(42); return accepted; } int32 Main() { bool rejected = Fill(false, out var absent); if (rejected) { return 0; } require Fill(true, out var item); return item.Value; }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {} } void Take(Item first, int32 second) {} int32 Main() { unsafe { try { Take(new Item(7), 1 / 0); } catch { return 42; } } return 0; }",42)]
+    [TestCase("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; }  [Cleanup] public void Close() {}  public int32 Read() { return Value; } } bool Fill(out Item output) { output = new Item(42); return output.Value == 42 && output.Read() == 42; } int32 Main() { require Fill(out var item); return item.Value; }",42)]
+    [TestCase("unique struct Item { public int32 A; public int32 B; public int32 C; public Item(int32 a) { A = a; B = a + 1; C = a + 2; }  [Cleanup] public void Close() {}  public int32 Read() { return C; } } bool Refill(out Item output) { output = new Item(7); Item moved = move output; output = new Item(40); return output.C == 42 && output.Read() == 42; } int32 Main() { require Refill(out var item); return item.C; }",42)]
     [TestCase(OwnedBufferProgram,42)]
     [TestCase(ReadonlyBufferViewProgram,42)]
     [TestCase(ReadonlyBufferViewFailure,unchecked((int)0xE0540003))]
@@ -238,20 +254,34 @@ public sealed partial class JitTests
     private static async Task AssertCheckedExecutionAsync(string source, int expected, params string[] sourcePaths)
     {
         AssertWindowsX64();
-        var compilation = Compilation.Create(await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true),
-            BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(
+            await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var directory = TestArtifactPaths.CreateDirectory("jit-tests");
         var image = Path.Combine(directory, $"checked-{Guid.NewGuid():N}.exe");
+        var layoutManifest = Path.Combine(directory,
+            $"layout-{Guid.NewGuid():N}.json");
         try
         {
+            await File.WriteAllTextAsync(layoutManifest,
+                CliTests.CreateLayoutCoreManifest("sample.jit"))
+                .ConfigureAwait(true);
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true);
             (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) {
                 UseShellExecute = false,
                 CreateNoWindow = true,
             }, []).ConfigureAwait(true);
-            var jit = CliStart("jit", "-", "--runtime", "checked-exceptions");
+            var jit = CliStart("jit", "-", "--runtime", "checked-exceptions",
+                "--layout-core-manifest", layoutManifest);
             foreach (var path in sourcePaths)
             {
                 jit.ArgumentList.Add("--source");
@@ -266,6 +296,7 @@ public sealed partial class JitTests
         finally
         {
             File.Delete(image);
+            File.Delete(layoutManifest);
         }
     }
 
@@ -281,6 +312,30 @@ public sealed partial class JitTests
         return trees;
     }
 
+    private static async Task<(int Exit, string Output, string Error)>
+        RunScannerComponentAsync(string scannerPath, string source)
+    {
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"scanner-jit-{Guid.NewGuid():N}");
+        _ = Directory.CreateDirectory(directory);
+        var manifestPath = Path.Combine(directory, "layout.json");
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath,
+                CliTests.CreateLayoutCoreManifest("sample.scanner"))
+                .ConfigureAwait(true);
+            return await RunAsync(CliStart("scan-component", scannerPath, "-",
+                "--runtime", "fail-fast", "--layout-core-manifest",
+                manifestPath, "--json"), Encoding.UTF8.GetBytes(source))
+                .ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
     [Test]
     public async Task CheckedBoundsFailureAgreesBetweenHostBufferPeAndJitWorkerAsync()
     {
@@ -294,7 +349,11 @@ public sealed partial class JitTests
         try
         {
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true);
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual2 = compilation.Program;
+                    Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual2!;
+                }))(), NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true);
             (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -384,9 +443,8 @@ public sealed partial class JitTests
     {
         AssertWindowsX64();
         var scanner = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        (var exit, var output, var error) = await RunAsync(
-            CliStart("scan-component", scanner, "-", "--runtime", "fail-fast", "--json"),
-            Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+        (var exit, var output, var error) = await RunScannerComponentAsync(
+            scanner, source).ConfigureAwait(true);
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
@@ -416,9 +474,8 @@ public sealed partial class JitTests
     {
         var expected = Lexer.Lex(SourceText.From(source));
         var scanner = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (exit, output, error) = await RunAsync(
-            CliStart("scan-component", scanner, "-", "--runtime", "fail-fast", "--json"),
-            Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+        var (exit, output, error) = await RunScannerComponentAsync(
+            scanner, source).ConfigureAwait(true);
         Assert.That(exit, Is.EqualTo(expected.Diagnostics.IsEmpty ? 0 : 1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);

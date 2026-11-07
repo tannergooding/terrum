@@ -2,14 +2,15 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
-public sealed class NativeManagedClassCopyFieldTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeManagedClassCopyFieldTests
 {
     private const string Valid = """
         struct Small {
@@ -44,7 +45,11 @@ public sealed class NativeManagedClassCopyFieldTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Valid));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var fields = program.Classes[0].Fields;
         Assert.That((fields[0].Offset, fields[0].Size), Is.EqualTo((0, 1)));
         Assert.That((fields[1].Offset, fields[1].Size), Is.EqualTo((4, 12)));
@@ -70,7 +75,7 @@ public sealed class NativeManagedClassCopyFieldTests
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             class Box {
             """ + field + """
@@ -97,7 +102,11 @@ public sealed class NativeManagedClassCopyFieldTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Valid));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         var @class = program.Classes[0];
         var fields = @class.Fields;
         var owning = program with {
@@ -138,7 +147,11 @@ public sealed class NativeManagedClassCopyFieldTests
             }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var @class = program.Classes[0];
         var readonlyField = @class.Fields[0] with { IsMutable = false };
         var forged = program with { Classes = [@class with { Fields = [readonlyField] }] };
@@ -164,7 +177,7 @@ public sealed class NativeManagedClassCopyFieldTests
             int32 Main() { return 42; }
             """));
         Assert.That(compilation.Program, Is.Null);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
     [TestCase(8,true)]
     [TestCase(9,false)]
@@ -193,7 +206,11 @@ public sealed class NativeManagedClassCopyFieldTests
         if (fits)
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Classes[0].Size, Is.EqualTo(128));
+            Assert.That(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual3 = compilation.Program;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual3!;
+            }))().Classes[0].Size, Is.EqualTo(128));
         }
         else
         {

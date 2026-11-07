@@ -5,13 +5,13 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed partial class NativeManagedClassModuleTests
+internal sealed partial class NativeManagedClassModuleTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -33,7 +33,7 @@ public sealed partial class NativeManagedClassModuleTests
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(program, ["Counter.Increment"]))!;
         var producer = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("Leaf"));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Leaf(); }",
@@ -74,7 +74,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(Compile(Replacement, policy), ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.CreateReference(producer).Structures, Is.Empty);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 25);
@@ -111,7 +111,7 @@ public sealed partial class NativeManagedClassModuleTests
                 public mut int32 Value;
                 public Owner(int32 value) { Value = value; }
                 public mut void Add(int32 amount) { Value = Value + amount; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public int32 Leaf() {
                 mut Owner owner = new Owner(40);
@@ -129,7 +129,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.CreateReference(producer).Structures, Is.Empty);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 26);
@@ -169,12 +169,12 @@ public sealed partial class NativeManagedClassModuleTests
             unique struct Child {
                 public mut Leaf Data;
                 public Child(int32 value) { Data = new Leaf(value); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Owner {
                 public mut Child Nested;
                 public Owner(int32 value) { Nested = new Child(value); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public int32 LeafValue() {
                 mut Owner owner = new Owner(40);
@@ -190,7 +190,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.CreateReference(producer).Structures, Is.Empty);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 27);
@@ -233,7 +233,7 @@ public sealed partial class NativeManagedClassModuleTests
                 public mut int32 Value;
                 public Owner(int32 value) { Value = value; }
                 public mut void Add(int32 amount) { Value = Value + amount; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public int32 LeafValue() {
                 mut Owner owner = new Owner(40);
@@ -250,7 +250,7 @@ public sealed partial class NativeManagedClassModuleTests
             unique struct Owner {
                 public mut Leaf Nested;
                 public Owner(int32 value) { Nested = new Leaf(value); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public int32 LeafValue() {
                 mut Owner owner = new Owner(40);
@@ -262,7 +262,7 @@ public sealed partial class NativeManagedClassModuleTests
             NativeRuntimePolicy.CheckedExceptions);
         Assert.That(program.Structures[0].Name, Is.EqualTo("Unused"));
         var producer = ModuleCompiler.CreateProducer(program, ["LeafValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("LeafValue"));
         Assert.That(reference.Structures, Is.Empty);

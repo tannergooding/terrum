@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [Test]
     public async Task Float128ArithmeticMatchesExactOracleAcrossRandomOperandsAsync()
@@ -35,7 +35,7 @@ public sealed partial class JitTests
                     operation, PrimitiveType.Float128, left, right, out var expected), Is.True);
                 Assert.That((expected.High >> 48) & 0x7FFF, Is.Not.EqualTo(0x7FFF));
                 checkCount++;
-                checks.Append("if (").Append(name).Append('(')
+                _ = checks.Append("if (").Append(name).Append('(')
                     .Append(Float128Literal(left)).Append(", ")
                     .Append(Float128Literal(right)).Append(") != ")
                     .Append(Float128Literal(expected)).Append(") { return ")
@@ -168,7 +168,8 @@ public sealed partial class JitTests
         }
         var exponent = encodedExponent == 0 ? -16382 : encodedExponent - 16383;
         var integralDigit = encodedExponent == 0 ? "0" : "1";
-        var exponentText = exponent >= 0 ? $"+{exponent}" : exponent.ToString();
+        var exponentText = exponent >= 0 ? $"+{exponent}"
+            : exponent.ToString(System.Globalization.CultureInfo.InvariantCulture);
         return $"float128({(negative ? "-" : "")}0x{integralDigit}.{fraction}p{exponentText})";
     }
 }

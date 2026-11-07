@@ -8,17 +8,17 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed partial class NativeManagedClassModuleTests
+internal sealed partial class NativeManagedClassModuleTests
 {
     private const string Middle = "public int32 Middle() { return Leaf() + 1; }";
     private const string Root = "int32 Main() { Middle(); return Middle() + 1; }";
@@ -45,9 +45,9 @@ public sealed partial class NativeManagedClassModuleTests
         _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(root, [middle, original, replacement]))!;
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(44));
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
@@ -55,9 +55,9 @@ public sealed partial class NativeManagedClassModuleTests
         var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
             configuration, frameworkDirectory.Name, "terrumc.exe");
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, original], apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(44));
         Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
         Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
@@ -79,16 +79,16 @@ public sealed partial class NativeManagedClassModuleTests
         _ = global::System.Linq.Enumerable.Single(NativeModuleCompiler.CreateReference(replacement).Functions);
         NativeModuleCompiler.ValidateGraph(root, [middle, replacement]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(44));
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, frameworkDirectory.Name, "terrumc.exe");
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(44));
         Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
         Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
@@ -128,7 +128,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy);
         var contract = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-19"));
         var reference = ModuleCompiler.CreateReference(contract);
         Assert.That(reference.Structures, Is.Empty);
@@ -175,9 +175,12 @@ public sealed partial class NativeManagedClassModuleTests
     [Test]
     public void CurrentSemanticModuleRejectsForgedCopyFieldTypesAlignmentAndOwnership()
     {
-        var contract = ModuleCompiler.CreateProducer(Compile(Sample("managed-copy-class-leaf"),
-            NativeRuntimePolicy.FailFast), ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(101));
+        var program = Compile(Sample("managed-copy-class-leaf"),
+            NativeRuntimePolicy.FailFast);
+        var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
+        var expectedNestedType = program.Classes.Single(
+            static @class => @class.Name == "Cycle").Fields[1].Type;
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(104));
         var formatVersion = BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
@@ -194,7 +197,7 @@ public sealed partial class NativeManagedClassModuleTests
             {
                 _ = reader.ReadByte();
             }
-            _ = reader.ReadInt32();
+            _ = reader.ReadUInt64();
             _ = reader.ReadBoolean();
             _ = reader.ReadBoolean();
             if (structure == 1)
@@ -207,6 +210,16 @@ public sealed partial class NativeManagedClassModuleTests
             {
                 _ = reader.ReadInt32();
                 _ = reader.ReadBoolean();
+            }
+            if (formatVersion >= 103)
+            {
+                _ = reader.ReadInt32();
+                if (reader.ReadBoolean())
+                {
+                    _ = reader.ReadInt32();
+                }
+                _ = reader.ReadInt32();
+                _ = reader.ReadInt32();
             }
             if (reader.ReadBoolean())
             {
@@ -222,10 +235,11 @@ public sealed partial class NativeManagedClassModuleTests
                 if (structure == 1 && field == 1)
                 {
                     nestedOffset = (int)reader.BaseStream.Position;
-                    Assert.That(reader.ReadInt32(), Is.EqualTo(4));
-                    reader.BaseStream.Position -= 4;
+                    Assert.That(reader.ReadUInt64(), Is.EqualTo(4));
+                    reader.BaseStream.Position -= sizeof(ulong);
                 }
-                reader.BaseStream.Position += 4 + 4 + 4;
+                reader.BaseStream.Position += (2 * sizeof(ulong))
+                    + (4 * sizeof(byte));
             }
         }
         Assert.That(nestedOffset >= 0, Is.True);
@@ -239,7 +253,7 @@ public sealed partial class NativeManagedClassModuleTests
         var secondNameLength = reader.ReadInt32();
         reader.BaseStream.Position += secondNameLength;
         var type = (int)reader.BaseStream.Position;
-        Assert.That(reader.ReadInt32(), Is.EqualTo(101));
+        Assert.That(reader.ReadInt32(), Is.EqualTo((int)expectedNestedType));
         var offset = (int)reader.BaseStream.Position;
         Assert.That(reader.ReadInt32(), Is.EqualTo(8));
 
@@ -247,7 +261,8 @@ public sealed partial class NativeManagedClassModuleTests
         malformed[unique] = 1;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed))!;
         malformed = (byte[])contract.Clone();
-        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(nestedOffset, 4), 8);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            malformed.AsSpan(nestedOffset, sizeof(ulong)), 8);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed))!;
         malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(type, 4), 100);
@@ -262,7 +277,7 @@ public sealed partial class NativeManagedClassModuleTests
         var native = NativeModuleCompiler.CreateProducer(Compile(Sample("managed-copy-class-leaf"),
             NativeRuntimePolicy.FailFast), ["Leaf"], "NodeB", NativeRuntimePolicy.FailFast);
         var invalidPackage = (byte[])native.Clone();
-        var contractOffset = 18 + invalidPackage[7] + invalidPackage[8] + 2;
+        var contractOffset = NativePackageTestHelpers.ContractOffset(invalidPackage);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(invalidPackage.AsSpan(10, 4)), Is.EqualTo(contract.Length));
         malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(offset, 4), 4);
@@ -284,7 +299,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var program = Compile(Sample("managed-class-leaf"), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-20"));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
@@ -391,8 +406,7 @@ public sealed partial class NativeManagedClassModuleTests
         Rehash(downgraded);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded))!;
 
-        var imageStart = 18 + package[7] + package[8] + 2
-            + BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(10, 4));
+        var imageStart = NativePackageTestHelpers.ImageOffset(package);
         var invalidData = (byte[])package.Clone();
         var pe = imageStart + BinaryPrimitives.ReadInt32LittleEndian(invalidData.AsSpan(imageStart + 0x3C, 4));
         var dataSection = pe + 24 + 0xF0 + (2 * 40);
@@ -441,9 +455,13 @@ public sealed partial class NativeManagedClassModuleTests
         var imported = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeModuleCompiler.CreateReference(dependency), (BoundRuntimePolicy)policy);
         Assert.That(imported.HasErrors, Is.False, string.Join(Environment.NewLine, imported.Diagnostics));
-        var graph = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = imported.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var graph = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = imported.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             ["Leaf"], "NodeB", [dependency], policy);
-        Assert.That(GraphSemanticVersion(graph), Is.EqualTo(101));
+        Assert.That(GraphSemanticVersion(graph), Is.EqualTo(104));
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile("int32 Main() { return Leaf(); }",
             policy, NativeModuleCompiler.CreateGraphReference([graph]), library: false), [graph], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [graph, dependency],
@@ -498,12 +516,29 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var syntax = SyntaxTree.Parse(source);
         var boundPolicy = (BoundRuntimePolicy)policy;
+        var nativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var options = new CompilationOptions {
+            RuntimePolicy = boundPolicy,
+            NativeCoreRegistration = nativeRegistration,
+            LayoutCoreRegistration
+                = NativeCoreRegistrationTests.CreateLayoutRegistration(
+                    nativeRegistration),
+        };
         var compilation = library
-            ? reference is null ? Compilation.CreateLibrary(syntax, boundPolicy)
-                : Compilation.CreateLibrary(syntax, reference, boundPolicy)
-            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual1 = reference; Assert.That(__nunitActual1, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual1!; }))(), boundPolicy);
+            ? reference is null ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.CreateLibrary(syntax, reference, options)
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => {
+                var __nunitActual1 = reference;
+                Assert.That(__nunitActual1, Is.TypeOf<CompilationReference>());
+                return (CompilationReference)__nunitActual1!;
+            }))(), options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
     }
 
     private static string Sample(string name) =>

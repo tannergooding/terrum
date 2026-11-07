@@ -6,21 +6,23 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Graphs;
 
-public sealed class NativeGraphOriginTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeGraphOriginTests
 {
     private const string LeafSource = """
         [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
             public int32 Value;
-            [NoThrow] public Ticket(int32 value) { Value = value; }
-            [NoThrow] [Cleanup] public void Close() {}
+             public Ticket(int32 value) { Value = value; }
+             [Cleanup] public void Close() {}
         }
         public Ticket Make() { return new Ticket(20); }
         """;
@@ -30,12 +32,24 @@ public sealed class NativeGraphOriginTests
     {
         var boundPolicy = (BoundRuntimePolicy)policy;
         var syntax = SyntaxTree.Parse(source);
+        var options = new CompilationOptions {
+            RuntimePolicy = boundPolicy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
         var compilation = library
-            ? reference is null ? Compilation.CreateLibrary(syntax, boundPolicy)
-                : Compilation.CreateLibrary(syntax, reference, boundPolicy)
-            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), boundPolicy);
+            ? reference is null ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.CreateLibrary(syntax, reference, options)
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => {
+                var __nunitActual0 = reference;
+                Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>());
+                return (CompilationReference)__nunitActual0!;
+            }))(), options);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
     }
 
     private static byte[] Leaf(string source, NativeRuntimePolicy policy) =>
@@ -81,12 +95,12 @@ public sealed class NativeGraphOriginTests
         var originalMiddle = middle.ToArray();
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         var replacement = Leaf(LeafSource.Replace("new Ticket(20)", "new Ticket(21)",
             StringComparison.Ordinal), policy);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(44));
         Assert.That(root, Is.EqualTo(originalRoot));
         Assert.That(middle, Is.EqualTo(originalMiddle));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
@@ -128,12 +142,12 @@ public sealed class NativeGraphOriginTests
             NativeModuleCompiler.CreateGraphReference([leaf, middle]), library: false),
             [middle, leaf], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(Compile(
             Source.Replace("new Shared(40)", "new Shared(41)", StringComparison.Ordinal), policy),
             ["Make"], "Leaf", policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(43));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -168,7 +182,7 @@ public sealed class NativeGraphOriginTests
             dependencies, policy);
         NativeModuleCompiler.ValidateGraph(root, dependencies);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root,
-            [gamma, middle, leaf, beta, alpha], TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            [gamma, middle, leaf, beta, alpha], TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -177,7 +191,7 @@ public sealed class NativeGraphOriginTests
         const string Source = """
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Plain {
                 public int32 Value;
-                [NoThrow] public Plain(int32 value) { Value = value; }
+                 public Plain(int32 value) { Value = value; }
             }
             public Plain Make() { return new Plain(40); }
             """;
@@ -191,12 +205,12 @@ public sealed class NativeGraphOriginTests
             NativeModuleCompiler.CreateGraphReference([middle, leaf]), library: false),
             [middle, leaf], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(Compile(
             Source.Replace("new Plain(40)", "new Plain(41)", StringComparison.Ordinal), policy),
             ["Make"], "Leaf", policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(43));
     }
 
     [Test]
@@ -228,7 +242,7 @@ public sealed class NativeGraphOriginTests
             NativeModuleCompiler.CreateGraphReference([middle, leaf]), library: false),
             [middle, leaf], Policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [seed, leaf, middle],
-            TimeSpan.FromSeconds(10), Policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), Policy).ConfigureAwait(false), Is.EqualTo(42));
     }
 
     [Test]
@@ -240,8 +254,8 @@ public sealed class NativeGraphOriginTests
         var middle = NativeModuleCompiler.CreateGraphProducer(Compile("""
             internal unique struct Local {
                 public int32 Value;
-                [NoThrow] public Local(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 public Local(int32 value) { Value = value; }
+                 [Cleanup] public void Close() {}
             }
             public int32 Middle() {
                 Local local = new Local(2);
@@ -254,7 +268,7 @@ public sealed class NativeGraphOriginTests
             NativeModuleCompiler.CreateGraphReference([middle]), library: false),
             [middle], Policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [seed, middle],
-            TimeSpan.FromSeconds(10), Policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), Policy).ConfigureAwait(false), Is.EqualTo(42));
     }
 
     [Test]
@@ -306,7 +320,7 @@ public sealed class NativeGraphOriginTests
 
     private static (int Owner, int Cleanup) OriginOffsets(byte[] package, string type)
     {
-        Assert.That(package[4], Is.EqualTo(2));
+        Assert.That(package[4], Is.EqualTo(3));
         var at = 19 + package[7];
         for (var i = 0; i < package[8]; i++)
         {
@@ -365,7 +379,7 @@ public sealed class NativeGraphOriginTests
 
     private static (string[] Declarations, string[] Imports) Mapping(byte[] package, string identity)
     {
-        Assert.That(package[4], Is.EqualTo(2));
+        Assert.That(package[4], Is.EqualTo(3));
         var at = 19 + package[7];
         for (var i = 0; i < package[8]; i++)
         {

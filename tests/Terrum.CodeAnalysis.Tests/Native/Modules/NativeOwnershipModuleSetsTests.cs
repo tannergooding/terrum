@@ -2,21 +2,23 @@
 
 using System;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativeOwnershipModuleSetsTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeOwnershipModuleSetsTests
 {
     private const string First = """
         [Blittable] [Layout(LayoutKind.Sequential)] public unique struct FirstTicket {
             public int32 Value;
-            [NoThrow] public FirstTicket(int32 value) { Value = value; }
-            [NoThrow] [Cleanup] public void Close() {}
+             public FirstTicket(int32 value) { Value = value; }
+             [Cleanup] public void Close() {}
         }
         public FirstTicket CreateFirst() { return new FirstTicket(20); }
         public int32 ConsumeFirst(FirstTicket ticket) { return ticket.Value; }
@@ -26,11 +28,11 @@ public sealed class NativeOwnershipModuleSetsTests
         [Blittable] [Layout(LayoutKind.Sequential)] public unique struct SecondTicket {
             public int64 Value;
             public uint64 Marker;
-            [NoThrow] public SecondTicket(int64 value) {
+             public SecondTicket(int64 value) {
                 Value = value;
                 Marker = uint64.MaxValue;
             }
-            [NoThrow] [Cleanup] public void Close() {}
+             [Cleanup] public void Close() {}
         }
         public bool TrySecond(bool success, out SecondTicket ticket) {
             ticket = new SecondTicket(22);
@@ -76,20 +78,24 @@ public sealed class NativeOwnershipModuleSetsTests
             }
             """), NativeModuleCompiler.CreateReferenceSet([second, first]), boundPolicy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             [first, second], policy);
         var original = (byte[])consumer.Clone();
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, first],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
 
         var firstReplacement = Producer(First.Replace("new FirstTicket(20)", "new FirstTicket(21)", StringComparison.Ordinal),
             ["CreateFirst", "ConsumeFirst", "FirstTicket.Close"], "First", policy);
         var secondReplacement = Producer(Second.Replace("new SecondTicket(22)", "new SecondTicket(23)", StringComparison.Ordinal),
             secondExports, "Second", policy);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [firstReplacement, second],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [secondReplacement, first],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(43));
         Assert.That(consumer, Is.EqualTo(original));
     }
 
@@ -97,9 +103,17 @@ public sealed class NativeOwnershipModuleSetsTests
     {
         var boundPolicy = policy == NativeRuntimePolicy.FailFast
             ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), boundPolicy);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = boundPolicy,
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(),
             exports, identity, policy);
     }
 }

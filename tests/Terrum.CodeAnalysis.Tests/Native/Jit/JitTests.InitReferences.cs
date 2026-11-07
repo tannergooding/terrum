@@ -7,7 +7,7 @@ using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -135,7 +135,7 @@ public sealed partial class JitTests
     [Test]
     public Task CheckedLaterArgumentFailureLeavesStagedInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
-            [NoThrow] bool Fill(init ref<int32> value, int32 ignored) {
+             bool Fill(init ref<int32> value, int32 ignored) {
                 value = 42;
                 return true;
             }
@@ -157,7 +157,7 @@ public sealed partial class JitTests
     [Test]
     public Task CheckedReorderedNamedLaterArgumentFailureLeavesInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
-            [NoThrow] bool Fill(int32 ignored, init ref<int32> value) {
+             bool Fill(int32 ignored, init ref<int32> value) {
                 value = 42;
                 return true;
             }
@@ -179,8 +179,9 @@ public sealed partial class JitTests
     [Test]
     public Task CheckedEarlierArgumentFailureLeavesOutDestinationUnchangedAsync() =>
         AssertCheckedExecutionAsync("""
-            [NoThrow] void Fill(int32 ignored, out int32 value) { value = 42; }
-            int32 Fail() { require false; return 0; }
+             void Fill(int32 ignored, out int32 value) { value = 42; }
+            [DoesNotReturn]
+            int32 Fail() { require false; }
             int32 Main() {
                 mut int32 value = 7;
                 unsafe {
@@ -201,7 +202,7 @@ public sealed partial class JitTests
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Fail(init ref<Owner> value) {
                 value = new Owner(42);

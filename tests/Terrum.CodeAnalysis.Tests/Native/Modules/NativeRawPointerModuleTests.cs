@@ -8,7 +8,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativeRawPointerModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeRawPointerModuleTests
 {
     [Test]
     public void OpaquePointerResultsRetainCallerUnsafeAcrossPrivateModules()

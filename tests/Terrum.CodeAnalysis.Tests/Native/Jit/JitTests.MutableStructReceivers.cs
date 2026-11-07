@@ -2,13 +2,13 @@
 
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [Test]
     public async Task UniqueOwnerSampleAgreesBetweenAotAndJitAsync()
@@ -53,7 +53,7 @@ public sealed partial class JitTests
                     Advance(amount);
                     this.Advance(amount);
                 }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(20);
@@ -77,7 +77,7 @@ public sealed partial class JitTests
                     Value = 42;
                     require false;
                 }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(1);
@@ -108,7 +108,7 @@ public sealed partial class JitTests
                 public mut Middle Data;
                 public Owner(int32 value) { Data = new Middle(value); }
                 public mut void Forward(int32 amount) { Data.Nested.Add(amount); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(20);
@@ -134,13 +134,13 @@ public sealed partial class JitTests
                 public mut Leaf Data;
                 public Child(int32 value) { Data = new Leaf(value); }
                 public mut void Forward(int32 amount) { Data.Add(amount); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Owner {
                 public mut Child Nested;
                 public Owner(int32 value) { Nested = new Child(value); }
                 public mut void Forward(int32 amount) { Nested.Forward(amount); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(20);
@@ -160,14 +160,14 @@ public sealed partial class JitTests
             unique struct Child {
                 public mut int32 Value;
                 public Child(int32 value) { Value = value; }
-                [NoThrow] public int32 Read() { return Value; }
+                 public int32 Read() { return Value; }
                 public mut void Add(int32 value) { Value = Value + value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Owner {
                 public mut Child Nested;
                 public Owner(int32 value) { Nested = new Child(value); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 mut Owner owner = new Owner(21);
@@ -209,7 +209,11 @@ public sealed partial class JitTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(System.Environment.NewLine, compilation.Diagnostics));
-        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Structures[0].Size, Is.EqualTo(size));
+        Assert.That(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))().Structures[0].Size, Is.EqualTo(size));
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }

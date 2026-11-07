@@ -20,11 +20,8 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
 
     private static CompilationOptions LayoutOptions(
         BoundRuntimePolicy runtimePolicy)
-        => new() {
-            RuntimePolicy = runtimePolicy,
-            LayoutCoreRegistration =
-                LayoutCoreRegistrationTestData.Create(),
-        };
+        => NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            runtimePolicy);
 
     [Test]
     public void RepeatedSeedPreservesFlatAndNestedHighIndexCoverage()
@@ -416,6 +413,64 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         Assert.That(unknownWrite.HasErrors, Is.True,
             string.Join(Environment.NewLine, unknownWrite.Diagnostics));
 
+        var nestedUnknownWrite = Compile("""
+            public uint64 ReadAfterUnknownNestedNarrowWrite(
+                uint64 rowIndex, uint64 elementIndex) {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [[RawWord; 2]; 2] rows = [[wide; 2]; 2];
+                rows[rowIndex][elementIndex] = low;
+                unsafe { return rows[0][0].Wide; }
+            }
+            """);
+        Assert.That(nestedUnknownWrite.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                nestedUnknownWrite.Diagnostics));
+
+        var nestedUnknownSingletonWrite = Compile("""
+            public uint64 ReadAfterUnknownOuterSingletonWrite(
+                uint64 rowIndex, uint64 elementIndex) {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [[RawWord; 1]; 2] rows = [[wide; 1]; 2];
+                rows[rowIndex][elementIndex] = low;
+                unsafe { return rows[0][0].Wide; }
+            }
+            """);
+        Assert.That(nestedUnknownSingletonWrite.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                nestedUnknownSingletonWrite.Diagnostics));
+
+        var knownSingletonIndexUnderUnknownAncestor = Compile("""
+            public uint64 ReadAfterUnknownOuterKnownSingletonWrite(
+                uint64 rowIndex) {
+                RawWord wide = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [[RawWord; 1]; 2] rows = [[wide; 1]; 2];
+                rows[rowIndex][0] = low;
+                unsafe { return rows[0][0].Wide; }
+            }
+            """);
+        Assert.That(knownSingletonIndexUnderUnknownAncestor.HasErrors,
+            Is.True, string.Join(Environment.NewLine,
+                knownSingletonIndexUnderUnknownAncestor.Diagnostics));
+
+        var nestedUnknownFieldWrite = Compile("""
+            public uint64 ReadAfterUnknownNestedNarrowFieldWrite(
+                uint64 rowIndex, uint64 elementIndex) {
+                RawWord wide = new RawWord(uint64(7));
+                mut [[RawWord; 2]; 2] rows = [[wide; 2]; 2];
+                unsafe { rows[rowIndex][elementIndex].Low = uint8(1); }
+                unsafe { return rows[0][0].Wide; }
+            }
+            """);
+        Assert.That(nestedUnknownFieldWrite.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                nestedUnknownFieldWrite.Diagnostics));
+
         var oneElementWrite = Compile("""
             public uint64 ReadAfterUnknownSingleElementWrite(uint64 index) {
                 RawWord wide = new RawWord(uint64(7));
@@ -726,6 +781,26 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
     }
 
     [Test]
+    public void RepeatedUnionRootStateSurvivesSnapshotScopeHandoff()
+    {
+        var compilation = Compile("""
+            public int32 WriteUnknownOuterIndexAfterBranch(bool writeBranch,
+                uint64 rowIndex) {
+                RawWord seed = new RawWord(uint64(7));
+                mut [[RawWord; 2]; 2] rows = [[seed; 2]; 2];
+                if (writeBranch) {
+                    unsafe { rows[1][1].Low = uint8(1); }
+                }
+                unsafe { rows[rowIndex][1].Low = uint8(2); }
+                return 0;
+            }
+            """);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void RepeatedFieldArrayCoverageSurvivesByValueCalls()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
@@ -856,8 +931,9 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 first.Values[0] = low;
                 init mut Holder second;
                 second.Values = [wide; 2];
+                second.Values[1] = low;
                 Holder copy = Select(true, first, second);
-                unsafe { return int32(copy.Values[1].Wide); }
+                unsafe { return int32(copy.Values[0].Low); }
             }
             """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
@@ -866,7 +942,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         Assert.That(NativeJit.Execute(compilation.Program!,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
     }
 
     [Test]
@@ -1359,15 +1435,15 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
             [Blittable]
             [Layout(LayoutKind.Sequential)]
             struct CallbackBox {
-                public mut fnptr<NativeAbi, int32, int32> Callback;
-                public CallbackBox(fnptr<NativeAbi, int32, int32> callback) {
+                public mut [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> Callback;
+                public CallbackBox([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> callback) {
                     Callback = callback;
                 }
             }
 
-            unsafe fnptr<NativeAbi, int32, int32> Select(
-                fnptr<NativeAbi, int32, int32> original,
-                fnptr<NativeAbi, int32, int32> replacement, int32 index) {
+            unsafe [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> Select(
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> original,
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> replacement, int32 index) {
                 CallbackBox seed = new CallbackBox(original);
                 mut [CallbackBox; 2] callbacks = [seed; 2];
                 unsafe {
@@ -1376,9 +1452,9 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 }
             }
 
-            unsafe fnptr<NativeAbi, int32, int32> SelectKnown(
-                fnptr<NativeAbi, int32, int32> original,
-                fnptr<NativeAbi, int32, int32> replacement) {
+            unsafe [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> SelectKnown(
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> original,
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> replacement) {
                 CallbackBox seed = new CallbackBox(original);
                 mut [CallbackBox; 2] callbacks = [seed; 2];
                 unsafe {
@@ -1387,9 +1463,9 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 }
             }
 
-            unsafe fnptr<NativeAbi, int32, int32> SelectExplicit(
-                fnptr<NativeAbi, int32, int32> original,
-                fnptr<NativeAbi, int32, int32> replacement) {
+            unsafe [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> SelectExplicit(
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> original,
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> replacement) {
                 CallbackBox first = new CallbackBox(original);
                 CallbackBox second = new CallbackBox(replacement);
                 mut [CallbackBox; 2] callbacks = [first, second];
@@ -1404,13 +1480,13 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
 
             int32 Main() {
                 unsafe {
-                    fnptr<NativeAbi, int32, int32> known
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> known
                         = SelectKnown(&Increment, &Double);
                     if (known(0) != 24) { return -1; }
-                    fnptr<NativeAbi, int32, int32> explicitValue
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> explicitValue
                         = SelectExplicit(&Increment, &Double);
                     if (explicitValue(0) != 24) { return -2; }
-                    fnptr<NativeAbi, int32, int32> selected
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> selected
                         = Select(&Increment, &Double, 1);
                     return selected(21);
                 }
@@ -1713,6 +1789,24 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
+    [Test]
+    public void SparseUnionUpdatesStopAtThePublicWorkLimit()
+    {
+        var withinLimit = CompileSparseUnionUpdates(150);
+        Assert.That(withinLimit.HasErrors, Is.False,
+            string.Join(Environment.NewLine, withinLimit.Diagnostics));
+
+        var overLimit = CompileSparseUnionUpdates(151);
+
+        Assert.That(overLimit.HasErrors, Is.True,
+            string.Join(Environment.NewLine, overLimit.Diagnostics));
+        Assert.That(overLimit.Diagnostics.Any(diagnostic =>
+                diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("work limit",
+                    StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, overLimit.Diagnostics));
+    }
+
     private const string s_rawWordDeclarations = """
         [Blittable]
         [Layout(LayoutKind.Sequential)]
@@ -1741,4 +1835,23 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         => Compilation.CreateLibrary(
             SyntaxTree.Parse(s_rawWordDeclarations + body),
             LayoutOptions(BoundRuntimePolicy.FailFast));
+
+    private static Compilation CompileSparseUnionUpdates(int updateCount)
+    {
+        const int arrayExtent = 256;
+        var updates = string.Join(Environment.NewLine,
+            Enumerable.Range(0, updateCount).Select(static index =>
+                $"values[{index}] = low;"));
+        return Compile($$"""
+            public int32 UpdateSparseUnionState() {
+                RawWord seed = new RawWord(uint64(7));
+                init mut RawWord low;
+                unsafe { low.Low = 1; }
+                mut [RawWord; {{arrayExtent}}] values
+                    = [seed; {{arrayExtent}}];
+            {{updates}}
+                return 0;
+            }
+            """);
+    }
 }

@@ -14,7 +14,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [Test]
     public async Task NarrowIntegerConversionsPreserveValuesAcrossAotAndJitAsync()
@@ -126,14 +126,17 @@ public sealed partial class JitTests
                 {
                     continue;
                 }
-                source.AppendLine($"    {sourceType} source{pair} = {sourceType}(1);");
-                source.AppendLine($"    {destinationType} result{pair} = {destinationType}(source{pair});");
-                source.AppendLine($"    if (int32(result{pair}) != 1) {{ return {pair + 1}; }}");
+                _ = source.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                    $"    {sourceType} source{pair} = {sourceType}(1);");
+                _ = source.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                    $"    {destinationType} result{pair} = {destinationType}(source{pair});");
+                _ = source.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                    $"    if (int32(result{pair}) != 1) {{ return {pair + 1}; }}");
                 pair++;
             }
         }
         Assert.That(pair, Is.EqualTo(types.Length * (types.Length - 1)));
-        source.AppendLine("    return 42;\n}");
+        _ = source.AppendLine("    return 42;\n}");
 
         await AssertFailFastExecutionAsync(source.ToString(), 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source.ToString(), 42).ConfigureAwait(true);

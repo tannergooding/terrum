@@ -3,15 +3,15 @@
 using System;
 using System.Linq;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed partial class NativeSourceImportTests
+internal sealed partial class NativeSourceImportTests
 {
     [Test]
     public void SourceAuthoredWin32ImportUsesOrdinaryPointerAbi()
@@ -134,7 +134,7 @@ public sealed partial class NativeSourceImportTests
 
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(consumerCompilation.Program!, "typed-pointers"));
         var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer);
 

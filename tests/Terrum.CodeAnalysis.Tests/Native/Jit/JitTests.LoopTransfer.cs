@@ -5,7 +5,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -162,7 +162,7 @@ public sealed partial class JitTests
     public Task NestedFinallyOnLoopExitRunsOnceInsideOutAsync(bool checkedExceptions)
     {
         const string Source = """
-            [NoThrow] void Touch() { }
+             void Touch() { }
             int32 Main() {
                 mut int32 value = 0;
                 while (true) {

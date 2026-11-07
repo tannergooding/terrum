@@ -7,16 +7,16 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native;
 
-public sealed partial class NativeTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed partial class NativeTests
 {
     [TestCase("require true; return 7;",7)]
     [TestCase("require false; return 7;",unchecked((int)0xE0540003))]
@@ -54,7 +54,7 @@ public sealed partial class NativeTests
     [TestCase("int32 Main() { mut int32 n = 0; outer: while (true) { do { n = n + 42; break outer; } while (true); } return n; }",42)]
     public async Task ExecutesNativeFunctionsAndStructuredControlFlowAsync(string source, int expected)
     {
-        Assert.That(await ExecuteAsync(Emit(source)), Is.EqualTo(expected));
+        Assert.That(await ExecuteAsync(Emit(source)).ConfigureAwait(false), Is.EqualTo(expected));
     }
     [TestCase("2147483647 + 1",unchecked((int)0xE0540001))]
     [TestCase("-2147483648 - 1",unchecked((int)0xE0540001))]
@@ -67,21 +67,21 @@ public sealed partial class NativeTests
     [TestCase("(2147483647 + 1) + (1 / 0)",unchecked((int)0xE0540001))]
     public async Task RuntimeFailuresHaveExplicitProfileExitCodesAsync(string expression, int expected)
     {
-        Assert.That(await ExecuteAsync(Emit("int32 Main() { return " + expression + "; }")), Is.EqualTo(expected));
+        Assert.That(await ExecuteAsync(Emit("int32 Main() { return " + expression + "; }")).ConfigureAwait(false), Is.EqualTo(expected));
     }
 
     [Test]
     public async Task ArgumentsEvaluateOnceInSourceOrderAsync()
     {
         const string Source = "int32 Main() { return F(1 / 0, 2147483647 + 1); } int32 F(int32 a, int32 b) { return a + b; }";
-        Assert.That(await ExecuteAsync(Emit(Source)), Is.EqualTo(unchecked((int)0xE0540002)));
+        Assert.That(await ExecuteAsync(Emit(Source)).ConfigureAwait(false), Is.EqualTo(unchecked((int)0xE0540002)));
     }
     [TestCase("ControlFlow/factorial.terrum",720)]
     [TestCase("ControlFlow/control-flow.terrum",45)]
     [TestCase("Functions/stack-arguments.terrum",91)]
     [TestCase("Contracts/requirements.terrum",10)]
     [TestCase("ControlFlow/for-loops.terrum",285)]
-    [TestCase("Contracts/no-throw.terrum",42)]
+    [TestCase("Contracts/scalar-values.terrum",42)]
     [TestCase("Contracts/no-return.terrum",42)]
     public async Task LanguageFeatureSamplesExecuteAsync(string name, int expected)
     {
@@ -149,7 +149,11 @@ public sealed partial class NativeTests
         using var reader = new PEReader(stream);
         Assert.That(reader.HasMetadata, Is.False);
         Assert.That(reader.PEHeaders.CoffHeader.Machine, Is.EqualTo(Machine.Amd64));
-        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual0 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual0, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual0!; }))();
+        var header = ((global::System.Func<PEHeader>)(() => {
+            var __nunitActual0 = reader.PEHeaders.PEHeader;
+            Assert.That(__nunitActual0, Is.TypeOf<PEHeader>());
+            return (PEHeader)__nunitActual0!;
+        }))();
         Assert.That(header.Magic, Is.EqualTo(PEMagic.PE32Plus));
         Assert.That(header.Subsystem, Is.EqualTo(Subsystem.WindowsCui));
         Assert.That(header.AddressOfEntryPoint, Is.Not.EqualTo(0));
@@ -157,13 +161,16 @@ public sealed partial class NativeTests
         Assert.That(header.ExceptionTableDirectory.Size >= 24, Is.True);
         Assert.That(header.CorHeaderTableDirectory.Size, Is.EqualTo(0));
         Assert.That((header.DllCharacteristics & DllCharacteristics.NxCompatible) != 0, Is.True);
-        {var __nunitItems0 = reader.PEHeaders.SectionHeaders;        Assert.Multiple(() => {
+        {
+            var __nunitItems0 = reader.PEHeaders.SectionHeaders;
+            Assert.Multiple(() => {
             foreach (var __nunitItem1 in __nunitItems0)
             {
                 Assert.That((__nunitItem1.SectionCharacteristics & (SectionCharacteristics.MemWrite | SectionCharacteristics.MemExecute))
                 == (SectionCharacteristics.MemWrite | SectionCharacteristics.MemExecute), Is.False);
             }
-        });}
+        });
+        }
     }
 
     [Test]
@@ -200,7 +207,11 @@ public sealed partial class NativeTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
     }
 
     private static byte[] Emit(string source) => NativeEmitter.Emit(GetProgram(source), NativeRuntimePolicy.FailFast);

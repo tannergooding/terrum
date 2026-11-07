@@ -4,15 +4,16 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativeScopedViewModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeScopedViewModuleTests
 {
     private static string Fixture(string name)
     {
@@ -31,7 +32,11 @@ public sealed class NativeScopedViewModuleTests
             : reference is null ? Compilation.Create(tree, (BoundRuntimePolicy)policy)
                 : Compilation.Create(tree, reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
     }
     [TestCase(NativeRuntimePolicy.FailFast,"native-10")]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"native-11")]
@@ -51,8 +56,8 @@ public sealed class NativeScopedViewModuleTests
         var persistedSingle = (byte[])single.Clone();
         NativeModuleCompiler.Validate(single, original);
         NativeModuleCompiler.Validate(single, replacement);
-        Assert.That(await NativeModuleCompiler.RunAsync(single, original, TimeSpan.FromSeconds(10)), Is.EqualTo(42));
-        Assert.That(await NativeModuleCompiler.RunAsync(single, replacement, TimeSpan.FromSeconds(10)), Is.EqualTo(44));
+        Assert.That(await NativeModuleCompiler.RunAsync(single, original, TimeSpan.FromSeconds(10)).ConfigureAwait(false), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(single, replacement, TimeSpan.FromSeconds(10)).ConfigureAwait(false), Is.EqualTo(44));
         Assert.That(single, Is.EqualTo(persistedSingle));
 
         var middle = NativeModuleCompiler.CreateGraphProducer(
@@ -68,9 +73,9 @@ public sealed class NativeScopedViewModuleTests
         NativeModuleCompiler.ValidateGraph(root, [middle, original]);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(44));
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
@@ -79,9 +84,9 @@ public sealed class NativeScopedViewModuleTests
         var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
             configuration, frameworkDirectory.Name, "terrumc.exe");
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, original], apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
-            TimeSpan.FromSeconds(30), policy), Is.EqualTo(44));
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(44));
         Assert.That(root, Is.EqualTo(persistedRoot));
         Assert.That(middle, Is.EqualTo(persistedMiddle));
 
@@ -156,12 +161,12 @@ public sealed class NativeScopedViewModuleTests
         })
         {
             NativeModuleCompiler.Validate(single, provider);
-            Assert.That(await NativeModuleCompiler.RunAsync(single, provider, TimeSpan.FromSeconds(10)), Is.EqualTo(expected));
+            Assert.That(await NativeModuleCompiler.RunAsync(single, provider, TimeSpan.FromSeconds(10)).ConfigureAwait(false), Is.EqualTo(expected));
             NativeModuleCompiler.ValidateGraph(root, [middle, provider]);
             Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
-                TimeSpan.FromSeconds(10), policy), Is.EqualTo(expected));
+                TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(expected));
             Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, provider], apphost,
-                TimeSpan.FromSeconds(30), policy), Is.EqualTo(expected));
+                TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(expected));
         }
 
         var writableMiddle = NativeModuleCompiler.CreateGraphProducer(
@@ -171,12 +176,12 @@ public sealed class NativeScopedViewModuleTests
         Assert.That(NativeModuleCompiler.InspectGraphArtifact(writableMiddle).NativeProfileVersion, Is.EqualTo("native-17"));
         NativeModuleCompiler.ValidateGraph(root, [original, writableMiddle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [writableMiddle, original],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
         NativeModuleCompiler.ValidateGraph(root, [writableReplacement, writableMiddle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [writableMiddle, writableReplacement],
-            TimeSpan.FromSeconds(10), policy), Is.EqualTo(46));
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(46));
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root,
-            [writableReplacement, writableMiddle], apphost, TimeSpan.FromSeconds(30), policy), Is.EqualTo(46));
+            [writableReplacement, writableMiddle], apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(false), Is.EqualTo(46));
         Assert.That(single, Is.EqualTo(persistedSingle));
         Assert.That(middle, Is.EqualTo(persistedMiddle));
         Assert.That(root, Is.EqualTo(persistedRoot));

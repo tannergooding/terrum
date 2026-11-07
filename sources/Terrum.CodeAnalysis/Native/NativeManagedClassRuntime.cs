@@ -357,7 +357,8 @@ internal sealed partial class PeCompiler
             }
             foreach (var field in program.Structures[structureIndex].Fields)
             {
-                Collect(field.Type, checked(offset + field.Offset), activeStructures);
+                Collect(field.Type, checked(offset
+                    + NativeLayoutOffset(field.Offset)), activeStructures);
             }
             _ = activeStructures.Remove(structureIndex);
         }
@@ -878,7 +879,7 @@ internal sealed partial class PeCompiler
             if (ManagedClassTypes.IsManaged(field.Type))
             {
                 _code.Bytes(0x48, 0xC7, 0x80);
-                _code.Int32(32 + field.Offset);
+                _code.Int32(checked(32 + NativeLayoutOffset(field.Offset)));
                 _code.Int32(0);
             }
             if (_normalBacking)
@@ -886,10 +887,13 @@ internal sealed partial class PeCompiler
                 foreach (var leaf in NormalBackingReferenceLeaves(field.Type, _program))
                 {
                     _code.Bytes(0x48, 0xC7, 0x80);
-                    _code.Int32(32 + field.Offset + leaf.Offset);
+                    _code.Int32(checked(32
+                        + NativeLayoutOffset(field.Offset) + leaf.Offset));
                     _code.Int32(0);
                     _code.Bytes(0x48, 0xC7, 0x80);
-                    _code.Int32(32 + field.Offset + leaf.Offset + sizeof(ulong));
+                    _code.Int32(checked(32
+                        + NativeLayoutOffset(field.Offset) + leaf.Offset
+                        + sizeof(ulong)));
                     _code.Int32(0);
                 }
             }
@@ -1346,7 +1350,7 @@ internal sealed partial class PeCompiler
             _code.PointerOffset(metadataOffset + NormalBackingFieldRankOffset + fieldIndex);
             _code.Bytes(0xC6, 0x00, 0xFF);
             EmitNormalBackingQueueFieldSupportAtOffset(
-                field.Offset, field.Type, failures);
+                NativeLayoutOffset(field.Offset), field.Type, failures);
             _code.Load(NormalBackingHelperRankSlot);
             _code.Bytes(0xFF, 0xC0);
             _code.Store(NormalBackingHelperRankSlot);
@@ -1363,7 +1367,7 @@ internal sealed partial class PeCompiler
         {
             var field = @class.Fields[fieldIndex];
             EmitNormalBackingQueueFieldSupportAtOffset(
-                field.Offset, field.Type, failures);
+                NativeLayoutOffset(field.Offset), field.Type, failures);
         }
         var afterFields = _code.Position;
         _code.PatchRelative(acquisitionsDone, afterFields);
@@ -1412,7 +1416,8 @@ internal sealed partial class PeCompiler
                 if (IsNormalBackingHandle(field.Type))
                 {
                     _code.Load64(provisionalSlot);
-                    _code.PointerOffset(NormalBackingControlSize + field.Offset);
+                    _code.PointerOffset(checked(NormalBackingControlSize
+                        + NativeLayoutOffset(field.Offset)));
                     _code.LoadPointerField(0, sizeof(ulong));
                     _code.Store64(temporarySupport);
                     EmitNormalBackingRelease(temporarySupport);
@@ -1425,7 +1430,8 @@ internal sealed partial class PeCompiler
                         var leaf = leaves[leafIndex];
                         _code.Load64(provisionalSlot);
                         _code.PointerOffset(NormalBackingControlSize
-                            + field.Offset + leaf.Offset + sizeof(ulong));
+                            + NativeLayoutOffset(field.Offset) + leaf.Offset
+                            + sizeof(ulong));
                         _code.LoadPointerField(0, sizeof(ulong));
                         _code.Store64(temporarySupport);
                         EmitNormalBackingRelease(temporarySupport);

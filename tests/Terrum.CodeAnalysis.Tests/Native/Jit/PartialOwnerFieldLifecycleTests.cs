@@ -6,7 +6,8 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed class PartialOwnerFieldLifecycleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class PartialOwnerFieldLifecycleTests
 {
     private const string PairSource = """
         unique struct Pair {

@@ -7,7 +7,7 @@ using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -19,7 +19,7 @@ public sealed partial class JitTests
     public Task GenericCopyInfersStandaloneVacantOutputAsync(bool checkedFailures)
     {
         const string Source = """
-            [NoThrow] bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
+             bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
                 result = source;
                 return true;
             }
@@ -89,7 +89,7 @@ public sealed partial class JitTests
             unique struct Owner {
                 public int32 Number;
                 public Owner(int32 number) { Number = number; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             bool Create(init ref<Owner> value) {
                 value = new Owner(42);
@@ -109,7 +109,7 @@ public sealed partial class JitTests
     public Task GenericTemplatesPreserveTypedAndInferredVacantSlotsAsync(bool checkedFailures)
     {
         const string Source = """
-            [NoThrow] bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
+             bool Copy<T>(T source, init ref<T> result) where T : [Copy] {
                 result = source;
                 return true;
             }

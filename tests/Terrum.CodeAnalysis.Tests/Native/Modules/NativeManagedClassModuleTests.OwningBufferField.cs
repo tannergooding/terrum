@@ -5,13 +5,13 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed partial class NativeManagedClassModuleTests
+internal sealed partial class NativeManagedClassModuleTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -34,7 +34,7 @@ public sealed partial class NativeManagedClassModuleTests
             unique struct Owner {
                 public mut OwnedInt32Buffer Words;
                 public Owner(OwnedInt32Buffer words) { Words = move words; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public int32 LeafValue() {
                 require OwnedInt32Buffer.TryCreate(1, out var raw);
@@ -55,7 +55,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var producer = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         Assert.That(ModuleCompiler.CreateReference(producer).Structures, Is.Empty);
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 28);

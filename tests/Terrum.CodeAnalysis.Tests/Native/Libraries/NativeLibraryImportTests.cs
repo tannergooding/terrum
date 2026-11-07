@@ -6,17 +6,17 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Libraries;
 
-public sealed class NativeLibraryImportTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeLibraryImportTests
 {
     private const string Leaf = "public int32 Leaf() { return 40; }";
     private const string Middle = "public int32 Middle() { return Leaf() + 1; }";
@@ -28,14 +28,22 @@ public sealed class NativeLibraryImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var leaf = Compilation.CreateLibrary(SyntaxTree.Parse(Leaf), policy);
         Assert.That(leaf.HasErrors, Is.False, string.Join(Environment.NewLine, leaf.Diagnostics));
-        var leafProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = leaf.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var leafProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = leaf.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var leafContract = ModuleCompiler.CreateProducer(leafProgram, ["Leaf"]);
         var leafReference = ModuleCompiler.CreateReference(leafContract);
         var middle = Compilation.CreateLibrary([SyntaxTree.Parse(
             "public int32 Forward() { return Leaf(); }"), SyntaxTree.Parse(
             "public int32 Middle() { return Forward() + 1; }")], leafReference, policy);
         Assert.That(middle.HasErrors, Is.False, string.Join(Environment.NewLine, middle.Diagnostics));
-        var middleProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = middle.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var middleProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = middle.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(middleProgram.EntryPoint, Is.EqualTo(-1));
         var nativePolicy = (NativeRuntimePolicy)policy;
         var binding = new NativeImportBinding("Leaf", "bridge-leaf.dll", "Leaf");
@@ -45,12 +53,28 @@ public sealed class NativeLibraryImportTests
         var application = Compilation.Create([SyntaxTree.Parse(Middle), SyntaxTree.Parse(Main)],
             leafReference, policy);
         Assert.That(application.HasErrors, Is.False, string.Join(Environment.NewLine, application.Diagnostics));
-        var applicationProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = application.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var applicationProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = application.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var main = global::System.Linq.Enumerable.Single(applicationProgram.Functions, static function => function.Name == "Main");
         var published = global::System.Linq.Enumerable.Single(applicationProgram.Functions, static function => function.Name == "Middle");
-        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual3 = global::System.Linq.Enumerable.Single(main.Body.Statements); Assert.That(__nunitActual3, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual3!; }))();
-        var sum = ((global::System.Func<BoundBinary>)(() => { var __nunitActual4 = result.Value; Assert.That(__nunitActual4, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual4!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual5 = sum.Left; Assert.That(__nunitActual5, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual5!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual3 = global::System.Linq.Enumerable.Single(main.Body.Statements);
+            Assert.That(__nunitActual3, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual3!;
+        }))();
+        var sum = ((global::System.Func<BoundBinary>)(() => {
+            var __nunitActual4 = result.Value;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundBinary>());
+            return (BoundBinary)__nunitActual4!;
+        }))();
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual5 = sum.Left;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual5!;
+        }))();
         Assert.That(applicationProgram.Functions[call.Function].Name, Is.EqualTo(published.Name));
         var imported = published with { IsExternal = true, Body = new BoundBlock([], published.Body.Span) };
         var entry = main with {
@@ -107,7 +131,11 @@ public sealed class NativeLibraryImportTests
         var leaf = Compilation.CreateLibrary(SyntaxTree.Parse(Leaf), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(leaf.HasErrors, Is.False);
         var reference = ModuleCompiler.CreateReference(ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = leaf.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), ["Leaf"]));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = leaf.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))(), ["Leaf"]));
         var single = Compilation.CreateLibrary(SyntaxTree.Parse(Middle), reference,
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(single.HasErrors, Is.False, string.Join(Environment.NewLine, single.Diagnostics));
@@ -115,8 +143,16 @@ public sealed class NativeLibraryImportTests
             SyntaxTree.Parse("public int32 Relay() { return Middle(); }")],
             reference, BoundRuntimePolicy.CheckedExceptions);
         Assert.That(multiple.HasErrors, Is.False, string.Join(Environment.NewLine, multiple.Diagnostics));
-        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = multiple.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))().EntryPoint, Is.EqualTo(-1));
-        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = multiple.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))().Functions,static function => function.Name == "Leaf" && function.IsExternal),Is.True);
+        Assert.That(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = multiple.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))().EntryPoint, Is.EqualTo(-1));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = multiple.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))().Functions,static function => function.Name == "Leaf" && function.IsExternal),Is.True);
         var mismatch = Compilation.CreateLibrary(SyntaxTree.Parse(Middle), reference);
         Assert.That(global::System.Linq.Enumerable.Any(mismatch.Diagnostics,static diagnostic => diagnostic.Code == "TRM3022"),Is.True);
         Assert.That(mismatch.Program, Is.Null);
@@ -128,7 +164,11 @@ public sealed class NativeLibraryImportTests
         var fastLeaf = Compilation.CreateLibrary(SyntaxTree.Parse(Leaf));
         Assert.That(fastLeaf.HasErrors, Is.False);
         var fastReference = ModuleCompiler.CreateReference(ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = fastLeaf.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), ["Leaf"]));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = fastLeaf.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))(), ["Leaf"]));
         var defaultSingle = Compilation.CreateLibrary(SyntaxTree.Parse(Middle), fastReference);
         var defaultMultiple = Compilation.CreateLibrary([SyntaxTree.Parse(Middle)], fastReference);
         Assert.That(defaultSingle.HasErrors, Is.False, string.Join(Environment.NewLine, defaultSingle.Diagnostics));
@@ -141,10 +181,18 @@ public sealed class NativeLibraryImportTests
         var leaf = Compilation.CreateLibrary(SyntaxTree.Parse(Leaf));
         Assert.That(leaf.HasErrors, Is.False);
         var reference = ModuleCompiler.CreateReference(ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = leaf.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), ["Leaf"]));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual10 = leaf.Program;
+                Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual10!;
+            }))(), ["Leaf"]));
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Middle), reference);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))();
         var binding = new NativeImportBinding("Leaf", "bridge-leaf.dll", "Leaf");
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Middle"],
             NativeRuntimePolicy.FailFast))!;

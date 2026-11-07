@@ -1,14 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed partial class NativeSourceImportTests
+internal sealed partial class NativeSourceImportTests
 {
     [Test]
     public void Utf8ZRequiresAnAsciiLiteralAtAnExplicitNoEscapeArgument()
@@ -18,7 +18,7 @@ public sealed partial class NativeSourceImportTests
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(6, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int32 NativeFfiUtf8Z(ptr<void> first, uint32 second, uint64 third,
                 ptr<void> fourth, uint32 fifth, ptr<void> sixth);
             """;
@@ -70,25 +70,32 @@ public sealed partial class NativeSourceImportTests
     }
 
     [Test]
-    public void Utf8PointerElementDoesNotOverrideSourceTypesNamedChar8()
+    public void Utf8PointerElementDoesNotOverrideResolvedSourceTypeAliases()
     {
         var aliasSource = """
-            alias char8 = char16;
+            alias WideUnit = char16;
             [Terrum.Interop.NativeImport("fixture.dll", "NativeFfiWideAlias")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
-            [NoThrow]
-            extern unsafe void NativeFfiWideAlias(ptr<char8> text);
+
+            extern unsafe void NativeFfiWideAlias(ptr<WideUnit> text);
             void Main() { unsafe { NativeFfiWideAlias(utf16z("wide")); } }
             """;
         var aliasCompilation = Compilation.Create(
             SyntaxTree.Parse(aliasSource), BoundRuntimePolicy.FailFast);
         Assert.That(aliasCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, aliasCompilation.Diagnostics));
 
+        var reservedAliasCompilation = Compilation.Create(
+            SyntaxTree.Parse("alias char8 = char16; int32 Main() { return 0; }"),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(reservedAliasCompilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(reservedAliasCompilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3003"), Is.True);
+
         var structSource = """
             struct char8 { int32 Value; }
             [Terrum.Interop.NativeImport("fixture.dll", "NativeFfiUtf8Z")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int32 NativeFfiUtf8Z(ptr<char8> text);
             int32 Main() { unsafe { return NativeFfiUtf8Z(utf8z("wide")); } }
             """;
@@ -108,7 +115,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(NativeUtf8ZContract.IsValidLiteral("caf\u00E9"), Is.False);
         Assert.That(NativeUtf8ZContract.IsValidLiteral(new string('\uD800', 1)), Is.False);
 
-        var maximumUtf16 = new string('u', NativeUtf16ZContract.MaximumStorageBytes / sizeof(char) - 1);
+        var maximumUtf16 = new string('u', (NativeUtf16ZContract.MaximumStorageBytes / sizeof(char)) - 1);
         Assert.That(NativeStringZPoolContract.IsValid([maximumUtf16], []), Is.True);
         Assert.That(NativeStringZPoolContract.IsValid([maximumUtf16], ["x"]), Is.False);
     }
@@ -120,16 +127,16 @@ public sealed partial class NativeSourceImportTests
             [Terrum.Interop.NativeImport("fixture.dll", "NativeFfiMixedZ")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe void NativeFfiMixedZ(ptr<void> wide, ptr<void> narrow);
             """;
-        var exactLimitLiteral = new string('u', NativeStringZPoolContract.MaximumStorageBytes / sizeof(char) - 2);
+        var exactLimitLiteral = new string('u', (NativeStringZPoolContract.MaximumStorageBytes / sizeof(char)) - 2);
         var exactSource = string.Concat(declaration, "\nvoid Main() { unsafe { NativeFfiMixedZ(utf16z(\"",
             exactLimitLiteral, "\"), utf8z(\"x\")); } }");
         var exactCompilation = Compilation.Create(SyntaxTree.Parse(exactSource), BoundRuntimePolicy.FailFast);
         Assert.That(exactCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, exactCompilation.Diagnostics));
 
-        var overLimitLiteral = new string('u', NativeStringZPoolContract.MaximumStorageBytes / sizeof(char) - 1);
+        var overLimitLiteral = new string('u', (NativeStringZPoolContract.MaximumStorageBytes / sizeof(char)) - 1);
         var overLimitSource = string.Concat(declaration, "\nvoid Main() { unsafe { NativeFfiMixedZ(utf16z(\"",
             overLimitLiteral, "\"), utf8z(\"x\")); } }");
         var overLimitCompilation = Compilation.Create(SyntaxTree.Parse(overLimitSource), BoundRuntimePolicy.FailFast);
@@ -145,7 +152,7 @@ public sealed partial class NativeSourceImportTests
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(6, Read, NoEscape, 0)]
-            [NoThrow]
+
             extern unsafe int32 NativeFfiUtf8Z(ptr<void> first, uint32 second, uint64 third,
                 ptr<void> fourth, uint32 fifth, ptr<void> sixth);
             int32 Main() {
@@ -157,10 +164,13 @@ public sealed partial class NativeSourceImportTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
 
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImports(
             program with { NativeUtf8ZLiterals = [] }, NativeRuntimePolicy.FailFast))!;
     }
-
 }

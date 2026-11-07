@@ -6,7 +6,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -135,13 +135,13 @@ public sealed partial class JitTests
                 public Storage(OwnedInt32Buffer words) { Words = move words; }
                 public mut bool Append(int32 value) { return Words.TryAppend(value); }
                 public mut void Reset() { Words.Clear(); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unique struct Owner {
                 public mut Storage Nested;
                 public Owner(Storage nested) { Nested = move nested; }
                 public mut bool Forward(int32 value) { return Nested.Append(value); }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(2, out var raw);
@@ -167,7 +167,7 @@ public sealed partial class JitTests
             unique struct Owner {
                 public mut OwnedInt32Buffer Words;
                 public Owner(OwnedInt32Buffer words) { Words = move words; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(2, out var raw);

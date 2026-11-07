@@ -50,7 +50,7 @@ struct FailureSwapChainDescription {
 unique struct FailureWindowOwner {
     ptr<void> Pointer;
     public unsafe FailureWindowOwner(ptr<void> pointer) { unsafe { Pointer = pointer; } }
-    [NoThrow] [Cleanup] public void Close() {
+     [Cleanup] public void Close() {
         unsafe { if (Pointer != null) { DestroyWindow(Pointer); } }
     }
 }
@@ -66,7 +66,7 @@ unique struct FailureWindowOwner {
 extern unsafe int32 ObserveCompile(
     ptr<char16> path, ptr<void> defines, ptr<void> include,
     ptr<void> entry, ptr<void> target, uint32 flags1, uint32 flags2,
-    ptr<ptr<void>> code, ptr<ptr<void>> diagnostics);
+    write ptr<ptr<void>> code, write ptr<ptr<void>> diagnostics);
 
 [Terrum.Interop.NativeImport("d3d11.dll", "D3D11CreateDeviceAndSwapChain")]
 [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
@@ -77,27 +77,27 @@ extern unsafe int32 ObserveCompile(
 [Terrum.Interop.NativeParameter(10, Write, NoEscape, 1)]
 [Terrum.Interop.NativeParameter(11, Write, NoEscape, 1)]
 [Terrum.Interop.NativeParameter(12, Write, NoEscape, 1)]
-[NoThrow]
+
 extern unsafe int32 ObserveAcquire(
     ptr<void> adapter, int32 driver, ptr<void> software, uint32 flags,
     ptr<uint32> featureLevels, uint32 featureCount, uint32 sdkVersion,
     ptr<FailureSwapChainDescription> description,
-    ptr<ptr<void>> swapChain, ptr<ptr<void>> device,
-    ptr<uint32> selectedFeature, ptr<ptr<void>> context);
+    write ptr<ptr<void>> swapChain, write ptr<ptr<void>> device,
+    write ptr<uint32> selectedFeature, write ptr<ptr<void>> context);
 
 [Terrum.Interop.NativeVTableMethod(12)]
 [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
 [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
-[NoThrow]
+
 extern unsafe int32 ObserveVertexFailure(ptr<void> receiver, ptr<uint32> bytecode,
-    uint64 bytecodeSize, ptr<void> classLinkage, ptr<ptr<void>> output);
+    uint64 bytecodeSize, ptr<void> classLinkage, write ptr<ptr<void>> output);
 
 [Terrum.Interop.NativeVTableMethod(15)]
 [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
 [Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
-[NoThrow]
+
 extern unsafe int32 ObservePixelFailure(ptr<void> receiver, ptr<uint32> bytecode,
-    uint64 bytecodeSize, ptr<void> classLinkage, ptr<ptr<void>> output);
+    uint64 bytecodeSize, ptr<void> classLinkage, write ptr<ptr<void>> output);
 
 int32 Main() {
     unsafe {

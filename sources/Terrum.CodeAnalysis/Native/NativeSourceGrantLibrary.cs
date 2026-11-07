@@ -6,11 +6,11 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Native;
 
-/// <summary>Managed signature metadata for one explicitly selected Windows x64 DLL export.</summary>
+/// <summary>Test-only prototype signature metadata for one source-grant DLL export.</summary>
 public sealed record NativeLibraryExportDescriptor(string Name, bool SourceDependent, PrimitiveType ReturnType,
     ImmutableArray<PrimitiveType> ParameterTypes);
 
-/// <summary>A provisional native library image and descriptors for its exact selected export set.</summary>
+/// <summary>A test-only prototype native image and descriptors for its selected export set.</summary>
 /// <remarks>
 /// This result supports the unapproved source-grant library experiment. It does
 /// not define a stable or public native ABI.

@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -52,7 +52,11 @@ public sealed partial class JitTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var functions = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions;
+        var functions = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))().Functions;
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Value." + operatorName),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Apply<Value>"),Is.True);
         await AssertFailFastExecutionAsync(source, result).ConfigureAwait(true);
@@ -93,16 +97,16 @@ public sealed partial class JitTests
     {
         const string Source = """
             interface Mask<A, B, C> {
-                [NoThrow] static C operator &(A left, B right);
+                 static C operator &(A left, B right);
             }
             struct Value : Mask<Value, Value, Value> {
                 public int32 Number;
-                [NoThrow] public Value(int32 number) { Number = number; }
-                [NoThrow] public static Value operator &(Value left, Value right) {
+                 public Value(int32 number) { Number = number; }
+                 public static Value operator &(Value left, Value right) {
                     return new Value(left.Number & right.Number);
                 }
             }
-            [NoThrow] T Apply<T>(T left, T right) where T : Mask<T, T, T>, [Copy] {
+             T Apply<T>(T left, T right) where T : Mask<T, T, T>, [Copy] {
                 return left & right;
             }
             int32 Main() { return Apply(new Value(42), new Value(63)).Number; }

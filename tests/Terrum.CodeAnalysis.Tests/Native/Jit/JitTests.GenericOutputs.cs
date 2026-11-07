@@ -2,14 +2,13 @@
 
 using System.IO;
 using System.Threading.Tasks;
-using Terrum.CodeAnalysis.Native;
 using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -20,13 +19,13 @@ public sealed partial class JitTests
                 public int64 Number;
                 public Counter(int64 number) { Number = number; }
             }
-            [NoThrow] int32 Copy<T>(T value, T duplicate, out T result,
+             int32 Copy<T>(T value, T duplicate, out T result,
                 out T secondResult) where T : [Copy] {
                 result = value;
                 secondResult = duplicate;
                 return 7;
             }
-            [NoThrow] void CopyVoid<T>(T value, out T result) where T : [Copy] {
+             void CopyVoid<T>(T value, out T result) where T : [Copy] {
                 result = value;
             }
             int32 Main() {
@@ -56,11 +55,11 @@ public sealed partial class JitTests
                 public int64 Number;
                 public Counter(int64 number) { Number = number; }
             }
-            [NoThrow] int32 Fill<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
+             int32 Fill<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
                 result = value;
                 return status;
             }
-            [NoThrow] void FillVoid<T>(T value, init ref<T> result) where T : [Copy] {
+             void FillVoid<T>(T value, init ref<T> result) where T : [Copy] {
                 result = value;
             }
             int32 Main() {
@@ -87,7 +86,7 @@ public sealed partial class JitTests
     public async Task GenericInitNonBooleanOutputPublishesManagedHandleAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
-            [NoThrow] int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
+             int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
                 result = value;
                 return 7;
             }
@@ -119,32 +118,32 @@ public sealed partial class JitTests
             struct Inner {
                 public float32 Single;
                 public int32 Marker;
-                [NoThrow] public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
+                 public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
             }
             struct Pair {
                 public Inner Nested;
                 public float64 Wide;
-                [NoThrow] public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
-                [NoThrow] public float32 ReadSingle() { return Nested.Single; }
+                 public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
+                 public float32 ReadSingle() { return Nested.Single; }
             }
-            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
-            [NoThrow] bool TryCreatePair(init ref<Pair> result) {
+             T Identity<T>(T value) where T : [Copy] { return value; }
+             bool TryCreatePair(init ref<Pair> result) {
                 result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
-            [NoThrow] float32 CopyFloat(float32 value) { return value; }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+             float32 CopyFloat(float32 value) { return value; }
+             T Forward<T>(T value) where T : [Copy] {
                 if (!TryCreatePair(init var pair)) { return Identity(value); }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) {
                     return Identity(value);
                 }
                 return Identity(value);
             }
-            [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+             bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
                 result = Forward(value);
                 return publish;
             }
-            [NoThrow] bool TryCopyInit<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
+             bool TryCopyInit<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
                 if (!publish) { return false; }
                 result = Forward(value);
                 return true;
@@ -181,10 +180,10 @@ public sealed partial class JitTests
         const string Source = """
             using Terrum;
             using Terrum.CodeAnalysis;
-            [NoThrow] bool Choose<T>(int32 index, T first, T second, out T result) where T : [Copy] {
+             bool Choose<T>(int32 index, T first, T second, out T result) where T : [Copy] {
                 return TrySelectCopy<T>(index, first, second, out result);
             }
-            [NoThrow] bool ChooseInit<T>(int32 index, T first, T second, init ref<T> result) where T : [Copy] {
+             bool ChooseInit<T>(int32 index, T first, T second, init ref<T> result) where T : [Copy] {
                 return TrySelectCopyInit<T>(index, first, second, init result);
             }
             int32 Main() {
@@ -227,11 +226,11 @@ public sealed partial class JitTests
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
-            [NoThrow] bool Forward<T>(T first, T second, bool publish, out T left, out T right,
+             bool Forward<T>(T first, T second, bool publish, out T left, out T right,
                 out uint64 number, out char16 unit) where T : [Copy] {
                 return Split<T>(first, 42, second, publish, out left, out right, out number, out unit);
             }
-            [NoThrow] bool Split<T>(T first, int32 marker, T second, bool publish,
+             bool Split<T>(T first, int32 marker, T second, bool publish,
                 out T left, out T right, out uint64 number, out char16 unit) where T : [Copy] {
                 if (marker != 42) { return false; }
                 left = first;
@@ -240,13 +239,13 @@ public sealed partial class JitTests
                 unit = char16(55296);
                 return publish;
             }
-            [NoThrow] bool ForwardInit<T>(T first, T second, bool publish,
+             bool ForwardInit<T>(T first, T second, bool publish,
                 init ref<T> left, init ref<T> right, init ref<uint64> number, init ref<char16> unit)
                 where T : [Copy] {
                 return SplitInit<T>(first, 42, second, publish, init left, init right,
                     init number, init unit);
             }
-            [NoThrow] bool SplitInit<T>(T first, int32 marker, T second, bool publish,
+             bool SplitInit<T>(T first, int32 marker, T second, bool publish,
                 init ref<T> left, init ref<T> right, init ref<uint64> number, init ref<char16> unit)
                 where T : [Copy] {
                 if (marker != 42 || !publish) { return false; }
@@ -295,11 +294,11 @@ public sealed partial class JitTests
                 require false;
                 return true;
             }
-            [NoThrow] bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
+             bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
                 result = value;
                 return true;
             }
-            [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+             bool None<T>(init ref<T> result) where T : [Copy] { return false; }
             int32 Main() {
                 if (None<int32>(init var target)) { return 1; }
                 unsafe {
@@ -321,10 +320,10 @@ public sealed partial class JitTests
                 public int64 Number;
                 public Value(int64 number) { Number = number; }
             }
-            [NoThrow] bool Enabled<T>(T value, bool enabled) where T : [Copy] { return enabled; }
-            [NoThrow] uint64 Number<T>(T value, uint64 number) where T : [Copy] { return number; }
-            [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
-            [NoThrow] char16 Unit<T>(T value, char16 unit) where T : [Copy] { return unit; }
+             bool Enabled<T>(T value, bool enabled) where T : [Copy] { return enabled; }
+             uint64 Number<T>(T value, uint64 number) where T : [Copy] { return number; }
+             int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
+             char16 Unit<T>(T value, char16 unit) where T : [Copy] { return unit; }
             int32 Main() {
                 Value value = new Value(0);
                 var count = Count<Value>(value, 40) + 2;
@@ -474,18 +473,18 @@ public sealed partial class JitTests
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
-            [NoThrow] int32 Fill<T, U>(T value, U second, int32 status, out T result,
+             int32 Fill<T, U>(T value, U second, int32 status, out T result,
                 init ref<U> initialized) where T : [Copy] where U : [Copy] {
                 result = value;
                 initialized = second;
                 return status;
             }
-            [NoThrow] void FillVoid<T, U>(T value, U second, out T result,
+             void FillVoid<T, U>(T value, U second, out T result,
                 init ref<U> initialized) where T : [Copy] where U : [Copy] {
                 result = value;
                 initialized = second;
             }
-            [NoThrow] int32 FillSame<T>(T value, out T result, init ref<T> initialized)
+             int32 FillSame<T>(T value, out T result, init ref<T> initialized)
                 where T : [Copy] {
                 result = value;
                 initialized = value;
@@ -559,13 +558,13 @@ public sealed partial class JitTests
     public async Task FloatingGenericNonBooleanAndVoidOutputsPublishAsync(bool checkedFailures)
     {
         const string Source = """
-            [NoThrow] int32 Fill<T>(T value, int32 status, out T copied, init ref<T> initialized)
+             int32 Fill<T>(T value, int32 status, out T copied, init ref<T> initialized)
                 where T : [Copy] {
                 copied = value;
                 initialized = value;
                 return status;
             }
-            [NoThrow] void FillVoid<T>(T value, out T copied, init ref<T> initialized)
+             void FillVoid<T>(T value, out T copied, init ref<T> initialized)
                 where T : [Copy] {
                 copied = value;
                 initialized = value;
@@ -600,7 +599,7 @@ public sealed partial class JitTests
     public async Task GenericFloatingResultsPreserveZeroAndSubnormalOutputsAsync(bool checkedFailures)
     {
         const string Source = """
-            [NoThrow] float32 Fill32<T>(T value, out T copied, init ref<T> initialized,
+             float32 Fill32<T>(T value, out T copied, init ref<T> initialized,
                 out int32 count, init ref<float64> score)
                 where T : [Copy] {
                 copied = value;
@@ -609,7 +608,7 @@ public sealed partial class JitTests
                 score = float64(3.5);
                 return float32(-0.0);
             }
-            [NoThrow] float64 Fill64<T>(T value, out T copied, init ref<T> initialized,
+             float64 Fill64<T>(T value, out T copied, init ref<T> initialized,
                 out int32 count, init ref<float64> score)
                 where T : [Copy] {
                 copied = value;
@@ -618,11 +617,11 @@ public sealed partial class JitTests
                 score = float64(4.5);
                 return float64(-0.0);
             }
-            [NoThrow] float32 Tiny32<T>(T value, out T copied) where T : [Copy] {
+             float32 Tiny32<T>(T value, out T copied) where T : [Copy] {
                 copied = value;
                 return float32(1.401298464324817e-45);
             }
-            [NoThrow] float64 Tiny64<T>(T value, init ref<T> initialized) where T : [Copy] {
+             float64 Tiny64<T>(T value, init ref<T> initialized) where T : [Copy] {
                 initialized = value;
                 return float64(4.9406564584124654e-324);
             }
@@ -742,7 +741,7 @@ public sealed partial class JitTests
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
             }
-            [NoThrow] int32 Copy<T, U>(T value, U second, int32 status, out T result,
+             int32 Copy<T, U>(T value, U second, int32 status, out T result,
                 init ref<U> initialized) where T : [Copy] where U : [Copy] {
                 result = value;
                 initialized = second;
@@ -816,7 +815,7 @@ public sealed partial class JitTests
     public async Task GenericBooleanMixedOutputPublicationRemainsConditionalAsync(bool checkedFailures)
     {
         const string Source = """
-            [NoThrow] bool Fill<T>(T value, int32 number, bool publish, out T result,
+             bool Fill<T>(T value, int32 number, bool publish, out T result,
                 init ref<int32> initialized) where T : [Copy] {
                 result = value;
                 initialized = number;

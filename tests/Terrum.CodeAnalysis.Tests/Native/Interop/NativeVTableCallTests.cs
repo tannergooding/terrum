@@ -4,17 +4,18 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Tests.Semantics;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class NativeVTableCallTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeVTableCallTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeVTableDispatch(IntPtr receiver);
@@ -98,7 +99,7 @@ public sealed class NativeVTableCallTests
                 function with { NativeVTableMethod = invalidMethod }),
         };
 
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalidProgram));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalidProgram));
     }
 
     [Test]
@@ -128,7 +129,7 @@ public sealed class NativeVTableCallTests
 
         var malformed = (byte[])artifact.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(vtableSectionOffset + 8), 3);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
 
         BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(vtableSectionOffset + 8), 8);
         var offsetLoaded = TrRmExecutableCompiler.Load(artifact);
@@ -207,15 +208,15 @@ public sealed class NativeVTableCallTests
         }
         Assert.That(pointerConstantOffset, Is.GreaterThanOrEqualTo(0));
         bodyBytes[pointerConstantOffset] = 1;
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformedPointerCall));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformedPointerCall));
 
         var missingVTableFeatures = (byte[])callArtifact.Clone();
         var moduleOffset = FindSectionOffset(callArtifact, 0x0001);
         BinaryPrimitives.WriteUInt32LittleEndian(missingVTableFeatures.AsSpan(moduleOffset + 28), 2);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingVTableFeatures));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingVTableFeatures));
 
         var privateArtifact = ModuleCompiler.CreateProducer(offsetLoaded, ["Invoke"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(104));
         var privateReference = ModuleCompiler.CreateReference(privateArtifact);
         var privateConsumer = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -295,7 +296,7 @@ public sealed class NativeVTableCallTests
             + ((firstParameter - 1) * 16) + 8);
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(parameterTypeOffset),
             (uint)signedPointerTypeSpec);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
 
     [Test]
@@ -338,7 +339,8 @@ public sealed class NativeVTableCallTests
         var reference = TrRmExecutableCompiler.CreateReference(providerArtifact);
         var consumer = Compilation.Create(SyntaxTree.Parse("""
             int32 Dispatch() {
-                unsafe { return Invoke(null, null); }
+                uint32 value = 0;
+                unsafe { return Invoke(null, &value); }
             }
             int32 Main() { return 0; }
             """), reference);
@@ -378,7 +380,8 @@ public sealed class NativeVTableCallTests
 
         const string setConsumerSource = """
             int32 Dispatch() {
-                unsafe { return Invoke(null, null); }
+                uint32 value = 0;
+                unsafe { return Invoke(null, &value); }
             }
             int32 Main() {
                 if (Dispatch() != 0) { return -1; }
@@ -399,7 +402,8 @@ public sealed class NativeVTableCallTests
 
         var graphLibraryCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Forward() {
-                unsafe { return Invoke(null, null); }
+                uint32 value = 0;
+                unsafe { return Invoke(null, &value); }
             }
             """), reference);
         Assert.That(graphLibraryCompilation.HasErrors, Is.False,
@@ -411,9 +415,9 @@ public sealed class NativeVTableCallTests
 
         var wrongIdentityProvider = NativeModuleCompiler.CreateProducer(provider.Program!,
             ["Invoke"], "WrongVTableProvider", NativeRuntimePolicy.FailFast);
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumer(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumer(
             consumer.Program!, wrongIdentityProvider, NativeRuntimePolicy.FailFast));
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphProducer(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphProducer(
             graphLibraryCompilation.Program!, ["Forward"], "VTableMiddle",
             [wrongIdentityProvider], NativeRuntimePolicy.FailFast));
 
@@ -426,20 +430,20 @@ public sealed class NativeVTableCallTests
             string.Join(Environment.NewLine, wrongSlotCompilation.Diagnostics));
         var wrongSlotProvider = NativeModuleCompiler.CreateProducer(wrongSlotCompilation.Program!,
             ["Invoke"], "VTableProvider", NativeRuntimePolicy.FailFast);
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumer(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumer(
             consumer.Program!, wrongSlotProvider, NativeRuntimePolicy.FailFast));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(nativeConsumer, wrongSlotProvider));
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphProducer(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphProducer(
             graphLibraryCompilation.Program!, ["Forward"], "VTableMiddle",
             [wrongSlotProvider], NativeRuntimePolicy.FailFast));
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumerSet(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumerSet(
             setCompilation.Program!, [wrongSlotProvider, extraNativeProvider], NativeRuntimePolicy.FailFast));
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(
             nativeConsumerSet, [wrongSlotProvider, extraNativeProvider]));
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphConsumer(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphConsumer(
             setCompilation.Program!, [wrongSlotProvider, extraNativeProvider], NativeRuntimePolicy.FailFast));
-        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(
             graphConsumer, [wrongSlotProvider, extraNativeProvider]));
     }
 
@@ -484,7 +488,7 @@ public sealed class NativeVTableCallTests
         var malformed = (byte[])artifact.Clone();
         BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(effectsMaskOffset), 0);
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadDevelopmentFunctionPointerEffectsDraft(malformed));
     }
 
@@ -566,7 +570,8 @@ public sealed class NativeVTableCallTests
             public unsafe int32 Dispatch(ptr<void> receiver) {
                 unsafe { return Invoke(receiver); }
             }
-            """), reference);
+            """), reference,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
 
@@ -682,11 +687,11 @@ public sealed class NativeVTableCallTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = CreateWithNativeCore(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, uint32, float64, uint32, float64, float64, uint32, uint32> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, uint32, float64, uint32, float64, float64, uint32, uint32> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, uint32, float64, uint32, float64, float64, uint32, uint32> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, uint32, float64, uint32, float64, float64, uint32, uint32> method) {
                     Method = method;
                 }
             }
@@ -761,11 +766,11 @@ public sealed class NativeVTableCallTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = CreateWithNativeCore(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>, float64> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>, float64> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, write ptr<uint32>, float64> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, write ptr<uint32>, float64> method) {
                     Method = method;
                 }
             }
@@ -795,7 +800,9 @@ public sealed class NativeVTableCallTests
                     ptr<TestObject> receiver = &instance;
                     mut uint32 output = 0;
                     float64 result = Invoke(receiver, out output);
-                    return output == 42 && result == 10.5 ? 0 : -1;
+                    if (output != 42) { return -2; }
+                    if (result != 10.5) { return -1; }
+                    return 0;
                 }
             }
             """));
@@ -810,11 +817,11 @@ public sealed class NativeVTableCallTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var providerCompilation = CreateLibraryWithNativeCore(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>, bool> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>, bool> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, write ptr<uint32>, bool> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, write ptr<uint32>, bool> method) {
                     Method = method;
                 }
             }
@@ -851,7 +858,8 @@ public sealed class NativeVTableCallTests
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var producer = NativeModuleCompiler.CreateProducer(providerCompilation.Program!, ["Run"],
             "BoolVTableOutput", NativeRuntimePolicy.FailFast);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Run(); }"),
+        var consumerCompilation = CreateWithNativeCore(
+            SyntaxTree.Parse("int32 Main() { return Run(); }"),
             NativeModuleCompiler.CreateReference(producer));
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -871,8 +879,8 @@ public sealed class NativeVTableCallTests
         var source = $$"""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<char16>, int32> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<char16>, int32> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<char16>, int32> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<char16>, int32> method) {
                     Method = method;
                 }
             }
@@ -901,7 +909,7 @@ public sealed class NativeVTableCallTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = CreateWithNativeCore(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -927,8 +935,8 @@ public sealed class NativeVTableCallTests
         var source = $$"""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<uint32>, int32> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<uint32>, int32> method) {
                     Method = method;
                 }
             }
@@ -954,7 +962,7 @@ public sealed class NativeVTableCallTests
             extern unsafe int32 Invoke(ptr<TestObject> receiver, ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 3> values = [42, 42, 42];
+                [uint32; 3] values = [42, 42, 42];
                 unsafe {
                     TestVTable vtable = new TestVTable(&ReadFirst);
                     TestObject instance = new TestObject(&vtable);
@@ -965,7 +973,7 @@ public sealed class NativeVTableCallTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = CreateWithNativeCore(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -984,12 +992,12 @@ public sealed class NativeVTableCallTests
     [Test]
     public void NativeVTableExtentUsesStagedPointerBeforeLaterWriteArgument()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = CreateWithNativeCore(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32, int32> Method;
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<uint32>, int32, int32> Method;
                 public TestVTable(
-                    fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32, int32> method) {
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<uint32>, int32, int32> method) {
                     Method = method;
                 }
             }
@@ -1015,7 +1023,7 @@ public sealed class NativeVTableCallTests
                 ptr<TestObject> receiver, ptr<uint32> value, int32 status);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 mut ptr<uint32> pointer = null;
                 unsafe {
                     TestVTable vtable = new TestVTable(&ObserveValue);
@@ -1037,11 +1045,11 @@ public sealed class NativeVTableCallTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = CreateWithNativeCore(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<void>> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<void>> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<void>> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<void>> method) {
                     Method = method;
                 }
             }
@@ -1091,11 +1099,11 @@ public sealed class NativeVTableCallTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = CreateWithNativeCore(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, uint32> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, uint32> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<uint32>, uint32> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<uint32>, uint32> method) {
                     Method = method;
                 }
             }
@@ -1142,10 +1150,10 @@ public sealed class NativeVTableCallTests
         const string providerSource = """
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<TestPayload>, int32> First;
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<TestPayload>, int32> Second;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<TestPayload>, int32> first,
-                    fnptr<NativeAbi, ptr<TestObject>, ptr<TestPayload>, int32> second) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<TestPayload>, int32> First;
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<TestPayload>, int32> Second;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<TestPayload>, int32> first,
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<TestPayload>, int32> second) {
                     First = first;
                     Second = second;
                 }
@@ -1190,51 +1198,75 @@ public sealed class NativeVTableCallTests
             }
             """;
         string[] exports = ["Invoke", "TestVTable.#ctor", "TestObject.#ctor", "TestPayload.#ctor"];
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource));
+        var providerCompilation = CreateLibraryWithNativeCore(
+            SyntaxTree.Parse(providerSource));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var providerProgram = providerCompilation.Program!;
-        var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
+        var producerInputs = CreateOwnedNominalInputs(providerProgram,
+            "provider");
+        var producer = ModuleCompiler.CreateProducer(providerProgram, exports,
+            producerInputs);
         var reference = ModuleCompiler.CreateReference(producer);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource), reference);
+        var consumerCompilation = CreateWithNativeCore(
+            SyntaxTree.Parse(consumerSource), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer);
+        var consumerProgram = consumerCompilation.Program!;
+        var consumerInputs = CreateImportedNominalInputs(consumerProgram,
+            "consumer", "provider");
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram,
+            producer, consumerInputs);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer),
             NativeRuntimePolicy.FailFast), Is.Zero);
 
         var slotOneSource = providerSource.Replace("NativeVTableMethod(0)", "NativeVTableMethod(1)",
             StringComparison.Ordinal);
-        var slotOneCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(slotOneSource));
+        var slotOneCompilation = CreateLibraryWithNativeCore(
+            SyntaxTree.Parse(slotOneSource));
         Assert.That(slotOneCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, slotOneCompilation.Diagnostics));
-        var slotOneProducer = ModuleCompiler.CreateProducer(slotOneCompilation.Program!, exports);
+        var slotOneProgram = slotOneCompilation.Program!;
+        var slotOneProducer = ModuleCompiler.CreateProducer(slotOneProgram,
+            exports, CreateOwnedNominalInputs(slotOneProgram, "provider"));
         var slotOneConsumer = ModuleCompiler.Link(consumer, slotOneProducer);
         Assert.That(NativeJit.Execute(slotOneConsumer, NativeRuntimePolicy.FailFast), Is.EqualTo(-1));
 
         var incompatibleSource = providerSource.Replace("extern unsafe int32 Invoke",
             "extern unsafe int64 Invoke", StringComparison.Ordinal);
-        var incompatibleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(incompatibleSource));
+        var incompatibleCompilation = CreateLibraryWithNativeCore(
+            SyntaxTree.Parse(incompatibleSource));
         Assert.That(incompatibleCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, incompatibleCompilation.Diagnostics));
-        var incompatibleProducer = ModuleCompiler.CreateProducer(incompatibleCompilation.Program!, exports);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, incompatibleProducer));
+        var incompatibleProgram = incompatibleCompilation.Program!;
+        var incompatibleProducer = ModuleCompiler.CreateProducer(
+            incompatibleProgram, exports,
+            CreateOwnedNominalInputs(incompatibleProgram, "provider"));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, incompatibleProducer));
 
-        var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, exports, "native_vtable",
-            NativeRuntimePolicy.FailFast);
+        var nativeProducerInputs = CreateOwnedNominalInputs(providerProgram,
+            "native_vtable");
+        var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram,
+            exports, "native_vtable", NativeRuntimePolicy.FailFast,
+            nativeProducerInputs);
         var nativeReference = NativeModuleCompiler.CreateReference(nativeProducer);
-        var nativeConsumerCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource), nativeReference);
+        var nativeConsumerCompilation = CreateWithNativeCore(
+            SyntaxTree.Parse(consumerSource), nativeReference);
         Assert.That(nativeConsumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
-        var nativeConsumer = NativeModuleCompiler.CreateConsumer(nativeConsumerCompilation.Program!,
-            nativeProducer, NativeRuntimePolicy.FailFast);
+        var nativeConsumerProgram = nativeConsumerCompilation.Program!;
+        var nativeConsumerInputs = CreateImportedNominalInputs(
+            nativeConsumerProgram, "native_consumer", "native_vtable");
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(
+            nativeConsumerProgram, nativeProducer,
+            NativeRuntimePolicy.FailFast, nativeConsumerInputs);
         NativeModuleCompiler.Validate(nativeConsumer, nativeProducer);
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.Zero);
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.Zero);
         var slotOneNativeProducer = NativeModuleCompiler.CreateProducer(
             slotOneCompilation.Program!, exports, "native_vtable",
             NativeRuntimePolicy.FailFast);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(nativeConsumer, slotOneNativeProducer));
 
         var extraProviderCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
@@ -1251,47 +1283,97 @@ public sealed class NativeVTableCallTests
             StringComparison.Ordinal);
 
         var setReference = NativeModuleCompiler.CreateReferenceSet(nativeProviders);
-        var setCompilation = Compilation.Create(
+        var setCompilation = CreateWithNativeCore(
             SyntaxTree.Parse(multiProviderConsumerSource), setReference);
         Assert.That(setCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, setCompilation.Diagnostics));
-        var nativeSet = NativeModuleCompiler.CreateConsumerSet(setCompilation.Program!,
-            nativeProviders, NativeRuntimePolicy.FailFast);
+        var setProgram = setCompilation.Program!;
+        var setInputs = CreateImportedNominalInputs(setProgram,
+            "native_multi_consumer", "native_vtable");
+        var nativeSet = NativeModuleCompiler.CreateConsumerSet(setProgram,
+            nativeProviders, NativeRuntimePolicy.FailFast, setInputs);
         NativeModuleCompiler.ValidateConsumerSet(nativeSet, nativeProviders);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(nativeSet, nativeProviders,
-            TimeSpan.FromSeconds(15), NativeRuntimePolicy.FailFast), Is.Zero);
+            TimeSpan.FromSeconds(15), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.Zero);
 
         var graphReference = NativeModuleCompiler.CreateGraphReference(nativeProviders);
-        var graphCompilation = Compilation.Create(
+        var graphCompilation = CreateWithNativeCore(
             SyntaxTree.Parse(multiProviderConsumerSource), graphReference);
         Assert.That(graphCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, graphCompilation.Diagnostics));
-        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(graphCompilation.Program!,
-            nativeProviders, NativeRuntimePolicy.FailFast);
+        var graphProgram = graphCompilation.Program!;
+        var graphInputs = CreateImportedNominalInputs(graphProgram,
+            "native_multi_consumer", "native_vtable");
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(graphProgram,
+            nativeProviders, NativeRuntimePolicy.FailFast, graphInputs);
         NativeModuleCompiler.ValidateGraph(graphConsumer, nativeProviders);
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(graphConsumer, nativeProviders,
-            CompilerApphost(), TimeSpan.FromSeconds(15), NativeRuntimePolicy.FailFast), Is.Zero);
+            CompilerApphost(), TimeSpan.FromSeconds(15), NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.Zero);
 
         var incompatibleNativeProducer = NativeModuleCompiler.CreateProducer(
-            incompatibleCompilation.Program!, exports, "native_vtable", NativeRuntimePolicy.FailFast);
+            incompatibleProgram, exports, "native_vtable",
+            NativeRuntimePolicy.FailFast,
+            CreateOwnedNominalInputs(incompatibleProgram, "native_vtable"));
         var slotOneNativeProviders = new[] { slotOneNativeProducer, extraNativeProducer };
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(nativeSet,
                 [incompatibleNativeProducer, extraNativeProducer]));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(nativeSet,
                 slotOneNativeProviders));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(graphConsumer,
                 [incompatibleNativeProducer, extraNativeProducer]));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateGraph(graphConsumer,
                 slotOneNativeProviders));
 
-        var directCompilation = Compilation.Create(SyntaxTree.Parse(providerSource + consumerSource));
+        var directCompilation = CreateWithNativeCore(
+            SyntaxTree.Parse(providerSource + consumerSource));
         Assert.That(directCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, directCompilation.Diagnostics));
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(directCompilation.Program!, "native_vtable"));
     }
+
+    private static PrivateModuleIdentityInputs CreateOwnedNominalInputs(
+        BoundProgram program, string usingModuleIdentity)
+    {
+        var definitions = program.Structures
+            .Select((structure, index) => (Structure: structure, Index: index))
+            .Where(static item => !item.Structure.IsPrivate
+                && !item.Structure.IsInternal)
+            .Select(static item => new PrivateNominalDefinition(
+                (PrimitiveType)(100 + item.Index),
+                $"types.{item.Structure.Name.ToUpperInvariant()}",
+                IsExported: true)).ToArray();
+        return PrivateModuleIdentityInputs.Create(program,
+            usingModuleIdentity, definitions, []);
+    }
+
+    private static PrivateModuleIdentityInputs CreateImportedNominalInputs(
+        BoundProgram program, string usingModuleIdentity,
+        string selectedModuleIdentity)
+    {
+        var imports = program.Structures.Select((structure, index) =>
+            new PrivateNominalImport((PrimitiveType)(100 + index),
+                $"imports.{structure.Name.ToUpperInvariant()}",
+                selectedModuleIdentity,
+                $"types.{structure.Name.ToUpperInvariant()}")).ToArray();
+        return PrivateModuleIdentityInputs.Create(program,
+            usingModuleIdentity, [], imports);
+    }
+
+    private static Compilation CreateWithNativeCore(SyntaxTree tree,
+        CompilationReference? reference = null)
+    {
+        var options = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        return reference is null
+            ? Compilation.Create(tree, options)
+            : Compilation.Create(tree, reference, options);
+    }
+
+    private static Compilation CreateLibraryWithNativeCore(SyntaxTree tree)
+        => Compilation.CreateLibrary(tree,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
 }

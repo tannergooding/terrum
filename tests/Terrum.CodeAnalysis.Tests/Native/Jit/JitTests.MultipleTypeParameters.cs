@@ -2,12 +2,12 @@
 
 using System.IO;
 using System.Threading.Tasks;
-using Terrum.CodeAnalysis.Native;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Native;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]

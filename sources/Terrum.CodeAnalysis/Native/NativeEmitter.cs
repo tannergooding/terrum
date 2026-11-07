@@ -41,7 +41,8 @@ public static class NativeEmitter
         IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
         string? nativeLoweringAgreement, CancellationToken cancellationToken = default)
     {
-        if (nativeLoweringAgreement is not null)
+        if (nativeLoweringAgreement
+            == CompilationOptions.WindowsX64NormalBackingAgreement)
         {
             ArgumentNullException.ThrowIfNull(program);
             SemanticVerifier.Verify(program, nativeLoweringAgreement);
@@ -49,7 +50,8 @@ public static class NativeEmitter
                 "The selected native lowering agreement is recognized but not implemented.");
         }
         return EmitWithImportUsage(program, bindings, runtimePolicy,
-            cancellationToken: cancellationToken).Image;
+            cancellationToken: cancellationToken,
+            nativeLoweringAgreement: nativeLoweringAgreement).Image;
     }
 
     /// <summary>Emits a native executable using verified direct native import declarations.</summary>
@@ -78,8 +80,15 @@ public static class NativeEmitter
         if (nativeLoweringAgreement is not null)
         {
             SemanticVerifier.VerifyWithDirectNativeImports(program, nativeLoweringAgreement);
-            throw new NotSupportedException(
-                "The selected native lowering agreement is recognized but not implemented.");
+            if (nativeLoweringAgreement
+                != CompilationOptions.WindowsX64RootlessReferencesAgreement)
+            {
+                throw new NotSupportedException(
+                    "The selected native lowering agreement is not implemented for direct native imports.");
+            }
+
+            ValidateRootlessReferenceProgram(program);
+            ValidateRootlessNativeImportBoundaries(program);
         }
 
         var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
@@ -120,11 +129,14 @@ public static class NativeEmitter
             throw new ArgumentException("The program contains no supported native imports.",
                 nameof(program));
         }
-        var code = CompileWithImports(program, bindings.ToImmutable(), runtimePolicy, cancellationToken,
-            allowNativeImports: true).Code;
-        return PeImage.Build(allowApplicationDirectory
+        var code = CompileWithImports(program, bindings.ToImmutable(),
+            runtimePolicy, allowNativeImports: true,
+            nativeLoweringAgreement: nativeLoweringAgreement,
+            cancellationToken: cancellationToken).Code;
+        code = allowApplicationDirectory
             ? code
-            : QualifyDirectNativeImports(program, code));
+            : QualifyDirectNativeImports(program, code);
+        return BuildExecutableImage(program, code);
     }
 
     internal static string System32ImportPath(string dllName)
@@ -141,7 +153,9 @@ public static class NativeEmitter
     internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
             NativeRuntimePolicy runtimePolicy, bool allowNativeImports = false,
-            bool allowDirectNativeImports = false, CancellationToken cancellationToken = default)
+            bool allowDirectNativeImports = false,
+            string? nativeLoweringAgreement = null,
+            CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(bindings);
@@ -149,14 +163,67 @@ public static class NativeEmitter
         {
             ValidateDirectNativeBindings(program, bindings);
         }
-        var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken,
-            allowNativeImports || allowDirectNativeImports);
+        var (code, selected) = CompileWithImports(program, bindings,
+            runtimePolicy,
+            allowNativeImports: allowNativeImports || allowDirectNativeImports,
+            nativeLoweringAgreement: nativeLoweringAgreement,
+            cancellationToken: cancellationToken);
         var used = UsedImports(code, selected);
         if (allowDirectNativeImports)
         {
             code = QualifyDirectNativeImports(program, code);
         }
-        return (PeImage.Build(code), used);
+        return (BuildExecutableImage(program, code), used);
+    }
+
+    private static byte[] BuildExecutableImage(BoundProgram program,
+        NativeCode code)
+    {
+        var exports = new List<(string Name, int Index)>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            var function = program.Functions[index];
+            if (!function.HasNativeExport)
+            {
+                continue;
+            }
+
+            if (function.NativeExportEntryName is not string entryName
+                || !NativeExportContract.IsValidWindowsX64SymbolName(entryName)
+                || function.NativeFunctionPointerType is not PrimitiveType pointerType)
+            {
+                throw new ArgumentException(
+                    $"Function '{function.Name}' has an invalid NativeExport contract.",
+                    nameof(program));
+            }
+
+            EnsureNativeFunctionPointerConventionSupported(pointerType,
+                program.NativeFunctionPointerSignatures);
+            if (!names.Add(entryName))
+            {
+                throw new ArgumentException(
+                    $"Native export symbol '{entryName}' is duplicated.",
+                    nameof(program));
+            }
+
+            exports.Add((entryName, index));
+            if (exports.Count > 1024)
+            {
+                throw new ArgumentException(
+                    "A native executable supports at most 1024 source exports.",
+                    nameof(program));
+            }
+        }
+
+        if (exports.Count == 0)
+        {
+            return PeImage.Build(code);
+        }
+
+        exports.Sort(static (left, right) =>
+            StringComparer.Ordinal.Compare(left.Name, right.Name));
+        return PeImage.BuildExecutable(code, exports);
     }
 
     private static NativeCode QualifyDirectNativeImports(BoundProgram program, NativeCode code)
@@ -189,6 +256,7 @@ public static class NativeEmitter
     internal static (NativeCode Code, ImmutableArray<NativeImportBinding> Imports)
         EmitCodeWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
             NativeRuntimePolicy runtimePolicy, bool allowDirectNativeImports = false,
+            string? nativeLoweringAgreement = null,
             CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(program);
@@ -197,8 +265,11 @@ public static class NativeEmitter
         {
             ValidateDirectNativeBindings(program, bindings);
         }
-        var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken,
-            allowNativeImports: allowDirectNativeImports);
+        var (code, selected) = CompileWithImports(program, bindings,
+            runtimePolicy,
+            allowNativeImports: allowDirectNativeImports,
+            nativeLoweringAgreement: nativeLoweringAgreement,
+            cancellationToken: cancellationToken);
         return (code, UsedImports(code, selected));
     }
 
@@ -244,7 +315,8 @@ public static class NativeEmitter
 
     internal static (NativeCode Code, ImmutableArray<NativeImportBinding> Imports)
         EmitCodeWithDirectNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
-                CancellationToken cancellationToken = default)
+            string? nativeLoweringAgreement = null,
+            CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(program);
 
@@ -286,13 +358,16 @@ public static class NativeEmitter
         }
         var directBindings = bindings.ToImmutable();
         return EmitCodeWithImportUsage(program, directBindings, runtimePolicy,
-            allowDirectNativeImports: true, cancellationToken: cancellationToken);
+            allowDirectNativeImports: true,
+            nativeLoweringAgreement: nativeLoweringAgreement,
+            cancellationToken: cancellationToken);
     }
 
     private static (NativeCode Code, Dictionary<int, NativeImportBinding> Selected)
         CompileWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
-            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken,
-            bool allowNativeImports = false)
+            NativeRuntimePolicy runtimePolicy, bool allowNativeImports = false,
+            string? nativeLoweringAgreement = null,
+            CancellationToken cancellationToken = default)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -311,7 +386,14 @@ public static class NativeEmitter
         {
             throw new NotSupportedException("JIT and low-level import binding do not support source native imports.");
         }
-        SemanticVerifier.VerifyReferences(program);
+        SemanticVerifier.VerifyReferences(program,
+            nativeLoweringAgreement);
+        if (nativeLoweringAgreement
+            == CompilationOptions.WindowsX64RootlessReferencesAgreement)
+        {
+            ValidateRootlessReferenceProgram(program);
+            ValidateRootlessNativeImportBoundaries(program);
+        }
         if (BoundGenericNominalTypeContract.UsesAny(program))
         {
             throw new NotSupportedException(
@@ -413,6 +495,17 @@ public static class NativeEmitter
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken).Image;
 
+    internal static byte[] EmitLibraryWithVerifiedFixedArrayBodies(
+        BoundProgram program, IReadOnlyList<string> exports,
+        NativeRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(exports);
+        return EmitLibraryCore(program, exports, null, runtimePolicy,
+            cancellationToken, allowVerifiedFixedArrayBodies: true).Image;
+    }
+
     /// <summary>Test-only prototype: emits a library with invocation-scoped source context and export descriptors.</summary>
     /// <remarks>The source-grant ABI is not a selected compiler boundary or a stable native contract.</remarks>
     public static NativeSourceGrantLibrary EmitLibraryWithSourceGrant(BoundProgram program,
@@ -464,7 +557,7 @@ public static class NativeEmitter
         NativeCode? emitted = null;
         var exportBindings = ImmutableArray.CreateBuilder<(string Name, bool SourceDependent,
             PrimitiveType ReturnType, ImmutableArray<PrimitiveType> ParameterTypes)>();
-        var result = EmitLibraryCore(program, exports, null, runtimePolicy, default, dependent,
+        var (Image, Imports) = EmitLibraryCore(program, exports, null, runtimePolicy, default, dependent,
             code => emitted = code, selectedExports =>
             {
                 foreach (var (name, index) in selectedExports)
@@ -481,7 +574,7 @@ public static class NativeEmitter
                 }
             });
 
-        return (result.Image, emitted ?? throw new InvalidOperationException("No experiment code was emitted."),
+        return (Image, emitted ?? throw new InvalidOperationException("No experiment code was emitted."),
             exportBindings.ToImmutable());
     }
 
@@ -597,7 +690,8 @@ public static class NativeEmitter
         IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken,
         bool[]? sourceDependent = null, Action<NativeCode>? captureCode = null,
         Action<ImmutableArray<(string Name, int Index)>>? captureSelectedExports = null,
-        bool allowDirectNativeImports = false, bool containCheckedExceptionsAtExports = true)
+        bool allowDirectNativeImports = false, bool containCheckedExceptionsAtExports = true,
+        bool allowVerifiedFixedArrayBodies = false)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -606,7 +700,8 @@ public static class NativeEmitter
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
         SemanticVerifier.RejectSourceNativeImports(program, "PE library emission",
-            allowDirectNativeImports, allowFixedArrayStorage: true);
+            allowDirectNativeImports, allowFixedArrayStorage: true,
+            allowVerifiedFixedArrayBodies: allowVerifiedFixedArrayBodies);
         if (program.RequiresSourceGrant && !program.IsInvocationSourceBound && sourceDependent is null)
         {
             throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
@@ -628,13 +723,19 @@ public static class NativeEmitter
         {
             throw new NotSupportedException("Native DLLs do not expose host buffer capabilities.");
         }
-        if (exports.Count is < 1 or > 1024)
+        var sourceExportCount = program.Functions.Count(static function =>
+            function.HasNativeExport && !function.IsModuleReference
+            && function.ModuleImport is null);
+        if ((exports.Count == 0 && sourceExportCount == 0)
+            || exports.Count > 1024)
         {
-            throw new ArgumentException("A native library requires 1 to 1024 explicit exports.", nameof(exports));
+            throw new ArgumentException(
+                "A native library requires at least one selected host or source export and supports at most 1024 entries.",
+                nameof(exports));
         }
         var selected = new List<(string Name, int Index)>(exports.Count);
         var names = new HashSet<string>(StringComparer.Ordinal);
-        var imageNames = new HashSet<string>(StringComparer.Ordinal);
+        var imageNames = new Dictionary<string, int>(StringComparer.Ordinal);
         var nativeCallableEntryNames = new HashSet<string>(StringComparer.Ordinal);
         var managedExports = UsesManagedNodes(program);
         var functionIndices = new Dictionary<string, int>(program.Functions.Length, StringComparer.Ordinal);
@@ -665,11 +766,31 @@ public static class NativeEmitter
             {
                 throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
             }
-            if (!imageNames.Add(name))
+            AddImageExport(name, index, coalesceSameOwner: false);
+        }
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var function = program.Functions[index];
+            if (!function.HasNativeExport || function.IsModuleReference
+                || function.ModuleImport is not null)
             {
-                throw new ArgumentException("Native library export names must be unique.", nameof(exports));
+                continue;
             }
-            selected.Add((name, index));
+            if (function.NativeExportEntryName is not string entryName
+                || !NativeExportContract.IsValidWindowsX64SymbolName(entryName)
+                || function.NativeFunctionPointerType is not
+                    PrimitiveType nativeFunctionPointerType)
+            {
+                throw new ArgumentException(
+                    $"Function '{function.Name}' has an invalid NativeExport contract.",
+                    nameof(program));
+            }
+
+            EnsureNativeFunctionPointerConventionSupported(
+                nativeFunctionPointerType,
+                program.NativeFunctionPointerSignatures);
+            AddImageExport(entryName, index, coalesceSameOwner: true);
         }
         for (var index = 0; index < program.Functions.Length; index++)
         {
@@ -689,13 +810,9 @@ public static class NativeEmitter
             }
             EnsureNativeFunctionPointerConventionSupported(function.NativeFunctionPointerType.Value,
                 program.NativeFunctionPointerSignatures);
-            if (!function.IsExternal && !imageNames.Add(entryName))
-            {
-                throw new ArgumentException("Native library export names must be unique.", nameof(exports));
-            }
             if (!function.IsExternal)
             {
-                selected.Add((entryName, index));
+                AddImageExport(entryName, index, coalesceSameOwner: true);
             }
         }
         if (selected.Count > 1024)
@@ -769,17 +886,137 @@ public static class NativeEmitter
         }
         captureCode?.Invoke(code);
         return (PeImage.BuildLibrary(code, [.. selected]), usedImports);
+
+        void AddImageExport(string name, int functionIndex,
+            bool coalesceSameOwner)
+        {
+            if (imageNames.TryGetValue(name, out var previousFunctionIndex))
+            {
+                if (coalesceSameOwner
+                    && previousFunctionIndex == functionIndex)
+                {
+                    return;
+                }
+
+                throw new ArgumentException(
+                    "Native library export names must be unique.",
+                    nameof(exports));
+            }
+
+            imageNames.Add(name, functionIndex);
+            selected.Add((name, functionIndex));
+        }
     }
 
     internal static bool UsesManagedNodes(BoundProgram program) =>
-        program.NativeLoweringAgreement is null && (!program.Classes.IsEmpty
+        program.NativeLoweringAgreement is null
+        && (program.Classes.Any(@class => program.Functions.Any(function =>
+                (function.IsClassConstructor
+                    || function.ClassConstructor >= 0)
+                && function.DeclaringStruct == @class.Name))
             || program.Functions.Any(static function =>
                 function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
                 || ManagedClassTypes.IsManaged(function.ReturnType)
-                || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))));
+                || function.Variables.Any(static variable =>
+                    ManagedClassTypes.IsManaged(variable.Type))));
+
+    internal static void ValidateRootlessReferenceProgram(
+        BoundProgram program)
+    {
+        if (program.NativeLoweringAgreement
+                != CompilationOptions.WindowsX64RootlessReferencesAgreement
+            || program.RequiresSourceGrant || program.CoreTaskType is not null
+            || !program.Interfaces.IsEmpty || !program.Classes.IsEmpty
+            || program.Structures.Any(static structure =>
+                structure.Fields.Any(static field =>
+                    ManagedClassTypes.IsManaged(field.Type)))
+            || program.Functions.Any(static function =>
+                ManagedClassTypes.IsManaged(function.ReturnType)
+                || function.Variables.Any(static variable =>
+                    ManagedClassTypes.IsManaged(variable.Type))
+                || function.Intrinsic is >= BoundIntrinsic.NodeTryCreate
+                    and <= BoundIntrinsic.NodeCollect))
+        {
+            throw new NotSupportedException(
+                "The rootless reference agreement does not include managed-class, GC or source-grant runtime support.");
+        }
+
+        if (!CheckedReferenceTypeContract.IsValidTable(
+                program.CheckedReferenceTypes))
+        {
+            throw new ArgumentException(
+                "The rootless reference type table is invalid.",
+                nameof(program));
+        }
+
+        for (var index = 0;
+            index < program.CheckedReferenceTypes.Length; index++)
+        {
+            var reference = program.CheckedReferenceTypes[index];
+            var type = CheckedReferenceTypes.Type(index);
+            if (reference.IsGarbageCollected
+                || reference.IsInitialization
+                || !CheckedReferenceTypeContract
+                    .IsSupportedReferenceStoreValueType(type,
+                        program.Structures, program.Classes,
+                        program.EnumDefinitions.Length,
+                        program.CheckedReferenceTypes))
+            {
+                throw new NotSupportedException(
+                    "The rootless reference agreement supports only complete externally bounded ordinary references and their optional forms.");
+            }
+        }
+    }
+
+    private static void ValidateRootlessNativeImportBoundaries(
+        BoundProgram program)
+    {
+        static bool CrossesCheckedReference(PrimitiveType type)
+        {
+            return CheckedReferenceTypes.IsType(type);
+        }
+
+        foreach (var function in program.Functions)
+        {
+            if (CrossesCheckedReference(function.ReturnType)
+                || function.Variables.Take(function.ParameterCount)
+                    .Any(static variable =>
+                        CheckedReferenceTypes.IsType(variable.Type))
+                || function.NativeOutputContracts.Any(static output =>
+                    CheckedReferenceTypes.IsType(output.PointeeType))
+                || (function.DirectNativeImport is DirectNativeImport import
+                    && (import.Parameters.Any(static parameter =>
+                            CheckedReferenceTypes.IsType(parameter.PointeeType))
+                        || import.Outputs.Any(static output =>
+                            CheckedReferenceTypes.IsType(output.PointeeType))))
+                || (function.NativeVTableMethod
+                    is NativeVTableMethodDefinition method
+                    && (method.Parameters.Any(static parameter =>
+                            CheckedReferenceTypes.IsType(parameter.PointeeType))
+                        || method.Outputs.Any(static output =>
+                            CheckedReferenceTypes.IsType(output.PointeeType)))))
+            {
+                throw new NotSupportedException(
+                    "Rootless references cannot cross a foreign, native-callable or function-pointer boundary.");
+            }
+        }
+
+        if (program.NativePointerTypes.Any(static pointer =>
+                CrossesCheckedReference(pointer.PointeeType))
+            || program.NativeFunctionPointerSignatures.Any(
+                static signature => CrossesCheckedReference(
+                    signature.ReturnType)
+                    || signature.ParameterTypes.Any(
+                        CrossesCheckedReference)))
+        {
+            throw new NotSupportedException(
+                "Rootless references cannot be nested in native pointer or function-pointer contracts.");
+        }
+    }
 
     private static bool Exportable(BoundProgram program, BoundFunction function, bool managedExports,
-        IReadOnlyDictionary<string, bool> structureVisibility, Dictionary<PrimitiveType, bool> publicLayouts)
+        Dictionary<string, bool> structureVisibility,
+        Dictionary<PrimitiveType, bool> publicLayouts)
     {
         var isOwnedDirectNativeImport = function.IsExternal
             && function.DirectNativeImport is not null
@@ -873,7 +1110,7 @@ public static class NativeEmitter
     {
         var code = EmitCode(program, runtimePolicy, nativeLoweringAgreement,
             cancellationToken);
-        return PeImage.Build(code);
+        return BuildExecutableImage(program, code);
     }
 
     /// <summary>Verifies and emits relocatable code with a callable int32(void) entry point.</summary>
@@ -892,18 +1129,29 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
-        SemanticVerifier.Verify(program, nativeLoweringAgreement);
-        if (nativeLoweringAgreement is not null)
-        {
-            PeCompiler.ValidateNormalBackingProgram(program);
-        }
-        if (program.Functions.Any(static function => function.DirectNativeImport is not null))
-        {
-            throw new NotSupportedException("Source native imports require the explicit EmitWithNativeImports path.");
-        }
         if (program.RequiresSourceGrant && !program.IsInvocationSourceBound)
         {
             throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
+        }
+        if (program.Functions.Any(static function =>
+                function.DirectNativeImport is not null))
+        {
+            SemanticVerifier.VerifyWithDirectNativeImports(program,
+                nativeLoweringAgreement);
+            throw new NotSupportedException(
+                "Source native imports require the explicit EmitWithNativeImports path.");
+        }
+
+        SemanticVerifier.Verify(program, nativeLoweringAgreement);
+        if (nativeLoweringAgreement
+            == CompilationOptions.WindowsX64NormalBackingAgreement)
+        {
+            PeCompiler.ValidateNormalBackingProgram(program);
+        }
+        else if (nativeLoweringAgreement
+            == CompilationOptions.WindowsX64RootlessReferencesAgreement)
+        {
+            ValidateRootlessReferenceProgram(program);
         }
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
@@ -938,10 +1186,11 @@ internal sealed partial class PeCompiler
     private readonly bool _library;
     private readonly IReadOnlyDictionary<int, NativeImportBinding>? _nativeImports;
     private readonly CancellationToken _cancellationToken;
-    private readonly MachineCode _code = new();
+    private readonly MachineCode _code;
     private readonly int[] _starts;
     private readonly int[] _ends;
     private readonly int[] _frames;
+    private readonly int[] _frameAlignments;
     private readonly int[][] _slots;
     private readonly int[] _spillBases;
     private readonly int[][] _outSlots;
@@ -1007,6 +1256,7 @@ internal sealed partial class PeCompiler
     private int _returnSlot;
     private int _currentFunction;
     private bool _emittingFunclet;
+    private bool _usesAlignedFrame;
     private readonly List<int> _cleanups = [];
     private readonly List<NormalExit> _normalExits = [];
     private readonly List<LoopTarget> _loopTargets = [];
@@ -1024,7 +1274,25 @@ internal sealed partial class PeCompiler
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null, bool[]? sourceDependent = null,
         CancellationToken cancellationToken = default)
     {
+        if (program.Functions.Any(static function =>
+            function.DeclarationContractClauses.IsDefault
+                || !function.DeclarationContractClauses.IsEmpty))
+        {
+            throw new NotSupportedException(
+                "Native lowering of declaration contract clauses is not implemented.");
+        }
+        if (!program.StaticFields.IsDefaultOrEmpty
+            || !program.StaticInitializationGroups.IsDefaultOrEmpty
+            || program.Functions.Any(static function =>
+                function.StaticConstructorIdentity is not null
+                    || function.StaticInitializationTrigger is not null))
+        {
+            throw new NotSupportedException(
+                "Native lowering of static initialization groups is not implemented.");
+        }
         _program = program;
+        _code = new MachineCode(MaximumText,
+            "Native text exceeds the 8 MiB image ceiling.");
         _managedNodes = managedNodes;
         _normalBacking = program.NativeLoweringAgreement
             == CompilationOptions.WindowsX64NormalBackingAgreement;
@@ -1050,6 +1318,7 @@ internal sealed partial class PeCompiler
         }
         _ends = new int[program.Functions.Length];
         _frames = new int[program.Functions.Length];
+        _frameAlignments = new int[program.Functions.Length];
         _slots = new int[program.Functions.Length][];
         _spillBases = new int[program.Functions.Length];
         _outSlots = new int[program.Functions.Length][];
@@ -1103,28 +1372,37 @@ internal sealed partial class PeCompiler
         }
         var literalBytes = 0;
         _nativeUtf16ZOffsets = new int[program.NativeUtf16ZLiterals.Length];
-        for (var index = 0; index < program.NativeUtf16ZLiterals.Length; index++)
+        for (var index = 0; index < _program.NativeUtf16ZLiterals.Length; index++)
         {
             _nativeUtf16ZOffsets[index] = literalBytes;
-            literalBytes = checked(literalBytes
-                + ((program.NativeUtf16ZLiterals[index].Length + 1) * sizeof(char)));
+            literalBytes = NativeImageCapacity((long)literalBytes
+                + (((long)program.NativeUtf16ZLiterals[index].Length + 1)
+                    * sizeof(char)), "UTF-16 literal data");
         }
         _nativeUtf8ZOffsets = new int[program.NativeUtf8ZLiterals.Length];
         for (var index = 0; index < program.NativeUtf8ZLiterals.Length; index++)
         {
             _nativeUtf8ZOffsets[index] = literalBytes;
-            literalBytes = checked(literalBytes + program.NativeUtf8ZLiterals[index].Length + 1);
+            literalBytes = NativeImageCapacity((long)literalBytes
+                + program.NativeUtf8ZLiterals[index].Length + 1,
+                "UTF-8 literal data");
         }
-        var literalPrefixBytes = checked((literalBytes + 3) & ~3);
+        var literalPrefixBytes = NativeImageCapacity(((long)literalBytes + 3)
+            & ~3L, "literal data prefix");
         var readOnlyBufferBytes = 0;
         foreach (var buffer in program.Buffers)
         {
             if (!buffer.IsWritable)
             {
-                readOnlyBufferBytes = checked(readOnlyBufferBytes + (buffer.Values.Length * 4));
+                readOnlyBufferBytes = NativeImageCapacity(
+                    (long)readOnlyBufferBytes
+                        + ((long)buffer.Values.Length * sizeof(int)),
+                    "read-only buffer data");
             }
         }
-        _readOnlyDataLength = checked(literalPrefixBytes + readOnlyBufferBytes);
+        _readOnlyDataLength = NativeImageCapacity(
+            (long)literalPrefixBytes + readOnlyBufferBytes,
+            "read-only data");
         var readOnlyAt = literalPrefixBytes;
         var writableAt = _readOnlyDataLength;
         for (var index = 0; index < program.Buffers.Length; index++)
@@ -1133,31 +1411,53 @@ internal sealed partial class PeCompiler
             _bufferOffsets[index] = buffer.IsWritable ? writableAt : readOnlyAt;
             if (buffer.IsWritable)
             {
-                writableAt = checked(writableAt + (buffer.Values.Length * 4));
+                writableAt = NativeImageCapacity((long)writableAt
+                    + ((long)buffer.Values.Length * sizeof(int)),
+                    "writable buffer data");
             }
             else
             {
-                readOnlyAt = checked(readOnlyAt + (buffer.Values.Length * 4));
+                readOnlyAt = NativeImageCapacity((long)readOnlyAt
+                    + ((long)buffer.Values.Length * sizeof(int)),
+                    "read-only buffer data");
             }
         }
-        _hostDataLength = checked(writableAt - literalPrefixBytes);
+        _hostDataLength = NativeImageCapacity(
+            (long)writableAt - literalPrefixBytes, "host buffer data");
         if (_managedNodes && _normalBacking)
         {
             throw new InvalidOperationException(
                 "Normal backing and managed-node runtime state cannot share an image.");
         }
         var runtimeStateOffset = _managedNodes || _normalBacking
-            ? checked((writableAt + 7) & ~7) : -1;
+            ? NativeImageCapacity(((long)writableAt + 7) & ~7L,
+                "runtime-state offset") : -1;
         _managedRuntimeOffset = _managedNodes ? runtimeStateOffset : -1;
         _normalBackingRuntimeOffset = _normalBacking ? runtimeStateOffset : -1;
         var runtimeStateSize = _normalBacking
             ? NormalBackingRuntimeStateSize : _managedNodes ? 24 : 0;
-        _data = runtimeStateOffset < 0
-            ? new byte[writableAt]
-            : new byte[runtimeStateOffset + runtimeStateSize];
-        for (var index = 0; index < program.NativeUtf16ZLiterals.Length; index++)
+        var imageDataLength = NativeImageCapacity(runtimeStateOffset < 0
+            ? writableAt : (long)runtimeStateOffset + runtimeStateSize,
+            "native data image");
+        _data = new byte[imageDataLength];
+    }
+
+    private static int NativeImageCapacity(long value, string dimension)
+        => value < 0 || value > Array.MaxLength
+            ? throw new NotSupportedException(
+                $"Native {dimension} exceeds the host byte-array capacity.")
+            : (int)value;
+
+    private void InitializeImageData()
+    {
+        if (_sourceDependent is not null)
         {
-            var literal = program.NativeUtf16ZLiterals[index];
+            return;
+        }
+
+        for (var index = 0; index < _program.NativeUtf16ZLiterals.Length; index++)
+        {
+            var literal = _program.NativeUtf16ZLiterals[index];
             for (var codeUnit = 0; codeUnit < literal.Length; codeUnit++)
             {
                 var offset = _nativeUtf16ZOffsets[index] + (codeUnit * sizeof(char));
@@ -1168,9 +1468,9 @@ internal sealed partial class PeCompiler
             System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
                 _data.AsSpan(terminatorOffset, sizeof(char)), 0);
         }
-        for (var index = 0; index < program.NativeUtf8ZLiterals.Length; index++)
+        for (var index = 0; index < _program.NativeUtf8ZLiterals.Length; index++)
         {
-            var literal = program.NativeUtf8ZLiterals[index];
+            var literal = _program.NativeUtf8ZLiterals[index];
             var offset = _nativeUtf8ZOffsets[index];
             for (var character = 0; character < literal.Length; character++)
             {
@@ -1178,9 +1478,9 @@ internal sealed partial class PeCompiler
             }
             _data[offset + literal.Length] = 0;
         }
-        for (var index = 0; index < program.Buffers.Length; index++)
+        for (var index = 0; index < _program.Buffers.Length; index++)
         {
-            var buffer = program.Buffers[index];
+            var buffer = _program.Buffers[index];
             for (var element = 0; element < buffer.Values.Length; element++)
             {
                 System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
@@ -1191,8 +1491,9 @@ internal sealed partial class PeCompiler
     internal NativeCode Compile()
     {
         PrepareFrames();
+        InitializeImageData();
         var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
-        if (_frames.Any(static frame => frame > NativeUnwind.StackProbeThreshold + 8))
+        if (NeedsStackProbe())
         {
             _stackProbeHelper = EmitStackProbeHelper();
         }
@@ -1360,7 +1661,10 @@ internal sealed partial class PeCompiler
             {
                 functions.Add(new NativeFunctionRange(_starts[i], _ends[i], _frames[i]) {
                     UsesFramePointer = true,
-                    UsesStackProbe = _frames[i] - 8
+                    UsesAlignedFrame = _frameAlignments[i] > 16,
+                    StackAlignment = _frameAlignments[i] > 16
+                        ? _frameAlignments[i] : 0,
+                    UsesStackProbe = StackProbeAllocationSize(i)
                         > NativeUnwind.StackProbeThreshold,
                     ExceptionHandler = _checkedExceptions ? _exceptionHandler : 0,
                     ExceptionScopes = [.. _scopes[i].Select(scope => scope with {
@@ -1423,15 +1727,20 @@ internal sealed partial class PeCompiler
 
     private void PrepareFrames()
     {
-        var maximumIndirectCleanupSize = 0;
-        for (var type = 0; type < _program.Structures.Length; type++)
+        try
         {
-            var structureType = (PrimitiveType)(100 + type);
-            if (_program.Structures[type].CleanupMethod is not null && IsIndirect(structureType))
-            {
-                maximumIndirectCleanupSize = Math.Max(maximumIndirectCleanupSize, ScratchSize(structureType));
-            }
+            PrepareFramesCore();
         }
+        catch (OverflowException exception)
+        {
+            throw new NotSupportedException(
+                "Native frame or temporary layout exceeds signed x64 capacity.",
+                exception);
+        }
+    }
+
+    private void PrepareFramesCore()
+    {
         for (var i = 0; i < _program.Functions.Length; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -1442,9 +1751,48 @@ internal sealed partial class PeCompiler
                 _starts[i] = -1;
                 continue;
             }
+            var frameAlignment = 16;
+            var maximumIndirectCleanupSize = 0;
+            var maximumIndirectCleanupAlignment = 16;
+            var cleanupTypes = new HashSet<PrimitiveType>();
+            foreach (var variable in function.Variables)
+            {
+                frameAlignment = Math.Max(frameAlignment,
+                    ScratchAlignment(variable.Type));
+                IncludeCleanupScratch(variable.Type,
+                    ref maximumIndirectCleanupSize,
+                    ref maximumIndirectCleanupAlignment, cleanupTypes);
+            }
+            frameAlignment = Math.Max(frameAlignment,
+                ScratchAlignment(function.ReturnType));
+            IncludeCleanupScratch(function.ReturnType,
+                ref maximumIndirectCleanupSize,
+                ref maximumIndirectCleanupAlignment, cleanupTypes);
+            if (function.Body is not null
+                && !BoundTreeTraversal.VisitExpressions(function.Body,
+                    expression => frameAlignment = Math.Max(frameAlignment,
+                        ScratchAlignment(expression.Type))))
+            {
+                throw new InvalidOperationException(
+                    "Native frame-alignment traversal is incomplete.");
+            }
+            if (function.IndexedBody is TrRmScalarGraph frameGraph)
+            {
+                foreach (var type in frameGraph.Types)
+                {
+                    frameAlignment = Math.Max(frameAlignment,
+                        ScratchAlignment(type));
+                }
+            }
+            frameAlignment = Math.Max(frameAlignment,
+                maximumIndirectCleanupAlignment);
+            _frameAlignments[i] = frameAlignment > 16
+                ? frameAlignment : 0;
             var maximumArguments = 0;
             var needsReturnSnapshot = false;
-            var spillSlots = StatementSpills(function.Body, ref maximumArguments, ref needsReturnSnapshot,
+            var body = function.Body ?? throw new InvalidOperationException(
+                "A verified source function has no body.");
+            var spillSlots = StatementSpills(body, ref maximumArguments, ref needsReturnSnapshot,
                 _checkedExceptions && _managedNodes);
             _spillCounts[i] = spillSlots;
             if (function.IndexedBody is TrRmScalarGraph indexedBody)
@@ -1465,30 +1813,32 @@ internal sealed partial class PeCompiler
             {
                 maximumArguments = Math.Max(maximumArguments, function.ParameterCount);
             }
-            var outgoingSize = 32 + (8 * Math.Max(0, maximumArguments - 4));
-            var at = (outgoingSize + 15) & ~15;
+            var outgoingSize = checked(32
+                + (8 * Math.Max(0, maximumArguments - 4)));
+            var at = checked((outgoingSize + 15) & ~15);
             if (_sourceDependent?[i] == true)
             {
                 _sourceSlots[i] = at;
-                at += 16;
+                at = checked(at + 16);
             }
             var slots = new int[function.Variables.Length];
             for (var variable = 0; variable < slots.Length; variable++)
             {
-                if ((IsIndirect(function.Variables[variable].Type)
-                    || function.Variables[variable].Type is PrimitiveType.ReadonlyInt32BufferView
+                var variableType = function.Variables[variable].Type;
+                if ((IsIndirect(variableType)
+                    || variableType is PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView)
                     && !function.Variables[variable].IsOut)
                 {
-                    at = (at + 15) & ~15;
+                    at = checked((at + 15) & ~15);
                 }
+                at = AlignOffset(at, ScratchAlignment(variableType));
                 slots[variable] = at;
                 ulong variableSize;
-                if (NativeFixedArrayTypes.IsType(
-                        function.Variables[variable].Type))
+                if (NativeFixedArrayTypes.IsType(variableType))
                 {
                     if (!NativeFixedArrayContract.TryGetLayout(
-                            function.Variables[variable].Type,
+                            variableType,
                             _program.Structures,
                             _program.NativeFixedArrayTypes,
                             out var fixedArrayLayout))
@@ -1502,23 +1852,24 @@ internal sealed partial class PeCompiler
                 else
                 {
                     variableSize = checked((ulong)(
-                        (IsIndirect(function.Variables[variable].Type)
-                            && IsStruct(function.Variables[variable].Type))
-                            ? Size(function.Variables[variable].Type)
-                            : (IsIndirect(function.Variables[variable].Type)
-                                || function.Variables[variable].Type
+                        (IsIndirect(variableType)
+                            && IsStruct(variableType))
+                            ? Size(variableType)
+                            : (IsIndirect(variableType)
+                                || variableType
                                     is PrimitiveType.ReadonlyInt32BufferView
                                         or PrimitiveType.MutableInt32BufferView)
                                     && !function.Variables[variable].IsOut
                                 ? 16 : 8));
                 }
-                if (variableSize > (ulong)(int.MaxValue - at))
+                if (at < 0
+                    || variableSize > (ulong)((long)int.MaxValue - at))
                 {
-                    throw new InvalidOperationException(
-                        "The native stack frame exceeds the supported local-offset range.");
+                    throw new NotSupportedException(
+                        "Native fixed-layout local exceeds the signed x64 stack-offset capacity.");
                 }
-                at += (int)variableSize;
-                at = (at + 7) & ~7;
+                at = checked(at + (int)variableSize);
+                at = checked((at + 7) & ~7);
             }
             _slots[i] = slots;
             _spillBases[i] = AlignOffset(at, 16);
@@ -1570,11 +1921,14 @@ internal sealed partial class PeCompiler
                 at = checked(at + edgeCopySizes[parameter]);
             }
             _edgeCopySlots[i] = edgeCopySlots;
-            at = AlignOffset(at, 16);
+            at = AlignOffset(at,
+                Math.Max(16, ScratchAlignment(function.ReturnType)));
             _returnSlots[i] = at;
             var maximumFieldReplacementSize = 0;
+            var maximumFieldReplacementAlignment = 16;
             var hasUniqueFieldReplacement = false;
             var maximumReferenceReplacementSize = 0;
+            var maximumReferenceReplacementAlignment = 16;
             var hasUniqueReferenceReplacement = false;
             var hasOutputParameters = false;
             var parameterOffset = function.IsConstructor ? 1 : 0;
@@ -1591,14 +1945,16 @@ internal sealed partial class PeCompiler
             if (needsReturnSnapshot || function.ReturnType == PrimitiveType.Float128)
             {
                 var returnSnapshot = AlignOffset(_returnSlots[i]
-                    + (IsIndirectResult(function.ReturnType) ? 8 : 0), 16);
+                    + (IsIndirectResult(function.ReturnType) ? 8 : 0),
+                    ScratchAlignment(function.ReturnType));
                 required = Math.Max(required, returnSnapshot + (long)ScratchSize(function.ReturnType));
             }
             if (_normalBacking
                 && ContainsNormalBackingReferenceValue(function.ReturnType, _program))
             {
                 var returnValue = checked((int)AlignOffset(_returnSlots[i]
-                    + (IsIndirectResult(function.ReturnType) ? 8 : 0), 16));
+                    + (IsIndirectResult(function.ReturnType) ? 8 : 0),
+                    ScratchAlignment(function.ReturnType)));
                 required = Math.Max(required, returnValue + (long)Size(function.ReturnType));
             }
             var live = new int[function.Variables.Length];
@@ -1650,6 +2006,9 @@ internal sealed partial class PeCompiler
                                 hasUniqueFieldReplacement = true;
                                 maximumFieldReplacementSize = Math.Max(
                                     maximumFieldReplacementSize, ScratchSize(fieldType));
+                                maximumFieldReplacementAlignment = Math.Max(
+                                    maximumFieldReplacementAlignment,
+                                    ScratchAlignment(fieldType));
                                 _ = partialFieldOwners.Add(assignment.Variable);
                             }
                         }
@@ -1667,6 +2026,9 @@ internal sealed partial class PeCompiler
                         hasUniqueReferenceReplacement = true;
                         maximumReferenceReplacementSize = Math.Max(
                             maximumReferenceReplacementSize, ScratchSize(write.Value.Type));
+                        maximumReferenceReplacementAlignment = Math.Max(
+                            maximumReferenceReplacementAlignment,
+                            ScratchAlignment(write.Value.Type));
                     }
                 }))
             {
@@ -1674,6 +2036,7 @@ internal sealed partial class PeCompiler
             }
             var hasUnique = false;
             var replacementSize = 8;
+            var replacementAlignment = 16;
             for (var variable = 0; variable < function.Variables.Length; variable++)
             {
                 var type = function.Variables[variable].Type;
@@ -1681,10 +2044,12 @@ internal sealed partial class PeCompiler
                 {
                     hasUnique = true;
                     replacementSize = Math.Max(replacementSize, ScratchSize(type));
+                    replacementAlignment = Math.Max(replacementAlignment,
+                        ScratchAlignment(type));
                     if (!(variable == 0 && function.DeclaringStruct is not null && !function.IsStatic))
                     {
                         live[variable] = checked((int)required);
-                        required += 8;
+                        required = checked(required + 8);
                     }
                 }
             }
@@ -1692,6 +2057,8 @@ internal sealed partial class PeCompiler
             {
                 hasUnique = true;
                 replacementSize = Math.Max(replacementSize, maximumReferenceReplacementSize);
+                replacementAlignment = Math.Max(replacementAlignment,
+                    maximumReferenceReplacementAlignment);
             }
             _liveSlots[i] = live;
             var partialFields = new int[function.Variables.Length][];
@@ -1720,7 +2087,7 @@ internal sealed partial class PeCompiler
                             ? -1 : checked((int)required);
                         if (liveSlot >= 0)
                         {
-                            required += 8;
+                            required = checked(required + 8);
                         }
                         fieldSlots[field] = liveSlot;
                         fieldTrees[field] = AllocatePartialFieldNode(
@@ -1742,7 +2109,7 @@ internal sealed partial class PeCompiler
                     && !ManagedClassTypes.IsManaged(slot.Type) && !IsUnique(slot.Type))
                 {
                     initializationFlags[variable] = checked((int)required);
-                    required += 4;
+                    required = checked(required + 4);
                 }
             }
             _initializationFlags[i] = initializationFlags;
@@ -1754,36 +2121,43 @@ internal sealed partial class PeCompiler
                 if (IsUnique(_program.Structures[(int)function.ReturnType - 100].Fields[field].Type))
                 {
                     constructed[field] = checked((int)required);
-                    required += 8;
+                    required = checked(required + 8);
                 }
             }
             _constructedFieldSlots[i] = constructed;
-            _replacementSlots[i] = checked((int)((required + 15) & ~15L));
+            _replacementSlots[i] = checked((int)AlignOffset(required,
+                replacementAlignment));
             if (hasUnique)
             {
                 required = _replacementSlots[i] + (long)replacementSize;
             }
             if (hasUniqueFieldReplacement || hasUniqueReferenceReplacement)
             {
-                required = (required + 15) & ~15L;
+                var oldReplacementAlignment = Math.Max(
+                    maximumFieldReplacementAlignment,
+                    maximumReferenceReplacementAlignment);
+                required = AlignOffset(required, oldReplacementAlignment);
                 _oldReplacementSlots[i] = checked((int)required);
-                required += Math.Max(maximumFieldReplacementSize,
-                    maximumReferenceReplacementSize);
+                required = checked(required + Math.Max(maximumFieldReplacementSize,
+                    maximumReferenceReplacementSize));
             }
             _cleanupArgumentSlots[i] = -1;
             if (maximumIndirectCleanupSize != 0)
             {
-                _cleanupArgumentSlots[i] = checked((int)((required + 15) & ~15L));
-                required = _cleanupArgumentSlots[i] + (long)maximumIndirectCleanupSize;
+                required = AlignOffset(required,
+                    Math.Max(16, maximumIndirectCleanupAlignment));
+                _cleanupArgumentSlots[i] = checked((int)required);
+                required = checked(_cleanupArgumentSlots[i]
+                    + (long)maximumIndirectCleanupSize);
             }
             required = PrepareManagedRoots(i, function, spillSlots, needsReturnSnapshot, required);
             if (_normalBacking)
             {
                 if (RequiresNormalBackingCallPlan(function, _program))
                 {
-                    required = (required + 7) & ~7L;
+                    required = checked((required + 7) & ~7L);
                     _normalBackingIncomingCallPlanSlots[i] = checked((int)required);
-                    required += sizeof(ulong);
+                    required = checked(required + sizeof(ulong));
                 }
 
                 var maximumCallPlanSize = 0;
@@ -1804,24 +2178,86 @@ internal sealed partial class PeCompiler
                 }
                 if (maximumCallPlanSize != 0)
                 {
-                    required = (required + 15) & ~15L;
+                    required = checked((required + 15) & ~15L);
                     _normalBackingCallPlanSlots[i] = checked((int)required);
                     required = checked(required + maximumCallPlanSize);
                 }
             }
-            required += 8; // Saved RBP lives above the addressable frame slots.
-            if (required > MaximumFrame)
+            required = checked(required + 8); // Saved RBP lives above the addressable frame slots.
+            if (_frameAlignments[i] > 16)
             {
-                throw new NotSupportedException("Native frame exceeds the signed x64 stack-offset range.");
+                var allocation = AlignOffset(required, 16);
+                var frame = checked(allocation + 24);
+                if ((long)frame + _frameAlignments[i] - 1 > MaximumFrame)
+                {
+                    throw new NotSupportedException(
+                        "Over-aligned native frame exceeds the signed x64 stack-offset range.");
+                }
+                _frames[i] = checked((int)frame);
             }
-            var frame = AlignFrame(checked((int)required));
-            if (frame > MaximumFrame)
+            else
             {
-                throw new NotSupportedException("Native frame exceeds the signed x64 stack-offset range.");
+                if (required > MaximumFrame)
+                {
+                    throw new NotSupportedException("Native frame exceeds the signed x64 stack-offset range.");
+                }
+                var frame = AlignFrame(checked((int)required));
+                if (frame > MaximumFrame)
+                {
+                    throw new NotSupportedException("Native frame exceeds the signed x64 stack-offset range.");
+                }
+                _frames[i] = frame;
             }
-            _frames[i] = frame;
         }
     }
+
+    private void IncludeCleanupScratch(PrimitiveType type,
+        ref int maximumSize, ref int maximumAlignment,
+        HashSet<PrimitiveType> visited)
+    {
+        if (!IsStruct(type) || !visited.Add(type))
+        {
+            return;
+        }
+
+        var structure = _program.Structures[(int)type - 100];
+        if (structure.CleanupMethod is not null && IsIndirect(type))
+        {
+            maximumSize = Math.Max(maximumSize, ScratchSize(type));
+            maximumAlignment = Math.Max(maximumAlignment,
+                ScratchAlignment(type));
+        }
+
+        foreach (var field in structure.Fields)
+        {
+            if (IsUnique(field.Type))
+            {
+                IncludeCleanupScratch(field.Type, ref maximumSize,
+                    ref maximumAlignment, visited);
+            }
+        }
+    }
+
+    private bool NeedsStackProbe()
+    {
+        for (var index = 0; index < _frames.Length; index++)
+        {
+            if (_frames[index] != 0
+                && StackProbeAllocationSize(index)
+                    > NativeUnwind.StackProbeThreshold)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int StackProbeAllocationSize(int functionIndex)
+        => _frameAlignments[functionIndex] > 16
+            ? checked(_frames[functionIndex] - 24
+                + _frameAlignments[functionIndex] - 1)
+            : checked(_frames[functionIndex] - 8);
 
     private PartialFieldNode AllocatePartialFieldNode(
         PrimitiveType type, int liveSlot, ref long required, int depth = 0)
@@ -1844,7 +2280,7 @@ internal sealed partial class PeCompiler
                 continue;
             }
             var childLiveSlot = checked((int)required);
-            required += 8;
+            required = checked(required + 8);
             children[field] = AllocatePartialFieldNode(
                 fields[field].Type, childLiveSlot, ref required, depth + 1);
         }
@@ -1865,14 +2301,22 @@ internal sealed partial class PeCompiler
             _starts[i] = _code.Position;
             _currentFunction = i;
             _frame = _frames[i];
+            _usesAlignedFrame = _frameAlignments[i] > 16;
             _spillBase = _spillBases[i];
             _returnSlot = _returnSlots[i];
             _cleanups.Clear();
             _normalExits.Clear();
             _loopTargets.Clear();
-            _code.Byte(0x55); // push rbp
-            Prolog(_frame - 8);
-            _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
+            if (_usesAlignedFrame)
+            {
+                AlignedProlog(_frame - 24, _frameAlignments[i]);
+            }
+            else
+            {
+                _code.Byte(0x55); // push rbp
+                Prolog(_frame - 8);
+                _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
+            }
             _code.UseFramePointer = true;
             var sourceHidden = _sourceDependent?[i] == true ? 2 : 0;
             if (sourceHidden != 0 && function.NativeFunctionPointerType is not null)
@@ -2084,6 +2528,7 @@ internal sealed partial class PeCompiler
             var (body, function, _, _) = _funclets[index];
             _currentFunction = function;
             _frame = _frames[function];
+            _usesAlignedFrame = false;
             _spillBase = _spillBases[function];
             _returnSlot = _returnSlots[function];
             var start = _code.Position;
@@ -2256,8 +2701,12 @@ internal sealed partial class PeCompiler
     private static int AlignFrame(int bytes)
         => checked((int)((((long)bytes + 8 + 15) & ~15L) - 8));
 
-    private int PendingReturnSlot() => (_returnSlot
-        + (IsIndirectResult(_program.Functions[_currentFunction].ReturnType) ? 8 : 0) + 15) & ~15;
+    private int PendingReturnSlot()
+    {
+        var type = _program.Functions[_currentFunction].ReturnType;
+        var offset = _returnSlot + (IsIndirectResult(type) ? 8 : 0);
+        return AlignOffset(offset, ScratchAlignment(type));
+    }
 
     private int StatementSpills(BoundStatement statement, ref int maximumArguments)
     {
@@ -3100,13 +3549,26 @@ internal sealed partial class PeCompiler
                 throw new InvalidOperationException(
                     "A fixed-array value has no verified type-table entry.");
             }
-            return checked((int)_program.NativeFixedArrayTypes[arrayIndex]
-                .ByteExtent);
+            return NativeLayoutSize(
+                _program.NativeFixedArrayTypes[arrayIndex].ByteExtent);
         }
 
-        return ValueLayout.Size(type, _program.Structures,
-            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement);
+        return NativeLayoutSize(ValueLayout.Size(type, _program.Structures,
+            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement));
     }
+
+    private static int NativeLayoutOffset(ulong offset) =>
+        offset > int.MaxValue
+            ? throw new NotSupportedException(
+                "The native emitter cannot address a fixed-layout offset larger than Int32.MaxValue.")
+            : (int)offset;
+
+    private static int NativeLayoutSize(ulong size) =>
+        size > int.MaxValue
+            ? throw new NotSupportedException(
+                "The native emitter cannot materialize a fixed-layout value larger than Int32.MaxValue.")
+            : (int)size;
+
     private static bool IsNarrowInteger(PrimitiveType type) =>
         PrimitiveTypeFacts.IntegerWidth(type) is 8 or 16;
 
@@ -3134,8 +3596,10 @@ internal sealed partial class PeCompiler
         Math.Max(8, ValueLayout.Alignment(type, _program.Structures,
             _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
             _program.NativeFixedArrayTypes));
-    private static int AlignOffset(int offset, int alignment) =>
-        checked((offset + alignment - 1) & ~(alignment - 1));
+    private static int AlignOffset(int offset, int alignment)
+        => checked((int)AlignOffset((long)offset, alignment));
+    private static long AlignOffset(long offset, int alignment)
+        => checked((offset + alignment - 1) & ~((long)alignment - 1));
 
     private static Binary128Runtime CreateBinary128Runtime()
     {
@@ -4672,6 +5136,8 @@ internal sealed partial class PeCompiler
             new CompilationOptions {
                 RuntimePolicy = BoundRuntimePolicy.FailFast,
                 SourceArithmeticProfile = SourceArithmeticProfile.Release,
+                LayoutCoreRegistration =
+                    CreateCompilerRuntimeLayoutRegistration(),
             });
         if (compilation.HasErrors || compilation.Program is not BoundProgram program)
         {
@@ -4695,6 +5161,73 @@ internal sealed partial class PeCompiler
             }
         }
         return new BidDecimalRuntime(code, functionOffsets.ToImmutable());
+    }
+
+    // This selected schema is confined to compiler-owned helper source; it is not a user-source default.
+    private static LayoutCoreRegistrationSet CreateCompilerRuntimeLayoutRegistration()
+    {
+        const string providerIdentity = "terrum.compiler.runtime-layout";
+        const string usingModuleIdentity = "terrum.compiler.bid-decimal";
+        var layoutKindsIdentity = new CoreDeclarationIdentity(providerIdentity,
+            "LayoutKind", CoreDeclarationKind.EnumType);
+
+        CoreEnumMemberDefinition CreateMember(string name, int value)
+        {
+            var identity = new CoreDeclarationIdentity(providerIdentity,
+                $"LayoutKind.{name}", CoreDeclarationKind.EnumMember);
+            return new CoreEnumMemberDefinition(identity, layoutKindsIdentity,
+                name, value, IsPublic: true) {
+                DeclarationKey = $"layout-kind/member/{name}",
+            };
+        }
+
+        var layoutKinds = new CoreEnumDefinition(layoutKindsIdentity,
+            "LayoutKind", PrimitiveType.Int32, [
+                CreateMember("Auto", 0),
+                CreateMember("Sequential", 1),
+                CreateMember("Union", 2),
+                CreateMember("Transparent", 3),
+            ], GenericArity: 0, IsPublic: true, IsPrimary: true,
+            IsFlags: false);
+        var layout = new CoreLayoutAttributeSchema(
+            new CoreDeclarationIdentity(providerIdentity, "Layout",
+                CoreDeclarationKind.AttributeSchema),
+            "Layout",
+            [
+                new("Kind", CoreLayoutAttributeArgumentKind.LayoutKind,
+                    layoutKindsIdentity, IsRequired: true,
+                    AllowsPositional: true, DefaultUInt32: null),
+                new("Packing", CoreLayoutAttributeArgumentKind.Unsigned32,
+                    null, IsRequired: false, AllowsPositional: false,
+                    DefaultUInt32: 16),
+                new("Alignment", CoreLayoutAttributeArgumentKind.Unsigned32,
+                    null, IsRequired: false, AllowsPositional: false,
+                    DefaultUInt32: null),
+            ],
+            CoreLayoutAttributeTargets.InlineStruct,
+            IsPrimaryTargetOnly: true, GenericArity: 0, IsPublic: true,
+            IsPrimary: true, IsRepeatable: false);
+        var blittable = new CoreLayoutAttributeSchema(
+            new CoreDeclarationIdentity(providerIdentity, "Blittable",
+                CoreDeclarationKind.AttributeSchema),
+            "Blittable", [],
+            CoreLayoutAttributeTargets.InlineStruct
+                | CoreLayoutAttributeTargets.IntegerBackedEnum,
+            IsPrimaryTargetOnly: true, GenericArity: 0, IsPublic: true,
+            IsPrimary: true, IsRepeatable: false);
+        var declarations = ImmutableArray.Create(
+            CoreProviderDeclarationSnapshot.From(layoutKinds),
+            CoreProviderDeclarationSnapshot.From(layout),
+            CoreProviderDeclarationSnapshot.From(blittable));
+        var bindings = CoreProviderModuleBindings.Create(usingModuleIdentity, [
+            new CoreProviderModuleOrigin(providerIdentity,
+                "compiler-runtime-layout-v1",
+                new CoreProviderSchemaSelection("layout-registration", 1),
+                GoverningSemanticEdition: 1, TargetRequirement: 0,
+                RuntimePolicy: 0),
+        ], declarations);
+        return LayoutCoreRegistrationSet.Create(bindings, layoutKinds,
+            layout, blittable);
     }
 
     private void EmitBinary128Call(string function, int left, int right, int result)
@@ -4890,12 +5423,12 @@ internal sealed partial class PeCompiler
                 or TokenKind.Slash or TokenKind.Percent;
         var binary128Comparison = type == PrimitiveType.Float128
             && IsFloatingComparison(operation);
-        var bidDecimalOperator = type is (PrimitiveType.Decimal32 or PrimitiveType.Decimal64
-                or PrimitiveType.Decimal128)
-            && operation is (TokenKind.Plus or TokenKind.Minus or TokenKind.Star
-                or TokenKind.Slash or TokenKind.Percent);
-        var bidDecimalComparison = type is (PrimitiveType.Decimal32 or PrimitiveType.Decimal64
-                or PrimitiveType.Decimal128)
+        var bidDecimalOperator = type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                or PrimitiveType.Decimal128
+            && operation is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                or TokenKind.Slash or TokenKind.Percent;
+        var bidDecimalComparison = type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                or PrimitiveType.Decimal128
             && IsFloatingComparison(operation);
         if (PrimitiveTypeFacts.IsFloating(type)
             && type is not (PrimitiveType.Float32 or PrimitiveType.Float64)
@@ -4913,7 +5446,7 @@ internal sealed partial class PeCompiler
         || (_normalBacking && CheckedReferenceTypes.IsType(type))
         || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
             or PrimitiveType.Decimal128
-        || IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
+        || (IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8));
     private bool IsIndirectResult(PrimitiveType type) =>
         type != PrimitiveType.Float128 && IsIndirect(type);
     private static bool IsFloatingCallCarrier(PrimitiveType type) =>
@@ -4951,7 +5484,7 @@ internal sealed partial class PeCompiler
         var fieldRead = (BoundFieldRead)expression;
         EmitUniqueFieldPlace(fieldRead.Receiver);
         var field = _program.Structures[(int)fieldRead.Receiver.Type - 100].Fields[fieldRead.Field];
-        _code.PointerOffset(field.Offset);
+        _code.PointerOffset(NativeLayoutOffset(field.Offset));
     }
 
     private bool UpdateAddress(BoundExpression place, int spill)
@@ -4983,6 +5516,17 @@ internal sealed partial class PeCompiler
             case BoundViewRead view:
                 EmitViewElementAddress(view, spill);
                 return false;
+            case BoundNativeFixedArrayElement element:
+                EmitNativeFixedArrayElementAddress(element.Variable,
+                    element.FieldPlace, element.Index, spill,
+                    element.Layout.ElementCount,
+                    element.Layout.ElementStride);
+                return false;
+            case BoundNativeFixedArrayPathElement element:
+                EmitNativeFixedArrayPathAddress(element.Variable,
+                    element.Projections, spill,
+                    fieldPlace: element.FieldPlace);
+                return false;
             case BoundFieldRead field:
                 bool rooted;
                 int offset;
@@ -4991,14 +5535,17 @@ internal sealed partial class PeCompiler
                     Expression(field.Receiver, spill);
                     _code.Store64(Spill(spill));
                     SetManagedRoot(Spill(spill), active: true);
-                    offset = 32 + _program.Classes[ManagedClassTypes.ClassIndex(field.Receiver.Type)]
-                        .Fields[field.Field].Offset;
+                    offset = checked(32 + NativeLayoutOffset(
+                        _program.Classes[ManagedClassTypes.ClassIndex(field.Receiver.Type)]
+                            .Fields[field.Field].Offset));
                     rooted = true;
                 }
                 else
                 {
                     rooted = UpdateAddress(field.Receiver, spill);
-                    offset = _program.Structures[(int)field.Receiver.Type - 100].Fields[field.Field].Offset;
+                    offset = NativeLayoutOffset(
+                        _program.Structures[(int)field.Receiver.Type - 100]
+                            .Fields[field.Field].Offset);
                 }
                 _code.PointerOffset(offset);
                 return rooted;
@@ -5044,7 +5591,8 @@ internal sealed partial class PeCompiler
                 var fieldVacant = _code.JumpIf(0x84);
                 _code.Clear(fieldLive);
                 var fieldTree = _partialFieldTrees[_currentFunction][variable][field];
-                EmitDropFieldWithLiveness(OwnerPlace(variable) + fields[field].Offset,
+                EmitDropFieldWithLiveness(checked(OwnerPlace(variable)
+                    + NativeLayoutOffset(fields[field].Offset)),
                     fields[field].Type, fieldTree);
                 _code.PatchRelative(fieldVacant, _code.Position);
             }
@@ -5131,7 +5679,8 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x85, 0xC0);
             var vacant = _code.JumpIf(0x84);
             _code.Clear(child.LiveSlot);
-            EmitDropFieldWithLiveness(place + fields[field].Offset,
+            EmitDropFieldWithLiveness(checked(place
+                + NativeLayoutOffset(fields[field].Offset)),
                 fields[field].Type, child);
             _code.PatchRelative(vacant, _code.Position);
         }
@@ -5515,7 +6064,9 @@ internal sealed partial class PeCompiler
         {
             if (IsUnique(structure.Fields[field].Type))
             {
-                EmitDropValue(place + structure.Fields[field].Offset, structure.Fields[field].Type);
+                EmitDropValue(checked(place
+                    + NativeLayoutOffset(structure.Fields[field].Offset)),
+                    structure.Fields[field].Type);
             }
         }
     }
@@ -5700,8 +6251,46 @@ internal sealed partial class PeCompiler
         _code.Int32(frame);
     }
 
+    private void AlignedProlog(int frame, int alignment)
+    {
+        _code.Byte(0x55); // push rbp
+        _code.Bytes(0x41, 0x54); // push r12
+        _code.Bytes(0x49, 0x89, 0xE4); // mov r12,rsp: stable unwind anchor
+        _code.Bytes(0x48, 0x81, 0xEC);
+        _code.Int32(8);
+
+        var probeSize = checked(frame + alignment - 1);
+        if (probeSize > NativeUnwind.StackProbeThreshold)
+        {
+            if (_stackProbeHelper is not NativeFunctionRange stackProbeHelper)
+            {
+                throw new InvalidOperationException(
+                    "An over-aligned native frame has no stack-probe helper.");
+            }
+
+            _code.Byte(0xB8);
+            _code.Int32(probeSize);
+            _code.PatchRelative(_code.RelativeCall(), stackProbeHelper.Start);
+        }
+
+        _code.Bytes(0x48, 0x81, 0xEC);
+        _code.Int32(frame);
+        _code.Bytes(0x48, 0x81, 0xE4);
+        _code.Int32(-alignment);
+        _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
+    }
+
     private void Epilog()
     {
+        if (_usesAlignedFrame)
+        {
+            _code.Bytes(0x4C, 0x89, 0xE4); // mov rsp,r12
+            _code.Bytes(0x41, 0x5C); // pop r12
+            _code.Byte(0x5D); // pop rbp
+            _code.Byte(0xC3);
+            return;
+        }
+
         _code.Bytes(0x48, 0x81, 0xC4);
         _code.Int32(_frame - (_code.UseFramePointer ? 8 : 0));
         if (_code.UseFramePointer)
@@ -6150,6 +6739,19 @@ internal sealed partial class PeCompiler
                 SetInitializationFlag(end.Variable, initialized: false);
                 break;
             case BoundAssignment assignment:
+                if (assignment.Value
+                    is BoundNativeFixedArrayRepeatInitialization repeatedInitialization)
+                {
+                    var repeatDestination = _program.Functions[_currentFunction]
+                        .Variables[assignment.Variable].IsOut
+                            ? OutSlot(assignment.Variable)
+                            : Slot(assignment.Variable);
+                    EmitNativeFixedArrayRepeatInitialization(
+                        repeatedInitialization, repeatDestination, 0);
+                    SetInitializationFlag(assignment.Variable,
+                        initialized: true);
+                    break;
+                }
                 Expression(assignment.Value, 0);
                 if (ManagedClassTypes.IsManaged(assignment.Value.Type)
                     || (_normalBacking
@@ -6211,14 +6813,17 @@ internal sealed partial class PeCompiler
                     .Fields[optionalField.Field];
                 var isNormalBackingOptionalReferenceField =
                     IsNormalBackingOptionalReference(optionalField.Type);
-                _code.LoadPointerField(32 + fieldDeclaration.Offset, 8);
+                var fieldOffset = checked(32
+                    + NativeLayoutOffset(fieldDeclaration.Offset));
+                var fieldSize = NativeLayoutSize(fieldDeclaration.Size);
+                _code.LoadPointerField(fieldOffset, 8);
                 _code.Bytes(0x48, 0x85, 0xC0);
                 var fieldPresent = _code.JumpIf(0x85);
                 if (isNormalBackingOptionalReferenceField)
                 {
                     _code.Load64(Spill(0));
                     _code.LoadPointerField(
-                        32 + fieldDeclaration.Offset + sizeof(ulong), sizeof(ulong));
+                        checked(fieldOffset + sizeof(ulong)), sizeof(ulong));
                     _code.Bytes(0x48, 0x85, 0xC0);
                     var validAbsentReference = _code.JumpIf(0x84);
                     EmitNormalBackingContractFailure();
@@ -6240,7 +6845,7 @@ internal sealed partial class PeCompiler
                     var newMarker = temporary + (3 * sizeof(ulong));
                     _code.Store64(temporary);
                     _code.Load64(temporary);
-                    CopyToFrame(stagedReferenceValue, fieldDeclaration.Size);
+                    CopyToFrame(stagedReferenceValue, fieldSize);
                     foreach (var leaf in NormalBackingReferenceLeaves(
                         optionalField.Type, _program))
                     {
@@ -6255,16 +6860,16 @@ internal sealed partial class PeCompiler
                         Spill(0), ManagedClassTypes.ClassIndex(optionalField.Receiver.Type),
                         optionalField.Field, temporary, newMarker);
                     _code.Load64(Spill(0));
-                    _code.PointerOffset(32 + fieldDeclaration.Offset);
+                    _code.PointerOffset(fieldOffset);
                     _code.Bytes(0x48, 0x89, 0xC2);
                     _code.Address(stagedReferenceValue);
-                    _code.CopyMemory(fieldDeclaration.Size);
+                    _code.CopyMemory(fieldSize);
                 }
                 else
                 {
                     _code.Bytes(0x48, 0x89, 0xC1);
                     _code.Load64(Spill(0));
-                    _code.PointerOffset(32 + fieldDeclaration.Offset);
+                    _code.PointerOffset(fieldOffset);
                     _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0x89, 0xC8);
                     _code.Bytes(0x48, 0x89, 0x02);
                 }
@@ -6318,7 +6923,8 @@ internal sealed partial class PeCompiler
                     _code.Clear(live);
                     var fieldTree = _partialFieldTrees[_currentFunction][0][fieldIndex];
                     EmitDropFieldWithLiveness(
-                        Slot(0) + fields[fieldIndex].Offset,
+                        checked(Slot(0)
+                            + NativeLayoutOffset(fields[fieldIndex].Offset)),
                         fields[fieldIndex].Type, fieldTree);
                     _code.PatchRelative(vacant, _code.Position);
                 }
@@ -6333,15 +6939,17 @@ internal sealed partial class PeCompiler
                 var fieldOwnerClassIndex = classField
                     ? ManagedClassTypes.ClassIndex(fieldType) : -1;
                 var fieldOrdinal = fieldAssignment.Field;
-                var fieldBaseOffset = classField ? field.Offset : 0;
+                var fieldBaseOffset = classField
+                    ? NativeLayoutOffset(field.Offset) : 0;
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
-                    + field.Offset;
+                    + NativeLayoutOffset(field.Offset);
                 if (!classField)
                 {
                     foreach (var nestedField in fieldAssignment.NestedFields)
                     {
                         field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
-                        destination += field.Offset;
+                        destination = checked(destination
+                            + NativeLayoutOffset(field.Offset));
                     }
                 }
                 if (!classField && IsUnique(field.Type))
@@ -6369,14 +6977,16 @@ internal sealed partial class PeCompiler
                         var vacant = _code.JumpIf(0x84);
                         _code.Clear(live);
                         LoadFieldAssignmentAddress(fieldAssignment.Variable, destination);
-                        CopyToFrame(oldReplacement, field.Size);
+                        CopyToFrame(oldReplacement,
+                            NativeLayoutSize(field.Size));
                         EmitDropValue(oldReplacement, field.Type);
                         _code.PatchRelative(vacant, _code.Position);
                     }
                     else
                     {
                         LoadFieldAssignmentAddress(fieldAssignment.Variable, destination);
-                        CopyToFrame(oldReplacement, field.Size);
+                        CopyToFrame(oldReplacement,
+                            NativeLayoutSize(field.Size));
                         EmitDropValue(oldReplacement, field.Type);
                     }
 
@@ -6388,11 +6998,11 @@ internal sealed partial class PeCompiler
                         if (IsIndirect(field.Type))
                         {
                             _code.Bytes(0x48, 0x89, 0xC8);
-                            _code.CopyMemory(field.Size);
+                            _code.CopyMemory(NativeLayoutSize(field.Size));
                         }
                         else
                         {
-                            switch (field.Size)
+                            switch (NativeLayoutSize(field.Size))
                             {
                                 case 1:
                                     _code.Bytes(0x88, 0x02);
@@ -6414,11 +7024,13 @@ internal sealed partial class PeCompiler
                         LoadValue(replacement, field.Type);
                         if (IsIndirect(field.Type))
                         {
-                            CopyToFrame(destination, field.Size);
+                            CopyToFrame(destination,
+                                NativeLayoutSize(field.Size));
                         }
                         else
                         {
-                            _code.StoreField(destination, field.Size);
+                            _code.StoreField(destination,
+                                NativeLayoutSize(field.Size));
                         }
                     }
                     SetPartialFieldState(fieldAssignment.Variable,
@@ -6434,18 +7046,20 @@ internal sealed partial class PeCompiler
                         var containingType = field.Type;
                         if (ManagedClassTypes.IsClass(containingType))
                         {
-                            _code.PointerOffset(32 + inlineOffset + field.Offset);
+                            _code.PointerOffset(checked(32 + inlineOffset
+                                + NativeLayoutOffset(field.Offset)));
                             _code.Bytes(0x48, 0x8B, 0x00);
                             field = _program.Classes[ManagedClassTypes.ClassIndex(containingType)]
                                 .Fields[nestedField];
                             fieldOwnerClassIndex = ManagedClassTypes.ClassIndex(containingType);
                             fieldOrdinal = nestedField;
-                            fieldBaseOffset = field.Offset;
+                            fieldBaseOffset = NativeLayoutOffset(field.Offset);
                             inlineOffset = 0;
                         }
                         else
                         {
-                            inlineOffset += field.Offset;
+                            inlineOffset = checked(inlineOffset
+                                + NativeLayoutOffset(field.Offset));
                             field = _program.Structures[(int)containingType - 100].Fields[nestedField];
                         }
                     }
@@ -6481,7 +7095,8 @@ internal sealed partial class PeCompiler
                     {
                         _code.Store64(normalBackingTemporary);
                         _code.Load64(normalBackingTemporary);
-                        CopyToFrame(stagedReferenceValue, field.Size);
+                        CopyToFrame(stagedReferenceValue,
+                            NativeLayoutSize(field.Size));
                         foreach (var leaf in normalBackingReferenceLeaves)
                         {
                             EmitNormalBackingRetain(
@@ -6496,8 +7111,11 @@ internal sealed partial class PeCompiler
                     {
                         _code.Store64(Spill(1));
                     }
+                    var managedFieldOffset = checked(32 + inlineOffset
+                        + NativeLayoutOffset(field.Offset));
+                    var managedFieldSize = NativeLayoutSize(field.Size);
                     _code.Load64(Spill(0));
-                    _code.PointerOffset(32 + inlineOffset + field.Offset);
+                    _code.PointerOffset(managedFieldOffset);
                     if (normalBackingHandleField)
                     {
                         _code.LoadPointerField(0, sizeof(ulong));
@@ -6505,7 +7123,7 @@ internal sealed partial class PeCompiler
                         EmitNormalBackingRecordFieldStore(Spill(0), fieldOwnerClassIndex,
                             fieldOrdinal, normalBackingTemporary + sizeof(ulong), Spill(1));
                         _code.Load64(Spill(0));
-                        _code.PointerOffset(32 + inlineOffset + field.Offset);
+                        _code.PointerOffset(managedFieldOffset);
                         _code.Bytes(0x48, 0x89, 0xC2);
                         LoadValue(Spill(1), field.Type);
                         _code.Bytes(0x48, 0x89, 0x02);
@@ -6518,12 +7136,14 @@ internal sealed partial class PeCompiler
                             .Fields[fieldOrdinal];
                         var trackedFieldType = trackedField.Type;
                         var replacementFieldOffset = checked(
-                            inlineOffset + field.Offset - fieldBaseOffset);
+                            inlineOffset + NativeLayoutOffset(field.Offset)
+                                - fieldBaseOffset);
                         _code.Address(oldReferenceValue);
                         _code.Bytes(0x48, 0x89, 0xC2);
                         _code.Load64(Spill(0));
-                        _code.PointerOffset(32 + fieldBaseOffset);
-                        _code.CopyMemory(trackedField.Size);
+                        _code.PointerOffset(checked(32 + fieldBaseOffset));
+                        _code.CopyMemory(
+                            NativeLayoutSize(trackedField.Size));
                         EmitNormalBackingReferenceMarker(
                             oldReferenceValue, trackedFieldType, Spill(2));
                         EmitNormalBackingReferenceMarkerWithReplacement(
@@ -6532,10 +7152,10 @@ internal sealed partial class PeCompiler
                         EmitNormalBackingRecordFieldStore(Spill(0), fieldOwnerClassIndex,
                             fieldOrdinal, Spill(2), Spill(3));
                         _code.Load64(Spill(0));
-                        _code.PointerOffset(32 + inlineOffset + field.Offset);
+                        _code.PointerOffset(managedFieldOffset);
                         _code.Bytes(0x48, 0x89, 0xC2);
                         _code.Address(stagedReferenceValue);
-                        _code.CopyMemory(field.Size);
+                        _code.CopyMemory(managedFieldSize);
                         for (var leafIndex = normalBackingReferenceLeaves.Count - 1;
                             leafIndex >= 0; leafIndex--)
                         {
@@ -6551,12 +7171,12 @@ internal sealed partial class PeCompiler
                         if (IsIndirect(field.Type))
                         {
                             _code.Bytes(0x48, 0x89, 0xC8);
-                            _code.CopyMemory(field.Size);
+                            _code.CopyMemory(managedFieldSize);
                         }
                         else
                         {
                             _code.Load64(Spill(1));
-                            switch (field.Size)
+                            switch (managedFieldSize)
                             {
                                 case 1:
                                     _code.Bytes(0x88, 0x02);
@@ -6593,11 +7213,11 @@ internal sealed partial class PeCompiler
                         LoadValue(Spill(0), field.Type);
                         if (IsIndirect(field.Type))
                         {
-                            _code.CopyMemory(field.Size);
+                            _code.CopyMemory(NativeLayoutSize(field.Size));
                         }
                         else
                         {
-                            switch (field.Size)
+                            switch (NativeLayoutSize(field.Size))
                             {
                                 case 1:
                                     _code.Bytes(0x88, 0x02);
@@ -6616,11 +7236,13 @@ internal sealed partial class PeCompiler
                     }
                     else if (IsIndirect(field.Type))
                     {
-                        CopyToFrame(destination, field.Size);
+                        CopyToFrame(destination,
+                            NativeLayoutSize(field.Size));
                     }
                     else
                     {
-                        _code.StoreField(destination, field.Size);
+                        _code.StoreField(destination,
+                            NativeLayoutSize(field.Size));
                     }
                 }
                 if (fieldAssignment.Variable == 0 && fieldAssignment.NestedFields.IsEmpty
@@ -7018,6 +7640,59 @@ internal sealed partial class PeCompiler
         _cancellationToken.ThrowIfCancellationRequested();
         switch (expression)
         {
+            case BoundPrivatePlaceRead read:
+            {
+                var function = _program.Functions[_currentFunction];
+                var remaining = SemanticVerifier.MaximumAnalysisVisits;
+                var placeExpression = SemanticVerifier.PrivateBodyPlaceExpression(
+                    read.Place, function, _program, read.Span,
+                    ref remaining, 0);
+                if (read.UseKind == 2)
+                {
+                    if (read.Place is BoundPrivateLocalPlace local)
+                    {
+                        Expression(new BoundMove(local.Variable, local.Type,
+                            read.Span), spill);
+                    }
+                    else if (read.Place
+                        is BoundPrivateInlineFieldPlace inlineField)
+                    {
+                        Expression(new BoundFieldMove(
+                            (BoundFieldRead)placeExpression,
+                            inlineField.Type, read.Span), spill);
+                    }
+                    else
+                    {
+                        throw new NotSupportedException(
+                            "Native lowering does not support this private move place.");
+                    }
+                }
+                else if (read.UseKind is 1 or 3)
+                {
+                    Expression(placeExpression, spill);
+                }
+                else
+                {
+                    throw new NotSupportedException(
+                        "Native lowering does not support this private place-read kind.");
+                }
+                break;
+            }
+            case BoundPrivateCheckedStore store:
+            {
+                var function = _program.Functions[_currentFunction];
+                var remaining = SemanticVerifier.MaximumAnalysisVisits;
+                if (store.Transition == 2
+                    && SemanticVerifier.TryCreatePrivateNativeArrayPathWrite(
+                        store.Destination, store.Value, store.Span, function,
+                        _program, ref remaining, 0, out var arrayPathWrite))
+                {
+                    Expression(arrayPathWrite, spill);
+                    break;
+                }
+                throw new NotSupportedException(
+                    "Native lowering does not support this private checked-store place.");
+            }
             case BoundNativeFixedArrayElement fixedArrayElement:
                 EmitNativeFixedArrayElement(fixedArrayElement, spill);
                 break;
@@ -7417,13 +8092,15 @@ internal sealed partial class PeCompiler
                     Expression(fieldRead.Receiver, spill);
                     var classField = _program.Classes[ManagedClassTypes.ClassIndex(
                         fieldRead.Receiver.Type)].Fields[fieldRead.Field];
+                    var classFieldOffset = checked(32
+                        + NativeLayoutOffset(classField.Offset));
                     if (IsIndirect(classField.Type))
                     {
-                        _code.PointerOffset(32 + classField.Offset);
+                        _code.PointerOffset(classFieldOffset);
                     }
                     else
                     {
-                        LoadTypedPointerField(32 + classField.Offset, fieldRead.Type);
+                        LoadTypedPointerField(classFieldOffset, fieldRead.Type);
                     }
                     break;
                 }
@@ -7436,21 +8113,23 @@ internal sealed partial class PeCompiler
                     Expression(fieldRead.Receiver, spill);
                 }
                 var field = _program.Structures[(int)fieldRead.Receiver.Type - 100].Fields[fieldRead.Field];
+                var fieldOffset = NativeLayoutOffset(field.Offset);
                 if (IsIndirect(fieldRead.Receiver.Type) || IsUnique(fieldRead.Receiver.Type))
                 {
                     if (IsIndirect(field.Type))
                     {
-                        _code.PointerOffset(field.Offset);
+                        _code.PointerOffset(fieldOffset);
                     }
                     else
                     {
-                        LoadTypedPointerField(field.Offset, field.Type);
+                        LoadTypedPointerField(fieldOffset, field.Type);
                     }
                     break;
                 }
-                if (field.Offset != 0)
+                if (fieldOffset != 0)
                 {
-                    _code.Bytes(0x48, 0xC1, 0xE8, checked((byte)(field.Offset * 8)));
+                    _code.Bytes(0x48, 0xC1, 0xE8,
+                        checked((byte)(fieldOffset * 8)));
                 }
                 if (field.Size == 1)
                 {
@@ -7663,12 +8342,12 @@ internal sealed partial class PeCompiler
                     or PrimitiveType.Decimal128)
                 {
                     ZeroStruct(Spill(spill + 3), 2 * sizeof(ulong));
-                    var one = BidDecimalOne(update.Type);
+                    var (Low, High) = BidDecimalOne(update.Type);
                     _code.Bytes(0x48, 0xB8);
-                    _code.Int64(unchecked((long)one.Low));
+                    _code.Int64(unchecked((long)Low));
                     _code.Store64(Spill(spill + 3));
                     _code.Bytes(0x48, 0xB8);
-                    _code.Int64(unchecked((long)one.High));
+                    _code.Int64(unchecked((long)High));
                     _code.Store64(Spill(spill + 3) + sizeof(ulong));
                     EmitBidDecimalArithmetic(update.Type,
                         update.Operator == TokenKind.PlusPlus ? TokenKind.Plus : TokenKind.Minus,
@@ -8194,7 +8873,8 @@ internal sealed partial class PeCompiler
                         var formalSlot = formal
                             + (targetFunction.IsConstructor ? 1 : 0);
                         var formalVariable = targetFunction.Variables[formalSlot];
-                        if (!formalVariable.IsImplicitRef && !formalVariable.IsOut
+                        if (_normalBacking && !formalVariable.IsImplicitRef
+                            && !formalVariable.IsOut
                             && ContainsNormalBackingReferenceValue(
                                 formalVariable.Type, _program))
                         {
@@ -8207,7 +8887,8 @@ internal sealed partial class PeCompiler
                             }
                         }
                     }
-                    if (ContainsNormalBackingReferenceValue(call.Type, _program))
+                    if (_normalBacking
+                        && ContainsNormalBackingReferenceValue(call.Type, _program))
                     {
                         foreach (var leaf in NormalBackingReferenceLeaves(call.Type, _program))
                         {
@@ -11307,24 +11988,68 @@ internal sealed partial class PeCompiler
 internal sealed class MachineCode
 {
     private readonly List<byte> _bytes = new();
+    private readonly int _maximumLength;
+    private readonly string _capacityMessage;
+
+    internal MachineCode(int maximumLength = int.MaxValue,
+        string capacityMessage = "Native code exceeds the host byte-array capacity.")
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumLength);
+
+        _maximumLength = Math.Min(maximumLength, Array.MaxLength);
+        _capacityMessage = capacityMessage;
+    }
+
     internal bool UseFramePointer { get; set; }
     internal int Position => _bytes.Count;
-    internal void Byte(byte value) => _bytes.Add(value);
-    internal void Bytes(params ReadOnlySpan<byte> values) => _bytes.AddRange(values);
+    internal void Byte(byte value)
+    {
+        EnsureCapacityFor(1);
+        _bytes.Add(value);
+    }
+
+    internal void Bytes(params ReadOnlySpan<byte> values)
+    {
+        EnsureCapacityFor(values.Length);
+        _bytes.AddRange(values);
+    }
+
     internal void Int32(int value)
     {
+        EnsureCapacityFor(sizeof(int));
         for (var i = 0; i < 4; i++)
         {
-            Byte(unchecked((byte)(value >> (8 * i))));
+            _bytes.Add(unchecked((byte)(value >> (8 * i))));
         }
     }
+
     internal void Int64(long value)
     {
+        EnsureCapacityFor(sizeof(long));
         for (var i = 0; i < 8; i++)
         {
-            Byte(unchecked((byte)(value >> (8 * i))));
+            _bytes.Add(unchecked((byte)(value >> (8 * i))));
         }
     }
+
+    private void EnsureCapacityFor(int additional)
+    {
+        if (additional < 0 || _bytes.Count > _maximumLength - additional)
+        {
+            throw new NotSupportedException(_capacityMessage);
+        }
+
+        var required = _bytes.Count + additional;
+        if (required <= _bytes.Capacity)
+        {
+            return;
+        }
+
+        var doubledCapacity = Math.Max(16L, (long)_bytes.Capacity * 2);
+        _bytes.Capacity = (int)Math.Min(_maximumLength,
+            Math.Max(required, doubledCapacity));
+    }
+
     internal void PatchInt32(int offset, int value)
     {
         for (var i = 0; i < 4; i++)

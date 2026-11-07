@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
@@ -67,7 +68,11 @@ internal sealed partial class NativeLoaderInteropTests
         var source = Path.Combine(root?.FullName
             ?? throw new DirectoryNotFoundException("Could not find the repository."),
             "tests", "Terrum.CodeAnalysis.Tests", "Native", "Interop", "Fixtures", "aggregate-abi.terrum");
-        var compilation = Compilation.Create(SyntaxTree.Parse(await File.ReadAllTextAsync(source).ConfigureAwait(false)));
+        var compilation = Compilation.Create(
+            SyntaxTree.Parse(await File.ReadAllTextAsync(source).ConfigureAwait(false)),
+            new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected the aggregate ABI program.");
         var directory = TestArtifactPaths.CreateDirectory("terrum-aggregate-abi-");

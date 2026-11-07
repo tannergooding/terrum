@@ -160,6 +160,27 @@ internal sealed class RepeatResourceLedgerTests
     }
 
     [Test]
+    public void WorkConsumptionStopsAtTheFirstExhaustedAction()
+    {
+        var ledger = new RepeatResourceLedger();
+        using (ledger.BeginCallable())
+        {
+            ledger.ConsumeWork(RepeatResourceLedger.WorkLimit - 3);
+            ledger.ConsumeWork(3);
+
+            var exception = Assert.Throws<SemanticRepeatResourceLimitException>(
+                () => ledger.ConsumeWork(5));
+
+            Assert.That(exception!.Dimension,
+                Is.EqualTo(SemanticResourceDimension.Work));
+            Assert.That(exception.Required,
+                Is.EqualTo((BigInteger)RepeatResourceLedger.WorkLimit + 1));
+            Assert.That(ledger.WorkUsed,
+                Is.EqualTo(RepeatResourceLedger.WorkLimit));
+        }
+    }
+
+    [Test]
     public void StateLeaseAddsLogicalOutputBeforeAppend()
     {
         var ledger = new RepeatResourceLedger();
@@ -222,6 +243,30 @@ internal sealed class RepeatResourceLedgerTests
     }
 
     [Test]
+    public void StagedOutputReplacesAnExistingSnapshotReservation()
+    {
+        var ledger = new RepeatResourceLedger();
+        using (ledger.BeginCallable())
+        {
+            using var snapshot = ledger.ReserveState(32);
+            using var output = ledger.ReserveState(48);
+            Assert.That(ledger.LiveStateBytes, Is.EqualTo(80));
+
+            snapshot.Remove(snapshot.ReservedBytes);
+            snapshot.TransferFrom(output, output.ReservedBytes,
+                BigInteger.Zero);
+
+            Assert.That(snapshot.ReservedBytes,
+                Is.EqualTo(new BigInteger(48)));
+            Assert.That(output.ReservedBytes,
+                Is.EqualTo(BigInteger.Zero));
+            Assert.That(ledger.LiveStateBytes, Is.EqualTo(48));
+        }
+
+        Assert.That(ledger.LiveStateBytes, Is.Zero);
+    }
+
+    [Test]
     public void StateTreeReservationsRequireAnActiveCallable()
     {
         var ledger = new RepeatResourceLedger();
@@ -238,7 +283,7 @@ internal sealed class RepeatResourceLedgerTests
         var callable = ledger.BeginCallable();
         var state = ledger.ReserveState(1);
 
-        _ = Assert.Throws<InvalidOperationException>(() => callable.Dispose());
+        _ = Assert.Throws<InvalidOperationException>(callable.Dispose);
         Assert.That(ledger.LiveStateBytes, Is.EqualTo(1));
 
         state.Dispose();

@@ -2,21 +2,27 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed class NativePointerModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativePointerModuleTests
 {
+    private static CompilationOptions LayoutOptions()
+        => NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+
     [Test]
     public void PrivateReferenceSetsExcludePointeeTypesUsedOnlyByUnexportedFunctions()
     {
@@ -44,18 +50,22 @@ public sealed class NativePointerModuleTests
                 unsafe { return Hidden(&state); }
             }
             """;
-        var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(firstSource));
-        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(secondSource));
+        var firstCompilation = CreateLibrary(
+            SyntaxTree.Parse(firstSource), LayoutOptions());
+        var secondCompilation = CreateLibrary(
+            SyntaxTree.Parse(secondSource), LayoutOptions());
         Assert.That(firstCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, firstCompilation.Diagnostics));
         Assert.That(secondCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, secondCompilation.Diagnostics));
         var firstProducer = ModuleCompiler.CreateProducer(firstCompilation.Program!, ["First"]);
         var secondProducer = ModuleCompiler.CreateProducer(secondCompilation.Program!, ["Second"]);
+        _ = ModuleCompiler.CreateReference(firstProducer);
+        _ = ModuleCompiler.CreateReference(secondProducer);
 
         var reference = ModuleCompiler.CreateReferenceSet([firstProducer, secondProducer]);
         Assert.That(reference.Structures.Any(static structure => structure.Name == "State"), Is.False);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() { return First() + Second() - 3; }
             """), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -89,8 +99,10 @@ public sealed class NativePointerModuleTests
                 unsafe { return Hidden(&state); }
             }
             """;
-        var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(firstSource));
-        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(secondSource));
+        var firstCompilation = CreateLibrary(
+            SyntaxTree.Parse(firstSource), LayoutOptions());
+        var secondCompilation = CreateLibrary(
+            SyntaxTree.Parse(secondSource), LayoutOptions());
         Assert.That(firstCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, firstCompilation.Diagnostics));
         Assert.That(secondCompilation.HasErrors, Is.False,
@@ -102,7 +114,7 @@ public sealed class NativePointerModuleTests
 
         var reference = NativeModuleCompiler.CreateGraphReference([firstProducer, secondProducer]);
         Assert.That(reference.Structures.Any(static structure => structure.Name == "State"), Is.False);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() { return First() + Second() - 3; }
             """), reference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -112,13 +124,13 @@ public sealed class NativePointerModuleTests
     [Test]
     public void TypedPointerIdentitiesMergeAcrossPrivateModuleReferences()
     {
-        var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var firstCompilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Payload { int32 Value; }
 
             public unsafe ptr<Payload> First(ptr<Payload> value) { return value; }
-            """));
-        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            """), LayoutOptions());
+        var secondCompilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Decoy { int32 Value; }
 
@@ -127,7 +139,7 @@ public sealed class NativePointerModuleTests
 
             public unsafe ptr<Other> Second(ptr<Other> value) { return value; }
             public unsafe ptr<Decoy> DecoyPointer(ptr<Decoy> value) { return value; }
-            """));
+            """), LayoutOptions());
 
         Assert.That(firstCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, firstCompilation.Diagnostics));
@@ -142,7 +154,7 @@ public sealed class NativePointerModuleTests
         var secondPointer = reference.Functions.Single(static function => function.Name == "Second").Variables[0].Type;
         Assert.That(secondPointer, Is.Not.EqualTo(firstPointer));
 
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
                     First(null);
@@ -160,24 +172,24 @@ public sealed class NativePointerModuleTests
     [TestCase(true)]
     public void NativePointerAndFunctionPointerFieldsRemainValidAfterProjection(bool moduleSet)
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct PrivatePointerPrefix {
                 ptr<int32> Address;
-                fnptr<NativeAbi, int32, int32> Callback;
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> Callback;
             }
 
             unsafe int32 Hidden(ptr<int32> privatePointer,
-                fnptr<NativeAbi, int32, int32> privateCallback) { return 0; }
+                [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> privateCallback) { return 0; }
 
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct ExportedPointers {
                 public ptr<uint32> Address;
-                public fnptr<NativeAbi, int64> Callback;
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int64> Callback;
             }
 
             public unsafe int32 Accept(ExportedPointers value) { return 0; }
-            """));
+            """), LayoutOptions());
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var sourceStructure = providerCompilation.Program!.Structures.Single(
@@ -191,7 +203,7 @@ public sealed class NativePointerModuleTests
             ? ModuleCompiler.CreateReferenceSet([
                 provider,
                 ModuleCompiler.CreateProducer(
-                    Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Extra() { return 0; }")).Program!,
+                    CreateLibrary(SyntaxTree.Parse("public int32 Extra() { return 0; }")).Program!,
                     ["Extra"]),
             ])
             : ModuleCompiler.CreateReference(provider);
@@ -202,16 +214,16 @@ public sealed class NativePointerModuleTests
             Is.EqualTo(0));
         Assert.That(NativeFunctionPointerTypes.Index(
             structure.Fields.Single(static field => field.Name == "Callback").Type), Is.EqualTo(0));
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             unsafe int32 ReadFields(ExportedPointers value) {
                 unsafe {
                     ptr<uint32> address = value.Address;
-                    fnptr<NativeAbi, int64> callback = value.Callback;
+                    [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int64> callback = value.Callback;
                     return 0;
                 }
             }
             int32 Main() { return 0; }
-            """), reference);
+            """), reference, LayoutOptions());
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
     }
@@ -243,7 +255,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         if (shouldReject)
         {
@@ -294,7 +306,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         if (shouldReject)
         {
@@ -339,7 +351,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         if (shouldReject)
         {
@@ -381,7 +393,7 @@ public sealed class NativePointerModuleTests
             unsafe PointerPair Identity(PointerPair value) { return value; }
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -413,7 +425,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -431,7 +443,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void PositiveNativeParameterExtentAcceptsOpaquePointerFieldAtUnsafeCall()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
             extern int32 Observe(ptr<uint32> value);
@@ -488,7 +500,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -526,7 +538,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -561,7 +573,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -593,7 +605,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+        var compilation = Create(SyntaxTree.Parse(source),
             BoundRuntimePolicy.FailFast);
 
         Assert.That(compilation.HasErrors, Is.False,
@@ -607,7 +619,7 @@ public sealed class NativePointerModuleTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 [uint32; 4] values = [4, 5, 6, 7];
                 unsafe {
@@ -632,7 +644,7 @@ public sealed class NativePointerModuleTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 [uint32; 5] values = [10, 20, 30, 40, 50];
                 unsafe {
@@ -656,7 +668,7 @@ public sealed class NativePointerModuleTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 [uint32; 5] values = [10, 20, 30, 40, 50];
                 unsafe {
@@ -684,7 +696,7 @@ public sealed class NativePointerModuleTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
                     [[ptr<uint32>; 1]; 1] pointers = [[null]];
@@ -702,7 +714,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativeParameterRejectsUnknownNestedPointerArrayBacking()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             extern int32 Observe(ptr<uint32> value);
@@ -743,7 +755,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return Check(1, 1); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+        var compilation = Create(SyntaxTree.Parse(source),
             BoundRuntimePolicy.FailFast);
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
@@ -784,7 +796,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return Check(0, 0); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+        var compilation = Create(SyntaxTree.Parse(source),
             BoundRuntimePolicy.FailFast);
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
@@ -825,7 +837,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return Check(false); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+        var compilation = Create(SyntaxTree.Parse(source),
             BoundRuntimePolicy.FailFast);
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
@@ -869,7 +881,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+        var compilation = Create(SyntaxTree.Parse(source),
             BoundRuntimePolicy.FailFast);
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
@@ -890,7 +902,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NestedPointerArrayValueCannotEscapeItsBacking()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             unsafe ptr<uint32> Escape() {
                 [uint32; 2] values = [1, 2];
                 unsafe {
@@ -913,7 +925,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NestedPointerArrayArgumentRejectsWrongPointerDepth()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
             extern int32 Observe(ptr<uint32> value);
 
@@ -939,7 +951,7 @@ public sealed class NativePointerModuleTests
         int index, int extent, bool shouldCompile)
     {
         var source = $$"""
-            [Blittable] [Layout(Sequential)]
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct PointerHolder {
                 public ptr<uint32> Value;
                 public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
@@ -959,7 +971,14 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var nativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var compilation = Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                NativeCoreRegistration = nativeRegistration,
+                LayoutCoreRegistration = NativeCoreRegistrationTests
+                    .CreateLayoutRegistration(nativeRegistration),
+            });
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -998,7 +1017,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return Check(0); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1039,7 +1058,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return Check(false); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1079,7 +1098,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return Check(1); }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1118,7 +1137,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1154,7 +1173,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1197,7 +1216,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1238,7 +1257,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1278,7 +1297,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1323,7 +1342,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1343,7 +1362,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativeParameterExtentUsesStagedPointerBeforeLaterWriteArgument()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
             [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
             extern int32 Overwrite(write ptr<ptr<uint32>> cell);
@@ -1402,7 +1421,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1444,7 +1463,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1486,7 +1505,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         if (shouldReject)
         {
@@ -1538,7 +1557,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         if (shouldReject)
         {
@@ -1581,7 +1600,7 @@ public sealed class NativePointerModuleTests
 
             int32 Main() { return 0; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3016"
@@ -1645,7 +1664,8 @@ public sealed class NativePointerModuleTests
         """)]
     public void NativePointerCannotReturnAddressBackedByFunctionLocal(string source)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Create(SyntaxTree.Parse(source),
+            LayoutOptions());
 
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3016"
@@ -1657,7 +1677,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void VerifierTracksPointerBackingWhenWriteIsWrappedInUnsafeExpression()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             unsafe ptr<int32> Escape() {
                 int32 value = 1;
                 mut ptr<int32> pointer = null;
@@ -1669,7 +1689,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             int32 Main() { return 0; }
-            """));
+            """), LayoutOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -1712,19 +1732,21 @@ public sealed class NativePointerModuleTests
             Functions = program.Functions.SetItem(functionIndex, forgedFunction),
         };
 
-        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forgedProgram));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forgedProgram));
     }
 
     [Test]
     public void NativePointerCannotEscapeThroughIndirectIdentityCallback()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
              [Terrum.Interop.NativeCallable]
             unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
             unsafe ptr<int32> Escape() {
                 int32 value = 1;
                 unsafe {
-                    fnptr<NativeAbi, ptr<int32>, ptr<int32>> identity = &Identity;
+                    [Terrum.Interop.NativeCallConv(
+                        Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    fnptr<ptr<int32>, ptr<int32>> identity = &Identity;
                     return identity(&value);
                 }
             }
@@ -1741,7 +1763,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotEscapeThroughExternalIdentityImport()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "Identity")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             extern ptr<int32> Identity(ptr<int32> pointer);
@@ -1762,7 +1784,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotEscapeThroughExternalIdentityImportFromLocalPointer()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "Identity")]
             extern ptr<int32> Identity(ptr<int32> pointer);
             unsafe ptr<int32> Escape() {
@@ -1785,7 +1807,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void ExternalIdentityImportPreservesLiveLocalBacking()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "Identity")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             extern ptr<int32> Identity(ptr<int32> pointer);
@@ -1805,7 +1827,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void OpaqueNativePointerCannotEscapeThroughExternalIdentityImport()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "Identity")]
             extern ptr<void> Identity(ptr<int32> pointer);
             unsafe ptr<void> Escape() {
@@ -1825,7 +1847,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void OpaqueNativePointerImportPreservesLiveLocalBacking()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "Identity")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             extern ptr<void> Identity(ptr<int32> pointer);
@@ -1845,13 +1867,15 @@ public sealed class NativePointerModuleTests
     [Test]
     public void OpaqueNativePointerCannotEscapeThroughIndirectIdentityCallback()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
              [Terrum.Interop.NativeCallable]
             unsafe ptr<void> Identity(ptr<int32> pointer) { return null; }
             unsafe ptr<void> Escape() {
                 int32 value = 1;
                 unsafe {
-                    fnptr<NativeAbi, ptr<int32>, ptr<void>> identity = &Identity;
+                    [Terrum.Interop.NativeCallConv(
+                        Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    fnptr<ptr<int32>, ptr<void>> identity = &Identity;
                     return identity(&value);
                 }
             }
@@ -1866,13 +1890,13 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
-    public void OpaqueNativePointerCannotEscapeThroughVTableIdentityMethod()
+    public void TypedOpaqueNativePointerCannotEscapeThroughVTableMethod()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, ptr<int32>, ptr<void>> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<int32>, ptr<void>> method) {
+                public [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<int32>, ptr<int32>> Method;
+                public TestVTable([Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<ptr<TestObject>, ptr<int32>, ptr<int32>> method) {
                     Method = method;
                 }
             }
@@ -1884,21 +1908,21 @@ public sealed class NativePointerModuleTests
             }
 
              [Terrum.Interop.NativeCallable]
-            unsafe ptr<void> Identity(ptr<TestObject> receiver, ptr<int32> pointer) { return null; }
+            unsafe ptr<int32> NullResult(ptr<TestObject> receiver, ptr<int32> pointer) { return null; }
 
             [Terrum.Interop.NativeVTableMethod(0)]
-            extern unsafe ptr<void> Invoke(ptr<TestObject> receiver, ptr<int32> pointer);
+            extern unsafe ptr<int32> Invoke(ptr<TestObject> receiver, ptr<int32> pointer);
 
-            unsafe ptr<void> Escape() {
+            unsafe ptr<int32> Escape() {
                 int32 value = 1;
                 unsafe {
-                    TestVTable vtable = new TestVTable(&Identity);
+                    TestVTable vtable = new TestVTable(&NullResult);
                     TestObject instance = new TestObject(&vtable);
                     return Invoke(&instance, &value);
                 }
             }
             int32 Main() { return 0; }
-            """));
+            """), LayoutOptions());
 
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3016"
@@ -1910,7 +1934,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void VerifierFindsUnsafePointerInsideRewrittenCallArguments()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Identity(ptr<int32> pointer) { return 0; }
             int32 Main() {
                 int32 value = 1;
@@ -1945,7 +1969,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void VerifierRejectsForgedAddressOfNonBlittableLocal()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             struct OpaquePayload {
                 public int32 Value;
                 public OpaquePayload(int32 value) { Value = value; }
@@ -2002,13 +2026,15 @@ public sealed class NativePointerModuleTests
     [Test]
     public void IndirectIdentityCallbackPreservesLiveLocalBacking()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
              [Terrum.Interop.NativeCallable]
             unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
             int32 Main() {
                 int32 value = 42;
                 unsafe {
-                    fnptr<NativeAbi, ptr<int32>, ptr<int32>> identity = &Identity;
+                    [Terrum.Interop.NativeCallConv(
+                        Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    fnptr<ptr<int32>, ptr<int32>> identity = &Identity;
                     ptr<int32> result = identity(&value);
                     return *result;
                 }
@@ -2022,7 +2048,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotPublishFunctionLocalBackingThroughInitParameter()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct PointerHolder {
                 public mut ptr<int32> Value;
@@ -2034,7 +2060,7 @@ public sealed class NativePointerModuleTests
                 return true;
             }
             int32 Main() { return 0; }
-            """));
+            """), LayoutOptions());
 
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3016"
@@ -2046,7 +2072,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotPublishFunctionLocalBackingThroughUnknownPointerCell()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             unsafe int32 Publish(write ptr<ptr<int32>> destination) {
                 int32 value = 1;
                 unsafe { *destination = &value; }
@@ -2065,7 +2091,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotPublishThroughConditionallyUnknownPointerCell()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             unsafe int32 Publish(bool chooseLocal, write ptr<ptr<int32>> destination) {
                 int32 value = 1;
                 mut ptr<int32> localPointer = null;
@@ -2088,7 +2114,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotPublishKnownBackingThroughAliasAfterUnknownStore()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             alias WritablePointerCell = write ptr<ptr<int32>>;
             unsafe int32 Publish(write ptr<ptr<int32>> destination) {
                 int32 value = 1;
@@ -2114,7 +2140,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotOutliveExplicitBackingLifetimeEnd()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 int32 value = 1;
                 mut ptr<int32> pointer = null;
@@ -2134,7 +2160,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerLifetimeTracksItsExactLocalStorageSite()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 int32 backing = 42;
                 mut int32 unrelated = 1;
@@ -2153,7 +2179,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotFormAddressAfterBackingLifetimeEnd()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 int32 value = 1;
                 value = _;
@@ -2174,7 +2200,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerReobservesAStillLiveLocalAfterMutation()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut int32 value = 1;
                 mut ptr<int32> pointer = null;
@@ -2191,7 +2217,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCanUseReinitializedStorageAfterTheOldPointerIsCleared()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init mut int32 value;
                 value = 1;
@@ -2214,7 +2240,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerStorageGenerationsRemainFiniteAcrossLoopActivations()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut int32 total = 0;
                 mut int32 index = 0;
@@ -2236,7 +2262,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotEscapeLoopScopeThroughContinue()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut int32 index = 0;
                 mut ptr<int32> escaped = null;
@@ -2260,7 +2286,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerLifetimeTracksPointerStoredThroughInternalHelper()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [param(destination): Captures(nameof(value))]
             unsafe void StorePointer(write ptr<ptr<int32>> destination, ptr<int32> value) {
                 unsafe { *destination = value; }
@@ -2284,7 +2310,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerHolderCaptureRequiresADeclaredSourceContract()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             unsafe void StorePointer(write ptr<ptr<int32>> destination, ptr<int32> value) {
                 unsafe { *destination = value; }
             }
@@ -2299,7 +2325,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerLifetimeTracksPointerStoredThroughAliasedHelperParameters()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [param(destination): Captures(nameof(value))]
             unsafe void StorePointer(write ptr<ptr<int32>> destination, ptr<int32> value) {
                 write ptr<ptr<int32>> destinationAlias = destination;
@@ -2328,7 +2354,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void RecursiveNativePointerWriteSummariesDoNotMutateDuringEnumeration()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [param(first): Captures(nameof(value))]
             [param(second): Captures(nameof(value))]
             unsafe void StorePointer(
@@ -2349,7 +2375,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerCannotOutliveNestedLocalBacking()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut ptr<int32> pointer = null;
                 {
@@ -2370,7 +2396,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void NativePointerParameterPassthroughPreservesCallerBacking()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
             int32 Main() { return 0; }
             """));
@@ -2382,7 +2408,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void PrivateModuleReaderRejectsCyclicNativePointerTypes()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             public unsafe int32 AcceptScalar(ptr<int32> value) { return 0; }
             public unsafe int32 AcceptNested(ptr<ptr<int32>> value) { return 0; }
             """));
@@ -2401,16 +2427,16 @@ public sealed class NativePointerModuleTests
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(tableOffset)), Is.EqualTo(2));
         var malformed = producer.ToArray();
         var nestedPointeeOffset = tableOffset + sizeof(int)
-            + nestedPointerIndex * (sizeof(int) + sizeof(byte));
+            + (nestedPointerIndex * (sizeof(int) + sizeof(byte)));
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(nestedPointeeOffset), nestedPointerType);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
     }
 
     [Test]
     public void TypedPointerAccessRequiresUnsafeAndWritablePermission()
     {
-        var unscopedRead = Compilation.Create(SyntaxTree.Parse("""
+        var unscopedRead = Create(SyntaxTree.Parse("""
             int32 Main() {
                 ptr<int32> pointer = null;
                 return *pointer;
@@ -2419,7 +2445,7 @@ public sealed class NativePointerModuleTests
         Assert.That(unscopedRead.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True,
             string.Join(Environment.NewLine, unscopedRead.Diagnostics));
 
-        var readonlyWrite = Compilation.Create(SyntaxTree.Parse("""
+        var readonlyWrite = Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
                     ptr<int32> pointer = null;
@@ -2435,7 +2461,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void RawPointerReadsAndWritesCannotCopyUniqueOwners()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             unique struct Owner {
                 public int32 Value;
@@ -2460,7 +2486,7 @@ public sealed class NativePointerModuleTests
     [TestCase("Write")]
     public void VerifierRejectsForgedRawPointerAccessToUniqueOwners(string functionName)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             unique struct Owner {
                 public int32 Value;
@@ -2478,7 +2504,7 @@ public sealed class NativePointerModuleTests
             }
             Owner MakeOwner() { return new Owner(2); }
             int32 Main() { return 0; }
-            """));
+            """), LayoutOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -2547,7 +2573,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void PrivateModulesPersistNativeFixedArrayPointerAddresses()
     {
-        var compilation = Compilation.Create([SyntaxTree.Parse("""
+        var compilation = Create([SyntaxTree.Parse("""
             public int32 Export() {
                 [uint32; 2] values = [4, 5];
                 unsafe {
@@ -2562,7 +2588,7 @@ public sealed class NativePointerModuleTests
 
         var producer = ModuleCompiler.CreateProducer(
             compilation.Program!, ["Export"]);
-        var consumerCompilation = Compilation.Create(
+        var consumerCompilation = Create(
             SyntaxTree.Parse("int32 Main() { return Export(); }"),
             ModuleCompiler.CreateReference(producer),
             BoundRuntimePolicy.CheckedExceptions);
@@ -2580,7 +2606,7 @@ public sealed class NativePointerModuleTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse("""
             public unsafe int32 Read(ptr<int32> value) {
                 unsafe { return *value; }
             }
@@ -2590,7 +2616,7 @@ public sealed class NativePointerModuleTests
         var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
             ["Read"], "PointerProvider", NativeRuntimePolicy.FailFast);
         var reference = NativeModuleCompiler.CreateGraphReference([provider]);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init mut int32 value;
                 unsafe {
@@ -2611,12 +2637,62 @@ public sealed class NativePointerModuleTests
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
+    private static Compilation Create(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(tree,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation Create(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(tree, reference, runtimePolicy);
+
+    private static Compilation Create(SyntaxTree tree,
+        CompilationOptions options) =>
+        Compilation.Create(tree, options);
+
+    private static Compilation Create(SyntaxTree tree,
+        CompilationReference reference, CompilationOptions options) =>
+        Compilation.Create(tree, reference, options);
+
+    private static Compilation Create(IEnumerable<SyntaxTree> trees,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(trees,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation Create(IEnumerable<SyntaxTree> trees,
+        CompilationOptions options) =>
+        Compilation.Create(trees, options);
+
+    private static Compilation CreateLibrary(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.CreateLibrary(tree,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation CreateLibrary(SyntaxTree tree,
+        CompilationOptions options) =>
+        Compilation.CreateLibrary(tree, options);
+
+    private static Compilation CreateLibrary(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.CreateLibrary(tree, reference, runtimePolicy);
+
+    private static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.CreateLibrary(trees,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
     private static int FindPointerTableOffset(byte[] module)
     {
         using var stream = new MemoryStream(module, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
-        Assert.That(reader.ReadInt32(), Is.EqualTo(101));
+        Assert.That(reader.ReadInt32(), Is.EqualTo(104));
         SkipString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();

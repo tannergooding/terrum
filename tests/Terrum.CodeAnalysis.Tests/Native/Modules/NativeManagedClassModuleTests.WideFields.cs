@@ -4,15 +4,15 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Modules;
 
-public sealed partial class NativeManagedClassModuleTests
+internal sealed partial class NativeManagedClassModuleTests
 {
     [TestCase(NativeRuntimePolicy.FailFast,16)]
     [TestCase(NativeRuntimePolicy.FailFast,17)]
@@ -24,7 +24,7 @@ public sealed partial class NativeManagedClassModuleTests
         NativeRuntimePolicy policy, int fieldCount)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(WideSource(fieldCount), policy), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         if (fieldCount > 16)
         {
             var retiredRevision = producer.ToArray();
@@ -70,7 +70,7 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source, policy);
         Assert.That(global::System.Linq.Enumerable.Single(program.Structures).IsTransparent, Is.True);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -99,7 +99,11 @@ public sealed partial class NativeManagedClassModuleTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true), Is.EqualTo(42));
     }
@@ -124,7 +128,11 @@ public sealed partial class NativeManagedClassModuleTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
             NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true), Is.EqualTo(42));
@@ -139,7 +147,7 @@ public sealed partial class NativeManagedClassModuleTests
             + " public int32 Read() { require Dense.TryCreate(out var value);"
             + " return value.F31 + value.F11; }";
         var producer = ModuleCompiler.CreateProducer(Compile(source, policy), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(104));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -156,7 +164,7 @@ public sealed partial class NativeManagedClassModuleTests
         var source = WideSource(32) + " int32 Main() { return Read() + Bias(); }";
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(104));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Single(linked.Classes).Fields.Length, Is.EqualTo(32));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));

@@ -44,7 +44,7 @@ unique struct FieldOwner {
     public FieldOwner(OwnedInt32Buffer words) { _words = move words; }
     public mut bool TryAppend(int32 value) { return _words.TryAppend(value); }
     public mut void Set(int32 index, int32 value) { _words.Set(index, value); }
-    [NoThrow] public mut void Clear() { _words.Clear(); }
+     public mut void Clear() { _words.Clear(); }
     public int32 Count() { return _words.Count; }
     public int32 Read(int32 index) { return _words.Read(index); }
 }

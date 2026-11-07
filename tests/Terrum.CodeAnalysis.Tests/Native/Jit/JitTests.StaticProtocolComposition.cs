@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Jit;
 
-public sealed partial class JitTests
+internal sealed partial class JitTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -121,7 +121,7 @@ public sealed partial class JitTests
         const string Source = """
             using Terrum;
             using Terrum.CodeAnalysis;
-            [NoThrow] T Choose<T>(T first, T second) where T : [Copy] {
+             T Choose<T>(T first, T second) where T : [Copy] {
                 return SelectCopy(false, SelectCopy(true, first, second), second);
             }
             int32 Main() {
@@ -254,7 +254,7 @@ public sealed partial class JitTests
     {
         const string Source = """
             using Terrum;
-            [NoThrow] T Choose<T>(bool first, T left, T right) where T : [Copy] {
+             T Choose<T>(bool first, T left, T right) where T : [Copy] {
                 return SelectCopy(first, left, right);
             }
             int32 Main() {
@@ -299,8 +299,8 @@ public sealed partial class JitTests
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
             }
-            [NoThrow] bool None<T>(out T result) where T : [Copy] { return false; }
-            [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+             bool None<T>(out T result) where T : [Copy] { return false; }
+             bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
                 result = value;
                 return publish;
             }

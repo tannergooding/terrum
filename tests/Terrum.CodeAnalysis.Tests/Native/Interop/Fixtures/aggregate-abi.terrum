@@ -414,7 +414,7 @@ public unique struct SmallOwner
 {
     public int32 Value;
     public SmallOwner(int32 value) { Value = value; }
-    [NoThrow] public int32 Read() { return Value; }
+     public int32 Read() { return Value; }
     public WideIntegerPair Pack(int64 a, int64 b, int64 c, uint64 d, uint64 e)
     {
         return new WideIntegerPair(int64(Value) + a + b + c, d + e);
@@ -426,7 +426,7 @@ public unique struct WordOwner
 {
     public uint64 Value;
     public WordOwner(uint64 value) { Value = value; }
-    [NoThrow] public uint64 Read() { return Value; }
+     public uint64 Read() { return Value; }
 }
 
 [Blittable] [Layout(LayoutKind.Sequential)]
@@ -439,7 +439,7 @@ public unique struct LargeOwner
         Signed = signed;
         Unsigned = unsigned;
     }
-    [NoThrow] public uint64 Read() { return Unsigned; }
+     public uint64 Read() { return Unsigned; }
 }
 // Transparent wrappers retain the carrier's direct argument and result ABI.
 [Blittable] [Layout(LayoutKind.Transparent)] public struct BoolCarrier

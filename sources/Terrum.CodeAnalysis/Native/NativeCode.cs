@@ -56,6 +56,18 @@ public readonly record struct NativeFunctionRange(int Start, int End, int StackS
     /// <summary>The prolog saves RBP and addresses frame slots relative to its stable post-allocation value.</summary>
     public bool UsesFramePointer { get; init; }
 
+    /// <summary>The source frame base is rounded down to the declared over-alignment.</summary>
+    public bool UsesAlignedFrame { get; init; }
+
+    /// <summary>The frame alignment used by an over-aligned source frame, or zero otherwise.</summary>
+    public int StackAlignment { get; init; }
+
+    /// <summary>The prolog probes every stack page before allocating a large frame.</summary>
+    public bool UsesStackProbe { get; init; }
+
+    /// <summary>This range is the compiler-owned helper used by large-frame prologs.</summary>
+    public bool IsStackProbeHelper { get; init; }
+
     /// <summary>The prolog receives the source function's frame base in RDX, for an out-of-line cleanup.</summary>
     public bool UsesParentFrame { get; init; }
 

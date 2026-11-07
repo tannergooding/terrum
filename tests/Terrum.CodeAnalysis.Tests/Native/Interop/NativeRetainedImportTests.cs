@@ -6,15 +6,17 @@ using System.IO;
 using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
-public sealed class NativeRetainedImportTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeRetainedImportTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -24,17 +26,28 @@ public sealed class NativeRetainedImportTests
             [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public Token Make() { return new Token(42); }
-            """), (BoundRuntimePolicy)policy);
+            """), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
         Assert.That(leaf.HasErrors, Is.False, string.Join(Environment.NewLine, leaf.Diagnostics));
         var reference = ModuleCompiler.CreateReference(ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = leaf.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Make", "Token.Close"]));
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = leaf.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(), ["Make", "Token.Close"]));
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public Token Forward() { return Make(); }"), reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))();
         BoundFunction[] external = [.. program.Functions.Where(static function => function.IsExternal)];
         Assert.That(global::System.Linq.Enumerable.Any(external,static function => function.Name == "Token.Close"),Is.True);
         NativeImportBinding[] bindings = [.. external.Select(static function =>
