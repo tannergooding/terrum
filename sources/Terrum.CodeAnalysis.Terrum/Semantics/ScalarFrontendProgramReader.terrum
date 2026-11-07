@@ -179,20 +179,74 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
     if (spanLength == 0)
     {
         if (spanStart != 0) { return false; }
-        for (mut int32 token = 0; token < eof; token = token + 1)
+        mut int32 at = 0;
+        mut int32 depth = 0;
+        while (at < eof)
         {
-            if (Host.Tokens[token * 3] == 6) { return false; }
+            int32 kind = Host.Tokens[at * 3];
+            if (depth == 0 && kind == 6)
+            {
+                if (!ScalarProgramReaderNamespaceBlock(at, eof,
+                        functionSourceStart, 0, 0, 1, init var next,
+                        init var blockMatches, init var blockHasAlias,
+                        init var functionInBlock)
+                    || functionInBlock)
+                {
+                    return false;
+                }
+                at = next;
+                continue;
+            }
+            if (kind == 6 || kind == 5) { return false; }
+            if (kind == 48) { depth = depth + 1; }
+            if (kind == 49)
+            {
+                if (depth == 0) { return false; }
+                depth = depth - 1;
+            }
+            at = at + 1;
         }
-        return true;
+        return depth == 0;
     }
     mut int32 at = 0;
     mut bool matchesFunctionBlock = false;
     mut int32 namespaces = 0;
+    mut bool sawRootScope = false;
     while (at < eof)
     {
         if (Host.Tokens[at * 3] != 6)
         {
-            return false;
+            sawRootScope = true;
+            mut int32 rootDepth = 0;
+            while (at < eof)
+            {
+                int32 kind = Host.Tokens[at * 3];
+                if (rootDepth == 0 && kind == 6) { break; }
+                if (kind == 5 || kind == 6) { return false; }
+                if (kind == 48 || kind == 49)
+                {
+                    int32 offset = at * 3;
+                    int32 tokenStart = Host.Tokens[offset + 1];
+                    int32 tokenLength = Host.Tokens[offset + 2];
+                    if (tokenLength != 1
+                        || !ScalarProgramReaderRange(
+                            tokenStart, tokenLength, Host.Source.Length)
+                        || kind == 48 && Host.Source[tokenStart] != '{'
+                        || kind == 49 && Host.Source[tokenStart] != '}')
+                    {
+                        return false;
+                    }
+                    if (kind == 48) { rootDepth = rootDepth + 1; }
+                    else
+                    {
+                        if (rootDepth == 0) { return false; }
+                        rootDepth = rootDepth - 1;
+                    }
+                }
+                at = at + 1;
+            }
+            if (rootDepth != 0) { return false; }
+            continue;
         }
         int32 nameStart = at + 1;
         if (nameStart >= eof || Host.Tokens[nameStart * 3] != 2)
@@ -242,7 +296,8 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
         }
         if (terminator == 52)
         {
-            if (namespaces != 1 || nameStartOffset != spanStart
+            if (namespaces != 1 || sawRootScope || at != 0
+                || nameStartOffset != spanStart
                 || nameEndOffset - nameStartOffset != spanLength
                 || functionSourceStart < terminatorStart + terminatorLength)
             {
@@ -264,16 +319,13 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
         }
         if (!ScalarProgramReaderNamespaceBlock(at, eof, functionSourceStart,
                 spanStart, spanLength, 1, init var next,
-                init var blockMatches, init var blockHasAlias))
+                init var blockMatches, init var blockHasAlias,
+                init var functionInBlock))
         {
             return false;
         }
         matchesFunctionBlock = matchesFunctionBlock || blockMatches;
         at = next;
-        if (at < eof && Host.Tokens[at * 3] != 6)
-        {
-            return false;
-        }
     }
     return matchesFunctionBlock;
 }
@@ -281,11 +333,13 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
 bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
     int32 functionSourceStart, int32 spanStart, int32 spanLength,
     int32 nestingDepth, init ref<int32> next,
-    init ref<bool> matchesFunctionBlock, init ref<bool> subtreeHasAlias)
+    init ref<bool> matchesFunctionBlock, init ref<bool> subtreeHasAlias,
+    init ref<bool> functionInBlock)
 {
     next = at;
     matchesFunctionBlock = false;
     subtreeHasAlias = false;
+    functionInBlock = false;
     if (nestingDepth > 8 || at < 0 || at >= eof
         || Host.Tokens[at * 3] != 6)
     {
@@ -352,11 +406,15 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
             {
                 return false;
             }
-            if (functionSourceStart >= segmentStart && functionSourceStart < tokenStart
-                && nameStartOffset == spanStart
-                && nameEndOffset - nameStartOffset == spanLength)
+            if (functionSourceStart >= segmentStart
+                && functionSourceStart < tokenStart)
             {
-                matchesFunctionBlock = true;
+                functionInBlock = true;
+                if (nameStartOffset == spanStart
+                    && nameEndOffset - nameStartOffset == spanLength)
+                {
+                    matchesFunctionBlock = true;
+                }
             }
             next = cursor + 1;
             return true;
@@ -367,22 +425,27 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
             {
                 return false;
             }
-            if (functionSourceStart >= segmentStart && functionSourceStart < tokenStart
-                && nameStartOffset == spanStart
-                && nameEndOffset - nameStartOffset == spanLength)
+            if (functionSourceStart >= segmentStart
+                && functionSourceStart < tokenStart)
             {
-                matchesFunctionBlock = true;
+                functionInBlock = true;
+                if (nameStartOffset == spanStart
+                    && nameEndOffset - nameStartOffset == spanLength)
+                {
+                    matchesFunctionBlock = true;
+                }
             }
             if (!ScalarProgramReaderNamespaceBlock(cursor, eof, functionSourceStart,
                     spanStart, spanLength, nestingDepth + 1,
                     init var childNext, init var childMatches,
-                    init var childHasAlias)
+                    init var childHasAlias, init var childFunctionInBlock)
                 || childNext <= cursor)
             {
                 return false;
             }
             matchesFunctionBlock = matchesFunctionBlock || childMatches;
             subtreeHasAlias = subtreeHasAlias || childHasAlias;
+            functionInBlock = functionInBlock || childFunctionInBlock;
             childCount = childCount + 1;
             if (childCount > 1 && subtreeHasAlias)
             {

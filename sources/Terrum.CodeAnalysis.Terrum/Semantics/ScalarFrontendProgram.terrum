@@ -146,6 +146,34 @@ int32 CountScalarProgramNamespaces(Span<Token> tokenView, int32 count)
     return namespaces;
 }
 
+bool ScalarProgramHasFileScopedNamespace(Span<Token> tokenView, int32 count)
+{
+    for (mut int32 at = 0; at < count - 1; at = at + 1)
+    {
+        require TryGetScalarWindowToken(tokenView, 0, count, false, at, init var token);
+        if (token.Kind != 6) { continue; }
+        mut int32 cursor = at + 1;
+        if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                cursor, init var name)
+            || name.Kind != 2)
+        {
+            return false;
+        }
+        cursor = cursor + 1;
+        while (cursor < count - 1
+            && TryGetScalarWindowToken(tokenView, 0, count, false,
+                cursor, init var separator)
+            && separator.Kind == 54)
+        {
+            cursor = cursor + 2;
+        }
+        return TryGetScalarWindowToken(tokenView, 0, count, false,
+                cursor, init var terminator)
+            && terminator.Kind == 52;
+    }
+    return false;
+}
+
 bool TryInventoryScalarProgramScope(Span<Token> tokenView, int32 count,
     int32 declarationStart, int32 declarationEnd, SourceRange namespaceName,
     bool hasNamespace, int32 aliasCount, int32 initialFunctionCount,
@@ -275,36 +303,106 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
     mut SourceRange firstNamespace = empty;
     while (at < count - 1)
     {
-        if (!TryGetScalarWindowToken(tokenView, 0, count, false, at, init var keyword)
-            || keyword.Kind != 6)
+        if (!TryGetScalarWindowToken(tokenView, 0, count, false, at, init var keyword))
         {
             return false;
         }
-        if (!TryInventoryScalarProgramNamespaceTree(tokenView, count, at, 1,
-                functions, hasFour, firstNamespace, aliasCount,
-                init var updatedFunctions, init var updatedHasFour,
-                init var updatedFirstNamespace, init var updatedAliasCount,
-                init var next, init var namespaceError, init var namespaceErrorCode))
+        if (keyword.Kind == 6)
         {
-            return false;
+            if (!TryInventoryScalarProgramNamespaceTree(tokenView, count, at, 1,
+                    functions, hasFour, firstNamespace, aliasCount,
+                    init var updatedFunctions, init var updatedHasFour,
+                    init var updatedFirstNamespace, init var updatedAliasCount,
+                    init var next, init var namespaceError, init var namespaceErrorCode))
+            {
+                return false;
+            }
+            if (namespaceError.Length != 0)
+            {
+                error = namespaceError;
+                errorCode = namespaceErrorCode;
+                return true;
+            }
+            if (updatedAliasCount > 0 && (hasNamespace || next != count - 1))
+            {
+                error = updatedFirstNamespace;
+                return true;
+            }
+            functions = updatedFunctions;
+            hasFour = updatedHasFour;
+            firstNamespace = updatedFirstNamespace;
+            aliasCount = updatedAliasCount;
+            hasNamespace = true;
+            at = next;
+            continue;
         }
-        if (namespaceError.Length != 0)
+
+        mut int32 scopeEnd = at;
+        mut int32 depth = 0;
+        while (scopeEnd < count - 1)
         {
-            error = namespaceError;
-            errorCode = namespaceErrorCode;
+            require TryGetScalarWindowToken(tokenView, 0, count, false,
+                scopeEnd, init var scopeToken);
+            if (depth == 0 && scopeToken.Kind == 6)
+            {
+                break;
+            }
+            if (scopeToken.Kind == 48) { depth = depth + 1; }
+            if (scopeToken.Kind == 49)
+            {
+                if (depth == 0)
+                {
+                    error = scopeToken.Range;
+                    return true;
+                }
+                depth = depth - 1;
+            }
+            scopeEnd = scopeEnd + 1;
+        }
+        if (depth != 0)
+        {
+            error = keyword.Range;
             return true;
         }
-        if (updatedAliasCount > 0 && (hasNamespace || next != count - 1))
+        if (scopeEnd == at)
         {
-            error = updatedFirstNamespace;
+            error = keyword.Range;
+            return true;
+        }
+        var aliasError = BuildScalarAliasTable(tokenView, count, at,
+            scopeEnd, init var rootAliasCount);
+        if (aliasError.Length != 0)
+        {
+            error = aliasError;
+            return true;
+        }
+        if (rootAliasCount > 0 && (hasNamespace || scopeEnd < count - 1))
+        {
+            error = keyword.Range;
+            return true;
+        }
+        if (!TryInventoryScalarProgramScope(tokenView, count, at, scopeEnd,
+                empty, false, rootAliasCount, functions, hasFour,
+                init var updatedFunctions, init var updatedHasFour,
+                init var useLegacy, init var inventoryError,
+                init var inventoryErrorCode))
+        {
+            return false;
+        }
+        if (useLegacy)
+        {
+            error = keyword.Range;
+            return true;
+        }
+        if (inventoryError.Length != 0)
+        {
+            error = inventoryError;
+            errorCode = inventoryErrorCode;
             return true;
         }
         functions = updatedFunctions;
         hasFour = updatedHasFour;
-        firstNamespace = updatedFirstNamespace;
-        aliasCount = updatedAliasCount;
-        hasNamespace = true;
-        at = next;
+        at = scopeEnd;
     }
     if (!hasNamespace || at != count - 1)
     {
@@ -884,7 +982,8 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
     mut int32 aliasCount = 0;
     mut int32 functions = 0;
     mut bool hasFourParameterFunction = false;
-    if (CountScalarProgramNamespaces(tokenView, count) > 1)
+    if (CountScalarProgramNamespaces(tokenView, count) > 0
+        && !ScalarProgramHasFileScopedNamespace(tokenView, count))
     {
         if (!TryInventoryRepeatedScalarProgramNamespaceBlocks(tokenView, count,
                 init var repeatedFunctions, init var repeatedHasFourParameterFunction,

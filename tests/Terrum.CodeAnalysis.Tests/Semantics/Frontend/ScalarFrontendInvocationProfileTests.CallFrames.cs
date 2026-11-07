@@ -77,6 +77,8 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 + "namespace Tools { int32 Before() => 0; "
                 + "namespace Inner { int32 Child() => 0; } int32 After() => 0; } "
                 + "int32 Tail() => 0; }",
+            "int32 Before() => Next(); namespace Demo.Tools { int32 Main() => 42; } "
+                + "int32 Other() => 0; int32 Next() => 42;",
             nestedNamespaceSource,
             nestedNamespaceBranchSource,
             "int32 Main() => Next(Id(41)); int32 Next(int32 value) => value; "

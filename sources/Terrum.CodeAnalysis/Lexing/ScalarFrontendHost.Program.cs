@@ -320,19 +320,15 @@ public static partial class ScalarFrontendHost
         }
         var endToken = tokens.Length - 1;
         var scopes = new List<ProgramScope>();
-        var namespaceWrappers = new List<(TextSpan Header, TextSpan Close)>();
-        if (tokens[0].Kind == TokenKind.NamespaceKeyword)
+        string? namespaceIdentity = null;
+        var cursor = 0;
+        var fileScoped = false;
+        while (cursor < endToken)
         {
-            string? namespaceIdentity = null;
-            var cursor = 0;
-            var fileScoped = false;
-            while (cursor < endToken)
+            if (tokens[cursor].Kind == TokenKind.NamespaceKeyword)
             {
-                if (tokens[cursor].Kind != TokenKind.NamespaceKeyword)
-                {
-                    throw InvalidResult();
-                }
-                var namespaceKeyword = tokens[cursor++];
+                var namespaceKeywordIndex = cursor;
+                cursor++;
                 if (cursor >= endToken || tokens[cursor].Kind != TokenKind.Identifier)
                 {
                     throw InvalidResult();
@@ -361,17 +357,16 @@ public static partial class ScalarFrontendHost
                 }
                 if (tokens[cursor].Kind == TokenKind.Semicolon)
                 {
-                    if (scopes.Count != 0 || cursor + 1 < endToken
-                        && tokens.Skip(cursor + 1).Take(endToken - cursor - 1)
-                            .Any(static token => token.Kind == TokenKind.NamespaceKeyword))
+                    if (namespaceKeywordIndex != 0 || scopes.Count != 0
+                        || namespaceIdentity is not null
+                        || (cursor + 1 < endToken
+                            && tokens.Skip(cursor + 1).Take(endToken - cursor - 1)
+                                .Any(static token =>
+                                    token.Kind == TokenKind.NamespaceKeyword)))
                     {
                         throw InvalidResult();
                     }
                     fileScoped = true;
-                    if (namespaceIdentity is not null)
-                    {
-                        throw InvalidResult();
-                    }
                     namespaceIdentity = currentNamespace;
                     scopes.Add(new ProgramScope(currentNamespace, currentNameSpan,
                         cursor + 1, endToken));
@@ -381,60 +376,63 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                var opening = tokens[cursor];
-                var header = new TextSpan(namespaceKeyword.Span.Start,
-                    opening.Span.End - namespaceKeyword.Span.Start);
                 cursor = ReadNamespaceBody(tokens, cursor, endToken, currentNamespace,
-                    currentNameSpan, header, scopes, namespaceWrappers, out var resolvedNamespace);
+                    currentNameSpan, scopes, 1, out var resolvedNamespace);
                 namespaceIdentity ??= resolvedNamespace;
-                if (cursor < endToken && tokens[cursor].Kind != TokenKind.NamespaceKeyword)
+                continue;
+            }
+
+            var scopeStart = cursor;
+            var declarationDepth = 0;
+            while (cursor < endToken)
+            {
+                if (declarationDepth == 0
+                    && tokens[cursor].Kind == TokenKind.NamespaceKeyword)
                 {
-                    throw InvalidResult();
+                    break;
                 }
+                if (tokens[cursor].Kind == TokenKind.OpenBrace)
+                {
+                    declarationDepth++;
+                }
+                else if (tokens[cursor].Kind == TokenKind.CloseBrace)
+                {
+                    if (declarationDepth == 0)
+                    {
+                        throw InvalidResult();
+                    }
+                    declarationDepth--;
+                }
+                cursor++;
             }
-            if (scopes.Count == 0)
+            if (declarationDepth != 0)
             {
                 throw InvalidResult();
             }
-        }
-        else
-        {
-            if (tokens.Any(static token => token.Kind == TokenKind.NamespaceKeyword))
+            if (scopeStart < cursor)
             {
-                throw InvalidResult();
+                scopes.Add(new ProgramScope(string.Empty, default, scopeStart, cursor));
             }
-            scopes.Add(new ProgramScope(string.Empty, default, 0, endToken));
         }
-        if (tokens.Any(static token => token.Kind == TokenKind.UsingKeyword)
-            || scopes.Count > 1 && scopes.Any(scope =>
-                tokens.Skip(scope.TokenStart).Take(scope.TokenEnd - scope.TokenStart)
-                    .Any(static token => token.Kind == TokenKind.AliasKeyword)))
+        if (scopes.Count == 0)
         {
             throw InvalidResult();
         }
-        var hasSwitch = false;
-        foreach (var token in tokens)
+        if (tokens.Any(static token => token.Kind == TokenKind.UsingKeyword)
+            || (scopes.Count > 1 && scopes.Any(scope =>
+                tokens.Skip(scope.TokenStart).Take(scope.TokenEnd - scope.TokenStart)
+                    .Any(static token => token.Kind == TokenKind.AliasKeyword))))
         {
-            if (token.Kind == TokenKind.SwitchKeyword)
-            {
-                hasSwitch = true;
-                break;
-            }
+            throw InvalidResult();
         }
-        // The project parser does not recognize this switch form. ReadProgram audits each
-        // frame first, then parses the full source with only audited switch spans masked.
-        // Hide the namespace wrapper so this bootstrap-only form is checked as its top-level body.
-        var syntaxSource = namespaceWrappers.Count == 0
-            ? source : MaskNamespaceWrappers(source, namespaceWrappers);
-        var syntax = namespaceWrappers.Count == 0 ? lexical : Lexer.Lex(syntaxSource);
-        if (!syntax.Diagnostics.IsEmpty || !hasSwitch && SyntaxTree.Parse(syntax).HasErrors)
+        if (SyntaxTree.Parse(lexical).HasErrors)
         {
             throw InvalidResult();
         }
         var declarations = ImmutableArray.CreateBuilder<ProgramDeclaration>();
         var names = new HashSet<string>(StringComparer.Ordinal);
         var aliases = scopes.Count > 1
-            ? new ScalarAliasEnvironment(ImmutableDictionary<string, int>.Empty)
+            ? new ScalarAliasEnvironment([])
             : InventoryScalarAliases(tokens, scopes[0].TokenStart, scopes[0].TokenEnd);
         var at = 0;
         var scopeEnd = 0;

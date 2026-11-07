@@ -675,12 +675,66 @@ public sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task ScalarFrontendSupportsRootDeclarationsAlongsideNamespaceBlocksAsync()
+    {
+        const string source = """
+            int32 Before() { return 0; }
+            namespace Demo.Tools {
+                int32 Main() { return 42; }
+            }
+            namespace Other {
+                int32 Helper() { return 0; }
+            }
+            int32 After() { return 0; }
+            """;
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        var namespaceStart = source.IndexOf("Demo.Tools", StringComparison.Ordinal);
+        var otherNamespaceStart = source.IndexOf("Other", StringComparison.Ordinal);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (exit, output, error) = await RunFrontendComponentAsync(
+                input, directory, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(0), $"{output}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            var functions = document.RootElement.GetProperty("result")
+                .GetProperty("functions").EnumerateArray().ToArray();
+            Assert.That(functions.Select(static function =>
+                    function.GetProperty("qualifiedName").GetString()).ToArray(),
+                Is.EqualTo([
+                    "Before",
+                    "Demo.Tools.Main",
+                    "Other.Helper",
+                    "After",
+                ]));
+            Assert.That(functions.Select(static function =>
+                    function.GetProperty("namespaceNameSpan")
+                        .GetProperty("start").GetInt32()).ToArray(),
+                Is.EqualTo([0, namespaceStart, otherNamespaceStart, 0]));
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(
+                input, "frontend-run", directory, "-", "--runtime", policy,
+                "--json").ConfigureAwait(false);
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                input, "jit", "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(frontendExit, Is.EqualTo(42));
+            Assert.That(hostedExit, Is.EqualTo(frontendExit));
+            Assert.That(frontendOutput, Is.Empty);
+            Assert.That(hostedOutput, Is.Empty);
+            Assert.That(frontendError, Is.Empty);
+            Assert.That(hostedError, Is.Empty);
+        }
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source)
+            .ConfigureAwait(false);
+    }
+
     [TestCase("namespace Demo.Tools { alias Scalar = int32; int32 Main() { return 42; } } namespace Demo.Tools { int32 Next() { return 0; } }")]
     [TestCase("namespace Demo.Tools { alias Scalar = int32; namespace Inner { Scalar Main() { return 42; } } }")]
     [TestCase("namespace Demo.Tools { using Other; int32 Main() { return 42; } }")]
     [TestCase("namespace Demo.Tools { import Other; int32 Main() { return 42; } }")]
-    [TestCase("int32 Before() { return 0; } namespace Demo.Tools { int32 Main() { return 42; } }")]
-    [TestCase("namespace Demo.Tools { int32 Main() { return 42; } } int32 After() { return 0; }")]
     [TestCase("namespace Demo; namespace Other; int32 Main() { return 42; }")]
     [TestCase("using Demo; namespace Demo; int32 Main() { return 42; }")]
     [TestCase("namespace Demo; using Other; int32 Main() { return 42; }")]
