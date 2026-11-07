@@ -709,6 +709,67 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public async Task FrontendFallbackWrappersRejectLayoutCoreManifestWithoutReplacingOutputAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-layout-core-manifest-wrapper-");
+        var manifestPath = Path.Combine(directory, "layout.json");
+        var executablePath = Path.Combine(directory, "output.exe");
+        var libraryPath = Path.Combine(directory, "output.dll");
+        var sentinel = "sentinel"u8.ToArray();
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath,
+                CreateLayoutCoreManifest()).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(executablePath, sentinel)
+                .ConfigureAwait(false);
+            await File.WriteAllBytesAsync(libraryPath, sentinel)
+                .ConfigureAwait(false);
+            var source = Encoding.UTF8.GetBytes(LayoutCoreSource);
+            var projectDirectory
+                = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+            var (buildExit, buildOutput, buildError) = await RunAsync(source,
+                "frontend-build", projectDirectory, "-", "-o", executablePath,
+                "--runtime", "fail-fast", "--layout-core-manifest",
+                manifestPath, "--json").ConfigureAwait(false);
+            Assert.That(buildExit, Is.EqualTo(2), buildOutput + buildError);
+            Assert.That(buildError, Is.Empty);
+            AssertInputDiagnosticCode(buildOutput, "TRM2000");
+            Assert.That(await File.ReadAllBytesAsync(executablePath)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+
+            var (libraryExit, libraryOutput, libraryError) = await RunAsync(
+                source, "frontend-build-library", projectDirectory, "-",
+                "-o", libraryPath, "--runtime", "fail-fast",
+                "--layout-core-manifest", manifestPath, "--json")
+                .ConfigureAwait(false);
+            Assert.That(libraryExit, Is.EqualTo(2),
+                libraryOutput + libraryError);
+            Assert.That(libraryError, Is.Empty);
+            AssertInputDiagnosticCode(libraryOutput, "TRM2000");
+            Assert.That(await File.ReadAllBytesAsync(libraryPath)
+                .ConfigureAwait(false), Is.EqualTo(sentinel));
+
+            var (runExit, runOutput, runError) = await RunAsync(source,
+                "frontend-run", projectDirectory, "-", "--runtime",
+                "fail-fast", "--layout-core-manifest", manifestPath,
+                "--json").ConfigureAwait(false);
+            Assert.That(runExit, Is.EqualTo(2), runOutput + runError);
+            Assert.That(runError, Is.Empty);
+            AssertInputDiagnosticCode(runOutput, "TRM2000");
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(executablePath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task NativeModuleCommandsDoNotAcceptLayoutCoreManifestAsync()
     {
         var directory = TestArtifactPaths.CreateDirectory(

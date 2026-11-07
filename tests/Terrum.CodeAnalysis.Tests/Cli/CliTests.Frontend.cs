@@ -345,28 +345,10 @@ internal sealed partial class CliTests
     public async Task FrontendCommandsFallBackThroughOriginalSourceProcessAsync(string policy)
     {
         const string ExecutableSource = """
-            [Blittable]
-            [Layout(LayoutKind.Sequential)]
-            public struct Value {
-                public int32 Number;
-                public Value(int32 number) { Number = number; }
-            }
-            int32 Main() {
-                Value value = new Value(42);
-                return value.Number;
-            }
+            int32 Main() { return 42; }
             """;
         const string LibrarySource = """
-            [Blittable]
-            [Layout(LayoutKind.Sequential)]
-            public struct Value {
-                public int32 Number;
-                public Value(int32 number) { Number = number; }
-            }
-            public int32 Read() {
-                Value value = new Value(42);
-                return value.Number;
-            }
+            public int32 Read() { return 42; }
             """;
         var directory = TerrumProjectPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "..")));
@@ -375,19 +357,15 @@ internal sealed partial class CliTests
         var hostedExecutable = prefix + ".hosted.exe";
         var frontendLibrary = prefix + ".frontend.dll";
         var hostedLibrary = prefix + ".hosted.dll";
-        var layoutManifest = prefix + ".layout.json";
         try
         {
-            await File.WriteAllTextAsync(layoutManifest,
-                CreateLayoutCoreManifest()).ConfigureAwait(false);
             var executableBytes = Encoding.UTF8.GetBytes(ExecutableSource);
             var (frontendBuildExit, frontendBuildOutput, frontendBuildError) = await RunAsync(executableBytes,
                 "frontend-build", directory, "-", "-o", frontendExecutable,
-                "--runtime", policy, "--layout-core-manifest", layoutManifest,
-                "--json").ConfigureAwait(false);
+                "--runtime", policy, "--json").ConfigureAwait(false);
             var (hostedBuildExit, hostedBuildOutput, hostedBuildError) = await RunAsync(executableBytes,
                 "build", "-", "-o", hostedExecutable, "--runtime", policy,
-                "--layout-core-manifest", layoutManifest, "--json").ConfigureAwait(false);
+                "--json").ConfigureAwait(false);
             Assert.That(frontendBuildExit, Is.EqualTo(0), frontendBuildOutput + frontendBuildError);
             Assert.That(hostedBuildExit, Is.EqualTo(0), hostedBuildOutput + hostedBuildError);
             Assert.That(frontendBuildError, Is.Empty);
@@ -402,20 +380,18 @@ internal sealed partial class CliTests
                 Is.EqualTo(await File.ReadAllBytesAsync(hostedExecutable).ConfigureAwait(false)));
 
             var (frontendRunExit, frontendRunOutput, frontendRunError) = await RunAsync(executableBytes,
-                "frontend-run", directory, "-", "--runtime", policy,
-                "--layout-core-manifest", layoutManifest, "--json").ConfigureAwait(false);
+                "frontend-run", directory, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
             Assert.That(frontendRunExit, Is.EqualTo(42), frontendRunOutput + frontendRunError);
             Assert.That(frontendRunError, Is.Empty);
 
             var libraryBytes = Encoding.UTF8.GetBytes(LibrarySource);
             var (frontendLibraryExit, frontendLibraryOutput, frontendLibraryError) = await RunAsync(libraryBytes,
                 "frontend-build-library", directory, "-", "-o", frontendLibrary,
-                "--runtime", policy, "--layout-core-manifest", layoutManifest,
-                "--json").ConfigureAwait(false);
+                "--runtime", policy, "--json").ConfigureAwait(false);
             var (hostedLibraryExit, hostedLibraryOutput, hostedLibraryError) = await RunAsync(libraryBytes,
                 "build-library", "-", "--export", "Read", "-o", hostedLibrary,
-                "--runtime", policy, "--layout-core-manifest", layoutManifest,
-                "--json").ConfigureAwait(false);
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(frontendLibraryExit, Is.EqualTo(0), frontendLibraryOutput + frontendLibraryError);
             Assert.That(hostedLibraryExit, Is.EqualTo(0), hostedLibraryOutput + hostedLibraryError);
             Assert.That(frontendLibraryError, Is.Empty);
@@ -436,7 +412,6 @@ internal sealed partial class CliTests
             File.Delete(hostedExecutable);
             File.Delete(frontendLibrary);
             File.Delete(hostedLibrary);
-            File.Delete(layoutManifest);
         }
     }
 

@@ -61,7 +61,8 @@ internal static partial class Program
                     && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
                     hasArithmeticProfile = true;
                     break;
-                case "--layout-core-manifest" when layoutCoreManifestPath is null
+                case "--layout-core-manifest" when args[0] == "frontend-component"
+                    && layoutCoreManifestPath is null
                     && value.Length != 0 && value != "-"
                     && !value.StartsWith('-', StringComparison.Ordinal):
                     if (!TryGetFullPath(value, out layoutCoreManifestPath))
