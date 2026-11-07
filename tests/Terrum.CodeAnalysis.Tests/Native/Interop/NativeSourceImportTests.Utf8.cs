@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
@@ -81,7 +82,8 @@ internal sealed partial class NativeSourceImportTests
             void Main() { unsafe { NativeFfiWideAlias(utf16z("wide")); } }
             """;
         var aliasCompilation = Compilation.Create(
-            SyntaxTree.Parse(aliasSource), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(aliasSource),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(aliasCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, aliasCompilation.Diagnostics));
 
         var reservedAliasCompilation = Compilation.Create(
@@ -100,7 +102,8 @@ internal sealed partial class NativeSourceImportTests
             int32 Main() { unsafe { return NativeFfiUtf8Z(utf8z("wide")); } }
             """;
         var structCompilation = Compilation.Create(
-            SyntaxTree.Parse(structSource), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(structSource),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(structCompilation.Program, Is.Null);
         Assert.That(structCompilation.Diagnostics, Is.Not.Empty);
     }
