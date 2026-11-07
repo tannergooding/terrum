@@ -6682,22 +6682,30 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
-    [Test]
-    public void StandardA2NativeOutputCallRetainsArrayParameterBacking()
+    [TestCase("Read", 0u)]
+    [TestCase("Read", 1u)]
+    [TestCase("Read", 2u)]
+    [TestCase("Write", 2u)]
+    [TestCase("ReadWrite", 2u)]
+    public void StandardA2NativeOutputCallRetainsArrayParameterBacking(
+        string access, uint nativeParameterExtent)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string moduleIdentity = "a2-native-output-array-backing";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var pointerType = access == "Read"
+            ? "ptr<int32>" : "write ptr<int32>";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Result {
                 public uint32 Value;
             }
 
             [Terrum.Interop.NativeImport("example.dll", "Observe")]
-            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            [Terrum.Interop.NativeParameter(
+                1, {{access}}, NoEscape, {{nativeParameterExtent}})]
             internal extern int32 Observe(
-                ptr<int32> values,
+                {{pointerType}} values,
                 [Terrum.Interop.NativeOutput(
                     When: Terrum.Interop.NativeOutputCondition.NonZero)]
                 write ptr<Result> result);
@@ -6744,7 +6752,9 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(address, Is.Not.Null);
         Assert.That(address!.ElementCount, Is.EqualTo(3));
         Assert.That(address.ElementType, Is.EqualTo(PrimitiveType.Int32));
-        Assert.That(address.ByteExtent, Is.EqualTo(8));
+        Assert.That(address.ByteExtent,
+            Is.EqualTo((ulong)Math.Max(1u, nativeParameterExtent) * 4));
+        Assert.That(address.IsReadonly, Is.EqualTo(access == "Read"));
         Assert.That(address.Projections, Has.Length.EqualTo(1));
         Assert.That(address.Index, Is.TypeOf<BoundRead>());
         Assert.That(arrayInitialization, Is.Not.Null);
