@@ -1144,17 +1144,34 @@ public static partial class TrRmExecutableCompiler
         }
 
         var codeBlocks = new List<List<byte>> {
-            new(checked((backingLocals.Length * 8)
+            new(checked((backingLocals.Length * 16)
                 + checked((outputVariables.Length + storageHomeCount) * 4)
                 + checked(outputCalls.Count * 6) + 2)),
         };
         var currentCode = codeBlocks[0];
         foreach (var local in backingLocals)
         {
-            if (local.Initializer is not BoundRead source)
+            BoundRead source;
+            byte? arithmeticControl = null;
+            BoundRead? rightSource = null;
+            byte arithmeticRightRegister = 15;
+            if (local.Initializer is BoundRead read)
+            {
+                source = read;
+            }
+            else if (TryGetDirectNativeOutputArithmetic(
+                    local.Initializer, out var arithmeticSource,
+                    out rightSource, out arithmeticRightRegister,
+                    out var control)
+                && arithmeticSource is not null)
+            {
+                source = arithmeticSource;
+                arithmeticControl = control;
+            }
+            else
             {
                 throw Unsupported(
-                    "A direct NativeOutput local has no caller-formal source.");
+                    "A direct NativeOutput local has no admitted caller source.");
             }
 
             var sourceHome = homeByVariable[source.Variable];
@@ -1163,6 +1180,25 @@ public static partial class TrRmExecutableCompiler
             currentCode.Add(0);
             currentCode.Add((byte)sourceHome);
             currentCode.Add((byte)(sourceHome >> 8));
+            if (arithmeticControl is byte controlValue)
+            {
+                if (rightSource is not null)
+                {
+                    var rightHome = homeByVariable[rightSource.Variable];
+                    currentCode.Add(0xD5);
+                    currentCode.Add(1);
+                    currentCode.Add((byte)rightHome);
+                    currentCode.Add((byte)(rightHome >> 8));
+                    arithmeticRightRegister = 1;
+                }
+
+                currentCode.Add(0xC0);
+                currentCode.Add(controlValue);
+                var arithmeticPayload = (ushort)(0x00F0
+                    | (arithmeticRightRegister << 12));
+                currentCode.Add(unchecked((byte)arithmeticPayload));
+                currentCode.Add((byte)(arithmeticPayload >> 8));
+            }
             currentCode.Add(0xD6);
             currentCode.Add(0x10);
             currentCode.Add((byte)destinationHome);
@@ -1680,6 +1716,95 @@ public static partial class TrRmExecutableCompiler
         return calls;
     }
 
+    private static bool TryGetDirectNativeOutputArithmetic(
+        BoundExpression? expression, out BoundRead? source,
+        out BoundRead? rightSource, out byte rightRegister,
+        out byte arithmeticControl)
+    {
+        source = null;
+        rightSource = null;
+        rightRegister = 15;
+        arithmeticControl = 0;
+        if (expression is not BoundBinary {
+                Left: BoundRead left,
+            } binary
+            || binary.Type != left.Type
+            || !PrimitiveTypeFacts.IsIntegerOrWide(binary.Type))
+        {
+            return false;
+        }
+
+        arithmeticControl = (binary.Operator, binary.OverflowBehavior) switch {
+            (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
+            (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
+            (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
+            (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
+            _ => (byte)0,
+        };
+        if (arithmeticControl == 0)
+        {
+            return false;
+        }
+
+        if (binary.Right is BoundRead rightRead
+            && rightRead.Type == binary.Type)
+        {
+            source = left;
+            rightSource = rightRead;
+            rightRegister = 1;
+            return true;
+        }
+
+        if (binary.Right is not BoundConstant constant
+            || constant.Type != binary.Type)
+        {
+            return false;
+        }
+
+        var width = PrimitiveTypeFacts.ScalarWidth(binary.Type) * 8;
+        var allBitsLow = width >= sizeof(ulong) * 8
+            ? ulong.MaxValue : (1UL << width) - 1;
+        var allBitsHigh = width > sizeof(ulong) * 8
+            ? ulong.MaxValue : 0;
+        var isZero = constant.Bits.Low == 0 && constant.Bits.High == 0;
+        var isOne = constant.Bits.Low == 1 && constant.Bits.High == 0;
+        var allBitsSet = constant.Bits.Low == allBitsLow
+            && constant.Bits.High == allBitsHigh;
+        if (isZero)
+        {
+            rightRegister = 14;
+        }
+        else if (allBitsSet)
+        {
+            rightRegister = 15;
+        }
+        else if (isOne && binary.Operator == TokenKind.Plus
+            && (binary.OverflowBehavior
+                    == BoundIntegerOverflowBehavior.Wrapping
+                || PrimitiveTypeFacts.IsSignedIntegerOrWide(binary.Type)))
+        {
+            rightRegister = 15;
+            arithmeticControl = binary.OverflowBehavior
+                == BoundIntegerOverflowBehavior.Checked ? (byte)0x02 : (byte)0x06;
+        }
+        else if (isOne && binary.Operator == TokenKind.Minus
+            && (binary.OverflowBehavior
+                    == BoundIntegerOverflowBehavior.Wrapping
+                || PrimitiveTypeFacts.IsSignedIntegerOrWide(binary.Type)))
+        {
+            rightRegister = 15;
+            arithmeticControl = binary.OverflowBehavior
+                == BoundIntegerOverflowBehavior.Checked ? (byte)0x01 : (byte)0x05;
+        }
+        else
+        {
+            return false;
+        }
+
+        source = left;
+        return true;
+    }
+
     private static ImmutableArray<BoundLocal> ValidateDirectNativeOutputCaller(
         BoundFunction caller, List<BoundCall> calls,
         HashSet<int> outputVariables)
@@ -1801,20 +1926,58 @@ public static partial class TrRmExecutableCompiler
                     }
                     return;
 
-                case BoundLocal local when topLevel
-                    && local.Initializer is BoundRead read:
-                    var sourceIsAvailable = read.Variable >= 0
-                        && read.Variable < caller.Variables.Length
-                        && (read.Variable < caller.ParameterCount
+                case BoundLocal local when topLevel:
+                {
+                    BoundRead? source;
+                    BoundRead? rightSource = null;
+                    if (local.Initializer is BoundRead read)
+                    {
+                        source = read;
+                    }
+                    else if (!TryGetDirectNativeOutputArithmetic(
+                            local.Initializer, out source, out rightSource,
+                            out _, out _))
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput local must copy or compute from a caller Home.");
+                    }
+
+                    if (source is null)
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput local has no caller Home source.");
+                    }
+
+                    var sourceRead = source;
+                    var sourceIsAvailable = sourceRead.Variable >= 0
+                        && sourceRead.Variable < caller.Variables.Length
+                        && (sourceRead.Variable < caller.ParameterCount
                             || backingLocalByVariable.Contains(
-                                read.Variable));
+                                sourceRead.Variable));
+                    var rightSourceIsAvailable = rightSource is null
+                        || (rightSource.Variable >= 0
+                            && rightSource.Variable
+                                < caller.Variables.Length
+                            && (rightSource.Variable
+                                    < caller.ParameterCount
+                                || backingLocalByVariable.Contains(
+                                    rightSource.Variable)));
                     if ((uint)local.Variable >= (uint)caller.Variables.Length
                             || local.Variable < caller.ParameterCount
                             || caller.Variables[local.Variable].IsInitializationLocal
                         || outputVariables.Contains(local.Variable)
                         || !sourceIsAvailable
-                        || read.Type != caller.Variables[local.Variable].Type
-                        || read.Type != caller.Variables[read.Variable].Type
+                        || !rightSourceIsAvailable
+                        || sourceRead.Type
+                            != caller.Variables[local.Variable].Type
+                        || sourceRead.Type
+                            != caller.Variables[sourceRead.Variable].Type
+                        || (rightSource is not null
+                            && (rightSource.Type
+                                    != caller.Variables[local.Variable].Type
+                                || rightSource.Type
+                                    != caller.Variables[
+                                        rightSource.Variable].Type))
                         || !backingLocalByVariable.Add(local.Variable))
                     {
                         throw Unsupported(
@@ -1823,6 +1986,7 @@ public static partial class TrRmExecutableCompiler
 
                     backingLocals.Add(local);
                     return;
+                }
 
                 case BoundUnsafe unsafeBlock when !insideUnsafe:
                     VisitStatement(unsafeBlock.Body, true,

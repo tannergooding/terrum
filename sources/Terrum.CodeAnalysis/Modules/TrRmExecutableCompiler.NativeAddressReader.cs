@@ -614,12 +614,18 @@ public static partial class TrRmExecutableCompiler
         var returnCount = 0;
         var returnResultCount = 0;
         var backingHomeBySourceHome = new Dictionary<int, int>();
+        var backingRightHomeByHome = new Dictionary<int, int>();
+        var backingArithmeticControlByHome = new Dictionary<int, byte>();
+        var backingRightRegisterByHome = new Dictionary<int, byte>();
         var storageAddressRecordIndexes = new HashSet<int>();
         for (var blockIndex = 0; blockIndex < body.BlockCount;
             blockIndex++)
         {
             var code = body.GetBlockCode(blockIndex);
             var pendingHomeLoad = -1;
+            var pendingRightHomeLoad = -1;
+            byte? pendingBackingArithmeticControl = null;
+            var pendingBackingArithmeticRightRegister = -1;
             var lastCallSiteRecord = -1;
             var pendingComparison = false;
             var sawTerminator = false;
@@ -644,10 +650,11 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 if (pendingHomeLoad >= 0
-                    && opcode is not (0xD6 or 0xC2 or 0xE4))
+                    && opcode is not (0xD5 or 0xC0 or 0xD6 or 0xC2
+                        or 0xE4))
                 {
                     throw Invalid(
-                        "A direct NativeOutput Home load is not consumed by a local copy or condition.");
+                        "A direct NativeOutput Home load is not consumed by a selected local initializer or condition.");
                 }
 
                 if (opcode == 0xDF)
@@ -663,14 +670,60 @@ public static partial class TrRmExecutableCompiler
                 }
                 else if (opcode == 0xD5)
                 {
-                    if (instruction[1] != 0 || pendingHomeLoad >= 0)
+                    if ((instruction[1] & 0xF0) != 0)
                     {
                         throw Invalid(
                             "A direct NativeOutput Home load is malformed.");
                     }
 
-                    pendingHomeLoad = BinaryPrimitives
+                    var destinationRegister = instruction[1] & 0x0F;
+                    var sourceHome = BinaryPrimitives
                         .ReadUInt16LittleEndian(instruction[2..]);
+                    if (pendingHomeLoad < 0 && destinationRegister == 0)
+                    {
+                        pendingHomeLoad = sourceHome;
+                    }
+                    else if (blockIndex == 0 && pendingHomeLoad >= 0
+                        && pendingRightHomeLoad < 0
+                        && pendingBackingArithmeticControl is null
+                        && !pendingComparison && destinationRegister == 1)
+                    {
+                        pendingRightHomeLoad = sourceHome;
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput Body loads a Home into an unsupported initializer register.");
+                    }
+
+                    lastCallSiteRecord = -1;
+                }
+                else if (opcode == 0xC0)
+                {
+                    var arithmeticPayload = BinaryPrimitives
+                        .ReadUInt16LittleEndian(instruction[2..]);
+                    var destination = arithmeticPayload & 0x0F;
+                    var result1 = (arithmeticPayload >> 4) & 0x0F;
+                    var source0 = (arithmeticPayload >> 8) & 0x0F;
+                    var source1 = arithmeticPayload >> 12;
+                    if (blockIndex != 0 || pendingHomeLoad < 0
+                        || pendingBackingArithmeticControl is not null
+                        || pendingComparison
+                        || instruction[1] is not (0x01 or 0x02 or 0x05 or 0x06)
+                        || destination != 0 || result1 != 15
+                        || source0 != 0
+                        || (source1 == 1 && pendingRightHomeLoad < 0)
+                        || ((source1 is 14 or 15)
+                            && pendingRightHomeLoad >= 0)
+                        || (source1 != 1 && source1 != 14
+                            && source1 != 15))
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput Body contains an unsupported computed local initializer.");
+                    }
+
+                    pendingBackingArithmeticControl = instruction[1];
+                    pendingBackingArithmeticRightRegister = source1;
                     lastCallSiteRecord = -1;
                 }
                 else if (opcode == 0xD6)
@@ -679,6 +732,8 @@ public static partial class TrRmExecutableCompiler
                         .ReadUInt16LittleEndian(instruction[2..]);
                     if (blockIndex != 0 || instruction[1] != 0x10
                         || pendingHomeLoad < 0
+                        || (pendingRightHomeLoad >= 0
+                            && pendingBackingArithmeticControl is null)
                         || !backingHomeBySourceHome.TryAdd(backingHome,
                             pendingHomeLoad))
                     {
@@ -686,7 +741,38 @@ public static partial class TrRmExecutableCompiler
                             "The direct NativeOutput local copy is malformed.");
                     }
 
+                    if (pendingBackingArithmeticControl is byte control
+                        && !backingArithmeticControlByHome.TryAdd(
+                            backingHome, control))
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput local has duplicate arithmetic initializers.");
+                    }
+
+                    if (pendingBackingArithmeticControl is not null)
+                    {
+                        if (pendingRightHomeLoad >= 0)
+                        {
+                            if (!backingRightHomeByHome.TryAdd(backingHome,
+                                    pendingRightHomeLoad))
+                            {
+                                throw Invalid(
+                                    "A direct NativeOutput local has duplicate right operands.");
+                            }
+                        }
+                        else if (!backingRightRegisterByHome.TryAdd(
+                                backingHome,
+                                checked((byte)pendingBackingArithmeticRightRegister)))
+                        {
+                            throw Invalid(
+                                "A direct NativeOutput local has duplicate immediate operands.");
+                        }
+                    }
+
                     pendingHomeLoad = -1;
+                    pendingRightHomeLoad = -1;
+                    pendingBackingArithmeticControl = null;
+                    pendingBackingArithmeticRightRegister = -1;
                 }
                 else if (opcode == 0xEC)
                 {
@@ -735,6 +821,8 @@ public static partial class TrRmExecutableCompiler
                     var source0 = (comparison >> 8) & 0x0F;
                     var source1 = comparison >> 12;
                     if (instruction[1] != 0 || pendingComparison
+                        || pendingBackingArithmeticControl is not null
+                        || pendingRightHomeLoad >= 0
                         || destination != 0 || secondResult != 15
                         || source0 != 0 || source1 != 14
                         || (pendingHomeLoad < 0
@@ -806,6 +894,8 @@ public static partial class TrRmExecutableCompiler
                 else if (opcode == 0xE4)
                 {
                     if (instruction[1] != 0
+                        || pendingBackingArithmeticControl is not null
+                        || pendingRightHomeLoad >= 0
                         || (pendingHomeLoad < 0
                             && !hasComparisonByBlock[blockIndex])
                         || (pendingHomeLoad >= 0
@@ -875,7 +965,10 @@ public static partial class TrRmExecutableCompiler
                 position += length;
             }
 
-            if (!sawTerminator || pendingHomeLoad >= 0 || pendingComparison)
+            if (!sawTerminator || pendingHomeLoad >= 0
+                || pendingRightHomeLoad >= 0
+                || pendingBackingArithmeticControl is not null
+                || pendingComparison)
             {
                 throw Invalid(
                     "A direct NativeOutput CFG Block has no complete terminator.");
@@ -1095,8 +1188,83 @@ public static partial class TrRmExecutableCompiler
                 variableByHome[homeIndex] = variableIndex;
                 variables.Add(new BoundVariable($"__home{homeIndex}", type,
                     (flags & 1) != 0, default));
+                BoundExpression initializer
+                    = new BoundRead(sourceVariable, type, default);
+                if (backingArithmeticControlByHome.TryGetValue(homeIndex,
+                        out var arithmeticControl))
+                {
+                    BoundExpression rightValue;
+                    if (backingRightHomeByHome.TryGetValue(homeIndex,
+                            out var rightHome))
+                    {
+                        if (rightHome >= homeIndex
+                            || rightHome >= variableByHome.Length)
+                        {
+                            throw Invalid(
+                                "A direct NativeOutput local arithmetic operand must read an earlier Home.");
+                        }
+
+                        var rightVariable = variableByHome[rightHome];
+                        if (rightVariable < 0
+                            || rightVariable >= variables.Count
+                            || (rightVariable >= callerParameterCount
+                                && !backingLocalHomeIndices.Contains(rightHome))
+                            || variables[rightVariable].Type != type)
+                        {
+                            throw Invalid(
+                                "A direct NativeOutput local arithmetic operand differs from its Home.");
+                        }
+
+                        rightValue = new BoundRead(rightVariable, type,
+                            default);
+                    }
+                    else if (backingRightRegisterByHome.TryGetValue(
+                            homeIndex, out var rightRegister))
+                    {
+                        if (!PrimitiveTypeFacts.IsIntegerOrWide(type)
+                            || rightRegister is not (14 or 15))
+                        {
+                            throw Invalid(
+                                "A direct NativeOutput local has an invalid arithmetic constant.");
+                        }
+
+                        var width = PrimitiveTypeFacts.ScalarWidth(type) * 8;
+                        var allBitsLow = width >= sizeof(ulong) * 8
+                            ? ulong.MaxValue : (1UL << width) - 1;
+                        var allBitsHigh = width > sizeof(ulong) * 8
+                            ? ulong.MaxValue : 0;
+                        rightValue = new BoundConstant(new ScalarBits(
+                            rightRegister == 14 ? 0 : allBitsLow,
+                            rightRegister == 14 ? 0 : allBitsHigh), type,
+                            default);
+                    }
+                    else
+                    {
+                        throw Invalid(
+                            "A direct NativeOutput local arithmetic operation has no right operand.");
+                    }
+
+                    var operation = arithmeticControl switch {
+                        0x01 or 0x05 => TokenKind.Plus,
+                        0x02 or 0x06 => TokenKind.Minus,
+                        _ => throw Invalid(
+                            "A direct NativeOutput local has an unsupported arithmetic control."),
+                    };
+                    var overflowBehavior = arithmeticControl switch {
+                        0x01 or 0x02 =>
+                            BoundIntegerOverflowBehavior.Checked,
+                        0x05 or 0x06 =>
+                            BoundIntegerOverflowBehavior.Wrapping,
+                        _ => throw Invalid(
+                            "A direct NativeOutput local has an unsupported arithmetic control."),
+                    };
+                    initializer = new BoundBinary(operation, initializer,
+                        rightValue, type, default) {
+                            OverflowBehavior = overflowBehavior,
+                        };
+                }
                 backingLocalStatements.Add(new BoundLocal(variableIndex,
-                    new BoundRead(sourceVariable, type, default), default));
+                    initializer, default));
                 continue;
             }
 

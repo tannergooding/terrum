@@ -2123,6 +2123,183 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Is.EqualTo(artifact));
     }
 
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x02)]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Wrapping, 0x06)]
+    public void StandardDirectNativeOutputCallsRoundTripComputedLocalInputHome(
+        SourceArithmeticProfile profile,
+        BoundIntegerOverflowBehavior overflowBehavior,
+        byte arithmeticControl)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string moduleIdentity = "native-output-computed-local-input";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Observe")]
+            internal extern int32 Observe(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value,
+                int32 selector);
+
+            internal void Probe(int32 selector) {
+                init mut uint32 value;
+                int32 adjusted = selector + 1;
+                unsafe { Observe(&init value, adjusted); }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions()
+                with { SourceArithmeticProfile = profile });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(2), tables.Contracts.Count);
+        var code = body.GetBlockCode(0).ToArray();
+        var arithmeticOffset = Array.IndexOf(code, (byte)0xC0);
+        Assert.That(arithmeticOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(code[arithmeticOffset + 1],
+            Is.EqualTo(arithmeticControl));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            code.AsSpan(arithmeticOffset + 2)), Is.EqualTo(0xF0F0));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        var locals = new List<BoundLocal>();
+        Assert.That(BoundTreeTraversal.VisitStatements(caller.Body,
+            statement =>
+            {
+                if (statement is BoundLocal local)
+                {
+                    locals.Add(local);
+                }
+            }), Is.True);
+        var adjusted = locals.Single(static local =>
+            local.Initializer is BoundBinary);
+        var initializer = (BoundBinary)adjusted.Initializer!;
+        Assert.That(initializer.Operator, Is.EqualTo(TokenKind.Minus));
+        Assert.That(initializer.OverflowBehavior,
+            Is.EqualTo(overflowBehavior));
+        Assert.That(initializer.Left, Is.TypeOf<BoundRead>());
+        Assert.That(initializer.Right, Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)initializer.Right).Value, Is.EqualTo(-1));
+        BoundCall? call = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundCall candidate
+                    && candidate.Arguments.Any(static argument =>
+                        argument is BoundNativeOutputReservation))
+                {
+                    call = candidate;
+                }
+            }), Is.True);
+        Assert.That(call, Is.Not.Null);
+        Assert.That(call!.Arguments[1], Is.TypeOf<BoundRead>());
+        Assert.That(((BoundRead)call.Arguments[1]).Variable,
+            Is.EqualTo(adjusted.Variable));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+    }
+
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x01)]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Wrapping, 0x05)]
+    public void StandardDirectNativeOutputCallsRoundTripBinaryLocalInputHome(
+        SourceArithmeticProfile profile,
+        BoundIntegerOverflowBehavior overflowBehavior,
+        byte arithmeticControl)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string moduleIdentity = "native-output-binary-local-input";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Observe")]
+            internal extern int32 Observe(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value,
+                int32 selector);
+
+            internal void Probe(int32 left, int32 right) {
+                init mut uint32 value;
+                int32 adjusted = left + right;
+                unsafe { Observe(&init value, adjusted); }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions()
+                with { SourceArithmeticProfile = profile });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(2), tables.Contracts.Count);
+        var code = body.GetBlockCode(0).ToArray();
+        var arithmeticOffset = Array.IndexOf(code, (byte)0xC0);
+        Assert.That(arithmeticOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(code[arithmeticOffset + 1],
+            Is.EqualTo(arithmeticControl));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            code.AsSpan(arithmeticOffset + 2)), Is.EqualTo(0x10F0));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        var local = new List<BoundLocal>();
+        Assert.That(BoundTreeTraversal.VisitStatements(caller.Body,
+            statement =>
+            {
+                if (statement is BoundLocal candidate)
+                {
+                    local.Add(candidate);
+                }
+            }), Is.True);
+        var adjusted = local.Single(static candidate =>
+            candidate.Initializer is BoundBinary);
+        var initializer = (BoundBinary)adjusted.Initializer!;
+        Assert.That(initializer.Operator, Is.EqualTo(TokenKind.Plus));
+        Assert.That(initializer.OverflowBehavior,
+            Is.EqualTo(overflowBehavior));
+        Assert.That(initializer.Left, Is.TypeOf<BoundRead>());
+        Assert.That(((BoundRead)initializer.Left).Variable, Is.EqualTo(0));
+        Assert.That(initializer.Right, Is.TypeOf<BoundRead>());
+        Assert.That(((BoundRead)initializer.Right).Variable, Is.EqualTo(1));
+        BoundCall? call = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundCall candidate
+                    && candidate.Arguments.Any(static argument =>
+                        argument is BoundNativeOutputReservation))
+                {
+                    call = candidate;
+                }
+            }), Is.True);
+        Assert.That(call, Is.Not.Null);
+        Assert.That(call!.Arguments[1], Is.TypeOf<BoundRead>());
+        Assert.That(((BoundRead)call.Arguments[1]).Variable,
+            Is.EqualTo(adjusted.Variable));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+    }
+
     [Test]
     public void StandardDirectNativeOutputCallsReserveMultipleFormalHomes()
     {
