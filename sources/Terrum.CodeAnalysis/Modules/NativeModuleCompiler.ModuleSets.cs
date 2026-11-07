@@ -38,9 +38,37 @@ public static partial class NativeModuleCompiler
 
     /// <summary>Emits the consumer once, binding its imports to checked producer identities.</summary>
     public static byte[] CreateConsumerSet(BoundProgram program, IReadOnlyList<byte[]> producers,
-        NativeRuntimePolicy runtimePolicy)
+        NativeRuntimePolicy runtimePolicy) =>
+        CreateConsumerSetCore(program, producers, runtimePolicy,
+            identityInputs: null);
+
+    /// <summary>Creates a set consumer with explicit nominal declaration identities.</summary>
+    /// <param name="program">The verified consumer program snapshot.</param>
+    /// <param name="producers">The selected producer packages.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The package containing the consumer executable and provider set.</returns>
+    public static byte[] CreateConsumerSet(BoundProgram program,
+        IReadOnlyList<byte[]> producers, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs identityInputs)
+    {
+        ArgumentNullException.ThrowIfNull(identityInputs);
+        return CreateConsumerSetCore(program, producers, runtimePolicy,
+            identityInputs);
+    }
+
+    private static byte[] CreateConsumerSetCore(BoundProgram program,
+        IReadOnlyList<byte[]> producers, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (identityInputs is not null && !identityInputs.IsFor(program))
+        {
+            throw new ArgumentException(
+                "Private nominal identity inputs were captured for another bound-program snapshot.",
+                nameof(identityInputs));
+        }
+        var sourceProgram = program;
         CheckPolicy(runtimePolicy);
         var providers = ReadProviders(producers);
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
@@ -50,9 +78,13 @@ public static partial class NativeModuleCompiler
         var importProviders = providers.Select(static provider =>
             (provider.Package.Identity, provider.Package.Policy, provider.Reference)).ToArray();
         program = BindModuleImportBindings(program, importProviders);
+        if (identityInputs is not null)
+        {
+            identityInputs = identityInputs.Rebind(sourceProgram, program);
+        }
         var referenceSet = CreateReferenceSet(providers);
         var semantic = ModuleCompiler.CreateConsumerAgainstReference(program, referenceSet,
-            allowManagedParticipant: true);
+            allowManagedParticipant: true, identityInputs: identityInputs);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(semantic);
         var directImportExpectations = CreateDirectImportExpectations(
             program, contractSnapshot.ParsedModule.Structures);

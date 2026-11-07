@@ -10,7 +10,6 @@ public static partial class ModuleCompiler
 {
     // Provisional bounded semantic IR only; canonical TRRM (1, 0) reserved bits stay reserved.
     private const int FixedLayoutVersion = 78;
-    private const int PrivateSpanFixedLayoutVersion = 81;
 
     private static Module SelectFixedLayoutRevision(Module module)
     {

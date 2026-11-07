@@ -28,7 +28,8 @@ internal static class NativeModuleImageValidator
     internal static void Validate(byte[] image, bool isConsumer,
         IReadOnlyDictionary<string, IReadOnlyList<string>> providerImports, IReadOnlyList<string> exports,
         NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast, bool allowOwnedBufferRuntime = false,
-        bool allowManagedRuntimeData = false)
+        bool allowManagedRuntimeData = false,
+        IReadOnlyDictionary<string, NativeImportBinding>? directImportExports = null)
     {
         if (policy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -137,6 +138,8 @@ internal static class NativeModuleImageValidator
                 }
             }
             var sourceFunctionStarts = isConsumer ? null : new HashSet<int>(exports.Count);
+            var importSlots = new Dictionary<(string DllName, string ExportName), int>();
+            var unwindEndRva = 0;
             CheckImports();
             CheckUnwind();
             if (!isConsumer)
@@ -324,7 +327,8 @@ internal static class NativeModuleImageValidator
                     for (var symbol = 0; symbol <= 1024; symbol++)
                     {
                         var hint = Rva64(checked(lookup + (symbol * 8)));
-                        var iat = Rva64(checked(address + (symbol * 8)), importSection);
+                        var iatSlotRva = checked(address + (symbol * 8));
+                        var iat = Rva64(iatSlotRva, importSection);
                         if (hint != iat)
                         {
                             throw Invalid();
@@ -338,6 +342,10 @@ internal static class NativeModuleImageValidator
                             throw Invalid();
                         }
                         var symbolName = Name(hint + 2);
+                        if (!importSlots.TryAdd((dll.ToUpperInvariant(), symbolName), iatSlotRva))
+                        {
+                            throw Invalid();
+                        }
                         if (previousSymbol is not null
                             && StringComparer.Ordinal.Compare(previousSymbol, symbolName) >= 0)
                         {
@@ -469,7 +477,11 @@ internal static class NativeModuleImageValidator
                 // The fixed runtime prelude is allocation-only; current source
                 // functions and cleanup funclets use saved-frame layouts.
                 var sourceStart = isConsumer ? 6 : 4;
-                if (table.Size / NativeUnwind.RuntimeFunctionSize <= sourceStart)
+                var unwindCount = table.Size / NativeUnwind.RuntimeFunctionSize;
+                var thunkOnlyProvider = !isConsumer && directImportExports is { Count: > 0 }
+                    && directImportExports.Count == exports.Count;
+                if (unwindCount < sourceStart
+                    || (unwindCount == sourceStart && !thunkOnlyProvider))
                 {
                     throw Invalid();
                 }
@@ -638,6 +650,11 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
+                unwindEndRva = checked((int)previousEnd);
+                if (!sawSourceFrame && !thunkOnlyProvider)
+                {
+                    throw Invalid();
+                }
             }
 
             void CheckExports(IReadOnlyList<string> expected)
@@ -655,16 +672,62 @@ internal static class NativeModuleImageValidator
                 var names = Read32(at + 32);
                 var ordinals = Read32(at + 36);
                 var sorted = SortOrdinalIfNeeded(expected);
+                var thunkCount = directImportExports?.Count ?? 0;
+                var thunkBytes = checked(thunkCount * 6);
+                var textSection = sections[0];
+                if (thunkBytes > textSection.VirtualSize)
+                {
+                    throw Invalid();
+                }
+                var firstThunkRva = checked(textSection.VirtualAddress
+                    + textSection.VirtualSize - thunkBytes);
+                if (thunkCount != 0 && firstThunkRva < unwindEndRva)
+                {
+                    throw Invalid();
+                }
+                var thunkIndex = 0;
                 for (var index = 0; index < count; index++)
                 {
                     var ordinal = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals + (index * 2), 2), 2));
                     var address = Rva32(functions + (index * 4));
-                    _ = Offset(address, 1, ".text");
-                    if (ordinal != index || sourceFunctionStarts is null || !sourceFunctionStarts.Contains(address)
-                        || Name(Rva32(names + (index * 4))) != sorted[index])
+                    var name = Name(Rva32(names + (index * 4)));
+                    if (ordinal != index || name != sorted[index])
                     {
                         throw Invalid();
                     }
+                    if (directImportExports is not null
+                        && directImportExports.TryGetValue(name, out var directImport))
+                    {
+                        var expectedThunkRva = checked(firstThunkRva + (thunkIndex * 6));
+                        if (address != expectedThunkRva)
+                        {
+                            throw Invalid();
+                        }
+                        var thunk = OffsetInSection(address, 6, textSection);
+                        if (image[thunk] != 0xFF || image[thunk + 1] != 0x25)
+                        {
+                            throw Invalid();
+                        }
+                        var displacement = BinaryPrimitives.ReadInt32LittleEndian(
+                            image.AsSpan(thunk + 2, 4));
+                        var targetRva = checked(address + 6 + displacement);
+                        if (!importSlots.TryGetValue(
+                                (directImport.DllName.ToUpperInvariant(), directImport.ExportName),
+                                out var expectedIatRva)
+                            || targetRva != expectedIatRva)
+                        {
+                            throw Invalid();
+                        }
+                        thunkIndex++;
+                    }
+                    else if (sourceFunctionStarts is null || !sourceFunctionStarts.Contains(address))
+                    {
+                        throw Invalid();
+                    }
+                }
+                if (thunkIndex != thunkCount)
+                {
+                    throw Invalid();
                 }
             }
         }

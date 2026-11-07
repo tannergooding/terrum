@@ -9,19 +9,31 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class ModuleCompiler
 {
-    private const int PrivateSpanVersion = 77;
-
     private sealed class ModuleWriter(Stream stream)
         : BinaryWriter(stream, StrictUtf8, leaveOpen: true)
     {
+        internal int FormatVersion { get; init; }
         internal ImmutableArray<BoundStruct> Structures { get; init; } = [];
+        internal ImmutableArray<BoundClass> Classes { get; init; } = [];
         internal ImmutableArray<NativeFunctionPointerSignatureDefinition>
-            NativeFunctionPointerSignatures { get; init; } = [];
+            NativeFunctionPointerSignatures
+        { get; init; } = [];
         internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
         internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; init; } = [];
+        internal ImmutableArray<CheckedReferenceTypeDefinition>
+            CheckedReferenceTypes { get; init; } = [];
+        internal ImmutableArray<BoundPrivateNominalTypeOrigin>
+            NominalTypeOrigins { get; init; } = [];
+        internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
+        internal ImmutableArray<HostBuffer> InvocationBuffers { get; init; } = [];
+        internal ImmutableArray<BoundFunction> SourceFunctions { get; init; } = [];
+        internal BoundProgram? SourceProgram { get; init; }
+        internal ImmutableArray<ModuleFunction> ModuleFunctions { get; init; } = [];
+        internal BoundFunction? CurrentSourceFunction { get; set; }
         internal ImmutableArray<BoundVariable> CurrentVariables { get; set; } = [];
         internal int CurrentParameterCount { get; set; }
         internal bool CurrentIsConstructor { get; set; }
+        internal PrimitiveType CurrentReturnType { get; set; }
         internal HashSet<int> AddressOnlyNestedBackingVariables { get; set; } = [];
         internal int CurrentNestedBackingVariable { get; set; } = -1;
     }
@@ -30,13 +42,25 @@ public static partial class ModuleCompiler
     {
         internal int FormatVersion { get; set; }
         internal ImmutableArray<BoundStruct> Structures { get; set; } = [];
+        internal ImmutableArray<BoundClass> Classes { get; set; } = [];
         internal ImmutableArray<NativeFunctionPointerSignatureDefinition>
-            NativeFunctionPointerSignatures { get; set; } = [];
+            NativeFunctionPointerSignatures
+        { get; set; } = [];
         internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; set; } = [];
+        internal ImmutableArray<CheckedReferenceTypeDefinition>
+            CheckedReferenceTypes { get; set; } = [];
+        internal ImmutableArray<BoundEnumDefinition>
+            EnumDefinitions { get; set; } = [];
+        internal bool HasReadEnumDefinitions { get; set; }
+        internal ImmutableArray<BoundPrivateNominalTypeOrigin>
+            NominalTypeOrigins { get; set; } = [];
+        internal ImmutableArray<HostBuffer> InvocationBuffers { get; set; } = [];
+        internal bool HasReadCheckedReferenceTypes { get; set; }
         internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; set; } = [];
         internal ImmutableArray<BoundVariable> CurrentVariables { get; set; } = [];
         internal int CurrentParameterCount { get; set; }
         internal bool CurrentIsConstructor { get; set; }
+        internal PrimitiveType CurrentReturnType { get; set; }
         internal int CurrentNestedBackingVariable { get; set; } = -1;
     }
 

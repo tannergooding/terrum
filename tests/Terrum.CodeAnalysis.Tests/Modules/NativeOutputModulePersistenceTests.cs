@@ -17,13 +17,15 @@ using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Native.Modules;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules;
 
-public sealed class NativeOutputModulePersistenceTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeOutputModulePersistenceTests
 {
     private const int RevisionOffset = sizeof(int);
-    private const int Revision100 = 100;
+    private const int Revision104 = 104;
 
     private const string OutputSource = """
         [Blittable]
@@ -116,30 +118,30 @@ public sealed class NativeOutputModulePersistenceTests
         """;
 
     [Test]
-    public void ProducerUsesExactRevision100AndRejectsOtherRevisions()
+    public void DirectNativeImportProducerUsesExactRevision106AndRejectsOtherRevisions()
     {
         var artifact = CreateOutputProducer();
-        Assert.That(ReadRevision(artifact), Is.EqualTo(Revision100));
+        Assert.That(ReadRevision(artifact), Is.EqualTo(106));
         Assert.That(ModuleCompiler.CreateReference(artifact), Is.Not.Null);
 
         foreach (var revision in new[] {
             76, 79, 80, 82, 83, 84, 85, 86, 87, 88, 89, 92,
-            93, 94, 95, 96, 97, 98, 99, 101,
+            93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105,
         })
         {
             var forged = (byte[])artifact.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(RevisionOffset), revision);
-            Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged),
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged),
                 $"revision {revision} must be rejected before decoding");
         }
     }
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task FlatFixedArrayOperationsRoundTripThroughRevision100Async(
+    public async Task FlatFixedArrayOperationsRoundTripThroughRevision104Async(
         BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 ReadArray() {
                 mut [uint32; 3] values = [10, 20, 30];
                 values[1] = values[0] + 1;
@@ -155,7 +157,7 @@ public sealed class NativeOutputModulePersistenceTests
         var program = compilation.Program
             ?? throw new AssertionException("Expected a bound program.");
         var artifact = ModuleCompiler.CreateProducer(program, ["ReadArray"]);
-        Assert.That(ReadRevision(artifact), Is.EqualTo(Revision100));
+        Assert.That(ReadRevision(artifact), Is.EqualTo(Revision104));
 
         using var stream = new MemoryStream(artifact, writable: false);
         using var reader = new BinaryReader(stream);
@@ -191,19 +193,19 @@ public sealed class NativeOutputModulePersistenceTests
         BinaryPrimitives.WriteUInt64LittleEndian(
             malformed.AsSpan(arrayRowOffset + sizeof(int) + (sizeof(ulong) * 2)),
             11);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(malformed));
         var invalidElementType = (byte[])artifact.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             invalidElementType.AsSpan(arrayRowOffset),
             (int)NativeFixedArrayTypes.Type(1));
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(invalidElementType));
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(
             artifact.AsSpan(0, arrayRowOffset + (44 * arrayTypeCount) - 1)
                 .ToArray()));
 
-        var consumerCompilation = Compilation.Create(
+        var consumerCompilation = Create(
             SyntaxTree.Parse("""
                 int32 Main() {
                     mut [uint16; 2] small = [1, 2];
@@ -226,11 +228,11 @@ public sealed class NativeOutputModulePersistenceTests
     }
 
     [Test]
-    public void FlatFixedArrayBodiesRoundTripThroughRevision100ModuleSets()
+    public void FlatFixedArrayBodiesRoundTripThroughRevision104ModuleSets()
     {
-        var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var firstCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Add(int32 value) { return value; }"));
-        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var secondCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 AddTwo(int32 value) { return value; }"));
         Assert.That(firstCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, firstCompilation.Diagnostics));
@@ -241,7 +243,7 @@ public sealed class NativeOutputModulePersistenceTests
         var second = ModuleCompiler.CreateProducer(secondCompilation.Program!,
             ["AddTwo"]);
         var reference = ModuleCompiler.CreateReferenceSet([first, second]);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut [uint32; 2] values = [20, 22];
                 return Add(int32(values[0])) + AddTwo(int32(values[1]));
@@ -252,14 +254,14 @@ public sealed class NativeOutputModulePersistenceTests
 
         var consumer = ModuleCompiler.CreateConsumerSet(
             consumerCompilation.Program!, [first, second]);
-        Assert.That(ReadRevision(consumer), Is.EqualTo(Revision100));
+        Assert.That(ReadRevision(consumer), Is.EqualTo(Revision104));
         ModuleCompiler.ValidateConsumerSet(consumer, [first, second]);
     }
 
     [Test]
-    public void FlatFixedArrayBodiesRoundTripThroughRevision100GraphLibraries()
+    public void FlatFixedArrayBodiesRoundTripThroughRevision104GraphLibraries()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 ReadArray() {
                 mut [uint32; 2] values = [20, 22];
                 return int32(values[0] + values[1]);
@@ -272,7 +274,7 @@ public sealed class NativeOutputModulePersistenceTests
 
         var graph = ModuleCompiler.CreateGraphLibrary(compilation.Program!,
             ["ReadArray"], dependencies);
-        Assert.That(ReadRevision(graph), Is.EqualTo(Revision100));
+        Assert.That(ReadRevision(graph), Is.EqualTo(Revision104));
         Assert.That(ModuleCompiler.CreateGraphReference(graph, ["ReadArray"]),
             Is.Not.Null);
     }
@@ -282,13 +284,13 @@ public sealed class NativeOutputModulePersistenceTests
     public void FlatArrayProviderReplacementRemapsPrivateRows(
         BoundRuntimePolicy policy)
     {
-        var originalCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var originalCompilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 ReadArray() {
                 mut [uint32; 3] values = [10, 20, 30];
                 return int32(values[1]);
             }
             """), policy);
-        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var replacementCompilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 ReadArray() {
                 mut [uint64; 1] values = [42];
                 return int32(values[0]);
@@ -302,7 +304,7 @@ public sealed class NativeOutputModulePersistenceTests
             originalCompilation.Program!, ["ReadArray"]);
         var replacement = ModuleCompiler.CreateProducer(
             replacementCompilation.Program!, ["ReadArray"]);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut [uint16; 2] local = [1, 2];
                 return ReadArray() + int32(local[0]);
@@ -348,9 +350,9 @@ public sealed class NativeOutputModulePersistenceTests
             public int32 Read(Element value) { return int32(value.Value); }
             """;
 
-        var originalCompilation = Compilation.CreateLibrary(
+        var originalCompilation = CreateLibrary(
             SyntaxTree.Parse(OriginalSource), policy);
-        var changedCompilation = Compilation.CreateLibrary(
+        var changedCompilation = CreateLibrary(
             SyntaxTree.Parse(ChangedSource), policy);
         Assert.That(originalCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, originalCompilation.Diagnostics));
@@ -360,7 +362,7 @@ public sealed class NativeOutputModulePersistenceTests
             originalCompilation.Program!, ["Make", "Read"]);
         var changed = ModuleCompiler.CreateProducer(
             changedCompilation.Program!, ["Make", "Read"]);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut [Element; 2] values = [Make(20), Make(22)];
                 return Read(values[0]) + Read(values[1]);
@@ -373,14 +375,14 @@ public sealed class NativeOutputModulePersistenceTests
 
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, original),
             (NativeRuntimePolicy)policy), Is.EqualTo(42));
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.Link(consumer, changed));
     }
 
     [Test]
     public void ProducerPrunesUnreferencedArraysAndCanonicalizesFirstUseOrder()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             uint32 Seed() { return 10; }
             public int32 ReadArray() {
                 mut [uint32; 3] values = [Seed(), 20, 30];
@@ -436,9 +438,9 @@ public sealed class NativeOutputModulePersistenceTests
     }
 
     [Test]
-    public void FlatArrayOperationsUseRevision100FramingVectors()
+    public void FlatArrayOperationsUseRevision104FramingVectors()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 Probe() {
                 mut [uint32; 2] values = [10, 20];
                 values[0] = 30;
@@ -452,7 +454,7 @@ public sealed class NativeOutputModulePersistenceTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = ModuleCompiler.CreateProducer(compilation.Program!,
             ["Probe"]);
-        Assert.That(ReadRevision(artifact), Is.EqualTo(Revision100));
+        Assert.That(ReadRevision(artifact), Is.EqualTo(Revision104));
         Assert.That(FindFlatArrayRecord(artifact, 43,
             NativeFixedArrayTypes.Type(0), 59), Is.GreaterThanOrEqualTo(0));
         Assert.That(FindFlatArrayRecord(artifact, 44,
@@ -466,7 +468,7 @@ public sealed class NativeOutputModulePersistenceTests
         var shortInitializer = (byte[])artifact.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             shortInitializer.AsSpan(initializerOffset + 13, sizeof(int)), 1);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(shortInitializer));
 
         var elementOffset = FindFlatArrayRecord(artifact, 44,
@@ -474,7 +476,7 @@ public sealed class NativeOutputModulePersistenceTests
         var wrongElementLocal = (byte[])artifact.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             wrongElementLocal.AsSpan(elementOffset + 13, sizeof(int)), 1);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(wrongElementLocal));
 
         var addressOffset = FindFlatArrayRecord(artifact, 45,
@@ -482,7 +484,7 @@ public sealed class NativeOutputModulePersistenceTests
         var onePastAddress = (byte[])artifact.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(
             onePastAddress.AsSpan(addressOffset + 21 + 13, sizeof(int)), 2);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(onePastAddress));
 
         var writeOffset = FindFlatArrayRecord(artifact, 46,
@@ -491,14 +493,14 @@ public sealed class NativeOutputModulePersistenceTests
         BinaryPrimitives.WriteInt32LittleEndian(
             wrongWriteValue.AsSpan(writeOffset + 42 + 1, sizeof(int)),
             (int)PrimitiveType.Int32);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(wrongWriteValue));
     }
 
     [Test]
-    public void MetadataOnlyNestedAndPointerArrayRecipesSurviveRevision100()
+    public void MetadataOnlyNestedAndPointerArrayRecipesSurviveRevision104()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var compilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Value() { return 42; }"));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -523,7 +525,7 @@ public sealed class NativeOutputModulePersistenceTests
         };
 
         var artifact = ModuleCompiler.CreateProducer(metadataProgram, ["Value"]);
-        Assert.That(ReadRevision(artifact), Is.EqualTo(Revision100));
+        Assert.That(ReadRevision(artifact), Is.EqualTo(Revision104));
         using var stream = new MemoryStream(artifact, writable: false);
         using var reader = new BinaryReader(stream);
         _ = reader.ReadInt32();
@@ -578,7 +580,7 @@ public sealed class NativeOutputModulePersistenceTests
         Assert.That(ModuleCompiler.CreateProducer(reorderedProgram, ["Value"]),
             Is.EqualTo(artifact));
 
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut [uint16; 2] local = [1, 2];
                 return Value() + int32(local[0]);
@@ -602,39 +604,43 @@ public sealed class NativeOutputModulePersistenceTests
         var runtimePointerProgram = metadataProgram with {
             Functions = [pointerValueFunction],
         };
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             ModuleCompiler.CreateProducer(runtimePointerProgram, ["Value"]));
     }
 
     [Test]
-    public void Revision100RejectsRuntimeNestedArrayLocals()
+    public void Revision104RejectsRuntimeNestedArrayLocals()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 Nested() {
                 mut [[uint32; 2]; 2] values = [[1, 2], [3, 4]];
-                return 0;
+                return int32(values[0][0]);
             }
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        Assert.Throws<ModuleContractException>(() =>
+        var exception = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(compilation.Program!, ["Nested"]));
+        Assert.That(exception!.Message,
+            Does.Contain("nested fixed-array backing outside the selected private nested-backing profile"));
     }
 
     [Test]
-    public void Revision100DistinguishesZeroPayloadNominalElementsFromUnit()
+    public void Revision104DistinguishesZeroPayloadNominalElementsFromUnit()
     {
         var structures = ImmutableArray.Create(new BoundStruct("ZeroNominal",
             [new BoundStructField("Tag", PrimitiveType.Void, 0, 0)], 0) {
             IsTransparent = true,
             BlittableTargetRequirement =
                 FixedLayoutStorage.WindowsX64TargetRequirement,
+            Alignment = 0,
+            RequiredAlignment = 1,
         });
         var nominalArrays = new List<BoundNativeFixedArrayType>();
         Assert.That(NativeFixedArrayContract.TryCreateType(
             (PrimitiveType)100, 0, structures, nominalArrays,
-            out var nominalArrayType, out var nominalLayout), Is.True);
+            out _, out var nominalLayout), Is.True);
         Assert.That(nominalLayout.ElementStride, Is.Zero);
         Assert.That(NativeFixedArrayContract.IsValidTable(structures,
             nominalArrays), Is.True);
@@ -655,9 +661,9 @@ public sealed class NativeOutputModulePersistenceTests
     }
 
     [Test]
-    public void Revision100RejectsRecursivePointerArrayMetadataRecipes()
+    public void Revision104RejectsRecursivePointerArrayMetadataRecipes()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var compilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Value() { return 42; }"));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -679,17 +685,17 @@ public sealed class NativeOutputModulePersistenceTests
             forged.NativePointerTypes, forged.Structures,
             forged.NativeFunctionPointerSignatures,
             forged.NativeFixedArrayTypes), Is.False);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(forged, ["Value"]));
     }
 
     [Test]
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task UnitFixedArrayOperationsRoundTripThroughRevision100Async(
+    public async Task UnitFixedArrayOperationsRoundTripThroughRevision104Async(
         BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 UnitArray() {
                 mut [void; 2] values = [(), ()];
                 values[1] = values[0];
@@ -716,10 +722,10 @@ public sealed class NativeOutputModulePersistenceTests
         BinaryPrimitives.WriteInt64LittleEndian(
             invalidUnitPayload.AsSpan(initializerOffset + 17 + 13,
                 sizeof(long)), 1);
-        Assert.Throws<ModuleFormatException>(
+        _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(invalidUnitPayload));
 
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+        var consumerCompilation = Create(SyntaxTree.Parse(
             "int32 Main() { return UnitArray(); }"),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -736,10 +742,10 @@ public sealed class NativeOutputModulePersistenceTests
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task EmptyPositivePayloadArrayRoundTripsThroughRevision100Async(
+    public async Task EmptyPositivePayloadArrayRoundTripsThroughRevision104Async(
         BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 EmptyArray() {
                 mut [uint32; 0] values = [];
                 return 42;
@@ -754,7 +760,7 @@ public sealed class NativeOutputModulePersistenceTests
         _ = FindFlatArrayRecord(producer, 43,
             NativeFixedArrayTypes.Type(0), 17, elementCount: 0);
 
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+        var consumerCompilation = Create(SyntaxTree.Parse(
             "int32 Main() { return EmptyArray(); }"),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -818,7 +824,7 @@ public sealed class NativeOutputModulePersistenceTests
     [Test]
     public void MetadataOnlyArrayFieldsSurvivePrivateLinkRemapping()
     {
-        var providerCompilation = Compilation.CreateLibrary(
+        var providerCompilation = CreateLibrary(
             SyntaxTree.Parse("public int32 Value() { return 42; }"));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
@@ -831,7 +837,7 @@ public sealed class NativeOutputModulePersistenceTests
         Assert.That(providerReference.Structures.Any(structure =>
             structure.Name == "ProviderDescription"), Is.False);
 
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+        var consumerCompilation = Create(SyntaxTree.Parse(
             "int32 Main() { return Value(); }"),
             providerReference);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -851,7 +857,7 @@ public sealed class NativeOutputModulePersistenceTests
     [Test]
     public void MetadataOnlyArrayFieldsRejectMalformedRowsAndRuntimeCarriers()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var compilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Value() { return 42; }"));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -868,7 +874,7 @@ public sealed class NativeOutputModulePersistenceTests
             Structures = program.Structures.SetItem(structureIndex,
                 malformedStructure),
         };
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             ModuleCompiler.CreateProducer(malformed, ["Value"]));
 
         var artifact = ModuleCompiler.CreateProducer(program, ["Value"]);
@@ -879,16 +885,25 @@ public sealed class NativeOutputModulePersistenceTests
         BinaryPrimitives.WriteInt32LittleEndian(
             forgedArtifact.AsSpan(fieldTypeOffset),
             (int)NativeFixedArrayTypes.Type(99));
-        Assert.Throws<ModuleFormatException>(() =>
+        _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(forgedArtifact));
 
         var structureType = (PrimitiveType)(100 + structureIndex);
-        var function = program.Functions[0] with {
+        var sourceFunction = program.Functions[0];
+        var function = sourceFunction with {
             Variables = [new BoundVariable("metadata", structureType, false,
-                default)],
+                default) {
+                IsInitializationLocal = true,
+            }],
+            Body = sourceFunction.Body with {
+                Statements = [
+                    new BoundVacantLocal(0, default),
+                    .. sourceFunction.Body.Statements,
+                ],
+            },
         };
         var runtimeCarrier = program with { Functions = [function] };
-        Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<NotSupportedException>(() =>
             ModuleCompiler.CreateProducer(runtimeCarrier, ["Value"]));
 
         var classRuntimeCarrier = program with {
@@ -903,7 +918,7 @@ public sealed class NativeOutputModulePersistenceTests
                 },
             ],
         };
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(classRuntimeCarrier, ["Value"]));
         var nestedClassRuntimeCarrier = ImmutableArray.Create(
             new BoundClass("PointerOwner", [
@@ -924,13 +939,13 @@ public sealed class NativeOutputModulePersistenceTests
     [Test]
     public void PrivateConsumerReaderRejectsArrayDerivedManagedClassFields()
     {
-        var providerCompilation = Compilation.CreateLibrary(
+        var providerCompilation = CreateLibrary(
             SyntaxTree.Parse("public int32 Export() { return 42; }"));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = ModuleCompiler.CreateProducer(
             providerCompilation.Program!, ["Export"]);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             class Leaf {
                 public int32 Value;
                 public Leaf(int32 value) { Value = value; }
@@ -954,7 +969,7 @@ public sealed class NativeOutputModulePersistenceTests
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(classFieldTypeOffset),
             (int)NativePointerTypes.Type(0));
-        Assert.Throws<ModuleFormatException>(() =>
+        _ = Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.GetConsumerCallImports(malformed));
     }
 
@@ -967,7 +982,7 @@ public sealed class NativeOutputModulePersistenceTests
         var reference = NativeModuleCompiler.CreateReference(producer);
         Assert.That(reference.Functions.Length, Is.EqualTo(1));
 
-        var consumerCompilation = Compilation.Create(
+        var consumerCompilation = Create(
             SyntaxTree.Parse("int32 Main() { return Value(); }"), reference,
             BoundRuntimePolicy.FailFast);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -985,13 +1000,13 @@ public sealed class NativeOutputModulePersistenceTests
         BoundRuntimePolicy policy)
     {
         var nativePolicy = (NativeRuntimePolicy)policy;
-        var arrayProviderCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var arrayProviderCompilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 ReadArray() {
                 mut [uint32; 2] values = [20, 22];
                 return int32(values[0] + values[1]);
             }
             """), policy);
-        var scalarProviderCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var scalarProviderCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Identity(int32 value) { return value; }"), policy);
         Assert.That(arrayProviderCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, arrayProviderCompilation.Diagnostics));
@@ -1009,7 +1024,7 @@ public sealed class NativeOutputModulePersistenceTests
         var reference = NativeModuleCompiler.CreateReferenceSet(
             [arrayProvider, scalarProvider]);
         Assert.That(reference.NativeFixedArrayTypes, Is.Empty);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut [uint32; 2] local = [1, 2];
                 return ReadArray() + Identity(int32(local[0]));
@@ -1025,7 +1040,7 @@ public sealed class NativeOutputModulePersistenceTests
             [scalarProvider, arrayProvider], TimeSpan.FromSeconds(10),
             nativePolicy).ConfigureAwait(true), Is.EqualTo(43));
 
-        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var replacementCompilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 ReadArray() {
                 mut [uint64; 1] values = [50];
                 return int32(values[0]);
@@ -1050,14 +1065,14 @@ public sealed class NativeOutputModulePersistenceTests
         BoundRuntimePolicy policy)
     {
         var nativePolicy = (NativeRuntimePolicy)policy;
-        var baseCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var baseCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Identity(int32 value) { return value; }"), policy);
         Assert.That(baseCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, baseCompilation.Diagnostics));
         var baseProvider = NativeModuleCompiler.CreateProducer(
             baseCompilation.Program!, ["Identity"], "ArrayGraphBase",
             nativePolicy);
-        var graphCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var graphCompilation = CreateLibrary(SyntaxTree.Parse("""
             public int32 ReadArray() {
                 mut [uint32; 2] values = [20, 22];
                 return Identity(int32(values[0] + values[1]));
@@ -1076,7 +1091,7 @@ public sealed class NativeOutputModulePersistenceTests
             [graphProvider, baseProvider]);
         Assert.That(graphReference.NativeFixedArrayTypes, Is.Empty);
 
-        var consumerCompilation = Compilation.Create(
+        var consumerCompilation = Create(
             SyntaxTree.Parse("int32 Main() { return ReadArray(); }"),
             graphReference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1089,7 +1104,7 @@ public sealed class NativeOutputModulePersistenceTests
             [graphProvider, baseProvider], TimeSpan.FromSeconds(10),
             nativePolicy).ConfigureAwait(true), Is.EqualTo(42));
 
-        var replacementGraphCompilation = Compilation.CreateLibrary(
+        var replacementGraphCompilation = CreateLibrary(
             SyntaxTree.Parse("""
                 public int32 ReadArray() {
                     mut [uint64; 1] values = [50];
@@ -1114,12 +1129,12 @@ public sealed class NativeOutputModulePersistenceTests
     [Test]
     public void ConsumerRejectsRetiredNoThrowTokenInImportedContract()
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Helper() { return 40; }"));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = ModuleCompiler.CreateProducer(providerCompilation.Program!, ["Helper"]);
-        var consumerCompilation = Compilation.Create(
+        var consumerCompilation = Create(
             SyntaxTree.Parse("int32 Main() { return Helper(); }"),
             ModuleCompiler.CreateReference(provider));
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1136,7 +1151,7 @@ public sealed class NativeOutputModulePersistenceTests
     [Test]
     public void NoThrowIsStillAcceptedAsAnOrdinaryFunctionName()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var compilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 NoThrow() { return 40; }"));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1152,7 +1167,7 @@ public sealed class NativeOutputModulePersistenceTests
         var reservationOffset = FindReservation(forged);
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(reservationOffset + 13), int.MaxValue);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
     }
 
     [Test]
@@ -1163,7 +1178,7 @@ public sealed class NativeOutputModulePersistenceTests
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(reservationOffset + 17),
             (int)PrimitiveType.Int32);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
     }
 
     [Test]
@@ -1174,7 +1189,7 @@ public sealed class NativeOutputModulePersistenceTests
         BinaryPrimitives.WriteInt32LittleEndian(
             forged.AsSpan(outputOffset + sizeof(uint)), (int)PrimitiveType.Int32);
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
     }
 
     [Test]
@@ -1182,7 +1197,7 @@ public sealed class NativeOutputModulePersistenceTests
     {
         var original = CreateOutputWrapperProducer(packetFirst: false);
         var reordered = CreateOutputWrapperProducer(packetFirst: true);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+        var consumerCompilation = Create(SyntaxTree.Parse(
             "int32 Main() { return ReadAndReturn(); }"),
             ModuleCompiler.CreateReference(original));
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1203,9 +1218,9 @@ public sealed class NativeOutputModulePersistenceTests
         AssertOutputDependencyProjection(reorderedReference.Functions, reorderedReference.Structures);
 
         var helper = ModuleCompiler.CreateProducer(
-            Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Helper() { return 40; }")).Program!,
+            CreateLibrary(SyntaxTree.Parse("public int32 Helper() { return 40; }")).Program!,
             ["Helper"]);
-        var consumerCompilation = Compilation.Create(
+        var consumerCompilation = Create(
             SyntaxTree.Parse(CreateDependencyOutputConsumerSource(packetFirst: false)),
             ModuleCompiler.CreateReference(helper));
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1214,7 +1229,7 @@ public sealed class NativeOutputModulePersistenceTests
         var linked = ModuleCompiler.Link(consumer, helper);
         AssertOutputDependencyProjection(linked.Functions, linked.Structures);
 
-        var reorderedConsumerCompilation = Compilation.Create(
+        var reorderedConsumerCompilation = Create(
             SyntaxTree.Parse(CreateDependencyOutputConsumerSource(packetFirst: true)),
             ModuleCompiler.CreateReference(helper));
         Assert.That(reorderedConsumerCompilation.HasErrors, Is.False,
@@ -1225,7 +1240,7 @@ public sealed class NativeOutputModulePersistenceTests
         AssertOutputDependencyProjection(reorderedLinked.Functions, reorderedLinked.Structures);
 
         var replacement = ModuleCompiler.CreateProducer(
-            Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Helper() { return 41; }")).Program!,
+            CreateLibrary(SyntaxTree.Parse("public int32 Helper() { return 41; }")).Program!,
             ["Helper"]);
         var replacementLinked = ModuleCompiler.Link(reorderedConsumer, replacement);
         AssertOutputDependencyProjection(replacementLinked.Functions, replacementLinked.Structures);
@@ -1238,7 +1253,7 @@ public sealed class NativeOutputModulePersistenceTests
         var reordered = CreateDependencyOutputDeclarationProducer(packetFirst: true);
         var empty = CreateDependencyOutputDeclarationProducer(
             packetFirst: false, includeSources: false);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut int32 source = 7;
                 init Packet packet;
@@ -1254,7 +1269,7 @@ public sealed class NativeOutputModulePersistenceTests
         var consumer = ModuleCompiler.CreateConsumer(compilation.Program!, original);
         var linked = ModuleCompiler.Link(consumer, reordered);
         AssertOutputDependencyProjection(linked.Functions, linked.Structures);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, empty));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, empty));
     }
 
     [Test]
@@ -1262,7 +1277,7 @@ public sealed class NativeOutputModulePersistenceTests
     {
         var provider = CreateDirectOutputDeclarationProducer("NonZero");
         var changed = CreateDirectOutputDeclarationProducer("NonNegative");
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init Packet packet;
                 unsafe {
@@ -1277,13 +1292,13 @@ public sealed class NativeOutputModulePersistenceTests
         var consumer = ModuleCompiler.CreateConsumer(compilation.Program!, provider);
         var linked = ModuleCompiler.Link(consumer, provider);
         AssertEmptyOutputProjection(linked.Functions, linked.Structures);
-        Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, changed));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, changed));
     }
 
     [Test]
     public void SourceRejectsUniqueNativeOutputCells()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadOwned")]
             extern int32 ReadOwned(
                 [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -1306,10 +1321,10 @@ public sealed class NativeOutputModulePersistenceTests
         Assert.That(originalReference.NativeFunctionPointerSignatures,
             Is.Not.EqualTo(reorderedReference.NativeFunctionPointerSignatures));
 
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init ptr<int32> value;
-                init fnptr<NativeAbi, int32, int32> callback;
+                init [Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32> callback;
                 unsafe {
                     if (ReadPointer32(&init value) == 0) { return -1; }
                     if (ReadCallback32(&init callback) == 0) { return -2; }
@@ -1328,13 +1343,13 @@ public sealed class NativeOutputModulePersistenceTests
         var callbackSignature = linked.NativeFunctionPointerSignatures[
             NativeFunctionPointerTypes.Index(callbackOutput.PointeeType)];
         Assert.That(callbackSignature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
-        Assert.That(callbackSignature.ParameterTypes, Is.EqualTo(new[] { PrimitiveType.Int32 }));
+        Assert.That(callbackSignature.ParameterTypes, Is.EqualTo([PrimitiveType.Int32]));
     }
 
     [Test]
     public void NativePointerOutputDependenciesRoundTrip()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
             [param(value): DependsOn(nameof(source))]
             [param(value): ForwardsBacking(nameof(source))]
             [Terrum.Interop.NativeImport("example.dll", "ReadPointer")]
@@ -1350,12 +1365,12 @@ public sealed class NativeOutputModulePersistenceTests
             function.Name == "ReadPointer").NativeOutputContracts.Single();
 
         Assert.That(NativePointerTypes.IsType(output.PointeeType), Is.True);
-        Assert.That(output.Dependencies, Is.EqualTo(new[]
-        {
+        Assert.That(output.Dependencies, Is.EqualTo(
+        [
             new NativeOutputDependency(2, NativeOutputDependencySourceKind.Formal,
                 NativeOutputDependencyRelationship.Forward,
                 NativeOutputPublicationPhase.NormalCompletion, 1, 0),
-        }));
+        ]));
     }
 
     [TestCase("char8", PrimitiveType.Char8)]
@@ -1368,7 +1383,7 @@ public sealed class NativeOutputModulePersistenceTests
     public void NativeOutputScalarCellsPreserveTheirExactType(string typeName,
         PrimitiveType expectedType)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"""
+        var compilation = CreateLibrary(SyntaxTree.Parse($"""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             public extern int32 ReadValue(
                 [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -1400,7 +1415,7 @@ public sealed class NativeOutputModulePersistenceTests
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             extern int32 ObservePointer(ptr<void> value);
             """;
-        var valid = Compilation.Create(SyntaxTree.Parse(Imports + """
+        var valid = Create(SyntaxTree.Parse(Imports + """
             int32 Main() {
                 mut int32 backing = 7;
                 init ptr<void> result;
@@ -1413,7 +1428,7 @@ public sealed class NativeOutputModulePersistenceTests
         Assert.That(valid.HasErrors, Is.False,
             string.Join(Environment.NewLine, valid.Diagnostics));
 
-        var invalid = Compilation.Create(SyntaxTree.Parse(Imports + """
+        var invalid = Create(SyntaxTree.Parse(Imports + """
             int32 Main() {
                 init ptr<void> result;
                 {
@@ -1434,7 +1449,7 @@ public sealed class NativeOutputModulePersistenceTests
     public void SourceDirectOutputImportStillRejectsProviderNameCollision()
     {
         var provider = CreateDirectOutputDeclarationProducer("NonZero");
-        var compilation = Compilation.Create(SyntaxTree.Parse(DirectOutputDeclarationSource + """
+        var compilation = Create(SyntaxTree.Parse(DirectOutputDeclarationSource + """
             int32 Main() {
                 init Packet packet;
                 unsafe {
@@ -1446,14 +1461,14 @@ public sealed class NativeOutputModulePersistenceTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        Assert.Throws<ModuleContractException>(
+        _ = Assert.Throws<ModuleContractException>(
             () => ModuleCompiler.CreateConsumer(compilation.Program!, provider));
     }
 
     [Test]
     public void NativePackageExportsOwnedDirectOutputThroughValidatedLeafThunk()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(DirectOutputDeclarationSource));
+        var compilation = CreateLibrary(SyntaxTree.Parse(DirectOutputDeclarationSource));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -1471,7 +1486,7 @@ public sealed class NativeOutputModulePersistenceTests
         var original = CreateNativeParameterOutputProvider(packetFirst: false, extent: 1);
         var reordered = CreateNativeParameterOutputProvider(packetFirst: true, extent: 1);
         var changed = CreateNativeParameterOutputProvider(packetFirst: true, extent: 2);
-        var compilation = Compilation.Create(SyntaxTree.Parse(
+        var compilation = Create(SyntaxTree.Parse(
             "int32 Main() { return 0; }"), NativeModuleCompiler.CreateReference(original));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1485,7 +1500,7 @@ public sealed class NativeOutputModulePersistenceTests
             Is.EqualTo(1));
 
         NativeModuleCompiler.Validate(consumer, reordered);
-        Assert.Throws<ModuleContractException>(
+        _ = Assert.Throws<ModuleContractException>(
             () => NativeModuleCompiler.Validate(consumer, changed));
     }
 
@@ -1499,7 +1514,7 @@ public sealed class NativeOutputModulePersistenceTests
         var reorderedReference = NativeModuleCompiler.CreateReference(reordered);
         Assert.That(originalReference.NativePointerTypes.Select(static pointer => pointer.PointeeType),
             Is.Not.EqualTo(reorderedReference.NativePointerTypes.Select(static pointer => pointer.PointeeType)));
-        var compilation = Compilation.Create(SyntaxTree.Parse(
+        var compilation = Create(SyntaxTree.Parse(
             "int32 Main() { return 0; }"), originalReference);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1507,14 +1522,14 @@ public sealed class NativeOutputModulePersistenceTests
             compilation.Program!, original, NativeRuntimePolicy.FailFast);
 
         NativeModuleCompiler.Validate(consumer, reordered);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(consumer, changed));
     }
 
     [Test]
     public void NativePackageDirectImportThunkMustTargetItsDeclaredIatSlot()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource));
+        var compilation = CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(compilation.Program!,
@@ -1541,7 +1556,7 @@ public sealed class NativeOutputModulePersistenceTests
         System.Security.Cryptography.SHA256.HashData(forged.AsSpan(0, forged.Length - 32))
             .CopyTo(forged, forged.Length - 32);
 
-        Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(forged));
     }
 
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -1549,13 +1564,13 @@ public sealed class NativeOutputModulePersistenceTests
     public async System.Threading.Tasks.Task NativePackageDirectOutputThunkExecutesSelectedProvider(
         NativeRuntimePolicy runtimePolicy)
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource),
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource),
             (BoundRuntimePolicy)runtimePolicy);
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
             ["ReadCounter"], "CounterProvider", runtimePolicy);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init Counter counter;
                 unsafe {
@@ -1570,28 +1585,28 @@ public sealed class NativeOutputModulePersistenceTests
         var consumer = NativeModuleCompiler.CreateConsumer(
             consumerCompilation.Program!, provider, runtimePolicy);
 
-        Assert.That(await NativeModuleCompiler.RunAsync(consumer, provider, TimeSpan.FromSeconds(30)),
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, provider, TimeSpan.FromSeconds(30)).ConfigureAwait(false),
             Is.Zero);
 
         var changedSource = NativeCounterOutputSource.Replace(
             "QueryPerformanceCounter", "QueryPerformanceFrequency", StringComparison.Ordinal);
-        var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(changedSource),
+        var changedCompilation = CreateLibrary(SyntaxTree.Parse(changedSource),
             (BoundRuntimePolicy)runtimePolicy);
         Assert.That(changedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, changedCompilation.Diagnostics));
         var changedProvider = NativeModuleCompiler.CreateProducer(changedCompilation.Program!,
             ["ReadCounter"], "CounterProvider", runtimePolicy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(consumer, changedProvider));
 
-        var changedSelectorCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var changedSelectorCompilation = CreateLibrary(SyntaxTree.Parse(
             NativeCounterOutputSource.Replace("NonZero", "NonNegative", StringComparison.Ordinal)),
             (BoundRuntimePolicy)runtimePolicy);
         Assert.That(changedSelectorCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, changedSelectorCompilation.Diagnostics));
         var changedSelectorProvider = NativeModuleCompiler.CreateProducer(
             changedSelectorCompilation.Program!, ["ReadCounter"], "CounterProvider", runtimePolicy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(consumer, changedSelectorProvider));
     }
 
@@ -1600,7 +1615,7 @@ public sealed class NativeOutputModulePersistenceTests
     public async System.Threading.Tasks.Task NativePackageScalarOutputExecutesWithPointerContractPresent(
         NativeRuntimePolicy runtimePolicy)
     {
-        var providerCompilation = Compilation.CreateLibrary(
+        var providerCompilation = CreateLibrary(
             SyntaxTree.Parse(NativeScalarAndPointerOutputSource), (BoundRuntimePolicy)runtimePolicy);
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
@@ -1614,7 +1629,7 @@ public sealed class NativeOutputModulePersistenceTests
         Assert.That(DirectNativeImportContract.IsValid(moduleDeclaration,
             providerReference.Structures, providerReference.NativeFunctionPointerSignatures,
             providerReference.NativePointerTypes), Is.True);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init int64 counter;
                 unsafe {
@@ -1630,17 +1645,17 @@ public sealed class NativeOutputModulePersistenceTests
             consumerCompilation.Program!, provider, runtimePolicy);
 
         Assert.That(await NativeModuleCompiler.RunAsync(
-            consumer, provider, TimeSpan.FromSeconds(30)), Is.Zero);
+            consumer, provider, TimeSpan.FromSeconds(30)).ConfigureAwait(false), Is.Zero);
 
         var changedSource = NativeScalarAndPointerOutputSource.Replace(
             "write ptr<ptr<void>> module", "write ptr<uint32> module", StringComparison.Ordinal);
-        var changedCompilation = Compilation.CreateLibrary(
+        var changedCompilation = CreateLibrary(
             SyntaxTree.Parse(changedSource), (BoundRuntimePolicy)runtimePolicy);
         Assert.That(changedCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, changedCompilation.Diagnostics));
         var changedProvider = NativeModuleCompiler.CreateProducer(changedCompilation.Program!,
             ["ReadCounter", "ReadModule"], "ScalarPointerOutputProvider", runtimePolicy);
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.Validate(consumer, changedProvider));
     }
 
@@ -1649,13 +1664,13 @@ public sealed class NativeOutputModulePersistenceTests
     public async System.Threading.Tasks.Task NativePackagePointerOutputExecutesWithExplicitHandleCleanup(
         NativeRuntimePolicy runtimePolicy)
     {
-        var providerCompilation = Compilation.CreateLibrary(
+        var providerCompilation = CreateLibrary(
             SyntaxTree.Parse(NativeHandlePointerOutputSource), (BoundRuntimePolicy)runtimePolicy);
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
             ["ExercisePointerOutput"], "PointerOutputProvider", runtimePolicy);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() { return ExercisePointerOutput(); }
             """), NativeModuleCompiler.CreateReference(provider), (BoundRuntimePolicy)runtimePolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1664,18 +1679,18 @@ public sealed class NativeOutputModulePersistenceTests
             consumerCompilation.Program!, provider, runtimePolicy);
 
         Assert.That(await NativeModuleCompiler.RunAsync(
-            consumer, provider, TimeSpan.FromSeconds(30)), Is.Zero);
+            consumer, provider, TimeSpan.FromSeconds(30)).ConfigureAwait(false), Is.Zero);
     }
 
     [Test]
     public void NativePackageSourceDirectOutputImportStillRejectsProviderCollision()
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource));
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
             ["ReadCounter"], "CounterProvider", NativeRuntimePolicy.FailFast);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(NativeCounterOutputSource + """
+        var consumerCompilation = Create(SyntaxTree.Parse(NativeCounterOutputSource + """
             int32 Main() {
                 init Counter counter;
                 unsafe {
@@ -1687,7 +1702,7 @@ public sealed class NativeOutputModulePersistenceTests
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
-        Assert.Throws<ModuleContractException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.CreateConsumer(
                 consumerCompilation.Program!, provider, NativeRuntimePolicy.FailFast));
     }
@@ -1697,12 +1712,12 @@ public sealed class NativeOutputModulePersistenceTests
     [TestCase("provider-identity")]
     public void NativeConsumerRejectsMalformedDirectImportExpectations(string malformedField)
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource));
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse(NativeCounterOutputSource));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
             ["ReadCounter"], "CounterProvider", NativeRuntimePolicy.FailFast);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+        var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init Counter counter;
                 unsafe {
@@ -1736,12 +1751,12 @@ public sealed class NativeOutputModulePersistenceTests
 
         if (malformedField == "provider-identity")
         {
-            Assert.Throws<ModuleContractException>(
+            _ = Assert.Throws<ModuleContractException>(
                 () => NativeModuleCompiler.Validate(forged, provider));
         }
         else
         {
-            Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(forged));
+            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(forged));
         }
     }
 
@@ -1750,12 +1765,12 @@ public sealed class NativeOutputModulePersistenceTests
     [TestCase("source-ordinal")]
     public void ConsumerReaderRejectsUnsupportedNativeOutputDependencyRows(string forgedField)
     {
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var providerCompilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Helper() { return 40; }"));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = ModuleCompiler.CreateProducer(providerCompilation.Program!, ["Helper"]);
-        var consumerCompilation = Compilation.Create(
+        var consumerCompilation = Create(
             SyntaxTree.Parse(CreateDependencyOutputConsumerSource(packetFirst: false)),
             ModuleCompiler.CreateReference(provider));
         Assert.That(consumerCompilation.HasErrors, Is.False,
@@ -1780,12 +1795,38 @@ public sealed class NativeOutputModulePersistenceTests
                 throw new InvalidOperationException("Unsupported mutation case.");
         }
 
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, provider));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, provider));
     }
+
+    private static Compilation CreateLibrary(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.CreateLibrary(tree,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation CreateLibrary(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.CreateLibrary(tree, reference,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation Create(SyntaxTree tree,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(tree,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
+
+    private static Compilation Create(SyntaxTree tree,
+        CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
+        Compilation.Create(tree, reference,
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                runtimePolicy));
 
     private static byte[] CreateOutputProducer()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(OutputSource));
+        var compilation = CreateLibrary(SyntaxTree.Parse(OutputSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!, ["ReadAndReturn"]);
     }
@@ -1793,7 +1834,7 @@ public sealed class NativeOutputModulePersistenceTests
     private static CompilationReference CreateMetadataRecipeReference(
         string functionName, bool reverseRows)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var compilation = CreateLibrary(SyntaxTree.Parse(
             $"public int32 {functionName}() {{ return 42; }}"));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1829,7 +1870,7 @@ public sealed class NativeOutputModulePersistenceTests
     private static CompilationReference CreateMetadataArrayFieldReference(
         string functionName, string structureName, bool reverseRows)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var compilation = CreateLibrary(SyntaxTree.Parse(
             $"public int32 {functionName}() {{ return 42; }}"));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1865,7 +1906,7 @@ public sealed class NativeOutputModulePersistenceTests
                 break;
             }
             elementCount++;
-        } while (elementCount <= (ulong)(ValueLayout.MaximumStructureSize / 2));
+        } while (elementCount <= (ulong)(ValueLayout.MaximumAddressStorageSize / 2));
         Assert.That(NativeFixedArrayTypes.Index(fieldType),
             Is.EqualTo(firstNewArrayIndex));
         Assert.That(fieldLayout.ByteExtent, Is.LessThanOrEqualTo(int.MaxValue));
@@ -1873,14 +1914,17 @@ public sealed class NativeOutputModulePersistenceTests
         var structureType = (PrimitiveType)(100 + structureIndex);
         var structure = new BoundStruct(structureName, [
             new BoundStructField("Items", fieldType, 0,
-                (int)fieldLayout.ByteExtent) {
+                fieldLayout.ByteExtent) {
                 IsPrivate = true,
             },
-        ], (int)fieldLayout.ByteExtent) {
+        ], fieldLayout.ByteExtent) {
             IsInternal = true,
             IsSequential = true,
             BlittableTargetRequirement =
                 FixedLayoutStorage.WindowsX64TargetRequirement,
+            Packing = 16,
+            Alignment = checked((int)fieldLayout.Alignment),
+            RequiredAlignment = checked((int)fieldLayout.RequiredAlignment),
         };
         var structures = program.Structures.Add(structure);
         Assert.That(NativeFixedArrayContract.TryCreateType(
@@ -1966,7 +2010,7 @@ public sealed class NativeOutputModulePersistenceTests
 
     private static BoundProgram CreateMetadataRecipeProgram()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+        var compilation = CreateLibrary(SyntaxTree.Parse(
             "public int32 Value() { return 42; }"));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2019,7 +2063,7 @@ public sealed class NativeOutputModulePersistenceTests
                 }
                 public int32 UseAnchor(Anchor value) { return value.Value; }
                 """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!, ["ReadAndReturn", "UseAnchor"]);
     }
@@ -2036,7 +2080,7 @@ public sealed class NativeOutputModulePersistenceTests
                     write ptr<Packet> packet);
                 public int32 UseAnchor(Anchor value) { return value.Value; }
                 """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!, ["ReadValue", "UseAnchor"]);
     }
@@ -2045,7 +2089,7 @@ public sealed class NativeOutputModulePersistenceTests
     {
         var source = DirectOutputDeclarationSource.Replace(
             "NonZero", resultCondition, StringComparison.Ordinal);
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!, ["ReadValue"]);
@@ -2069,18 +2113,18 @@ public sealed class NativeOutputModulePersistenceTests
             [Terrum.Interop.NativeImport("example.dll", "ReadCallback32")]
             public extern int32 ReadCallback32(
                 [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
-                write ptr<fnptr<NativeAbi, int32, int32>> callback);
+                write ptr<[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32, int32>> callback);
             """;
         const string Callback64 = """
             [Terrum.Interop.NativeImport("example.dll", "ReadCallback64")]
             public extern int32 ReadCallback64(
                 [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
-                write ptr<fnptr<NativeAbi, int64, int64>> callback);
+                write ptr<[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int64, int64>> callback);
             """;
         var source = reverse
             ? Callback64 + Callback32 + Pointer64 + Pointer32
             : Pointer32 + Pointer64 + Callback32 + Callback64;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!,
@@ -2106,7 +2150,7 @@ public sealed class NativeOutputModulePersistenceTests
                     write ptr<Packet> packet);
                 public int32 UseAnchor(Anchor value) { return int32(value.Value); }
                 """;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return NativeModuleCompiler.CreateProducer(compilation.Program!,
@@ -2143,7 +2187,7 @@ public sealed class NativeOutputModulePersistenceTests
             .Replace("ACCESS", access, StringComparison.Ordinal)
             .Replace("POINTER", pointerType, StringComparison.Ordinal);
         var declarations = reverse ? Packet + ReadInt64 + first : Packet + first + ReadInt64;
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(declarations));
+        var compilation = CreateLibrary(SyntaxTree.Parse(declarations));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return NativeModuleCompiler.CreateProducer(compilation.Program!,
@@ -2190,12 +2234,12 @@ public sealed class NativeOutputModulePersistenceTests
     {
         var function = functions.Single(static candidate => candidate.Name == "ReadValue");
         var output = function.NativeOutputContracts.Single();
-        Assert.That(output.Dependencies, Is.EqualTo(new[]
-        {
+        Assert.That(output.Dependencies, Is.EqualTo(
+        [
             new NativeOutputDependency(2, NativeOutputDependencySourceKind.Formal,
                 NativeOutputDependencyRelationship.Forward,
                 NativeOutputPublicationPhase.NormalCompletion, 1, 0),
-        }));
+        ]));
         var pointeeIndex = (int)output.PointeeType - 100;
         Assert.That(pointeeIndex, Is.GreaterThanOrEqualTo(0));
         Assert.That(structures[pointeeIndex].Name, Is.EqualTo("Packet"));
@@ -2207,12 +2251,12 @@ public sealed class NativeOutputModulePersistenceTests
         var function = functions.Single(static candidate => candidate.Name == "ReadValue");
         var output = function.NativeOutputContracts.Single();
         Assert.That(output.FormalOrdinal, Is.Zero);
-        Assert.That(output.Dependencies, Is.EqualTo(new[]
-        {
+        Assert.That(output.Dependencies, Is.EqualTo(
+        [
             new NativeOutputDependency(2, NativeOutputDependencySourceKind.Empty,
                 NativeOutputDependencyRelationship.Empty,
                 NativeOutputPublicationPhase.NormalCompletion, 0, 0),
-        }));
+        ]));
         var pointeeIndex = (int)output.PointeeType - 100;
         Assert.That(pointeeIndex, Is.GreaterThanOrEqualTo(0));
         Assert.That(structures[pointeeIndex].Name, Is.EqualTo("Packet"));
@@ -2230,7 +2274,7 @@ public sealed class NativeOutputModulePersistenceTests
         var contractLength = BinaryPrimitives.ReadInt32LittleEndian(
             artifact.AsSpan(contractLengthOffset, sizeof(int)));
         var outputCountOffset = contractLengthOffset + sizeof(int) + contractLength
-            + 3 * sizeof(byte);
+            + (3 * sizeof(byte));
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
             artifact.AsSpan(outputCountOffset, sizeof(int))), Is.EqualTo(1));
         var outputStart = outputCountOffset + 8;
@@ -2334,7 +2378,7 @@ public sealed class NativeOutputModulePersistenceTests
         var contractStart = contractLengthOffset + sizeof(int);
         var contract = System.Text.Encoding.UTF8.GetString(
             artifact, contractStart, contractLength);
-        var separator = contract.IndexOf('|');
+        var separator = contract.IndexOf('|', System.StringComparison.Ordinal);
         Assert.That(separator, Is.GreaterThanOrEqualTo(0));
         var forgedContract = System.Text.Encoding.UTF8.GetBytes(
             contract[..(separator + 1)] + "NoThrow|" + contract[(separator + 1)..]);
@@ -2379,7 +2423,8 @@ public sealed class NativeOutputModulePersistenceTests
         using var stream = new MemoryStream(artifact, writable: false);
         using var reader = new BinaryReader(stream);
         _ = reader.ReadInt32();
-        Assert.That(reader.ReadInt32(), Is.EqualTo(Revision100));
+        var formatVersion = reader.ReadInt32();
+        Assert.That(formatVersion, Is.EqualTo(Revision104));
         SkipModuleString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();
@@ -2398,13 +2443,23 @@ public sealed class NativeOutputModulePersistenceTests
         {
             SkipModuleString(reader);
             _ = reader.ReadByte();
-            _ = reader.ReadInt32();
+            _ = reader.ReadUInt64();
             for (var flag = 0; flag < 4; flag++)
             {
                 _ = reader.ReadBoolean();
             }
             _ = reader.ReadInt32();
             _ = reader.ReadBoolean();
+            if (formatVersion >= 103)
+            {
+                _ = reader.ReadInt32();
+                if (reader.ReadBoolean())
+                {
+                    _ = reader.ReadInt32();
+                }
+                _ = reader.ReadInt32();
+                _ = reader.ReadInt32();
+            }
             if (reader.ReadBoolean())
             {
                 SkipModuleString(reader);
@@ -2414,8 +2469,8 @@ public sealed class NativeOutputModulePersistenceTests
             {
                 SkipModuleString(reader);
                 _ = reader.ReadInt32();
-                _ = reader.ReadInt32();
-                _ = reader.ReadInt32();
+                _ = reader.ReadUInt64();
+                _ = reader.ReadUInt64();
                 for (var flag = 0; flag < 4; flag++)
                 {
                     _ = reader.ReadBoolean();
@@ -2564,14 +2619,16 @@ public sealed class NativeOutputModulePersistenceTests
                     == (int)expressionType)
             .Take(10);
         Assert.That(matches, Has.Count.EqualTo(1),
-            $"expected one revision-{Revision100} tag-{tag} record; "
+            $"expected one revision-{Revision104} tag-{tag} record; "
             + $"candidate offsets: {string.Join(",", candidates)}");
         return matches.Single();
 
-        bool IsConstant(int offset, PrimitiveType type) =>
-            artifact[offset] == 1
-            && BinaryPrimitives.ReadInt32LittleEndian(
-                artifact.AsSpan(offset + 1, sizeof(int))) == (int)type;
+        bool IsConstant(int offset, PrimitiveType type)
+        {
+            return artifact[offset] == 1
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    artifact.AsSpan(offset + 1, sizeof(int))) == (int)type;
+        }
     }
 
     private static BoundNativeFixedArrayType ReadSingleArrayRow(

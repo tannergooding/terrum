@@ -113,7 +113,7 @@ public static partial class NativeModuleCompiler
 
         var selectionCapacity = Math.Min(MaximumGraphProviderCount, snapshots.Length);
         var selected = new Dictionary<string, CatalogCandidate>(selectionCapacity, StringComparer.Ordinal);
-        GraphPackage[]?[] providerBuffers = new GraphPackage[MaximumGraphProviderCount + 1][];
+        var providerBuffers = new GraphPackage[MaximumGraphProviderCount + 1][];
         // Candidate search backtracks synchronously, so cycle checks can share these traversal sets.
         var visiting = new HashSet<string>(selectionCapacity, StringComparer.Ordinal);
         var visited = new HashSet<string>(selectionCapacity, StringComparer.Ordinal);

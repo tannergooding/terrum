@@ -450,7 +450,7 @@ public static partial class NativeModuleCompiler
                     importCount++;
                 }
             }
-            var imports = importCount == 0 ? Array.Empty<string>() : new string[importCount];
+            var imports = importCount == 0 ? [] : new string[importCount];
             if (importCount != 0)
             {
                 var importIndex = 0;
@@ -546,7 +546,7 @@ public static partial class NativeModuleCompiler
             var dependency = declarations[i];
             var actual = usedByDll.TryGetValue(DllName(dependency.Identity), out var providerImports)
                 ? providerImports : [];
-            var imports = actual.Count == 0 ? Array.Empty<string>() : new string[actual.Count];
+            var imports = actual.Count == 0 ? [] : new string[actual.Count];
             for (var index = 0; index < actual.Count; index++)
             {
                 var import = actual[index];

@@ -28,10 +28,42 @@ public static partial class NativeModuleCompiler
 
     /// <summary>Produces one DLL with real exported implementations and explicit imports of selected DLLs.</summary>
     public static byte[] CreateGraphProducer(BoundProgram program, IReadOnlyList<string> exports, string identity,
-        IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy)
+        IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy) =>
+        CreateGraphProducerCore(program, exports, identity, dependencies,
+            runtimePolicy, identityInputs: null);
+
+    /// <summary>Creates a graph producer with explicit nominal declaration identities.</summary>
+    /// <param name="program">The verified producer program snapshot.</param>
+    /// <param name="exports">The declarations exported by the package.</param>
+    /// <param name="identity">The producer's logical Module identity.</param>
+    /// <param name="dependencies">The selected provider packages.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The graph package containing the semantic contract and native DLL.</returns>
+    public static byte[] CreateGraphProducer(BoundProgram program,
+        IReadOnlyList<string> exports, string identity,
+        IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs identityInputs)
+    {
+        ArgumentNullException.ThrowIfNull(identityInputs);
+        return CreateGraphProducerCore(program, exports, identity,
+            dependencies, runtimePolicy, identityInputs);
+    }
+
+    private static byte[] CreateGraphProducerCore(BoundProgram program,
+        IReadOnlyList<string> exports, string identity,
+        IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
+        if (identityInputs is not null && !identityInputs.IsFor(program))
+        {
+            throw new ArgumentException(
+                "Private nominal identity inputs were captured for another bound-program snapshot.",
+                nameof(identityInputs));
+        }
+        var sourceProgram = program;
         CheckIdentity(identity);
         CheckPolicy(runtimePolicy);
         var providers = ReadGraphProviders(dependencies);
@@ -41,6 +73,10 @@ public static partial class NativeModuleCompiler
                     ?? throw new ModuleFormatException("Graph provider reference is missing.")))
             .ToArray();
         program = BindModuleImportBindings(program, importProviders);
+        if (identityInputs is not null)
+        {
+            identityInputs = identityInputs.Rebind(sourceProgram, program);
+        }
         foreach (var provider in providers)
         {
             if (provider.Identity!.Equals(identity, StringComparison.OrdinalIgnoreCase))
@@ -53,7 +89,8 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("Graph producer identity or runtime policy conflicts with a dependency.");
         }
         var reference = GraphReference(providers);
-        var contract = ModuleCompiler.CreateGraphLibrary(program, exports, reference);
+        var contract = ModuleCompiler.CreateGraphLibrary(program, exports,
+            reference, identityInputs);
         var sortedExports = new string[exports.Count];
         for (var i = 0; i < sortedExports.Length; i++)
         {
@@ -100,9 +137,37 @@ public static partial class NativeModuleCompiler
 
     /// <summary>Persists one executable and its direct dependency identities without embedding DLL implementations.</summary>
     public static byte[] CreateGraphConsumer(BoundProgram program, IReadOnlyList<byte[]> dependencies,
-        NativeRuntimePolicy runtimePolicy)
+        NativeRuntimePolicy runtimePolicy) =>
+        CreateGraphConsumerCore(program, dependencies, runtimePolicy,
+            identityInputs: null);
+
+    /// <summary>Creates a graph consumer with explicit nominal declaration identities.</summary>
+    /// <param name="program">The verified consumer program snapshot.</param>
+    /// <param name="dependencies">The selected provider packages.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The graph package containing the executable and dependency identities.</returns>
+    public static byte[] CreateGraphConsumer(BoundProgram program,
+        IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs identityInputs)
+    {
+        ArgumentNullException.ThrowIfNull(identityInputs);
+        return CreateGraphConsumerCore(program, dependencies, runtimePolicy,
+            identityInputs);
+    }
+
+    private static byte[] CreateGraphConsumerCore(BoundProgram program,
+        IReadOnlyList<byte[]> dependencies, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (identityInputs is not null && !identityInputs.IsFor(program))
+        {
+            throw new ArgumentException(
+                "Private nominal identity inputs were captured for another bound-program snapshot.",
+                nameof(identityInputs));
+        }
+        var sourceProgram = program;
         CheckPolicy(runtimePolicy);
         var providers = ReadGraphProviders(dependencies);
         var importProviders = providers.Select(static provider =>
@@ -111,12 +176,16 @@ public static partial class NativeModuleCompiler
                     ?? throw new ModuleFormatException("Graph provider reference is missing.")))
             .ToArray();
         program = BindModuleImportBindings(program, importProviders);
+        if (identityInputs is not null)
+        {
+            identityInputs = identityInputs.Rebind(sourceProgram, program);
+        }
         if (providers[0].Policy != runtimePolicy || program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
             throw new ModuleContractException("Graph consumer and dependency runtime policies differ.");
         }
         var contract = ModuleCompiler.CreateConsumerAgainstReference(program, GraphReference(providers),
-            allowManagedParticipant: true);
+            allowManagedParticipant: true, identityInputs: identityInputs);
         var contractSnapshot = ModuleCompiler.ReadGraphConsumerContract(contract);
         var directImportExpectations = CreateDirectImportExpectations(
             program, contractSnapshot.ParsedModule.Structures);
@@ -492,7 +561,7 @@ public static partial class NativeModuleCompiler
         }
         if (bindingCount == 0)
         {
-            return Array.Empty<NativeImportBinding>();
+            return [];
         }
         var bindings = new NativeImportBinding[bindingCount];
         var bindingIndex = 0;

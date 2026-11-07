@@ -43,7 +43,31 @@ public static partial class NativeModuleCompiler
 
     /// <summary>Stores a verified semantic producer contract and its independently emitted DLL.</summary>
     public static byte[] CreateProducer(BoundProgram program, IReadOnlyList<string> exports, string identity,
-        NativeRuntimePolicy runtimePolicy)
+        NativeRuntimePolicy runtimePolicy) =>
+        CreateProducerCore(program, exports, identity, runtimePolicy,
+            identityInputs: null);
+
+    /// <summary>Creates a native producer with explicit nominal declaration identities.</summary>
+    /// <param name="program">The verified producer program snapshot.</param>
+    /// <param name="exports">The declarations exported by the package.</param>
+    /// <param name="identity">The producer's logical Module identity.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The package containing the semantic contract and native DLL.</returns>
+    public static byte[] CreateProducer(BoundProgram program,
+        IReadOnlyList<string> exports, string identity,
+        NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs identityInputs)
+    {
+        ArgumentNullException.ThrowIfNull(identityInputs);
+        return CreateProducerCore(program, exports, identity,
+            runtimePolicy, identityInputs);
+    }
+
+    private static byte[] CreateProducerCore(BoundProgram program,
+        IReadOnlyList<string> exports, string identity,
+        NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
@@ -56,13 +80,16 @@ public static partial class NativeModuleCompiler
                 "Direct native module imports require explicit native module dependencies.");
         }
         var names = exports.ToArray();
-        var contract = ModuleCompiler.CreateProducer(program, names);
+        var contract = identityInputs is null
+            ? ModuleCompiler.CreateProducer(program, names)
+            : ModuleCompiler.CreateProducer(program, names,
+                identityInputs);
         var image = program.Functions.Any(static function => function.DirectNativeImport is not null)
             ? NativeEmitter.EmitLibraryWithNativeImports(program, names, runtimePolicy,
                 containCheckedExceptionsAtExports: false)
             : NativeEmitter.EmitModuleLibrary(program, names, null, runtimePolicy).Image;
         var package = Write(isConsumer: false, identity, runtimePolicy, contract, image);
-        ValidateProducer(Read(package));
+        _ = ValidateProducer(Read(package));
         return package;
     }
 
@@ -74,9 +101,38 @@ public static partial class NativeModuleCompiler
     }
 
     /// <summary>Stores a verified semantic consumer and a native EXE bound by name to one producer DLL.</summary>
-    public static byte[] CreateConsumer(BoundProgram program, byte[] producer, NativeRuntimePolicy runtimePolicy)
+    public static byte[] CreateConsumer(BoundProgram program, byte[] producer,
+        NativeRuntimePolicy runtimePolicy) =>
+        CreateConsumerCore(program, producer, runtimePolicy,
+            identityInputs: null);
+
+    /// <summary>Creates a native consumer with explicit nominal declaration identities.</summary>
+    /// <param name="program">The verified consumer program snapshot.</param>
+    /// <param name="producer">The selected native producer package.</param>
+    /// <param name="runtimePolicy">The selected runtime policy.</param>
+    /// <param name="identityInputs">Nominal identities captured for <paramref name="program"/>.</param>
+    /// <returns>The package containing the consumer executable and dependency identity.</returns>
+    public static byte[] CreateConsumer(BoundProgram program, byte[] producer,
+        NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs identityInputs)
+    {
+        ArgumentNullException.ThrowIfNull(identityInputs);
+        return CreateConsumerCore(program, producer, runtimePolicy,
+            identityInputs);
+    }
+
+    private static byte[] CreateConsumerCore(BoundProgram program,
+        byte[] producer, NativeRuntimePolicy runtimePolicy,
+        PrivateModuleIdentityInputs? identityInputs)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (identityInputs is not null && !identityInputs.IsFor(program))
+        {
+            throw new ArgumentException(
+                "Private nominal identity inputs were captured for another bound-program snapshot.",
+                nameof(identityInputs));
+        }
+        var sourceProgram = program;
         var provider = ReadAndValidateProducer(producer);
         var package = provider.Package;
         CheckPolicy(runtimePolicy);
@@ -84,7 +140,14 @@ public static partial class NativeModuleCompiler
             ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
         program = BindModuleImportBindings(program,
             [(package.Identity, package.Policy, providerReference)]);
-        var contract = ModuleCompiler.CreateConsumer(program, package.Contract);
+        if (identityInputs is not null)
+        {
+            identityInputs = identityInputs.Rebind(sourceProgram, program);
+        }
+        var contract = identityInputs is null
+            ? ModuleCompiler.CreateConsumer(program, package.Contract)
+            : ModuleCompiler.CreateConsumer(program, package.Contract,
+                identityInputs);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
         var directImportExpectations = CreateDirectImportExpectations(
             program, contractSnapshot.ParsedModule.Structures);
@@ -148,7 +211,7 @@ public static partial class NativeModuleCompiler
         }
         else
         {
-            ValidateProducer(package);
+            _ = ValidateProducer(package);
         }
         return new NativeModuleInfo(package.Identity, package.IsConsumer,
             Convert.ToHexString(SHA256.HashData(package.Image)), package.Image.Length, package.Contract.Length) {
@@ -433,7 +496,7 @@ public static partial class NativeModuleCompiler
     private static ValidatedProducer ReadAndValidateProducer(byte[] producer)
     {
         var package = Read(producer);
-        ValidateProducer(package);
+        _ = ValidateProducer(package);
         return new ValidatedProducer(package);
     }
 

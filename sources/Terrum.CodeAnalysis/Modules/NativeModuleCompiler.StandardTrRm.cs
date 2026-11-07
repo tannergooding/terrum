@@ -11,7 +11,7 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class NativeModuleCompiler
 {
-    /// <summary>Emits an executable from an explicitly selected Standard F root and provider set.</summary>
+    /// <summary>Emits an executable from an explicitly selected Standard root and provider set.</summary>
     /// <param name="input">The complete root artifact and its exact schema selection.</param>
     /// <param name="moduleIdentity">The exact executable root Module identity.</param>
     /// <param name="providers">The complete explicitly selected provider artifacts.</param>
@@ -45,12 +45,18 @@ public static partial class NativeModuleCompiler
 
         var (program, bindings) = plan.CreateLoweringInputs(
             TrRmStandardNativeOperation.EmitExecutable);
+        if (plan.IsLocalAggregateLayoutPlan)
+        {
+            return NativeEmitter.Emit(program, runtimePolicy,
+                cancellationToken);
+        }
+
         return NativeEmitter.EmitWithImportUsage(program, bindings,
             runtimePolicy, allowDirectNativeImports: true,
             cancellationToken: cancellationToken).Image;
     }
 
-    /// <summary>Emits a library from an explicitly selected Standard F root and provider set.</summary>
+    /// <summary>Emits a library from an explicitly selected Standard root and provider set.</summary>
     /// <param name="input">The complete root artifact and its exact schema selection.</param>
     /// <param name="moduleIdentity">The exact no-entry library Module identity.</param>
     /// <param name="providers">The complete explicitly selected provider artifacts.</param>
@@ -94,13 +100,19 @@ public static partial class NativeModuleCompiler
         plan.ValidateLibraryExports(exportSnapshot);
         var (program, bindings) = plan.CreateLoweringInputs(
             TrRmStandardNativeOperation.EmitLibrary);
+        if (plan.IsLocalAggregateLayoutPlan)
+        {
+            return NativeEmitter.EmitLibraryWithVerifiedFixedArrayBodies(
+                program, exportSnapshot, runtimePolicy, cancellationToken);
+        }
+
         return NativeEmitter.EmitLibraryWithImportUsage(program,
             exportSnapshot, bindings, runtimePolicy,
             allowDirectNativeImports: true,
             cancellationToken: cancellationToken).Image;
     }
 
-    /// <summary>Executes an explicitly selected Standard F root and provider set in the current process.</summary>
+    /// <summary>Executes an explicitly selected Standard root and provider set in the current process.</summary>
     /// <param name="input">The complete root artifact and its exact schema selection.</param>
     /// <param name="moduleIdentity">The exact executable root Module identity.</param>
     /// <param name="providers">The complete explicitly selected provider artifacts.</param>

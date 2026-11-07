@@ -5,18 +5,18 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Modules;
 
-public sealed class VariableTableIndexComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class VariableTableIndexComponentTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -87,7 +87,7 @@ public sealed class VariableTableIndexComponentTests
     public async Task VariableTableIndexMatchesHostedBlobAndBodyReaders(BoundRuntimePolicy policy)
     {
         var cases = new List<TableCase>();
-        byte[] blobs = TrRmVariableTableWriter.EncodeBlobs([
+        var blobs = TrRmVariableTableWriter.EncodeBlobs([
             ReadOnlyMemory<byte>.Empty, new byte[] { 0, 255 }, ReadOnlyMemory<byte>.Empty, new byte[] { 7 },
         ]);
         for (var row = 1; row <= 4; row++)
@@ -126,7 +126,7 @@ public sealed class VariableTableIndexComponentTests
         invalidByte[0] = 256;
         cases.Add(Rejected(invalidByte, 4, 0, 1, 1));
 
-        byte[] bodies = TrRmVariableTableWriter.EncodeBodies([
+        var bodies = TrRmVariableTableWriter.EncodeBodies([
             new byte[] { 0xFF }, new byte[] { 1, 2 },
         ]);
         for (var row = 1; row <= 2; row++)
@@ -153,7 +153,11 @@ public sealed class VariableTableIndexComponentTests
                 new HostBuffer("Expected", PrimitiveType.Int32, [.. testCase.Expected.SelectMany(static item => item)], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
             Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }

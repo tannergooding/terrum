@@ -10,6 +10,48 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class ModuleCompiler
 {
+    private static bool HasUnsupportedArrayDerivedManagedClassFields(
+        IReadOnlyList<BoundClass> classes,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrayTypes,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        ImmutableArray<BoundPrivateNominalTypeOrigin> nominalTypeOrigins)
+    {
+        var referenceOnlyClasses = nominalTypeOrigins
+            .Where(static origin => origin.OriginKind
+                    == BoundPrivateNominalOriginKind.ImportedExpectation
+                && ManagedClassTypes.IsClass(origin.PrivateType))
+            .Select(static origin =>
+                ManagedClassTypes.ClassIndex(origin.PrivateType))
+            .ToHashSet();
+        for (var index = 0; index < classes.Count; index++)
+        {
+            if (referenceOnlyClasses.Contains(index))
+            {
+                continue;
+            }
+            var @class = classes[index];
+            if (@class is null || @class.Fields.IsDefault)
+            {
+                return true;
+            }
+            foreach (var field in @class.Fields)
+            {
+                if (field is null
+                    || NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                        field.Type, structures, fixedArrayTypes,
+                        pointerTypes, functionPointerSignatures, classes))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static (Module Module, ImmutableArray<PrimitiveType> Mapping)
         CanonicalizeNativeFixedArrays(Module module)
     {
@@ -190,6 +232,10 @@ public static partial class ModuleCompiler
         {
             VisitType(pointerType.PointeeType, 0);
         }
+        foreach (var referenceType in module.CheckedReferenceTypes)
+        {
+            VisitType(referenceType.ReferentType, 0);
+        }
         foreach (var item in module.Functions)
         {
             foreach (var output in item.NativeOutputContracts)
@@ -287,6 +333,10 @@ public static partial class ModuleCompiler
             NativePointerTypes = [.. module.NativePointerTypes.Select(pointer =>
                 pointer with { PointeeType = MapType(pointer.PointeeType) })],
             NativeFixedArrayTypes = [.. canonicalArrays],
+            CheckedReferenceTypes = [.. module.CheckedReferenceTypes.Select(
+                referenceType => referenceType with {
+                    ReferentType = MapType(referenceType.ReferentType),
+                })],
             InvocationBuffers = [.. module.InvocationBuffers.Select(buffer =>
                 buffer with { ElementType = MapType(buffer.ElementType) })],
             Functions = remappedFunctions,
@@ -396,6 +446,120 @@ public static partial class ModuleCompiler
                     fixedArrays, pointerTypes, functionPointers);
         }
 
+        return false;
+    }
+
+    private static bool IsPrivate106ArrayAggregateValueContext(
+        BoundFunction function, BoundProgram program)
+    {
+        if (IsPrivate106RawUnionArrayAggregate(function.ReturnType,
+                program.Structures, program.NativeFixedArrayTypes,
+                program.NativePointerTypes,
+                program.NativeFunctionPointerSignatures, program))
+        {
+            return true;
+        }
+
+        return function.Variables.Any(variable =>
+            IsPrivate106RawUnionArrayAggregate(variable.Type,
+                program.Structures, program.NativeFixedArrayTypes,
+                program.NativePointerTypes,
+                program.NativeFunctionPointerSignatures, program));
+    }
+
+    private static bool IsPrivate106NestedArrayValueLocal(
+        PrimitiveType type, BoundFunction function, BoundProgram program)
+        => IsPrivate106NestedArrayValueLocal(type,
+            function.ReturnType, function.Variables, program);
+
+    private static bool IsPrivate106NestedArrayValueLocal(
+        PrimitiveType type, PrimitiveType returnType,
+        IReadOnlyList<BoundVariable> variables, BoundProgram program)
+    {
+        if (!NativeFixedArrayTypes.IsType(type)
+            || !NativeFixedArrayContract.TryGetLayout(type,
+                program.Structures, program.NativeFixedArrayTypes,
+                out var localLayout)
+            || localLayout.ByteExtent
+                > (ulong)ValueLayout.MaximumStructureSize
+            || !NativeFixedArrayContract.IsRootlessCopyFieldType(type,
+                program.Structures, program.NativeFixedArrayTypes))
+        {
+            return false;
+        }
+
+        if (IsPrivate106RawUnionArrayAggregate(returnType,
+                program.Structures, program.NativeFixedArrayTypes,
+                program.NativePointerTypes,
+                program.NativeFunctionPointerSignatures, program)
+            && ContainsInlineArrayType(returnType, type, program))
+        {
+            return true;
+        }
+
+        foreach (var variable in variables)
+        {
+            if (IsPrivate106RawUnionArrayAggregate(variable.Type,
+                    program.Structures, program.NativeFixedArrayTypes,
+                    program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures, program)
+                && ContainsInlineArrayType(variable.Type, type, program))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsInlineArrayType(PrimitiveType rootType,
+        PrimitiveType targetType, BoundProgram program)
+    {
+        var pending = new Stack<(PrimitiveType Type, int Depth)>();
+        var visited = new HashSet<PrimitiveType>();
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        pending.Push((rootType, 0));
+        while (pending.TryPop(out var item))
+        {
+            if (item.Depth > SemanticVerifier.MaximumDepth
+                || --remaining < 0)
+            {
+                return false;
+            }
+            if (item.Type == targetType)
+            {
+                return true;
+            }
+            if (NativeFixedArrayTypes.IsType(item.Type))
+            {
+                if (!visited.Add(item.Type)
+                    || !NativeFixedArrayContract.TryGetLayout(item.Type,
+                        program.Structures,
+                        program.NativeFixedArrayTypes, out var layout))
+                {
+                    continue;
+                }
+                pending.Push((layout.ElementType, item.Depth + 1));
+                continue;
+            }
+            var typeOrdinal = (int)item.Type;
+            if (ManagedClassTypes.IsClass(item.Type)
+                || BoundEnumTypes.IsType(item.Type)
+                || typeOrdinal is < 100 or >= BoundEnumTypes.First
+                || !visited.Add(item.Type))
+            {
+                continue;
+            }
+            var structureIndex = typeOrdinal - 100;
+            if ((uint)structureIndex >= (uint)program.Structures.Length)
+            {
+                continue;
+            }
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                pending.Push((field.Type, item.Depth + 1));
+            }
+        }
         return false;
     }
 
@@ -558,15 +722,42 @@ public static partial class ModuleCompiler
         var nestedBackingVariables = new HashSet<int>();
         variables = nestedBackingVariables;
         reason = string.Empty;
+        var private106ArrayValueContext
+            = IsPrivate106ArrayAggregateValueContext(function, program);
+        var addressedArrayVariables = new HashSet<int>();
+        if (private106ArrayValueContext
+            && !BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    switch (expression)
+                    {
+                        case BoundNativeStorageAddress address:
+                            _ = addressedArrayVariables.Add(
+                                address.Variable);
+                            break;
+                        case BoundNativeFixedArrayPointerAddress address:
+                            _ = addressedArrayVariables.Add(
+                                address.Variable);
+                            break;
+                    }
+                }))
+        {
+            reason = "the function expression traversal exceeds the analysis limit";
+            return false;
+        }
         for (var variable = function.ParameterCount
                 + (function.IsConstructor ? 1 : 0);
             variable < function.Variables.Length; variable++)
         {
-            if (IsAddressOnlyNestedBackingType(
-                    function.Variables[variable].Type,
+            var variableType = function.Variables[variable].Type;
+            if (IsAddressOnlyNestedBackingType(variableType,
                     program.Structures, program.NativeFixedArrayTypes,
                     program.NativePointerTypes,
-                    program.NativeFunctionPointerSignatures))
+                    program.NativeFunctionPointerSignatures)
+                && !(private106ArrayValueContext
+                    && !addressedArrayVariables.Contains(variable)
+                    && IsPrivate106NestedArrayValueLocal(variableType,
+                        function, program)))
             {
                 _ = nestedBackingVariables.Add(variable);
             }
@@ -950,7 +1141,7 @@ public static partial class ModuleCompiler
                 out var functionName, out var reason))
         {
             throw new ModuleFormatException(
-                $"Module function '{functionName}' has nested fixed-array backing outside the revision-102 nested-backing profile: {reason}.");
+                $"Module function '{functionName}' has nested fixed-array backing outside the selected private nested-backing profile: {reason}.");
         }
     }
 
@@ -961,7 +1152,7 @@ public static partial class ModuleCompiler
                 out var functionName, out var reason))
         {
             throw new ModuleContractException(
-                $"Function '{functionName}' has nested fixed-array backing outside the revision-102 nested-backing profile: {reason}.");
+                $"Function '{functionName}' has nested fixed-array backing outside the selected private nested-backing profile: {reason}.");
         }
     }
 
