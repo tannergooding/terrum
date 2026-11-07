@@ -14618,11 +14618,18 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             = "trrm/1-draft-foreign-invocation-contracts-1";
         const string rootIdentity = "native-output-closure-root";
         const string intermediateIdentity = "ReadValue";
+        const string secondaryIntermediateIdentity = "ReadOther";
         const string leafIdentity = "example.dll";
         var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
         var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             internal extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            [Terrum.Interop.NativeImport("example.dll", "ReadOther")]
+            internal extern int32 ReadOther(
                 [Terrum.Interop.NativeOutput(
                     When: Terrum.Interop.NativeOutputCondition.NonZero)]
                 write ptr<uint32> value);
@@ -14637,7 +14644,10 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         var rootArtifact = AddRootMethodImports(
             TrRmExecutableCompiler.EmitStandard(rootCompilation.Program!,
                 rootIdentity, schemaIdentity, 1),
-            [("ReadValue", intermediateIdentity, "ReadValue")],
+            [
+                ("ReadValue", intermediateIdentity, "ReadValue"),
+                ("ReadOther", secondaryIntermediateIdentity, "ReadOther"),
+            ],
             reuseModuleRefs: false, duplicateSecondMethodName: false);
 
         var intermediateCompilation = Compilation.CreateLibrary(
@@ -14669,6 +14679,35 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             [("ReadAux", leafIdentity, "ReadAux")],
             reuseModuleRefs: false, duplicateSecondMethodName: false);
 
+        var secondaryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport("example.dll", "ReadOther")]
+                public extern int32 ReadOther(
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                    write ptr<uint32> value);
+
+                [Terrum.Interop.NativeImport("example.dll", "ReadAux")]
+                internal extern int32 ReadAux(
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                    write ptr<uint32> value);
+
+                internal int32 BindOther() {
+                    init mut uint32 value;
+                    unsafe { return ReadAux(&init value); }
+                }
+                """), core);
+        Assert.That(secondaryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                secondaryCompilation.Diagnostics));
+        var secondaryArtifact = AddRootMethodImports(
+            TrRmExecutableCompiler.EmitStandard(
+                secondaryCompilation.Program!,
+                secondaryIntermediateIdentity, schemaIdentity, 1),
+            [("ReadAux", leafIdentity, "ReadAux")],
+            reuseModuleRefs: false, duplicateSecondMethodName: false);
+
         byte[] CreateStandaloneOutputProvider(string moduleIdentity,
             string methodName, string access)
         {
@@ -14690,6 +14729,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             rootArtifact);
         var intermediateInput = new TrRmStandardArtifactInput(schemaIdentity,
             intermediateArtifact);
+        var secondaryInput = new TrRmStandardArtifactInput(schemaIdentity,
+            secondaryArtifact);
         var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
             CreateStandaloneOutputProvider(leafIdentity, "ReadAux",
                 "NonZero"));
@@ -14709,12 +14750,16 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             static function => function.Name == "ReadAux")
             .ModuleImport!.ProducerIdentity, Is.EqualTo(leafIdentity));
         var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
-            rootIdentity, [intermediateInput, leafInput]);
+            rootIdentity, [intermediateInput, secondaryInput, leafInput]);
         Assert.That(loaded.Functions.Single(
             static function => function.Name == "ReadValue")
             .ModuleImport!.ProducerIdentity, Is.EqualTo(intermediateIdentity));
+        Assert.That(loaded.Functions.Single(
+            static function => function.Name == "ReadOther")
+            .ModuleImport!.ProducerIdentity,
+            Is.EqualTo(secondaryIntermediateIdentity));
         var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
-            rootIdentity, [intermediateInput, leafInput],
+            rootIdentity, [intermediateInput, secondaryInput, leafInput],
             NativeRuntimePolicy.FailFast);
         Assert.That(image[0], Is.EqualTo((byte)'M'));
         Assert.That(image[1], Is.EqualTo((byte)'Z'));
@@ -14724,7 +14769,133 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 "NonNegative"));
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity,
-                [intermediateInput, changedLeaf]));
+                [intermediateInput, secondaryInput, changedLeaf]));
+    }
+
+    [Test]
+    public void StandardFSelfProviderImportBindsAndReemitsItsOwnedDeclaration()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string moduleIdentity = "native-output-self-provider";
+        var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "GetValue")]
+            public extern int32 GetValue(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            [Terrum.Interop.NativeImport("example.dll", "GetValue")]
+            internal extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            int32 Main() {
+                init mut uint32 value;
+                unsafe { return ReadValue(&init value); }
+            }
+            """), core);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = AddRootMethodImports(
+            TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                moduleIdentity, schemaIdentity, 1),
+            [("ReadValue", moduleIdentity, "GetValue")],
+            reuseModuleRefs: false, duplicateSecondMethodName: false);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(loaded.Functions.Single(
+            static function => function.Name == "ReadValue")
+            .ModuleImport!.ProducerIdentity, Is.EqualTo(moduleIdentity));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            moduleIdentity, []);
+        Assert.That(reloaded.Functions.Single(
+            static function => function.Name == "ReadValue")
+            .ModuleImport!.ProducerIdentity, Is.EqualTo(moduleIdentity));
+    }
+
+    [Test]
+    public void StandardFNativeOutputProviderClosureValidatesAdmittedCycle()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "native-output-cycle-root";
+        const string firstIdentity = "ReadValue";
+        const string secondIdentity = "ReadAux";
+        var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+
+        byte[] CreateProvider(string moduleIdentity, string nextProvider)
+        {
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+                public extern int32 ReadValue(
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                    write ptr<uint32> value);
+
+                [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+                internal extern int32 ReadAux(
+                    [Terrum.Interop.NativeOutput(
+                        When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                    write ptr<uint32> value);
+
+                internal int32 Bind() {
+                    init mut uint32 value;
+                    unsafe { return ReadAux(&init value); }
+                }
+                """), core);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var artifact = TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, moduleIdentity, schemaIdentity, 1);
+            return AddRootMethodImports(artifact,
+                [("ReadAux", nextProvider, "ReadValue")],
+                reuseModuleRefs: false, duplicateSecondMethodName: false);
+        }
+
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            internal extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            int32 Main() {
+                init mut uint32 value;
+                unsafe { return ReadValue(&init value); }
+            }
+            """), core);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var rootArtifact = AddRootMethodImports(
+            TrRmExecutableCompiler.EmitStandard(rootCompilation.Program!,
+                rootIdentity, schemaIdentity, 1),
+            [("ReadValue", firstIdentity, "ReadValue")],
+            reuseModuleRefs: false, duplicateSecondMethodName: false);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var firstInput = new TrRmStandardArtifactInput(schemaIdentity,
+            CreateProvider(firstIdentity, secondIdentity));
+        var secondInput = new TrRmStandardArtifactInput(schemaIdentity,
+            CreateProvider(secondIdentity, firstIdentity));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [firstInput, secondInput]);
+        Assert.That(loaded.Functions.Single(
+            static function => function.Name == "ReadValue")
+            .ModuleImport!.ProducerIdentity, Is.EqualTo(firstIdentity));
+        var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
+            rootIdentity, [firstInput, secondInput],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image[0], Is.EqualTo((byte)'M'));
+        Assert.That(image[1], Is.EqualTo((byte)'Z'));
     }
 
     [TestCase(true, 1)]
