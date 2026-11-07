@@ -5,7 +5,8 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Infrastructure;
 
-public sealed class TestFileCleanupTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TestFileCleanupTests
 {
     [Test]
     public async Task DeleteWithRetryWaitsForFileLockToClearAsync()
@@ -16,7 +17,7 @@ public sealed class TestFileCleanupTests
         }
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"test-file-cleanup-{Guid.NewGuid():N}.tmp");
-        await File.WriteAllBytesAsync(path, Array.Empty<byte>()).ConfigureAwait(true);
+        await File.WriteAllBytesAsync(path, []).ConfigureAwait(true);
         Task deletion;
         bool waitedForLock;
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
@@ -40,9 +41,9 @@ public sealed class TestFileCleanupTests
         }
 
         var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"test-directory-cleanup-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        _ = Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "locked.tmp");
-        await File.WriteAllBytesAsync(path, Array.Empty<byte>()).ConfigureAwait(true);
+        await File.WriteAllBytesAsync(path, []).ConfigureAwait(true);
         Task deletion;
         bool waitedForLock;
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))

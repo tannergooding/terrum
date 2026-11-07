@@ -12,7 +12,7 @@ namespace Terrum.CodeAnalysis.Tests.Infrastructure;
 
 internal sealed class NativeSourceGrantTestBindings
 {
-    private readonly Dictionary<string, BoundExport> _exports = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, BoundExport> _exports = [with(StringComparer.Ordinal)];
 
     public NativeSourceGrantTestBindings(nint module,
         ImmutableArray<(string Name, bool SourceDependent, PrimitiveType ReturnType,
