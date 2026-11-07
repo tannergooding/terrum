@@ -13,7 +13,8 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
-public sealed class NativeRootPinLoadedTypesTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class NativeRootPinLoadedTypesTests
 {
     [Test]
     public async Task LoadedTypeAdmissionIsExactAndTransactionalAsync()
@@ -44,19 +45,19 @@ public sealed class NativeRootPinLoadedTypesTests
         var providerPath = Path.Combine(directory, "terrum-root-pin-runtime.dll");
         var providerObjectPath = Path.Combine(directory, "root-pin-loaded-types.obj");
         var missingExportDirectory = Path.Combine(directory, "missing-export");
-        Directory.CreateDirectory(missingExportDirectory);
+        _ = Directory.CreateDirectory(missingExportDirectory);
         var missingExportProviderPath = Path.Combine(missingExportDirectory,
             "terrum-root-pin-runtime.dll");
         var missingExportProviderObjectPath = Path.Combine(missingExportDirectory,
             "root-pin-missing-export.obj");
         var concurrentProviderDirectory = Path.Combine(directory, "concurrent");
-        Directory.CreateDirectory(concurrentProviderDirectory);
+        _ = Directory.CreateDirectory(concurrentProviderDirectory);
         var concurrentProviderPath = Path.Combine(concurrentProviderDirectory,
             "terrum-root-pin-runtime.dll");
         var concurrentProviderObjectPath = Path.Combine(concurrentProviderDirectory,
             "root-pin-concurrent.obj");
         var runtimeProviderDirectory = Path.Combine(AppContext.BaseDirectory, "RootPinRuntimeProvider");
-        Directory.CreateDirectory(runtimeProviderDirectory);
+        _ = Directory.CreateDirectory(runtimeProviderDirectory);
         var productionProviderPath = Path.Combine(runtimeProviderDirectory, "terrum-root-pin-runtime.dll");
         var productionProviderObjectPath = Path.Combine(runtimeProviderDirectory, "root-pin-loaded-types-production.obj");
         var probePath = Path.Combine(directory, "root-pin-loaded-types-probe.exe");
@@ -104,7 +105,7 @@ public sealed class NativeRootPinLoadedTypesTests
                 CreateRootPinRuntimeGetterCode(productionProviderPath), [], []), Is.Zero);
             TestContext.WriteLine("rootpin-jit-provider=pass");
             var alternateProviderDirectory = Path.Combine(directory, "alternate-provider");
-            Directory.CreateDirectory(alternateProviderDirectory);
+            _ = Directory.CreateDirectory(alternateProviderDirectory);
             var alternateProviderPath = Path.Combine(alternateProviderDirectory,
                 Path.GetFileName(productionProviderPath));
             File.Copy(productionProviderPath, alternateProviderPath);
@@ -140,7 +141,7 @@ public sealed class NativeRootPinLoadedTypesTests
             var invalidSupportProbe = new ProcessStartInfo(probePath) { WorkingDirectory = root };
             invalidSupportProbe.ArgumentList.Add(providerPath);
             invalidSupportProbe.ArgumentList.Add("invalid-support");
-            await RunProcessAsync(invalidSupportProbe, TimeSpan.FromSeconds(10),
+            _ = await RunProcessAsync(invalidSupportProbe, TimeSpan.FromSeconds(10),
                 unchecked((int)0xC0000409)).ConfigureAwait(true);
             TestContext.WriteLine("invalid-support-contract-violation=expected-fast-fail");
         }
