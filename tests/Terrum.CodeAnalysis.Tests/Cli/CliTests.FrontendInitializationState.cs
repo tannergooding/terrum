@@ -15,12 +15,12 @@ namespace Terrum.CodeAnalysis.Tests.Cli;
 
 internal sealed partial class CliTests
 {
-    [TestCase("public int32 Main() { init int32 value; if (value is init) { return 0; } value = 42; return value is init ? value : 0; }",80,87,42,2)]
-    [TestCase("public int32 Main() { init uint32 value; return value is init ? 42 : 0; }",80,87,0,1)]
-    [TestCase("public int32 Main() { init int64 value; return value is init ? 42 : 0; }",80,87,0,1)]
-    [TestCase("public int32 Main() { init uint64 value; return value is init ? 42 : 0; }",80,87,0,1)]
-    [TestCase("public int32 Main() { init bool value; return value is init ? 42 : 0; }",80,87,0,1)]
-    [TestCase("public int32 Main() { init char16 value; return value is init ? 42 : 0; }",80,87,0,1)]
+    [TestCase("public int32 Main() { init int32 value; if (value is init) { return 0; } value = 42; return value is init ? value : 0; }",80,87,42,2,false)]
+    [TestCase("public int32 Main() { init uint32 value; return value is init ? 42 : 0; }",80,87,0,1,false)]
+    [TestCase("public int32 Main() { init int64 value; return value is init ? 42 : 0; }",80,87,0,1,false)]
+    [TestCase("public int32 Main() { init uint64 value; return value is init ? 42 : 0; }",80,87,0,1,false)]
+    [TestCase("public int32 Main() { init bool value; return value is init ? 42 : 0; }",80,87,0,1,false)]
+    [TestCase("public int32 Main() { init char16 value; return value is init ? 42 : 0; }",80,87,0,1,false)]
     [TestCase("""
         public int32 Main() => Ready(42) ? 42 : 0;
         bool Ready(int32 value)
@@ -30,10 +30,11 @@ internal sealed partial class CliTests
             local = value;
             return local is init && value is init;
         }
-        """,81,88,42,3)]
+        """,81,88,42,3,true)]
     public async Task ScalarFrontendNamedInitializationTestsUseCurrentProjectionAsync(
         string text, int projectionVersion, int expectedCurrentProjectionVersion,
-        int expected, int expectedInitializationTests)
+        int expected, int expectedInitializationTests,
+        bool requiresNoFailureProof)
     {
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var input = Encoding.UTF8.GetBytes(text);
@@ -91,6 +92,14 @@ internal sealed partial class CliTests
             var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-init-{Guid.NewGuid():N}.dll");
             try
             {
+                if (runtime == "checked-exceptions" && requiresNoFailureProof)
+                {
+                    await AssertCheckedExceptionLibraryExportRejectedAsync(
+                        hosted, ["Main"], input, directory, outputPath)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
                 var (buildExit, buildOutput, buildError) = await RunAsync(input,
                     "frontend-build-library", directory, "-", "-o", outputPath,
                     "--runtime", runtime, "--json").ConfigureAwait(false);

@@ -1267,17 +1267,30 @@ internal sealed partial class CliTests
     }
 
     [Test]
-    public async Task ScalarFrontendRejectsIntegerShiftWithNonInt32CountAsync()
+    public async Task ScalarFrontendAcceptsTypedNonInt32ShiftCountsAsync()
     {
-        const string source = "int32 Main() { return Shift(1, 1); } int32 Shift(int32 value, uint32 count) { return value << count; }";
+        const string source = "int32 Main() { return Shift(1, uint32(1)); } "
+            + "int32 Shift(int32 value, uint32 count) { return value << count; }";
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), directory, "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
-        Assert.That(exit, Is.EqualTo(1));
-        Assert.That(error, Is.Empty);
-        using var document = JsonDocument.Parse(output);
-        Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
-        Assert.That(document.RootElement.GetProperty("result")
-            .GetProperty("errorCode").GetInt32(), Is.EqualTo(2));
+        var input = Encoding.UTF8.GetBytes(source);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (componentExit, componentOutput, componentError)
+                = await RunFrontendComponentAsync(input, directory, "-",
+                    "--runtime", policy, "--json").ConfigureAwait(false);
+            Assert.That(componentExit, Is.EqualTo(0), componentOutput);
+            Assert.That(componentError, Is.Empty);
+            using var document = JsonDocument.Parse(componentOutput);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.True);
+
+            var (runExit, runOutput, runError) = await RunAsync(input,
+                "frontend-run", directory, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(runExit, Is.EqualTo(2));
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+        }
     }
     [TestCase(64,true)]
     [TestCase(65,true)]
@@ -1532,10 +1545,21 @@ internal sealed partial class CliTests
             var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-outvar-{Guid.NewGuid():N}.dll");
             try
             {
+                if (policy == BoundRuntimePolicy.CheckedExceptions)
+                {
+                    await AssertCheckedExceptionLibraryExportRejectedAsync(
+                        hosted, ["Main"], input, directory, outputPath)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
                 var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
                     directory, "-", "-o", outputPath, "--runtime", runtime, "--json").ConfigureAwait(false);
                 Assert.That(buildExit == 0, Is.True, $"{runtime}: {buildExit}: {buildOutput}{buildError}");
-                Assert.That(await File.ReadAllBytesAsync(outputPath).ConfigureAwait(false), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Main"], (NativeRuntimePolicy)policy)));
+                var expectedImage = NativeEmitter.EmitLibrary(hosted, ["Main"],
+                    (NativeRuntimePolicy)policy);
+                Assert.That(await File.ReadAllBytesAsync(outputPath).ConfigureAwait(false),
+                    Is.EqualTo(expectedImage));
             }
             finally
             {
@@ -1597,8 +1621,6 @@ internal sealed partial class CliTests
             var path = Path.Combine(outputDirectory, $"single-init-ref-{Guid.NewGuid():N}.dll");
             try
             {
-                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
-                    directory, "-", "-o", path, "--runtime", runtime, "--json").ConfigureAwait(false);
                 var policy = runtime == "fail-fast"
                     ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
                 var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
@@ -1608,6 +1630,18 @@ internal sealed partial class CliTests
                     Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
                     return (BoundProgram)__nunitActual1!;
                 }))();
+                if (policy == BoundRuntimePolicy.CheckedExceptions)
+                {
+                    await AssertCheckedExceptionLibraryExportRejectedAsync(
+                        hosted, ["Fill"], input, directory, path)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
+                var (buildExit, buildOutput, buildError) = await RunAsync(input,
+                    "frontend-build-library", directory, "-", "-o", path,
+                    "--runtime", runtime, "--json").ConfigureAwait(false);
+                Assert.That(buildExit, Is.EqualTo(0), buildOutput + buildError);
                 Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], (NativeRuntimePolicy)policy)));
             }
             finally
@@ -1655,6 +1689,14 @@ internal sealed partial class CliTests
             var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-outvar-{Guid.NewGuid():N}.dll");
             try
             {
+                if (policy == BoundRuntimePolicy.CheckedExceptions)
+                {
+                    await AssertCheckedExceptionLibraryExportRejectedAsync(
+                        hosted, ["Fill"], input, directory, outputPath)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
                 var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
                     directory, "-", "-o", outputPath, "--runtime", runtime, "--json").ConfigureAwait(false);
                 Assert.That(buildExit == 0, Is.True, $"{runtime}: {buildExit}: {buildOutput}{buildError}");
@@ -1724,9 +1766,6 @@ internal sealed partial class CliTests
             var path = Path.Combine(outputDirectory, $"single-nonboolean-init-ref-{Guid.NewGuid():N}.dll");
             try
             {
-                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
-                    directory, "-", "-o", path, "--runtime", runtime, "--json").ConfigureAwait(false);
-                Assert.That(buildExit == 0, Is.True, $"{buildExit}: {buildOutput}{buildError}");
                 var policy = runtime == "fail-fast"
                     ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
                 var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
@@ -1736,6 +1775,11 @@ internal sealed partial class CliTests
                     Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
                     return (BoundProgram)__nunitActual3!;
                 }))();
+                var (buildExit, buildOutput, buildError) = await RunAsync(input,
+                    "frontend-build-library", directory, "-", "-o", path,
+                    "--runtime", runtime, "--json").ConfigureAwait(false);
+                Assert.That(buildExit, Is.EqualTo(0),
+                    $"{runtime}: {buildExit}: {buildOutput}{buildError}");
                 Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], (NativeRuntimePolicy)policy)));
             }
             finally
@@ -1766,8 +1810,6 @@ internal sealed partial class CliTests
             var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"nonboolean-init-ref-{Guid.NewGuid():N}.dll");
             try
             {
-                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
-                    directory, "-", "-o", path, "--runtime", runtime, "--json").ConfigureAwait(false);
                 var policy = runtime == "fail-fast"
                     ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
                 var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
@@ -1777,6 +1819,18 @@ internal sealed partial class CliTests
                     Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
                     return (BoundProgram)__nunitActual4!;
                 }))();
+                if (policy == BoundRuntimePolicy.CheckedExceptions)
+                {
+                    await AssertCheckedExceptionLibraryExportRejectedAsync(
+                        hosted, ["Fill"], input, directory, path)
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
+                var (buildExit, buildOutput, buildError) = await RunAsync(input,
+                    "frontend-build-library", directory, "-", "-o", path,
+                    "--runtime", runtime, "--json").ConfigureAwait(false);
+                Assert.That(buildExit, Is.EqualTo(0), buildOutput + buildError);
                 Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], (NativeRuntimePolicy)policy)));
             }
             finally
@@ -1888,9 +1942,6 @@ internal sealed partial class CliTests
             var executablePath = Path.ChangeExtension(path, ".exe");
             try
             {
-                var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
-                    directory, "-", "-o", path, "--runtime", runtime, "--json").ConfigureAwait(false);
-                Assert.That(buildExit == 0, Is.True, $"{buildExit}: {buildOutput}{buildError}");
                 var policy = runtime == "fail-fast"
                     ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
                 var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
@@ -1900,7 +1951,25 @@ internal sealed partial class CliTests
                     Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
                     return (BoundProgram)__nunitActual6!;
                 }))();
-                Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Next", "Main"], (NativeRuntimePolicy)policy)));
+                if (policy == BoundRuntimePolicy.CheckedExceptions)
+                {
+                    await AssertCheckedExceptionLibraryExportRejectedAsync(
+                        hosted, ["Next", "Main"], input, directory, path)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    var (buildExit, buildOutput, buildError) = await RunAsync(
+                        input, "frontend-build-library", directory, "-", "-o",
+                        path, "--runtime", runtime, "--json").ConfigureAwait(false);
+                    Assert.That(buildExit == 0, Is.True,
+                        $"{buildExit}: {buildOutput}{buildError}");
+                    Assert.That(await File.ReadAllBytesAsync(path)
+                        .ConfigureAwait(false),
+                        Is.EqualTo(NativeEmitter.EmitLibrary(hosted,
+                            ["Next", "Main"], (NativeRuntimePolicy)policy)));
+                }
+
                 var (executableExit, executableOutput, executableError) = await RunAsync(input, "frontend-build",
                     directory, "-", "-o", executablePath, "--runtime", runtime, "--json").ConfigureAwait(false);
                 Assert.That(executableExit == 0, Is.True, $"{executableExit}: {executableOutput}{executableError}");
@@ -2109,9 +2178,18 @@ internal sealed partial class CliTests
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"named-calls-{Guid.NewGuid():N}.dll");
         try
         {
-            var (buildExit, buildOutput, buildError) = await RunAsync(input, "frontend-build-library",
-                directory, "-", "-o", path, "--runtime", runtime, "--json").ConfigureAwait(false);
-            Assert.That(buildExit == 0, Is.True, $"{buildExit}: {buildOutput}{buildError}");
+            if (policy == BoundRuntimePolicy.CheckedExceptions)
+            {
+                await AssertCheckedExceptionLibraryExportRejectedAsync(
+                    hosted, ["Value"], input, directory, path)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            var (buildExit, buildOutput, buildError) = await RunAsync(input,
+                "frontend-build-library", directory, "-", "-o", path,
+                "--runtime", runtime, "--json").ConfigureAwait(false);
+            Assert.That(buildExit, Is.EqualTo(0), buildOutput + buildError);
             Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Value"], (NativeRuntimePolicy)policy)));
         }
         finally
@@ -2231,5 +2309,24 @@ internal sealed partial class CliTests
         Assert.That(runExit, Is.EqualTo(42));
         Assert.That(runOutput, Is.Empty);
         Assert.That(runError, Is.Empty);
+    }
+
+    private static async Task AssertCheckedExceptionLibraryExportRejectedAsync(
+        BoundProgram program, string[] exports, byte[] input, string directory,
+        string outputPath)
+    {
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(
+            program, exports, NativeRuntimePolicy.CheckedExceptions));
+        var (exit, output, error) = await RunAsync(input,
+            "frontend-build-library", directory, "-", "-o", outputPath,
+            "--runtime", "checked-exceptions", "--json").ConfigureAwait(false);
+        Assert.That(exit, Is.EqualTo(1), $"{exit}: {output}{error}");
+        Assert.That(error, Is.Empty);
+        using var document = JsonDocument.Parse(output);
+        Assert.That(document.RootElement.GetProperty("success").GetBoolean(),
+            Is.False);
+        Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+            .GetProperty("code").GetString(), Is.EqualTo("TRM4002"));
+        Assert.That(File.Exists(outputPath), Is.False);
     }
 }

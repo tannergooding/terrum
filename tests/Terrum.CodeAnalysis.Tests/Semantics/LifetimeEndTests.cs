@@ -73,7 +73,6 @@ internal sealed class LifetimeEndTests
     [TestCase("struct Pair { public int32 Value; public Pair() { Value = 1; } } void End() { mut Pair pair = new Pair(); pair.Value = _; }")]
     [TestCase("void End() { Host.Trace[0] = _; }")]
     [TestCase("enum Number { One } void End() { Number value = Number.One; value = _; }")]
-    [TestCase("void End() { int32 value = 1; ref<int32> borrowed = ref value; borrowed = _; }")]
     [TestCase("void End() { int32 value = 1; pin ref<int32> borrowed = ref value; borrowed = _; }")]
     public void EndRejectsAliasesAndDoesNotAdoptUnsupportedTypeFamilies(string declarations)
     {
@@ -82,6 +81,21 @@ internal sealed class LifetimeEndTests
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
+
+    [TestCase("ref<int32>")]
+    [TestCase("write ref<int32>")]
+    public void EndReleasesLocalReferenceLoans(string referenceType)
+    {
+        var source = $"int32 Main() {{ mut int32 value = 1; {referenceType} borrowed = ref value; borrowed = _; value = 42; return value; }}";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+    }
+
     [TestCase(false)]
     [TestCase(true)]
     public void InlineInitCanRetryBeforePublicationButCannotReviveAnEndedReadonlyValue(bool endBeforeRetry)
