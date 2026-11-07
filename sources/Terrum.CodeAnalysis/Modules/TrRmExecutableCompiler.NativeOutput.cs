@@ -1100,10 +1100,17 @@ public static partial class TrRmExecutableCompiler
         var nativeParameterTypeMapTokens = nativeParameterFormals.Select(
             formal => CreateStandardBodyTypeMapToken(
                 targetParameterTypeSpecRefs[formal])).ToArray();
+        var nativeArrayElementTypeMapTokens
+            = nativeParameterAddressByCallFormal.Values
+                .Where(static address => NativeFixedArrayTypes.IsType(
+                    address.CarrierType))
+                .Select(address => CreateStandardBodyTypeMapToken(
+                    GetTypeSpecRef(address.ElementType)));
         var bodyTypeMapTokens = outputTypeMapTokens
             .Concat(callerParameterTypeMapTokens)
             .Concat(backingLocalTypeMapTokens)
-            .Concat(nativeParameterTypeMapTokens);
+            .Concat(nativeParameterTypeMapTokens)
+            .Concat(nativeArrayElementTypeMapTokens);
         var maps = TrRmRegisterBodyMapBuilder.Create(
             bodyTypeMapTokens,
             [0x1600_0000u | checked((uint)targetMethodRow)]);

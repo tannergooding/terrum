@@ -6750,20 +6750,24 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
-    [TestCase("Read", 0u, false)]
-    [TestCase("Read", 1u, false)]
-    [TestCase("Read", 2u, false)]
-    [TestCase("Write", 2u, false)]
-    [TestCase("ReadWrite", 2u, false)]
-    [TestCase("Read", 2u, true)]
+    [TestCase("Read", 0u, false, "int32", PrimitiveType.Int32, 4)]
+    [TestCase("Read", 1u, false, "int32", PrimitiveType.Int32, 4)]
+    [TestCase("Read", 2u, false, "int32", PrimitiveType.Int32, 4)]
+    [TestCase("Write", 2u, false, "int32", PrimitiveType.Int32, 4)]
+    [TestCase("ReadWrite", 2u, false, "int32", PrimitiveType.Int32, 4)]
+    [TestCase("Read", 2u, true, "int32", PrimitiveType.Int32, 4)]
+    [TestCase("Read", 2u, false, "int64", PrimitiveType.Int64, 8)]
+    [TestCase("Read", 2u, true, "int64", PrimitiveType.Int64, 8)]
     public void StandardA2NativeOutputCallRetainsArrayParameterBacking(
-        string access, uint nativeParameterExtent, bool allBitsSet)
+        string access, uint nativeParameterExtent, bool allBitsSet,
+        string elementType, PrimitiveType expectedElementType,
+        int elementStride)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string moduleIdentity = "a2-native-output-array-backing";
         var pointerType = access == "Read"
-            ? "ptr<int32>" : "write ptr<int32>";
+            ? $"ptr<{elementType}>" : $"write ptr<{elementType}>";
         var arrayValues = allBitsSet
             ? "[-1, -1, -1]" : "[0, 0, 0]";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
@@ -6783,7 +6787,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
 
             internal int32 Probe(int32 index) {
                     int32 zeroIndex = 0;
-                    mut [int32; 3] backing = {{arrayValues}};
+                    mut [{{elementType}}; 3] backing = {{arrayValues}};
                 init mut Result result;
                 unsafe { return Observe(&backing[index], &init result); }
             }
@@ -6822,9 +6826,11 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }), Is.True);
         Assert.That(address, Is.Not.Null);
         Assert.That(address!.ElementCount, Is.EqualTo(3));
-        Assert.That(address.ElementType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(address.ElementType, Is.EqualTo(expectedElementType));
+        Assert.That(address.ElementStride, Is.EqualTo((ulong)elementStride));
         Assert.That(address.ByteExtent,
-            Is.EqualTo((ulong)Math.Max(1u, nativeParameterExtent) * 4));
+            Is.EqualTo((ulong)Math.Max(1u, nativeParameterExtent)
+                * (uint)elementStride));
         Assert.That(address.IsReadonly, Is.EqualTo(access == "Read"));
         Assert.That(address.Projections, Has.Length.EqualTo(1));
         Assert.That(address.Index, Is.TypeOf<BoundRead>());
@@ -6834,10 +6840,15 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         {
             Assert.That(element, Is.TypeOf<BoundConstant>());
             var constant = (BoundConstant)element;
-            Assert.That(constant.Type, Is.EqualTo(PrimitiveType.Int32));
-            Assert.That(constant.Bits.Low, Is.EqualTo(allBitsSet
-                ? uint.MaxValue : 0));
-            Assert.That(constant.Bits.High, Is.Zero);
+            Assert.That(constant.Type, Is.EqualTo(expectedElementType));
+            var width = elementStride * 8;
+            var expectedLow = !allBitsSet ? 0
+                : width >= sizeof(ulong) * 8
+                    ? ulong.MaxValue : (1UL << width) - 1;
+            var expectedHigh = allBitsSet && width > sizeof(ulong) * 8
+                ? ulong.MaxValue : 0;
+            Assert.That(constant.Bits.Low, Is.EqualTo(expectedLow));
+            Assert.That(constant.Bits.High, Is.EqualTo(expectedHigh));
         }
         Assert.That(call, Is.Not.Null);
         Assert.That(call!.Arguments[1],
