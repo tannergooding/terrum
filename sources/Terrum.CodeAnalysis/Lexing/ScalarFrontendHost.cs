@@ -566,7 +566,8 @@ public static partial class ScalarFrontendHost
                         var bitwise = node.Operation is 71 or 73 or 75;
                         var shift = node.Operation is (>= 88 and <= 90) or (>= 99 and <= 101);
                         var compound = node.Operation is >= 91 and <= 101;
-                        if ((shift ? rhs.Type != 1 : operand.Type != rhs.Type)
+                        if ((shift ? rhs.Type is < 1 or > 4
+                                : operand.Type != rhs.Type)
                             || node.Type != (comparison ? 5 : operand.Type)
                             || (compound && !UpdatePlace(node.Left))
                             || (compound && node.Type is < 1 or > 4)
@@ -2531,7 +2532,8 @@ public static partial class ScalarFrontendHost
                 if ((encodedOffset != 0 && binaryOperation / 100 != (literalFirst ? 3 : 1))
                     || expression.Type != type
                     || (shift ? (literalFirst
-                            ? parameterType != 1 || type is not (1 or 2 or 3 or 4)
+                            ? parameterType is < 1 or > 4
+                                || type is not (1 or 2 or 3 or 4)
                             : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
                         : comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6 or 7 or 8)
                         : type != parameterType || parameterType is not (1 or 2 or 3 or 4 or 7 or 8))

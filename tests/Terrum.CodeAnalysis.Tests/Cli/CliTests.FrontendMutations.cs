@@ -95,6 +95,47 @@ public sealed partial class CliTests
             Assert.That(runError, Is.Empty);
         }
     }
+
+    [TestCase("int32 Main() { mut int32 x = 1; bool count = true; return x << count; }")]
+    [TestCase("int32 Main() { mut int64 x = 1; float64 count = 1.0; return int32(x << count); }")]
+    public async Task FrontendComponentRejectsNonIntegerShiftCountsAsync(
+        string source)
+    {
+        var frontend = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        var input = Encoding.UTF8.GetBytes(source);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunFrontendComponentAsync(input,
+                frontend, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(1), $"{policy}: {output}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(),
+                Is.False);
+        }
+    }
+
+    [TestCase("int32 Main() { mut int32 x = 1; int64 count = 1; return x << count == 2 ? 42 : 0; }")]
+    [TestCase("int32 Main() { mut uint32 x = 8; uint32 count = 2; return x >>> count == 2 ? 42 : 0; }")]
+    public async Task FrontendComponentAcceptsTypedIntegerShiftCountsAsync(
+        string source)
+    {
+        var frontend = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        var input = Encoding.UTF8.GetBytes(source);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunFrontendComponentAsync(input,
+                frontend, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero, $"{policy}: {output}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("result")
+                .GetProperty("valid").GetBoolean(), Is.True);
+        }
+    }
+
     [TestCase("int32")]
     [TestCase("uint32")]
     [TestCase("int64")]
@@ -217,6 +258,8 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { mut int32 x = 4; return true || x++ == 0 ? x : 0; }",4)]
     [TestCase("int32 Main() { mut int32 x = 1; x <<= 31; return x >> 31 == -1 && x >>> 31 == 1 ? 42 : 0; }",42)]
     [TestCase("int32 Main() { mut int32 x = 1; return x << 31 == -2147483648 ? 42 : 0; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 1; int64 count = 1; return x << count == 2 ? 42 : 0; }",42)]
+    [TestCase("int32 Main() { mut uint32 x = 8; uint32 count = 2; return x >>> count == 2 ? 42 : 0; }",42)]
     [TestCase("int32 Main() { mut int64 x = -1; return x >>> 63 == 1 ? 42 : 0; }",42)]
     [TestCase("int32 Main() { mut int64 x = 1; x <<= 63; return x < 0 ? 42 : 0; }",42)]
     [TestCase("int32 Main() { mut uint64 x = 1; return x << 63 == 9223372036854775808 ? 42 : 0; }",42)]
@@ -311,8 +354,8 @@ public sealed partial class CliTests
     [TestCase("int32 Main(int32 x) { ++x; return x; }")]
     [TestCase("int32 Main() { mut bool x = true; x++; return 42; }")]
     [TestCase("int32 Main() { mut char16 x = 1; x += 1; return 42; }")]
-    [TestCase("int32 Main() { mut int32 x = 1; x <<= int64(1); return x; }")]
-    [TestCase("int32 Main() { mut int64 x = 1; return int32(x << int64(1)); }")]
+    [TestCase("int32 Main() { mut int32 x = 1; bool count = true; x <<= count; return x; }")]
+    [TestCase("int32 Main() { mut int64 x = 1; float64 count = 1.0; return int32(x << count); }")]
     [TestCase("int32 Main() { mut int32 x = 1; x += uint32(1); return x; }")]
     [TestCase("int32 Main() { mut int32 x = 1; return x++ + Missing(); }")]
     [TestCase("int32 Main() { mut int32 x = 1; return x.Value++; }")]
@@ -320,7 +363,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { mut int32 x = 1; x += 1.5; return x; }")]
     [TestCase("int32 Main() { mut int32 x = 1; return (x + 1)++; }")]
     [TestCase("int32 Main() { mut int32 x = 1; x += int64(2); return x; }")]
-    [TestCase("int32 Main() { mut int32 x = 1; return x >>> uint32(1); }")]
+    [TestCase("int32 Main() { mut uint32 x = 1; bool count = false; return int32(x >>> count); }")]
     [TestCase("int32 Main() { var x = 1 << 2; return 42; }")]
     [TestCase("int32 Main() { mut int32 count = 2; var x = 1 << count; return x; }")]
     [TestCase("int32 Main() { mut int32 count = 2; _ = 1 << count; return 42; }")]

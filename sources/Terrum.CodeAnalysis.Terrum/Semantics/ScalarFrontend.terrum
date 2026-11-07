@@ -1392,7 +1392,7 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                if ((isShift && parameterType != 1)
+                if ((isShift && (parameterType < 1 || parameterType > 4))
                     || (!isShift && parameterType != expectedType))
                 {
                     FailAt(2, next.Range);
@@ -1641,7 +1641,8 @@ mut class ScalarFrontendState
             }
             rightIndex = resolvedRightIndex;
             bool isShift = operation >= 88 && operation <= 90;
-            if ((isShift && (selected < 1 || selected > 4 || rightType != 1))
+            if ((isShift && (selected < 1 || selected > 4
+                    || rightType < 1 || rightType > 4))
                 || (!isShift && selected != rightType)
                 || ((operation >= 57 && operation <= 61)
                 && (selected == 5 || selected == 6))
@@ -4831,7 +4832,7 @@ bool IsScalarFrontendBinaryTypeValid(int32 operation, int32 left, int32 right)
 {
     if (operation >= 88 && operation <= 90)
     {
-        if (right != 1) { return false; }
+        if (right < 1 || right > 4) { return false; }
         if (left == 0) { return true; }
         return left >= 1 && left <= 4;
     }
