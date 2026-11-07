@@ -23,7 +23,7 @@ bool TryGetScalarType(Token type, init ref<int32> scalarType)
     {
         return false;
     }
-    for (mut int32 index = 0; index < count; index = index + 1)
+    for (mut int32 index = count - 1; index >= 0; index = index - 1)
     {
         int32 entry = Host.FrontendProgram.Length - 1 - (index + 1) * 5;
         require SourceRange.TryCreate(Host.FrontendProgram[entry],

@@ -4775,25 +4775,29 @@ internal sealed partial class Binder
             return _aliases.TryGetValue(name, out var alias) ? alias : null;
         }
 
+        var namespaceName = _namespace;
+        while (true)
+        {
+            var qualifiedName = namespaceName.Length == 0
+                ? name : namespaceName + "." + name;
+            if (_aliases.TryGetValue(qualifiedName, out var alias))
+            {
+                return alias;
+            }
+            var separator = namespaceName.LastIndexOf('.', StringComparison.Ordinal);
+            if (separator < 0)
+            {
+                break;
+            }
+            namespaceName = namespaceName[..separator];
+        }
+
         string? candidateName = null;
         AliasDefinition? candidate = null;
-        if (!TryAddAliasCandidate(name, ref candidateName, ref candidate)
-            || !TryAddAliasCandidate(Qualify(name), ref candidateName, ref candidate))
-        {
-            return null;
-        }
-        var parent = _namespace;
-        while (parent.Contains('.', StringComparison.Ordinal))
-        {
-            parent = parent[..parent.LastIndexOf('.', StringComparison.Ordinal)];
-            if (!TryAddAliasCandidate(parent + "." + name, ref candidateName, ref candidate))
-            {
-                return null;
-            }
-        }
         foreach (var imported in _usings)
         {
-            if (!TryAddAliasCandidate(imported + "." + name, ref candidateName, ref candidate))
+            if (!TryAddAliasCandidate(imported + "." + name,
+                ref candidateName, ref candidate))
             {
                 return null;
             }

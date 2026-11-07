@@ -246,7 +246,6 @@ internal sealed partial class CliTests
     [TestCase("alias Scalar = int32; alias Scalar = int64; Scalar Main() { return 42; }")]
     [TestCase("alias Scalar = Missing; Scalar Main() { return 42; }")]
     [TestCase("alias Scalar = Count; alias Count = Scalar; Scalar Main() { return 42; }")]
-    [TestCase("alias Scalar = int32; namespace Nested { alias Scalar = int32; Scalar Main() { return 42; } }")]
     public async Task ScalarFrontendRejectsInvalidAliasesInNestedNamespaceLeafAsync(string declarations)
     {
         var source = Encoding.UTF8.GetBytes(
@@ -923,6 +922,104 @@ internal sealed partial class CliTests
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.False);
+        }
+    }
+
+    [TestCase("alias Scalar = int32; namespace Demo.Tools { Scalar Main() => 42; }")]
+    [TestCase("namespace Demo.Tools { Scalar Main() => 42; } alias Scalar = int32;")]
+    [TestCase("alias Scalar = Word; namespace Demo.Tools { Scalar Main() => 42; } alias Word = int32;")]
+    [TestCase("namespace Demo.Tools { alias Scalar = Word; Scalar Main() => 42; } alias Word = int32;")]
+    public async Task ScalarFrontendSupportsRootAliasesAlongsideNamespaceBlocksAsync(
+        string source)
+    {
+        var input = Encoding.UTF8.GetBytes(source);
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (componentExit, componentOutput, componentError)
+                = await RunFrontendComponentAsync(input, directory, "-",
+                    "--runtime", policy, "--json").ConfigureAwait(false);
+            Assert.That(componentExit, Is.EqualTo(0), componentOutput);
+            Assert.That(componentError, Is.Empty);
+
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(
+                input, "frontend-run", directory, "-", "--runtime", policy,
+                "--json").ConfigureAwait(false);
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                input, "jit", "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(frontendExit, Is.EqualTo(42));
+            Assert.That(hostedExit, Is.EqualTo(frontendExit));
+            Assert.That(frontendOutput, Is.Empty);
+            Assert.That(hostedOutput, Is.Empty);
+            Assert.That(frontendError, Is.Empty);
+            Assert.That(hostedError, Is.Empty);
+        }
+    }
+
+    [Test]
+    public async Task ScalarFrontendAllowsNestedNamespaceAliasesToShadowRootAliasesAsync()
+    {
+        const string source = "alias Scalar = int32; "
+            + "int32 Main() => 42; "
+            + "namespace Demo.Tools { alias Scalar = int64; "
+            + "Scalar Value() => 42; } "
+            + "namespace Demo.Other { Scalar Other() => 0; }";
+        var input = Encoding.UTF8.GetBytes(source);
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (componentExit, componentOutput, componentError)
+                = await RunFrontendComponentAsync(input, directory, "-",
+                    "--runtime", policy, "--json").ConfigureAwait(false);
+            Assert.That(componentExit, Is.EqualTo(0), componentOutput);
+            Assert.That(componentError, Is.Empty);
+
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(
+                input, "frontend-run", directory, "-", "--runtime", policy,
+                "--json").ConfigureAwait(false);
+            Assert.That(frontendExit, Is.EqualTo(42));
+            Assert.That(frontendOutput, Is.Empty);
+            Assert.That(frontendError, Is.Empty);
+        }
+    }
+
+    [Test]
+    public async Task ScalarFrontendRejectsDuplicateRootAliasesAcrossNamespacePartsAsync()
+    {
+        const string source = "alias Scalar = int32; int32 Main() => 42; "
+            + "namespace Demo.Tools { int32 Value() => 42; } "
+            + "alias Scalar = int64;";
+        var input = Encoding.UTF8.GetBytes(source);
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunFrontendComponentAsync(
+                input, directory, "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.False);
+
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(
+                input, "frontend-run", directory, "-", "--runtime", policy,
+                "--json").ConfigureAwait(false);
+            Assert.That(frontendExit, Is.EqualTo(1));
+            Assert.That(frontendError, Is.Empty);
+            using var frontendDocument = JsonDocument.Parse(frontendOutput);
+            Assert.That(frontendDocument.RootElement.GetProperty("success")
+                .GetBoolean(), Is.False);
+
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                input, "jit", "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(hostedExit, Is.EqualTo(1));
+            Assert.That(hostedError, Is.Empty);
+            using var hostedDocument = JsonDocument.Parse(hostedOutput);
+            Assert.That(hostedDocument.RootElement.GetProperty("success")
                 .GetBoolean(), Is.False);
         }
     }

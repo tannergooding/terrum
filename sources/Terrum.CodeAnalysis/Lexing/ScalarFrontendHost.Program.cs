@@ -204,13 +204,8 @@ public static partial class ScalarFrontendHost
         var program = BindProgramCore(results, declarations, functionSources.MoveToImmutable(), policy,
             sourceArithmeticProfile);
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex,
-            out var span, out _, out var invalidEffect))
+            out var span, out _, out _))
         {
-            if (System.Environment.GetEnvironmentVariable(
-                    "TERRUM_DEBUG_SCALAR_FRONTEND") == "1")
-            {
-                System.Console.Error.WriteLine(invalidEffect);
-            }
             var invalidIndex = (uint)functionIndex < (uint)results.Length ? functionIndex : 0;
             var invalidFunctions = results.SetItem(invalidIndex, results[invalidIndex] with {
                 IsValid = false,
@@ -740,34 +735,49 @@ public static partial class ScalarFrontendHost
         ImmutableArray<SyntaxToken> tokens, List<ProgramScope> scopes,
         ProgramScope target)
     {
-        var declarations = new Dictionary<string, AliasDeclaration>(
-            StringComparer.Ordinal);
-        foreach (var scope in scopes)
+        var aliases = new Dictionary<string, int>(StringComparer.Ordinal);
+        var namespaceLevels = new List<string> { string.Empty };
+        if (target.NamespaceName.Length != 0)
         {
-            if (!IsNamespaceAncestor(scope.NamespaceName,
-                target.NamespaceName))
+            var namespaceParts = target.NamespaceName.Split('.');
+            var currentNamespace = string.Empty;
+            foreach (var part in namespaceParts)
             {
-                continue;
+                currentNamespace = currentNamespace.Length == 0
+                    ? part : currentNamespace + "." + part;
+                namespaceLevels.Add(currentNamespace);
             }
-            foreach (var (name, declaration) in
-                InventoryScalarAliasDeclarations(tokens, scope.TokenStart,
-                    scope.TokenEnd))
+        }
+
+        var totalAliasCount = 0;
+        foreach (var namespaceLevel in namespaceLevels)
+        {
+            var declarations = new Dictionary<string, AliasDeclaration>(
+                StringComparer.Ordinal);
+            foreach (var scope in scopes.Where(scope =>
+                         StringComparer.Ordinal.Equals(
+                             scope.NamespaceName, namespaceLevel)))
             {
-                if (declarations.Count == MaximumAliases
-                    || !declarations.TryAdd(name, declaration))
+                foreach (var (name, declaration) in
+                    InventoryScalarAliasDeclarations(tokens,
+                        scope.TokenStart, scope.TokenEnd))
                 {
-                    throw InvalidResult();
+                    if (totalAliasCount == MaximumAliases
+                        || !declarations.TryAdd(name, declaration))
+                    {
+                        throw InvalidResult();
+                    }
+                    totalAliasCount++;
                 }
             }
+            foreach (var (name, type) in
+                ResolveScalarAliases(declarations, aliases).Types)
+            {
+                aliases[name] = type;
+            }
         }
-        return ResolveScalarAliases(declarations);
-
-        static bool IsNamespaceAncestor(string ancestor, string current)
-        {
-            return ancestor.Length == 0
-                || string.Equals(ancestor, current, StringComparison.Ordinal)
-                || current.StartsWith(ancestor + ".", StringComparison.Ordinal);
-        }
+        return new ScalarAliasEnvironment(
+            aliases.ToImmutableDictionary(StringComparer.Ordinal));
     }
 
     private static ScalarAliasEnvironment InventoryScalarAliases(
@@ -880,8 +890,10 @@ public static partial class ScalarFrontendHost
     }
 
     private static ScalarAliasEnvironment ResolveScalarAliases(
-        Dictionary<string, AliasDeclaration> declarations)
+        Dictionary<string, AliasDeclaration> declarations,
+        Dictionary<string, int>? inherited = null)
     {
+        inherited ??= new Dictionary<string, int>(StringComparer.Ordinal);
         var resolved = new Dictionary<string, int>(StringComparer.Ordinal);
         while (resolved.Count != declarations.Count)
         {
@@ -895,6 +907,13 @@ public static partial class ScalarFrontendHost
                 if (!TryGetPrimitiveScalarCode(declaration.Target, allowVoid: false, out var type))
                 {
                     if (resolved.TryGetValue(declaration.Target, out type))
+                    {
+                        resolved.Add(declaration.Name, type);
+                        madeProgress = true;
+                    }
+                    else if (!declarations.ContainsKey(declaration.Target)
+                        && inherited.TryGetValue(declaration.Target,
+                            out type))
                     {
                         resolved.Add(declaration.Name, type);
                         madeProgress = true;
@@ -913,7 +932,17 @@ public static partial class ScalarFrontendHost
                 throw InvalidResult();
             }
         }
-        return new ScalarAliasEnvironment(resolved.ToImmutableDictionary(StringComparer.Ordinal));
+        var visible = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var (name, type) in inherited)
+        {
+            visible.Add(name, type);
+        }
+        foreach (var (name, type) in resolved)
+        {
+            visible[name] = type;
+        }
+        return new ScalarAliasEnvironment(
+            visible.ToImmutableDictionary(StringComparer.Ordinal));
     }
 
     private static int ScalarCode(string text, bool allowVoid, ScalarAliasEnvironment? aliases)

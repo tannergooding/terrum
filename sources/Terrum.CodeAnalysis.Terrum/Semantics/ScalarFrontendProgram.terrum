@@ -296,6 +296,14 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
     aliasCount = 0;
     error = empty;
     errorCode = 1;
+    var rootAliasError = BuildScalarAliasTable(tokenView, count,
+        0, count - 1, 0, 0, true, init var rootAliasCount);
+    if (rootAliasError.Length != 0)
+    {
+        error = rootAliasError;
+        return true;
+    }
+    aliasCount = rootAliasCount;
     mut int32 at = 0;
     mut int32 functions = 0;
     mut bool hasFour = false;
@@ -310,7 +318,7 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
         if (keyword.Kind == 6)
         {
             var aliasError = BuildScalarAliasTableForNamespaceParts(
-                tokenView, count, at, 0);
+                tokenView, count, at, rootAliasCount);
             if (aliasError.Length != 0)
             {
                 error = aliasError;
@@ -339,7 +347,7 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
             {
                 aliasCount = updatedAliasCount;
             }
-            RestoreScalarAliasTable(0);
+            RestoreScalarAliasTable(rootAliasCount);
             hasNamespace = true;
             at = next;
             continue;
@@ -373,18 +381,6 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
             return true;
         }
         if (scopeEnd == at)
-        {
-            error = keyword.Range;
-            return true;
-        }
-        var aliasError = BuildScalarAliasTable(tokenView, count, at,
-            scopeEnd, 0, true, init var rootAliasCount);
-        if (aliasError.Length != 0)
-        {
-            error = aliasError;
-            return true;
-        }
-        if (rootAliasCount > 0 && (hasNamespace || scopeEnd < count - 1))
         {
             error = keyword.Range;
             return true;
@@ -441,20 +437,23 @@ SourceRange BuildScalarAliasTableForNamespaceParts(Span<Token> tokenView,
     }
 
     var aliasError = CollectScalarNamespaceAliases(tokenView, count,
-        0, count - 1, namespaceStart, -1, initialAliasCount, 0);
+        0, count - 1, namespaceStart, -1, initialAliasCount,
+        initialAliasCount, 0);
     if (aliasError.Length != 0)
     {
         return aliasError;
     }
 
     return ResolveScalarAliases(
-        Host.FrontendProgram[Host.FrontendProgram.Length - 1]);
+        Host.FrontendProgram[Host.FrontendProgram.Length - 1],
+        initialAliasCount);
 }
 
 SourceRange CollectScalarNamespaceAliases(Span<Token> tokenView,
     int32 count, int32 scopeStart, int32 scopeEnd,
     int32 targetNamespaceStart, int32 parentNamespaceStart,
-    int32 initialAliasCount, int32 namespaceDepth)
+    int32 initialAliasCount, int32 duplicateStart,
+    int32 namespaceDepth)
 {
     require SourceRange.TryCreate(0, 0, init var empty);
     mut int32 currentAliasCount = initialAliasCount;
@@ -492,7 +491,8 @@ SourceRange CollectScalarNamespaceAliases(Span<Token> tokenView,
                     parentNamespaceStart))
             {
                 var aliasError = BuildScalarAliasTable(tokenView, count,
-                    bodyStart, blockEnd - 1, currentAliasCount, false,
+                    bodyStart, blockEnd - 1, currentAliasCount,
+                    duplicateStart, false,
                     init var updatedAliasCount);
                 if (aliasError.Length != 0)
                 {
@@ -503,7 +503,8 @@ SourceRange CollectScalarNamespaceAliases(Span<Token> tokenView,
 
             var nestedError = CollectScalarNamespaceAliases(tokenView,
                 count, bodyStart, blockEnd - 1, targetNamespaceStart,
-                scan, currentAliasCount, namespaceDepth + 1);
+                scan, currentAliasCount, duplicateStart,
+                namespaceDepth + 1);
             if (nestedError.Length != 0)
             {
                 return nestedError;
@@ -1017,7 +1018,8 @@ bool TryBuildScalarAliasTableForFunction(Span<Token> tokenView, int32 count,
     if (!namespaceAliasesPrebuilt)
     {
         var aliasError = BuildScalarAliasTable(tokenView, count,
-            scopeStart, scopeEnd, initialAliasCount, true,
+            scopeStart, scopeEnd, initialAliasCount,
+            initialAliasCount, true,
             init var updatedAliasCount);
         if (aliasError.Length != 0)
         {
@@ -1225,7 +1227,8 @@ void RestoreScalarAliasTable(int32 count)
 // final call-target slot when the complete source exceeds the former token bound.
 // An empty returned span means the alias table was built successfully.
 SourceRange BuildScalarAliasTable(Span<Token> tokenView, int32 count, int32 programDeclarationStart,
-    int32 programDeclarationEnd, int32 initialAliasCount, bool resolveAliases,
+    int32 programDeclarationEnd, int32 initialAliasCount,
+    int32 duplicateStart, bool resolveAliases,
     init ref<int32> aliasCount)
 {
     require SourceRange.TryCreate(0, 0, init var empty);
@@ -1296,7 +1299,8 @@ SourceRange BuildScalarAliasTable(Span<Token> tokenView, int32 count, int32 prog
             {
                 return aliasToken.Range;
             }
-            for (mut int32 index = 0; index < aliasCount; index = index + 1)
+            for (mut int32 index = duplicateStart; index < aliasCount;
+                index = index + 1)
             {
                 int32 entry = Host.FrontendProgram.Length - 1 - (index + 1) * 5;
                 require SourceRange.TryCreate(Host.FrontendProgram[entry],
@@ -1366,14 +1370,19 @@ SourceRange BuildScalarAliasTable(Span<Token> tokenView, int32 count, int32 prog
     }
 
     Host.FrontendProgram[Host.FrontendProgram.Length - 1] = aliasCount;
-    return resolveAliases ? ResolveScalarAliases(aliasCount) : empty;
+    return resolveAliases
+        ? ResolveScalarAliases(aliasCount, duplicateStart) : empty;
 }
 
-SourceRange ResolveScalarAliases(int32 aliasCount)
+SourceRange ResolveScalarAliases(int32 aliasCount,
+    int32 firstAliasToResolve)
 {
     require SourceRange.TryCreate(0, 0, init var empty);
-    require Host.FrontendProgram.Length == 25025 && aliasCount >= 0 && aliasCount <= 12;
-    for (mut int32 index = 0; index < aliasCount; index = index + 1)
+    require Host.FrontendProgram.Length == 25025 && aliasCount >= 0
+        && aliasCount <= 12 && firstAliasToResolve >= 0
+        && firstAliasToResolve <= aliasCount;
+    for (mut int32 index = firstAliasToResolve; index < aliasCount;
+        index = index + 1)
     {
         var errorSpan = ResolveScalarAlias(index, 0, aliasCount);
         if (errorSpan.Length != 0)
@@ -1411,7 +1420,8 @@ SourceRange ResolveScalarAlias(int32 index, int32 depth, int32 aliasCount)
         Host.FrontendProgram[entry + 4] = primitive;
         return empty;
     }
-    for (mut int32 candidate = 0; candidate < aliasCount; candidate = candidate + 1)
+    for (mut int32 candidate = aliasCount - 1; candidate >= 0;
+        candidate = candidate - 1)
     {
         int32 candidateEntry = Host.FrontendProgram.Length - 1 - (candidate + 1) * 5;
         require candidateEntry >= 0 && candidateEntry + 4 < Host.FrontendProgram.Length;
@@ -1419,7 +1429,8 @@ SourceRange ResolveScalarAlias(int32 index, int32 depth, int32 aliasCount)
             Host.FrontendProgram[candidateEntry + 1], init var candidateName);
         if (SameTokenSpelling(target, new Token(2, candidateName)))
         {
-            var errorSpan = ResolveScalarAlias(candidate, depth + 1, aliasCount);
+            var errorSpan = ResolveScalarAlias(candidate, depth + 1,
+                aliasCount);
             if (errorSpan.Length != 0)
             {
                 return errorSpan;
@@ -1510,7 +1521,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         hasNamespace = singleHasNamespace;
         namespaceName = singleNamespaceName;
         var aliasError = BuildScalarAliasTable(tokenView, count, declarationStart,
-            declarationEnd, 0, true, init var singleAliasCount);
+            declarationEnd, 0, 0, true, init var singleAliasCount);
         if (aliasError.Length != 0)
         {
             return ScalarProgramError(1, aliasError, init handled);

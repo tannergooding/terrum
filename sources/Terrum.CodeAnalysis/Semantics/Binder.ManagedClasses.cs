@@ -665,6 +665,7 @@ internal sealed partial class Binder
                 return DeclaredTypeResolution.Unique;
             }
         }
+        var visibleAlias = FindAliasDefinition(name);
         var invalidAlias = false;
         var invalidGenericNominal = false;
         var genericArityMismatch = false;
@@ -793,7 +794,9 @@ internal sealed partial class Binder
                     genericArityMismatch = true;
                 }
             }
-            if (_aliases.TryGetValue(qualified, out var alias))
+            if (_aliases.TryGetValue(qualified, out var alias)
+                && (visibleAlias is null
+                    || ReferenceEquals(alias, visibleAlias)))
             {
                 var aliasResolution = ResolveAlias(alias, typeArguments, useSite, out var aliasType);
                 if (aliasResolution == DeclaredTypeResolution.Unique)
