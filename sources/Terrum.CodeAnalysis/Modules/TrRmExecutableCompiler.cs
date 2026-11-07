@@ -201,7 +201,9 @@ public static partial class TrRmExecutableCompiler
         if ((StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignInvocationSchemaIdentity)
                 || StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardForeignInvocationStorageAddressSchemaIdentity))
+                    StandardForeignInvocationStorageAddressSchemaIdentity)
+                || StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity))
             && HasDirectNativeOutputCall(program))
         {
             return EmitStandardNativeOutputCallProgram(program,
@@ -209,7 +211,10 @@ public static partial class TrRmExecutableCompiler
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     StandardForeignInvocationSchemaIdentity)
                     ? TrRmArtifactSchema.ForeignInvocationDraft
-                    : TrRmArtifactSchema.ForeignInvocationStorageAddressDraft);
+                    : StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardForeignInvocationStorageAddressSchemaIdentity)
+                        ? TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                        : TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
         }
 
         if ((StringComparer.Ordinal.Equals(schemaIdentity,

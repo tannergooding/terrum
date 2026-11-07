@@ -6683,6 +6683,89 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2NativeOutputCallRetainsArrayParameterBacking()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-native-output-array-backing";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Result {
+                public uint32 Value;
+            }
+
+            [Terrum.Interop.NativeImport("example.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            internal extern int32 Observe(
+                ptr<int32> values,
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Result> result);
+
+            internal int32 Probe(int32 index) {
+                    int32 zeroIndex = 0;
+                    mut [int32; 3] backing = [0, 0, 0];
+                init mut Result result;
+                unsafe { return Observe(&backing[index], &init result); }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Probe");
+        BoundNativeStorageAddress? address = null;
+        BoundNativeFixedArrayInitialization? arrayInitialization = null;
+        BoundCall? call = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress storageAddress)
+                {
+                    address = storageAddress;
+                }
+                else if (expression
+                    is BoundNativeFixedArrayInitialization initialization)
+                {
+                    arrayInitialization = initialization;
+                }
+                else if (expression is BoundCall candidate
+                    && candidate.Arguments.Any(static argument =>
+                        argument is BoundNativeOutputReservation))
+                {
+                    call = candidate;
+                }
+            }), Is.True);
+        Assert.That(address, Is.Not.Null);
+        Assert.That(address!.ElementCount, Is.EqualTo(3));
+        Assert.That(address.ElementType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(address.ByteExtent, Is.EqualTo(8));
+        Assert.That(address.Projections, Has.Length.EqualTo(1));
+        Assert.That(address.Index, Is.TypeOf<BoundRead>());
+        Assert.That(arrayInitialization, Is.Not.Null);
+        Assert.That(arrayInitialization!.Elements, Has.Length.EqualTo(3));
+        foreach (var element in arrayInitialization.Elements)
+        {
+            Assert.That(element, Is.TypeOf<BoundConstant>());
+            var constant = (BoundConstant)element;
+            Assert.That(constant.Type, Is.EqualTo(PrimitiveType.Int32));
+            Assert.That(constant.Bits.Low, Is.Zero);
+            Assert.That(constant.Bits.High, Is.Zero);
+        }
+        Assert.That(call, Is.Not.Null);
+        Assert.That(call!.Arguments[1],
+            Is.TypeOf<BoundNativeOutputReservation>());
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+    }
+
+    [Test]
     public async Task StandardA2EUEmitsAndReconstructsArrayFieldStorageAddress()
     {
         Assume.That(OperatingSystem.IsWindows()

@@ -52,7 +52,8 @@ public static partial class TrRmExecutableCompiler
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         if (schema is not (TrRmArtifactSchema.ForeignInvocationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
             || program.Functions.Length < 2
             || program.Structures.Any(static structure =>
                 structure.BlittableTargetRequirement
@@ -64,14 +65,15 @@ public static partial class TrRmExecutableCompiler
                 || structure.StandardTypeOrigin is not null)
             || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty
-            || !program.NativeFixedArrayTypes.IsEmpty
+            || (schema != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                && !program.NativeFixedArrayTypes.IsEmpty)
             || !program.NativeFunctionPointerSignatures.IsEmpty
             || program.RuntimePolicy != BoundRuntimePolicy.FailFast
             || program.RequiresSourceGrant || program.InvocationProfileId is not null
             || program.IsInvocationSourceBound)
         {
             throw Unsupported(
-                "Direct NativeOutput Body emission requires a bounded F scalar/pointer program.");
+                "Direct NativeOutput Body emission requires a bounded selected-schema program.");
         }
 
         var targetIndex = -1;
@@ -283,7 +285,7 @@ public static partial class TrRmExecutableCompiler
         var outputVariables = outputVariablesByCall
             .SelectMany(static variables => variables).ToArray();
         var backingLocals = ValidateDirectNativeOutputCaller(caller,
-            outputCalls, seenOutputVariables);
+            outputCalls, seenOutputVariables, program, schema);
         if (minimumHomeCount + backingLocals.Length > 65_536)
         {
             throw Unsupported(
@@ -320,8 +322,9 @@ public static partial class TrRmExecutableCompiler
                 if (nativeParameterByFormal.TryGetValue(formal,
                         out var nativeParameter))
                 {
-                    if (schema
-                            != TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                    if (schema is not (
+                            TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
                         || nativeParameter.Retention
                             != NativeParameterRetention.NoEscape
                         || !DirectNativeImportContract
@@ -338,26 +341,73 @@ public static partial class TrRmExecutableCompiler
                     if (selectedCall.Arguments[formal]
                         is BoundNativeStorageAddress address)
                     {
+                        var isArrayCarrier = NativeFixedArrayTypes.IsType(
+                            address.CarrierType);
+                        var projections = address.Projections;
+                        if (isArrayCarrier && projections.IsDefaultOrEmpty
+                            && NativeFixedArrayContract.TryGetLayout(
+                                address.CarrierType, program.Structures,
+                                program.NativeFixedArrayTypes,
+                                out var rootLayout))
+                        {
+                            projections = [
+                                new BoundNativeFixedArrayProjection(
+                                    rootLayout, address.Index),
+                            ];
+                        }
+
+                        var hasArrayPath = isArrayCarrier
+                            && projections.Length == 1
+                            && NativeFixedArrayContract.MatchesPath(
+                                address.CarrierType, projections, program,
+                                out _, out var leafLayout)
+                            && address.Index == projections[^1].Index
+                            && leafLayout.ElementType == address.ElementType
+                            && leafLayout.ElementCount == address.ElementCount
+                            && leafLayout.ElementStride == address.ElementStride
+                            && projections.All(projection =>
+                                projection.Index is BoundRead indexRead
+                                    && indexRead.Type == PrimitiveType.Int32
+                                    && (uint)indexRead.Variable
+                                        < (uint)caller.Variables.Length
+                                    && (indexRead.Variable < caller.ParameterCount
+                                        || backingLocalByVariable.ContainsKey(
+                                            indexRead.Variable)));
+                        var requiredElementCount = address.ElementStride == 0
+                            || address.ByteExtent % address.ElementStride != 0
+                            ? 0
+                            : address.ByteExtent / address.ElementStride;
                         if (address.Variable < caller.ParameterCount
+                            || (isArrayCarrier
+                                && schema
+                                    != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
                             || !backingLocalByVariable.ContainsKey(
                                 address.Variable)
                             || address.Type
                                 != PrimitiveType.NativeStorageAddress
                             || address.ElementType
                                 != nativeParameter.PointeeType
-                            || address.CarrierType != address.ElementType
-                            || address.ElementCount != 1
-                            || nativeParameter.Extent > address.ElementCount
+                            || (isArrayCarrier
+                                ? !hasArrayPath
+                                : address.CarrierType != address.ElementType
+                                    || address.ElementCount != 1)
+                            || requiredElementCount == 0
+                            || requiredElementCount > address.ElementCount
+                            || nativeParameter.Extent
+                                > requiredElementCount
                             || address.ElementStride == 0
-                            || address.ElementStride != address.ByteExtent
-                            || address.Index is not BoundConstant index
-                            || index.Type != PrimitiveType.Int32
-                            || index.Bits.Low != 0 || index.Bits.High != 0
+                            || (!isArrayCarrier
+                                && address.ElementStride != address.ByteExtent)
+                            || caller.Variables[address.Variable].Type
+                                != address.CarrierType
+                            || (!isArrayCarrier
+                                && (address.Index is not BoundConstant index
+                                    || index.Type != PrimitiveType.Int32
+                                    || index.Bits.Low != 0
+                                    || index.Bits.High != 0))
                             || address.IsReadonly
                                 != (nativeParameter.Access
                                     == NativeParameterAccess.Read)
-                            || caller.Variables[address.Variable].Type
-                                != nativeParameter.PointeeType
                             || ((nativeParameter.Access
                                     is NativeParameterAccess.Write
                                         or NativeParameterAccess.ReadWrite)
@@ -396,8 +446,25 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var placeSelectionCount = nativeParameterAddressByCallFormal.Values
+            .Where(static address => NativeFixedArrayTypes.IsType(
+                address.CarrierType))
+            .Sum(static address => address.Projections.IsDefaultOrEmpty
+                ? 1 : address.Projections.Length);
+        var arrayInitializationRecordCount = backingLocals.Sum(local =>
+            local.Initializer
+                is BoundNativeFixedArrayInitialization initialization
+                    ? checked(initialization.Elements.Length * 2) : 0);
+        if (expectedRecordCount + placeSelectionCount
+                + arrayInitializationRecordCount > 65_536)
+        {
+            throw Unsupported(
+                "The direct NativeOutput Body exceeds the selected record index range.");
+        }
+
         if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes,
-                program.Structures, program.NativeFunctionPointerSignatures))
+                program.Structures, program.NativeFunctionPointerSignatures,
+                program.NativeFixedArrayTypes))
         {
             throw Invalid("The direct NativeOutput program has invalid pointer types.");
         }
@@ -425,6 +492,10 @@ public static partial class TrRmExecutableCompiler
         {
             structureTypeDefRows.Add(structure, structure + 1);
         }
+        var fixedArrayTypeSpecRows = new Dictionary<int, uint>();
+        var fixedArrayTypeStates = new byte[program.NativeFixedArrayTypes.Length];
+        var fixedArrayLayoutRows = new List<TrRmFixedArrayLayoutRow>();
+        var fixedArrayLayoutRowByType = new Dictionary<int, int>();
         var nativeRawPointerTypeRow = 0;
         if (program.NativePointerTypes.Any(static pointer =>
                 pointer.PointeeType == PrimitiveType.NativeRawPointer))
@@ -459,6 +530,49 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 return checked((uint)nativeRawPointerTypeRow);
+            }
+
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                if (schema != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
+                {
+                    throw Unsupported(
+                        "A fixed-array TypeSpec requires the exact A2 schema.");
+                }
+
+                var arrayIndex = NativeFixedArrayTypes.Index(type);
+                if ((uint)arrayIndex >= (uint)program.NativeFixedArrayTypes.Length)
+                {
+                    throw Unsupported(
+                        "The direct NativeOutput program has an invalid fixed-array type.");
+                }
+
+                if (fixedArrayTypeSpecRows.TryGetValue(arrayIndex,
+                        out var existingRow))
+                {
+                    return existingRow;
+                }
+
+                if (fixedArrayTypeStates[arrayIndex] != 0)
+                {
+                    throw Unsupported(
+                        "The direct NativeOutput program has a recursive fixed-array type.");
+                }
+
+                fixedArrayTypeStates[arrayIndex] = 1;
+                var definition = program.NativeFixedArrayTypes[arrayIndex];
+                var elementTypeSpecRef = GetTypeSpecRef(definition.ElementType);
+                var row = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(TrRmTypeSpecTableWriter.FixedInlineArray(
+                    elementTypeSpecRef, definition.ElementCount));
+                fixedArrayTypeSpecRows.Add(arrayIndex, row);
+                fixedArrayLayoutRowByType.Add(arrayIndex,
+                    fixedArrayLayoutRows.Count + 1);
+                fixedArrayLayoutRows.Add(new TrRmFixedArrayLayoutRow(1,
+                    checked((int)row), 1, definition.ElementStride,
+                    definition.ByteExtent, definition.Alignment));
+                fixedArrayTypeStates[arrayIndex] = 2;
+                return row;
             }
 
             var structureIndex = (int)type - 100;
@@ -543,6 +657,11 @@ public static partial class TrRmExecutableCompiler
                 moduleImportExportKeyStringRows[functionIndex]
                     = AddString(moduleImport.ExportKey, 0);
             }
+        }
+
+        foreach (var local in backingLocals)
+        {
+            _ = GetTypeSpecRef(caller.Variables[local.Variable].Type);
         }
 
         var targetParameterTypeSpecRefs
@@ -634,6 +753,11 @@ public static partial class TrRmExecutableCompiler
             TrRmFeatureRow.NativeOutputCellsCandidate,
             new(10, 1),
         };
+        if (fixedArrayLayoutRows.Count != 0)
+        {
+            featureRows.Add(
+                TrRmFeatureRow.FixedInlineArrayStorageCandidate);
+        }
         if (importedFunctionIndices.Any(functionIndex =>
                 program.Functions[functionIndex].DirectNativeImport
                     is DirectNativeImport imported
@@ -863,7 +987,8 @@ public static partial class TrRmExecutableCompiler
         var fields = fieldRows.Count == 0 ? default
             : new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
                 strings, typeDefs, typeSpecs);
-        var targetProfileBytes = typeDefRows.Count == 0 ? []
+        var targetProfileBytes = typeDefRows.Count == 0
+                && fixedArrayLayoutRows.Count == 0 ? []
             : TrRmTargetProfileTableWriter.Encode([
                 new TrRmTargetProfileRow(
                     TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
@@ -871,8 +996,13 @@ public static partial class TrRmExecutableCompiler
                         .WindowsX64NativeProfileRuleRevision),
             ], schema);
         var targetProfiles = typeDefRows.Count == 0
+                && fixedArrayLayoutRows.Count == 0
             ? new TrRmTargetProfileTableReader([], 0, schema)
             : new TrRmTargetProfileTableReader(targetProfileBytes, 1, schema);
+        var fixedArrayLayoutBytes = fixedArrayLayoutRows.Count == 0 ? []
+            : TrRmFixedArrayLayoutTableWriter.Encode(
+                fixedArrayLayoutRows, typeSpecs, targetProfiles, features,
+                modules, schema);
         var layoutBytes = layoutRows.Count == 0 ? []
             : TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
                 targetProfiles, layoutFieldRows.Count);
@@ -1102,6 +1232,9 @@ public static partial class TrRmExecutableCompiler
         var storageRecordByCallFormal
             = new Dictionary<(int CallIndex, int Formal), ushort>(
                 storageHomeCount);
+        var placeSelectionRecordsByCallFormal
+            = new Dictionary<(int CallIndex, int Formal),
+                ImmutableArray<(ushort RecordIndex, byte DestinationRegister)>>();
         var reservationRecordByCallFormal
             = new Dictionary<(int CallIndex, int Formal), ushort>(
                 outputVariables.Length);
@@ -1114,16 +1247,95 @@ public static partial class TrRmExecutableCompiler
                 if (nativeParameterAddressByCallFormal.TryGetValue(
                         (callIndex, formal), out var address))
                 {
-                    var storageRecordIndex = checked((ushort)records.Count);
                     var pointerTypeMapIndex = maps.GetTypeMapIndex(
                         CreateStandardBodyTypeMapToken(
                             targetParameterTypeSpecRefs[formal]));
+                    byte sourceKind = 2;
+                    var sourceIndex = homeByVariable[address.Variable];
+                    if (NativeFixedArrayTypes.IsType(address.CarrierType))
+                    {
+                        var projections = address.Projections;
+                        if (projections.IsDefaultOrEmpty
+                            && NativeFixedArrayContract.TryGetLayout(
+                                address.CarrierType, program.Structures,
+                                program.NativeFixedArrayTypes,
+                                out var rootLayout))
+                        {
+                            projections = [
+                                new BoundNativeFixedArrayProjection(
+                                    rootLayout, address.Index),
+                            ];
+                        }
+
+                        var selections
+                            = ImmutableArray.CreateBuilder<
+                                (ushort RecordIndex,
+                                    byte DestinationRegister)>(
+                                        projections.Length);
+                        for (var projectionIndex = 0;
+                            projectionIndex < projections.Length;
+                            projectionIndex++)
+                        {
+                            var projection = projections[projectionIndex];
+                            var indexRead = (BoundRead)projection.Index;
+                            var indexHome = homeByVariable[indexRead.Variable];
+                            var arrayTypeIndex = NativeFixedArrayTypes.Index(
+                                projection.Layout.CarrierType);
+                            if (indexHome < 0
+                                || !fixedArrayLayoutRowByType.TryGetValue(
+                                    arrayTypeIndex, out var layoutRow))
+                            {
+                                throw Unsupported(
+                                    "An A2 NativeParameter selection has no index Home or fixed-array layout row.");
+                            }
+
+                            var destinationRegister
+                                = checked((byte)(projectionIndex % 2));
+                            var baseKind = projectionIndex == 0
+                                ? (byte)2 : (byte)1;
+                            var baseIndex = projectionIndex == 0
+                                ? sourceIndex
+                                : selections[projectionIndex - 1]
+                                    .DestinationRegister;
+                            var selectionRecordIndex
+                                = checked((ushort)records.Count);
+                            records.Add(
+                                TrRmRegisterBodyRecordWriter
+                                    .EncodePlaceSelection(
+                                        3,
+                                        nativeParameterByFormal[formal].Access
+                                            == NativeParameterAccess.Read
+                                            ? (byte)1 : (byte)2,
+                                        1, baseKind, destinationRegister,
+                                        checked((ushort)baseIndex), 2, 3,
+                                        checked((ushort)indexHome),
+                                        checked((uint)layoutRow),
+                                        maps.GetTypeMapIndex(
+                                            CreateStandardBodyTypeMapToken(
+                                                GetTypeSpecRef(
+                                                    projection.Layout
+                                                        .ElementType))),
+                                        schema));
+                            selections.Add((selectionRecordIndex,
+                                destinationRegister));
+                        }
+
+                        placeSelectionRecordsByCallFormal.Add(
+                            (callIndex, formal), selections.ToImmutable());
+                        sourceKind = 1;
+                        sourceIndex = selections[selections.Count - 1]
+                            .DestinationRegister;
+                    }
+
+                    var requiredElementCount = checked((uint)(
+                        address.ByteExtent / address.ElementStride));
+                    var storageRecordIndex = checked((ushort)records.Count);
                     records.Add(
                         TrRmRegisterBodyRecordWriter.EncodeStorageAddress(
-                            2, 2, homeByVariable[address.Variable],
+                            sourceKind, 2, sourceIndex,
                             storageHomeByCallFormal[(callIndex, formal)],
                             pointerTypeMapIndex,
-                            checked((uint)address.ElementCount)));
+                            requiredElementCount));
                     storageRecordByCallFormal.Add((callIndex, formal),
                         storageRecordIndex);
                 }
@@ -1151,6 +1363,115 @@ public static partial class TrRmExecutableCompiler
         var currentCode = codeBlocks[0];
         foreach (var local in backingLocals)
         {
+            if (local.Initializer is BoundConstant scalarConstant)
+            {
+                if (!TryGetContextualInitializationRegister(scalarConstant,
+                        caller.Variables[local.Variable].Type, schema,
+                        out var constantRegister)
+                    || constantRegister != 14)
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput scalar local constant has no assigned register.");
+                }
+
+                var constantHome = homeByVariable[local.Variable];
+                currentCode.Add(0xD6);
+                currentCode.Add((byte)(0x10 | constantRegister));
+                currentCode.Add((byte)constantHome);
+                currentCode.Add((byte)(constantHome >> 8));
+                continue;
+            }
+
+            if (local.Initializer
+                is BoundNativeFixedArrayInitialization arrayInitialization)
+            {
+                var arrayType = caller.Variables[local.Variable].Type;
+                var arrayTypeIndex = NativeFixedArrayTypes.Index(arrayType);
+                var rootHome = homeByVariable[local.Variable];
+                var zeroIndexLocal = backingLocals.FirstOrDefault(candidate =>
+                    candidate.Variable < local.Variable
+                    && candidate.Initializer is BoundConstant {
+                        Type: PrimitiveType.Int32,
+                        Bits.Low: 0,
+                        Bits.High: 0,
+                    });
+                if (schema
+                        != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                    || rootHome < 0
+                    || zeroIndexLocal is null
+                    || !fixedArrayLayoutRowByType.TryGetValue(
+                        arrayTypeIndex, out var layoutRow)
+                    || !NativeFixedArrayContract.TryGetLayout(arrayType,
+                        program.Structures, program.NativeFixedArrayTypes,
+                        out var layout))
+                {
+                    throw Unsupported(
+                        "A direct NativeOutput array initializer has no A2 Home or layout.");
+                }
+
+                var zeroIndexHome = homeByVariable[
+                    zeroIndexLocal.Variable];
+                currentCode.Add(0xD5);
+                currentCode.Add(2);
+                currentCode.Add((byte)zeroIndexHome);
+                currentCode.Add((byte)(zeroIndexHome >> 8));
+                for (var elementIndex = 0;
+                    elementIndex < arrayInitialization.Elements.Length;
+                    elementIndex++)
+                {
+                    var placeRegister = (byte)0;
+                    var placeSelectionRecordIndex
+                        = checked((ushort)records.Count);
+                    records.Add(
+                        TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                            3, 3, 1, 2, placeRegister,
+                            checked((ushort)rootHome), 1, 3, 2,
+                            checked((uint)layoutRow),
+                            maps.GetTypeMapIndex(
+                                CreateStandardBodyTypeMapToken(
+                                    GetTypeSpecRef(layout.ElementType))),
+                            schema));
+                    currentCode.Add(0xD8);
+                    currentCode.Add(placeRegister);
+                    currentCode.Add((byte)placeSelectionRecordIndex);
+                    currentCode.Add((byte)(placeSelectionRecordIndex >> 8));
+
+                    var constant
+                        = (BoundConstant)arrayInitialization.Elements[
+                            elementIndex];
+                    if (!TryGetContextualInitializationRegister(constant,
+                            layout.ElementType, schema, out var sourceRegister)
+                        || sourceRegister != 14)
+                    {
+                        throw Unsupported(
+                            "A direct NativeOutput array initializer requires assigned scalar source registers.");
+                    }
+
+                    var storeRecordIndex = checked((ushort)records.Count);
+                    records.Add(
+                        TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                            1, 1, 1, 1, placeRegister, sourceRegister,
+                            schema));
+                    currentCode.Add(0xD9);
+                    currentCode.Add(0);
+                    currentCode.Add((byte)storeRecordIndex);
+                    currentCode.Add((byte)(storeRecordIndex >> 8));
+                    if (elementIndex + 1
+                        < arrayInitialization.Elements.Length)
+                    {
+                        const byte indexRegister = 2;
+                        const byte indexOperand
+                            = (byte)((indexRegister << 4) | indexRegister);
+                        currentCode.Add(0x33);
+                        currentCode.Add(indexOperand);
+                        currentCode.Add(0x20);
+                        currentCode.Add(indexOperand);
+                    }
+                }
+
+                continue;
+            }
+
             BoundRead source;
             byte? arithmeticControl = null;
             BoundRead? rightSource = null;
@@ -1368,6 +1689,19 @@ public static partial class TrRmExecutableCompiler
 
             for (var formal = 0; formal < target.ParameterCount; formal++)
             {
+                if (placeSelectionRecordsByCallFormal.TryGetValue(
+                        (callIndex, formal), out var placeSelections))
+                {
+                    foreach (var (recordIndex, destinationRegister)
+                        in placeSelections)
+                    {
+                        currentCode.Add(0xD8);
+                        currentCode.Add(destinationRegister);
+                        currentCode.Add((byte)recordIndex);
+                        currentCode.Add((byte)(recordIndex >> 8));
+                    }
+                }
+
                 if (storageRecordByCallFormal.TryGetValue(
                         (callIndex, formal), out var storageRecordIndex))
                 {
@@ -1604,22 +1938,41 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0048, 0, 1,
                 targetProfileBytes));
         }
+        else if (fixedArrayLayoutRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0048, 0, 1,
+                targetProfileBytes));
+        }
+        if (fixedArrayLayoutRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0012, 0,
+                checked((uint)fixedArrayLayoutRows.Count),
+                fixedArrayLayoutBytes));
+        }
         sections.Sort(static (left, right) =>
             left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections, schema);
-        var artifactIndex = schema
-            == TrRmArtifactSchema.ForeignInvocationDraft
-                ? TrRmArtifactIndex.ForForeignInvocationDraft(artifact)
-                : TrRmArtifactIndex
-                    .ForForeignInvocationStorageAddressDraft(artifact);
-        var tables = schema
-            == TrRmArtifactSchema.ForeignInvocationDraft
-                ? TrRmStructuralMetadataValidator
+        var artifactIndex = schema switch {
+            TrRmArtifactSchema.ForeignInvocationDraft =>
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact),
+            TrRmArtifactSchema.ForeignInvocationStorageAddressDraft =>
+                TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(artifact),
+            _ => TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyDraft(artifact),
+        };
+        var tables = schema switch {
+            TrRmArtifactSchema.ForeignInvocationDraft =>
+                TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationDraftAndGetExecutionTables(
-                        artifactIndex)
-                : TrRmStructuralMetadataValidator
+                        artifactIndex),
+            TrRmArtifactSchema.ForeignInvocationStorageAddressDraft =>
+                TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
-                        artifactIndex);
+                        artifactIndex),
+            _ => TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    artifactIndex),
+        };
         tables.ValidateRegisterBodyMapsForMethod(callerMethodRow);
         return artifact;
 
@@ -1870,7 +2223,8 @@ public static partial class TrRmExecutableCompiler
 
     private static ImmutableArray<BoundLocal> ValidateDirectNativeOutputCaller(
         BoundFunction caller, List<BoundCall> calls,
-        HashSet<int> outputVariables)
+        HashSet<int> outputVariables, BoundProgram program,
+        TrRmArtifactSchema schema)
     {
         if (caller.Body is not BoundBlock body)
         {
@@ -1991,9 +2345,45 @@ public static partial class TrRmExecutableCompiler
 
                 case BoundLocal local when topLevel:
                 {
+                    var isArrayInitializer
+                        = local.Initializer
+                            is BoundNativeFixedArrayInitialization
+                                arrayInitialization
+                            && (uint)local.Variable
+                                < (uint)caller.Variables.Length
+                            && schema
+                                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                            && NativeFixedArrayTypes.IsType(
+                                caller.Variables[local.Variable].Type)
+                            && IsSupportedNativeFixedArrayInitialization(
+                                caller.Variables[local.Variable].Type,
+                                arrayInitialization, program, schema)
+                            && arrayInitialization.Elements.All(element =>
+                                element is BoundConstant constant
+                                    && TryGetContextualInitializationRegister(
+                                        constant, arrayInitialization.Layout
+                                            .ElementType, schema,
+                                        out var sourceRegister)
+                                    && sourceRegister == 14);
+                    var isScalarConstantInitializer
+                        = schema
+                            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                            && local.Initializer is BoundConstant constantInitializer
+                            && (uint)local.Variable
+                                < (uint)caller.Variables.Length
+                            && constantInitializer.Type == caller
+                                .Variables[local.Variable].Type
+                            && TryGetContextualInitializationRegister(
+                                constantInitializer,
+                                caller.Variables[local.Variable].Type,
+                                schema, out _);
                     BoundRead? source;
                     BoundRead? rightSource = null;
-                    if (local.Initializer is BoundRead read)
+                    if (isArrayInitializer || isScalarConstantInitializer)
+                    {
+                        source = null;
+                    }
+                    else if (local.Initializer is BoundRead read)
                     {
                         source = read;
                     }
@@ -2005,18 +2395,23 @@ public static partial class TrRmExecutableCompiler
                             "A direct NativeOutput local must copy or compute from a caller Home.");
                     }
 
-                    if (source is null)
+                    if (source is null && !isArrayInitializer
+                        && !isScalarConstantInitializer)
                     {
                         throw Unsupported(
                             "A direct NativeOutput local has no caller Home source.");
                     }
 
-                    var sourceRead = source;
-                    var sourceIsAvailable = sourceRead.Variable >= 0
-                        && sourceRead.Variable < caller.Variables.Length
-                        && (sourceRead.Variable < caller.ParameterCount
-                            || backingLocalByVariable.Contains(
-                                sourceRead.Variable));
+                    var sourceIsAvailable = isArrayInitializer
+                        || isScalarConstantInitializer;
+                    if (source is BoundRead sourceRead)
+                    {
+                        sourceIsAvailable = sourceRead.Variable >= 0
+                            && sourceRead.Variable < caller.Variables.Length
+                            && (sourceRead.Variable < caller.ParameterCount
+                                || backingLocalByVariable.Contains(
+                                    sourceRead.Variable));
+                    }
                     var rightSourceIsAvailable = rightSource is null
                         || (rightSource.Variable >= 0
                             && rightSource.Variable
@@ -2031,10 +2426,12 @@ public static partial class TrRmExecutableCompiler
                         || outputVariables.Contains(local.Variable)
                         || !sourceIsAvailable
                         || !rightSourceIsAvailable
-                        || sourceRead.Type
-                            != caller.Variables[local.Variable].Type
-                        || sourceRead.Type
-                            != caller.Variables[sourceRead.Variable].Type
+                        || (!(isArrayInitializer
+                                || isScalarConstantInitializer)
+                            && (source!.Type
+                                    != caller.Variables[local.Variable].Type
+                                || source.Type
+                                    != caller.Variables[source.Variable].Type))
                         || (rightSource is not null
                             && (rightSource.Type
                                     != caller.Variables[local.Variable].Type
