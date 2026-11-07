@@ -6,19 +6,19 @@ using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class DecimalFloatLiteralModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class DecimalFloatLiteralModuleTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -120,7 +120,11 @@ public sealed class DecimalFloatLiteralModuleTests
             policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Terrum.CodeAnalysis.VerifyRecords"]);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(), ["Terrum.CodeAnalysis.VerifyRecords"]);
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -130,7 +134,11 @@ public sealed class DecimalFloatLiteralModuleTests
             consumerTree, ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.Link(
-            ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer),
+            ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer),
             producer);
 
         var emptyGrant = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
@@ -150,9 +158,7 @@ public sealed class DecimalFloatLiteralModuleTests
 
         var records = CreateRecords(fixtures, hostedBits);
         records.AddRange(CreateRecords(
-            s_invalidSpellings
-                .SelectMany(static spelling => new[] { new Fixture(32, spelling, null), new Fixture(64, spelling, null) })
-                .ToArray(),
+            [.. s_invalidSpellings.SelectMany(static spelling => new[] { new Fixture(32, spelling, null), new Fixture(64, spelling, null) })],
             null));
         Assert.That(ExecuteRecords(consumer, records, (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
@@ -201,7 +207,11 @@ public sealed class DecimalFloatLiteralModuleTests
         };
         var compilation = Compilation.CreateLibrary([componentTree], [sourceBuffer], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         const string Float32Export = "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne";
         const string Float64Export = "Terrum.CodeAnalysis.GetDecimalFloat64LiteralBitsOrMinusOne";
         if (policy == BoundRuntimePolicy.CheckedExceptions)
@@ -283,16 +293,16 @@ public sealed class DecimalFloatLiteralModuleTests
         const int FractionalDigits = 15_000;
         const int Separators = 1_380;
         var spelling = new System.Text.StringBuilder(16_384);
-        spelling.Append("1.");
+        _ = spelling.Append("1.");
         for (var index = 0; index < FractionalDigits; index++)
         {
-            spelling.Append('0');
+            _ = spelling.Append('0');
             if (index < Separators)
             {
-                spelling.Append('_');
+                _ = spelling.Append('_');
             }
         }
-        spelling.Append("e0");
+        _ = spelling.Append("e0");
         return spelling.ToString();
     }
 
@@ -349,13 +359,13 @@ public sealed class DecimalFloatLiteralModuleTests
             0x0010000000000000));
         var float32NormalBoundaryCoefficient = ((BigInteger.One << 24) - 1) * BigInteger.Pow(5, 150);
         fixtures.Add(new Fixture(32,
-            (float32NormalBoundaryCoefficient * 10 - 1).ToString(CultureInfo.InvariantCulture) + "e-151",
+            ((float32NormalBoundaryCoefficient * 10) - 1).ToString(CultureInfo.InvariantCulture) + "e-151",
             0x007FFFFF));
         fixtures.Add(new Fixture(32,
             float32NormalBoundaryCoefficient.ToString(CultureInfo.InvariantCulture) + "e-150",
             0x00800000));
         fixtures.Add(new Fixture(32,
-            (float32NormalBoundaryCoefficient * 10 + 1).ToString(CultureInfo.InvariantCulture) + "e-151",
+            ((float32NormalBoundaryCoefficient * 10) + 1).ToString(CultureInfo.InvariantCulture) + "e-151",
             0x00800000));
 
         var float64MidpointCoefficient = ((BigInteger.One << 53) + 1) * BigInteger.Pow(5, 1075);
@@ -363,9 +373,9 @@ public sealed class DecimalFloatLiteralModuleTests
         Assert.That(float64MidpointDigits.Length, Is.EqualTo(768));
         fixtures.Add(new Fixture(64, float64MidpointDigits + "e-1075", 0x0010000000000000));
         fixtures.Add(new Fixture(64,
-            (float64MidpointCoefficient * 10 - 1).ToString(CultureInfo.InvariantCulture) + "e-1076",
+            ((float64MidpointCoefficient * 10) - 1).ToString(CultureInfo.InvariantCulture) + "e-1076",
             0x0010000000000000));
-        var float64AboveMidpointDigits = (float64MidpointCoefficient * 10 + 1)
+        var float64AboveMidpointDigits = ((float64MidpointCoefficient * 10) + 1)
             .ToString(CultureInfo.InvariantCulture);
         fixtures.Add(new Fixture(64, float64AboveMidpointDigits + "e-1076", 0x0010000000000001));
         fixtures.Add(new Fixture(64,
@@ -376,13 +386,13 @@ public sealed class DecimalFloatLiteralModuleTests
             0x0010000000000001));
         var float64NormalBoundaryCoefficient = ((BigInteger.One << 53) - 1) * BigInteger.Pow(5, 1075);
         fixtures.Add(new Fixture(64,
-            (float64NormalBoundaryCoefficient * 10 - 1).ToString(CultureInfo.InvariantCulture) + "e-1076",
+            ((float64NormalBoundaryCoefficient * 10) - 1).ToString(CultureInfo.InvariantCulture) + "e-1076",
             0x000FFFFFFFFFFFFF));
         fixtures.Add(new Fixture(64,
             float64NormalBoundaryCoefficient.ToString(CultureInfo.InvariantCulture) + "e-1075",
             0x0010000000000000));
         fixtures.Add(new Fixture(64,
-            (float64NormalBoundaryCoefficient * 10 + 1).ToString(CultureInfo.InvariantCulture) + "e-1076",
+            ((float64NormalBoundaryCoefficient * 10) + 1).ToString(CultureInfo.InvariantCulture) + "e-1076",
             0x0010000000000000));
 
         var float32Maximum = FormatDyadicDecimal((BigInteger.One << 24) - 1, 104);
@@ -418,7 +428,7 @@ public sealed class DecimalFloatLiteralModuleTests
 
     private static string AdjustLastDecimalPlace(string spelling, int adjustment)
     {
-        var decimalPoint = spelling.IndexOf('.');
+        var decimalPoint = spelling.IndexOf('.', System.StringComparison.Ordinal);
         Assert.That(decimalPoint >= 0, Is.True);
         var decimalScale = spelling.Length - decimalPoint - 1;
         var coefficient = BigInteger.Parse(spelling.Remove(decimalPoint, 1), CultureInfo.InvariantCulture);
@@ -480,13 +490,13 @@ public sealed class DecimalFloatLiteralModuleTests
 
     private static string FormatDigits(ReadOnlySpan<char> digits, Random random)
     {
-        var result = new System.Text.StringBuilder(digits.Length + digits.Length / 4);
+        var result = new System.Text.StringBuilder(digits.Length + (digits.Length / 4));
         for (var index = 0; index < digits.Length; index++)
         {
-            result.Append(digits[index]);
+            _ = result.Append(digits[index]);
             if (index + 1 < digits.Length && random.Next(5) == 0)
             {
-                result.Append('_');
+                _ = result.Append('_');
             }
         }
 
@@ -508,13 +518,25 @@ public sealed class DecimalFloatLiteralModuleTests
         var compilation = Compilation.CreateLibrary(trees);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
         var results = new ulong[fixtures.Length];
         for (var index = 0; index < fixtures.Length; index++)
         {
             var function = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == $"Read{index}");
-            var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
-            var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = result.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))();
+            var result = ((global::System.Func<BoundReturn>)(() => {
+                var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements);
+                Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>());
+                return (BoundReturn)__nunitActual4!;
+            }))();
+            var constant = ((global::System.Func<BoundConstant>)(() => {
+                var __nunitActual5 = result.Value;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>());
+                return (BoundConstant)__nunitActual5!;
+            }))();
             Assert.That(constant.Type, Is.EqualTo(fixtures[index].Precision == 32 ? PrimitiveType.Float32 : PrimitiveType.Float64));
             results[index] = unchecked((ulong)constant.Value);
         }

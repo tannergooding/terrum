@@ -6,7 +6,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32ToInt32ConversionExport(uint bits, ref int result);
@@ -139,7 +139,7 @@ public sealed partial class CliTests
         TResult upperCanary)
         where TResult : struct
     {
-        var expectedSuccess = TryConvert(() => expectedConversion(input), out TResult expected);
+        var expectedSuccess = TryConvert(() => expectedConversion(input), out var expected);
         var guarded = new GuardedConversionResult<TResult> {
             Before = lowerCanary,
             Value = sentinel,

@@ -4,16 +4,16 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Text;
 
-public sealed partial class SourceLineComponentTests
+internal sealed partial class SourceLineComponentTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -39,12 +39,16 @@ public sealed partial class SourceLineComponentTests
                 return 0;
             }
             """, "source-text-exhaustive-entry.terrum");
-        var producerCompilation = Compilation.Create(trees.Add(entry),
+        var producerCompilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false) { IsInvocationScoped = true }],
             policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
             ["Terrum.CodeAnalysis.VerifySourceCodeUnits"]);
 
         BoundProgram CreateConsumer(int expectedFirst)
@@ -57,7 +61,11 @@ public sealed partial class SourceLineComponentTests
                 consumerTree, ModuleCompiler.CreateReference(producer), policy);
             Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = consumerCompilation.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))(), producer);
             return ModuleCompiler.Link(consumer, producer);
         }
 
@@ -135,14 +143,18 @@ public sealed partial class SourceLineComponentTests
 
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var compilation = Compilation.Create(trees.Add(harness),
+            var compilation = CompileWithLayoutCore(trees.Add(harness),
             [
                 new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
             ], (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine,
                 compilation.SourceDiagnostics.Select(diagnostic =>
                     $"{diagnostic.SyntaxTree.Source.Path}: {diagnostic.Diagnostic}")));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = compilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))();
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }

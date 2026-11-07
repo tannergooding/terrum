@@ -4,6 +4,7 @@ using System;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Terrum.CodeAnalysis.Lexing;
@@ -31,6 +32,7 @@ internal static partial class Program
         NativeRuntimePolicy? selectedPolicy = null;
         var sourceArithmeticProfile = SourceArithmeticProfile.Development;
         var hasArithmeticProfile = false;
+        string? layoutCoreManifestPath = null;
         for (var index = 3; index < count;)
         {
             if (index + 1 >= count)
@@ -53,37 +55,102 @@ internal static partial class Program
                     && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
                     hasArithmeticProfile = true;
                     break;
+                case "--layout-core-manifest" when layoutCoreManifestPath is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    if (!TryGetFullPath(value, out layoutCoreManifestPath))
+                    {
+                        WriteInputError(json, "TRM2000", Usage);
+                        return 2;
+                    }
+                    break;
                 default:
                     WriteInputError(json, "TRM2000", Usage);
                     return 2;
             }
             index += 2;
         }
-        if (selectedPolicy is not NativeRuntimePolicy policy || build && outputArgument is null)
+        if (selectedPolicy is not NativeRuntimePolicy policy || (build && outputArgument is null))
         {
             WriteInputError(json, "TRM2000", Usage);
             return 2;
         }
 
         ImmutableArray<SyntaxTree> scannerTrees;
-        string scannerPath;
+        ScannerSourceSelection scannerSelection;
         SourceText source;
         string? outputPath = null;
+        LayoutCoreRegistrationSet? layoutCoreRegistration = null;
         try
         {
-            scannerPath = Path.GetFullPath(args[1]);
+            scannerSelection = SelectScannerSourceFiles(args[1]);
+            var subjectPath = args[2] == "-"
+                ? null : Path.GetFullPath(args[2]);
             if (build)
             {
                 outputPath = Path.GetFullPath(outputArgument!);
-                if (!string.Equals(Path.GetExtension(outputPath), ".exe", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(outputPath, scannerPath, StringComparison.OrdinalIgnoreCase)
-                    || (args[2] != "-" && string.Equals(outputPath, Path.GetFullPath(args[2]), StringComparison.OrdinalIgnoreCase)))
+                if (!string.Equals(Path.GetExtension(outputPath), ".exe",
+                        StringComparison.OrdinalIgnoreCase)
+                    || Directory.Exists(outputPath))
                 {
-                    WriteInputError(json, "TRM2002", "Output must be a distinct .exe path, not scanner or input source.");
+                    WriteInputError(json, "TRM2002",
+                        "Output must be a distinct .exe file, not scanner or input source.");
                     return 2;
                 }
             }
-            scannerTrees = ReadScannerTrees(args[1]);
+
+            try
+            {
+                if (layoutCoreManifestPath is not null
+                    && (scannerSelection.Files.Any(path =>
+                            PathsAlias(layoutCoreManifestPath, path))
+                        || (subjectPath is not null
+                            && PathsAlias(layoutCoreManifestPath, subjectPath))
+                        || (build && PathsAlias(layoutCoreManifestPath,
+                            outputPath!))))
+                {
+                    WriteInputError(json, "TRM2002",
+                        "The layout Core manifest must be distinct from every scanner source, subject input and output.");
+                    return 2;
+                }
+                if (build && (scannerSelection.Files.Any(path =>
+                        PathsAlias(outputPath!, path))
+                    || (subjectPath is not null
+                        && PathsAlias(outputPath!, subjectPath))))
+                {
+                    WriteInputError(json, "TRM2002",
+                        "Output must be distinct from every scanner and subject source.");
+                    return 2;
+                }
+            }
+            catch (Exception exception) when (exception is IOException
+                or UnauthorizedAccessException or ArgumentException
+                or NotSupportedException)
+            {
+                WriteInputError(json, "TRM2002",
+                    $"Could not validate scanner component path identity: {exception.Message}");
+                return 2;
+            }
+
+            if (layoutCoreManifestPath is not null)
+            {
+                try
+                {
+                    layoutCoreRegistration
+                        = LayoutCoreManifestReader.Read(
+                            layoutCoreManifestPath).Registration;
+                }
+                catch (Exception exception) when (exception is IOException
+                    or UnauthorizedAccessException
+                    or DecoderFallbackException or ArgumentException
+                    or NotSupportedException or FormatException)
+                {
+                    WriteInputError(json, "TRM2001", exception.Message);
+                    return 2;
+                }
+            }
+
+            scannerTrees = ReadScannerTrees(scannerSelection);
             source = SourceText.From(ReadSource(args[2]), args[2] == "-" ? "<stdin>" : args[2]);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException or ArgumentException or NotSupportedException)
@@ -98,7 +165,11 @@ internal static partial class Program
             return 2;
         }
 
-        var compilation = Compilation.Create(scannerTrees, ScannerHost.CreateBuffers(source), (BoundRuntimePolicy)policy);
+        var compilation = Compilation.Create(scannerTrees,
+            ScannerHost.CreateBuffers(source), new CompilationOptions {
+                RuntimePolicy = (BoundRuntimePolicy)policy,
+                LayoutCoreRegistration = layoutCoreRegistration,
+            });
         if (compilation.HasErrors)
         {
             if (json)
@@ -259,12 +330,17 @@ internal static partial class Program
         return diagnostics.IsEmpty ? 0 : 1;
     }
 
-    private static ImmutableArray<SyntaxTree> ReadScannerTrees(string path)
+    private sealed record ScannerSourceSelection(
+        string OriginalPath,
+        bool IsDirectory,
+        ImmutableArray<string> Files);
+
+    private static ScannerSourceSelection SelectScannerSourceFiles(string path)
     {
         var fullPath = Path.GetFullPath(path);
         if (!Directory.Exists(fullPath))
         {
-            return [SyntaxTree.Parse(ReadSource(fullPath) + "\nint32 Main() { return Scan(); }\n", path)];
+            return new ScannerSourceSelection(path, false, [fullPath]);
         }
 
         string[] componentPaths = [
@@ -276,18 +352,40 @@ internal static partial class Program
             Path.Combine("Lexing", "StringEscape.terrum"),
             Path.Combine("Lexing", "Scanner.terrum"),
         ];
-        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(componentPaths.Length);
-        const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
+        var files = ImmutableArray.CreateBuilder<string>(componentPaths.Length);
         foreach (var componentPath in componentPaths)
         {
-            var fullComponentPath = Path.Combine(fullPath, componentPath);
+            files.Add(Path.GetFullPath(Path.Combine(fullPath, componentPath)));
+        }
+
+        return new ScannerSourceSelection(path, true, files.MoveToImmutable());
+    }
+
+    private static ImmutableArray<SyntaxTree> ReadScannerTrees(
+        ScannerSourceSelection selection)
+    {
+        if (!selection.IsDirectory)
+        {
+            return [
+                SyntaxTree.Parse(ReadSource(selection.OriginalPath)
+                    + "\nint32 Main() { return Scan(); }\n",
+                    selection.OriginalPath),
+            ];
+        }
+
+        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(
+            selection.Files.Length);
+        const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
+        foreach (var fullComponentPath in selection.Files)
+        {
             var componentName = Path.GetFileName(fullComponentPath);
             var componentSource = ReadSource(fullComponentPath);
             if (componentName != "SourceRange.terrum"
                 && !componentSource.StartsWith(NamespaceDeclaration, StringComparison.Ordinal))
             {
                 throw new ArgumentException(
-                    "Scanner bundle components must use the Terrum.CodeAnalysis namespace.", nameof(path));
+                    "Scanner bundle components must use the Terrum.CodeAnalysis namespace.",
+                    nameof(selection));
             }
             if (componentName == "Scanner.terrum")
             {

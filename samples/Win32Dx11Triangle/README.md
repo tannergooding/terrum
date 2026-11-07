@@ -88,5 +88,6 @@ ordinary unique/Cleanup wrappers are authored in the API source files.
 
 The generic native declaration, vtable, target-ABI and layout contracts are
 accepted in their canonical owners. This sample still uses prototype
-`NativeParameter`, `NativeOutput` and `[NoThrow]` forms and is not conformance
-evidence for the current metadata schema or source grammar.
+`NativeParameter` and `NativeOutput` forms and is not conformance evidence for
+the current metadata schema or source grammar. General `[NoThrow]` source use
+is provisionally retired.

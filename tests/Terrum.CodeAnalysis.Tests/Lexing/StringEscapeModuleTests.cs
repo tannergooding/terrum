@@ -4,20 +4,21 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class StringEscapeModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringEscapeModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -84,33 +85,49 @@ public sealed class StringEscapeModuleTests
                 return 0;
             }
             """, "string-escape-module.terrum");
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees,
         [
             new HostBuffer("Source", PrimitiveType.Char16, [92, 110], false) {
                 IsInvocationScoped = true,
             },
-        ], policy);
+        ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             ["Terrum.CodeAnalysis.AnalyzeFirstEscape", "Terrum.CodeAnalysis.VerifyEscapeRecords"]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return AnalyzeFirstEscape(); }
-            """, "string-escape-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+            """, "string-escape-consumer.terrum"),
+            ModuleCompiler.CreateReference(producer), options);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         var recordConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return VerifyEscapeRecords(); }
-            """, "string-escape-record-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+            """, "string-escape-record-consumer.terrum"),
+            ModuleCompiler.CreateReference(producer), options);
         Assert.That(recordConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
         var recordConsumer = ModuleCompiler.Link(
             ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = recordConsumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer),
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual2 = recordConsumerCompilation.Program;
+                    Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual2!;
+                }))(), producer),
             producer);
 
         foreach (var (escape, errorCode, scalar) in new (string Escape, int ErrorCode, int Scalar)[] {
@@ -226,7 +243,7 @@ public sealed class StringEscapeModuleTests
             {
                 var scalar = scalarStart + index;
                 var escape = $"\\u{scalar:X4}";
-                batchText.Append('"').Append(escape).Append("\" ");
+                _ = batchText.Append('"').Append(escape).Append("\" ");
                 var valid = !char.IsSurrogate((char)scalar);
                 if (!valid)
                 {
@@ -255,7 +272,7 @@ public sealed class StringEscapeModuleTests
                 if (char.IsSurrogate((char)scalar))
                 {
                     Assert.That(lexed.Diagnostics[diagnosticIndex].Code, Is.EqualTo("TRM0005"));
-                    Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Start, Is.EqualTo(index * 9 + 1));
+                    Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Start, Is.EqualTo((index * 9) + 1));
                     Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Length, Is.EqualTo(6));
                     diagnosticIndex++;
                 }
@@ -278,7 +295,7 @@ public sealed class StringEscapeModuleTests
             {
                 var scalar = scalarStart + index;
                 var escape = $"\\U{scalar:X8}";
-                batchText.Append('"').Append(escape).Append("\" ");
+                _ = batchText.Append('"').Append(escape).Append("\" ");
                 records.Add(0);
                 records.Add(scalar & 0xFFFF);
                 records.Add(scalar >> 16);
@@ -314,7 +331,7 @@ public sealed class StringEscapeModuleTests
             for (var index = 0; index < scalarCount; index++)
             {
                 var escape = $"\\U{scalarStart + index:X8}";
-                batchText.Append('"').Append(escape).Append("\" ");
+                _ = batchText.Append('"').Append(escape).Append("\" ");
                 records.Add(5);
                 records.Add(0);
                 records.Add(0);
@@ -331,7 +348,7 @@ public sealed class StringEscapeModuleTests
             for (var index = 0; index < scalarCount; index++)
             {
                 Assert.That(lexed.Diagnostics[index].Code, Is.EqualTo("TRM0005"));
-                Assert.That(lexed.Diagnostics[index].Span.Start, Is.EqualTo(index * 13 + 1));
+                Assert.That(lexed.Diagnostics[index].Span.Start, Is.EqualTo((index * 13) + 1));
                 Assert.That(lexed.Diagnostics[index].Span.Length, Is.EqualTo(10));
                 Assert.That(lexed.Tokens[index].Kind, Is.EqualTo(TokenKind.StringLiteral));
                 Assert.That(lexed.Tokens[index].Text, Is.EqualTo($"\"\\U{scalarStart + index:X8}\""));
@@ -364,7 +381,7 @@ public sealed class StringEscapeModuleTests
 
     // Escape widths fit in six low bits; the scalar payload stays below each 100-million error-code band.
     private static int PackResult(int errorCode, int scalar, int consumedLength, int errorLength) =>
-        errorCode * 100_000_000 + (scalar + 1) * 64 + consumedLength * 4 + errorLength;
+        (errorCode * 100_000_000) + ((scalar + 1) * 64) + (consumedLength * 4) + errorLength;
 
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

@@ -3,14 +3,15 @@
 using System;
 using System.Linq;
 using System.Threading;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class LexerTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class LexerTests
 {
     [Test]
     public void StandaloneUnderscoreIsReservedWithoutChangingPrefixedIdentifiers()
@@ -43,7 +44,13 @@ public sealed class LexerTests
         var tokens = Lexer.Lex(source).Tokens.Where(t => t.Kind != TokenKind.EndOfFile).ToArray();
         var expected = new[] { "a\u0301", "a\u00B7b", "_𐐀2", "a\u00E9", "ae\u0301" };
         Assert.That(tokens.Select(t => t.Text), Is.EqualTo(expected));
-        {var __nunitItems0 = tokens;        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0.Kind, Is.EqualTo(TokenKind.Identifier)); } });}
+        {
+            var __nunitItems0 = tokens;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem0 in __nunitItems0)
+    {
+        Assert.That(__nunitItem0.Kind, Is.EqualTo(TokenKind.Identifier)); } });
+        }
         Assert.That(tokens[3].Span, Is.EqualTo(new TextSpan(12, 2)));
     }
     [TestCase("1.2e-3+4",new[] { "1.2e-3", "+", "4" })]
@@ -137,7 +144,13 @@ public sealed class LexerTests
         Assert.That(result.Tokens[^2].Kind, Is.EqualTo(TokenKind.Identifier));
         Assert.That(result.Tokens[^2].Text, Is.EqualTo("end"));
         Assert.That(result.Tokens[^1].LeadingTrivia[^1].Kind, Is.EqualTo(TriviaKind.MultiLineComment));
-        {var __nunitItems1 = result.Diagnostics;        Assert.Multiple(() => { foreach (var __nunitItem1 in __nunitItems1) { Assert.That(__nunitItem1.Severity, Is.EqualTo(DiagnosticSeverity.Error)); } });}
+        {
+            var __nunitItems1 = result.Diagnostics;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem1 in __nunitItems1)
+    {
+        Assert.That(__nunitItem1.Severity, Is.EqualTo(DiagnosticSeverity.Error)); } });
+        }
     }
     [TestCase("'A'")]
     [TestCase("'\\''")]
@@ -185,7 +198,13 @@ public sealed class LexerTests
         var expectedStarts = new[] { 3, 6, 12, 15 };
         Assert.That(result.Diagnostics.Select(d => d.Code), Is.EqualTo(expectedCodes));
         Assert.That(result.Diagnostics.Select(d => d.Span.Start), Is.EqualTo(expectedStarts));
-        {var __nunitItems2 = result.Diagnostics;        Assert.Multiple(() => { foreach (var __nunitItem2 in __nunitItems2) { Assert.That(__nunitItem2.Span.Length, Is.EqualTo(1)); } });}
+        {
+            var __nunitItems2 = result.Diagnostics;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem2 in __nunitItems2)
+    {
+        Assert.That(__nunitItem2.Span.Length, Is.EqualTo(1)); } });
+        }
         Assert.That(result.Tokens[0].Text, Is.EqualTo("x"));
         Assert.That(string.Concat(result.Tokens[0].LeadingTrivia.Select(t => t.Text)), Is.EqualTo(text[..^1]));
         Assert.That(string.Concat(result.Tokens[0].LeadingTrivia.Select(t => t.Text)) + result.Tokens[0].Text, Is.EqualTo(text));
@@ -272,10 +291,10 @@ public sealed class LexerTests
     public void RecognizesOperatorsBeforeContextualGenericCloserSplitting()
     {
         var result = Lexer.Lex(SourceText.From(">> >= && & || | == = != !"));
-        Assert.That(result.Tokens.Select(t => t.Kind), Is.EqualTo(new[] { TokenKind.ShiftRight, TokenKind.GreaterEquals,
+        Assert.That(result.Tokens.Select(t => t.Kind), Is.EqualTo([ TokenKind.ShiftRight, TokenKind.GreaterEquals,
                              TokenKind.AmpersandAmpersand, TokenKind.Ampersand, TokenKind.PipePipe,
                              TokenKind.Pipe, TokenKind.EqualsEquals, TokenKind.Equals,
-                             TokenKind.BangEquals, TokenKind.Bang, TokenKind.EndOfFile }));
+                             TokenKind.BangEquals, TokenKind.Bang, TokenKind.EndOfFile ]));
     }
 
     [Test]

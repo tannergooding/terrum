@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -11,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task CoreLibrarySwitchGatesPrimitiveDeclarationAndEmitsApiAsync()
@@ -26,24 +27,25 @@ public sealed partial class CliTests
         try
         {
             var (rejected, rejectedOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(Source),
-                "analyze", "-", "--json");
+                "analyze", "-", "--json").ConfigureAwait(false);
             Assert.That(rejected, Is.EqualTo(1));
             using var rejectedDocument = JsonDocument.Parse(rejectedOutput);
-            Assert.That(rejectedDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM3003"));
+            Assert.That(rejectedDocument.RootElement.GetProperty("diagnostics").EnumerateArray()
+                .Any(static diagnostic => diagnostic.GetProperty("code").GetString() == "TRM3003"), Is.True);
 
             var (analyzed, _, _) = await RunAsync(Encoding.UTF8.GetBytes(Source),
-                "analyze", "-", "--corelib", "--json");
+                "analyze", "-", "--corelib", "--json").ConfigureAwait(false);
             Assert.That(analyzed, Is.EqualTo(0));
 
             var (built, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "build-library", "-", "--export", "int32.AddOne", "-o", path,
-                "--runtime", "fail-fast", "--corelib", "--json");
+                "--runtime", "fail-fast", "--corelib", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, output + error);
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("artifact").GetProperty("kind").GetString(), Is.EqualTo("dynamic-library"));
             Assert.That(File.Exists(path), Is.True);
-            Assert.That(await File.ReadAllBytesAsync(path), Is.Not.Empty);
+            Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.Not.Empty);
         }
         finally
         {
@@ -70,59 +72,59 @@ public sealed partial class CliTests
                     public static int32 AddOne(int32 input) { return input + 1; }
                     public int32 Read() { return value; }
                 }
-                """);
+                """).ConfigureAwait(false);
             await File.WriteAllTextAsync(additionalSource, """
                 public struct uint32 {
                     private uint32 value;
                     public static uint32 Identity(uint32 input) { return input.value; }
                 }
-                """);
+                """).ConfigureAwait(false);
             await File.WriteAllTextAsync(caller,
-                "int32 Main() { return int32.AddOne(5).Read() + int32(uint32.Identity(uint32(1))); }");
+                "int32 Main() { return int32.AddOne(5).Read() + int32(uint32.Identity(uint32(1))); }").ConfigureAwait(false);
 
             var (withoutSwitch, _, _) = await RunAsync([],
                 "compile-module", "producer", source, "int32.AddOne",
-                "--export", "int32.Read", "-o", provider, "--json");
+                "--export", "int32.Read", "-o", provider, "--json").ConfigureAwait(false);
             Assert.That(withoutSwitch, Is.EqualTo(1));
 
             var (produced, producerOutput, producerError) = await RunAsync([],
                 "compile-module", "producer", source, "int32.AddOne",
                 "--source", additionalSource, "--export", "int32.Read",
                 "--export", "uint32.Identity", "-o", provider, "--runtime", policy,
-                "--corelib", "--json");
+                "--corelib", "--json").ConfigureAwait(false);
             Assert.That(produced == 0, Is.True, producerOutput + producerError);
 
             var (consumed, consumerOutput, consumerError) = await RunAsync([],
                 "compile-module", "consumer", caller, provider, "-o", consumer,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(consumed == 0, Is.True, consumerOutput + consumerError);
 
             var (executed, _, _) = await RunAsync([],
-                "run-module", consumer, provider, "--runtime", policy);
+                "run-module", consumer, provider, "--runtime", policy).ConfigureAwait(false);
             Assert.That(executed, Is.EqualTo(7));
 
             var (consumerSwitch, _, _) = await RunAsync([],
-                "compile-module", "consumer", caller, provider, "-o", consumer, "--corelib", "--json");
+                "compile-module", "consumer", caller, provider, "-o", consumer, "--corelib", "--json").ConfigureAwait(false);
             Assert.That(consumerSwitch, Is.EqualTo(2));
 
             var (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
                 "compile-native", "producer", source, "CorePrimitive",
                 "--source", additionalSource, "--export", "int32.AddOne",
                 "--export", "int32.Read", "--export", "uint32.Identity",
-                "-o", nativeProvider, "--runtime", policy, "--corelib", "--json");
+                "-o", nativeProvider, "--runtime", policy, "--corelib", "--json").ConfigureAwait(false);
             Assert.That(nativeProduced == 0, Is.True, nativeOutput + nativeError);
 
             var (nativeConsumed, nativeConsumerOutput, nativeConsumerError) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(nativeConsumed == 0, Is.True, nativeConsumerOutput + nativeConsumerError);
 
             var (validated, validationOutput, validationError) = await RunAsync([],
-                "validate-native", nativeConsumer, nativeProvider, "--json");
+                "validate-native", nativeConsumer, nativeProvider, "--json").ConfigureAwait(false);
             Assert.That(validated == 0, Is.True, validationOutput + validationError);
 
             var (nativeExecuted, _, _) = await RunAsync([],
-                "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
+                "run-native", nativeConsumer, nativeProvider, "--runtime", policy).ConfigureAwait(false);
             Assert.That(nativeExecuted, Is.EqualTo(7));
 
             if (policy == "checked-exceptions")
@@ -134,27 +136,27 @@ public sealed partial class CliTests
                             catch { return 42; }
                         }
                     }
-                    """);
+                    """).ConfigureAwait(false);
                 var (checkedConsumer, checkedOutput, checkedError) = await RunAsync([],
                     "compile-module", "consumer", caller, provider, "-o", consumer,
-                    "--runtime", policy, "--json");
+                    "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(checkedConsumer == 0, Is.True, checkedOutput + checkedError);
                 var (checkedResult, _, _) = await RunAsync([],
-                    "run-module", consumer, provider, "--runtime", policy);
+                    "run-module", consumer, provider, "--runtime", policy).ConfigureAwait(false);
                 Assert.That(checkedResult, Is.EqualTo(42));
 
                 var (checkedNativeConsumer, nativeCheckedOutput, nativeCheckedError) =
                     await RunAsync([], "compile-native", "consumer", caller, nativeProvider,
-                        "-o", nativeConsumer, "--runtime", policy, "--json");
+                        "-o", nativeConsumer, "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(checkedNativeConsumer == 0, Is.True, nativeCheckedOutput + nativeCheckedError);
                 var (nativeCheckedResult, _, _) = await RunAsync([],
-                    "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
+                    "run-native", nativeConsumer, nativeProvider, "--runtime", policy).ConfigureAwait(false);
                 Assert.That(nativeCheckedResult, Is.EqualTo(42));
             }
 
             var (nativeConsumerSwitch, _, _) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
-                "--runtime", policy, "--corelib", "--json");
+                "--runtime", policy, "--corelib", "--json").ConfigureAwait(false);
             Assert.That(nativeConsumerSwitch, Is.EqualTo(2));
         }
         finally

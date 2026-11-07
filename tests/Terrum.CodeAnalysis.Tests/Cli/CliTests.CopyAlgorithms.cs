@@ -4,7 +4,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     private struct GuardedNativeToken

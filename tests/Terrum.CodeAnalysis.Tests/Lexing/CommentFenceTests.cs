@@ -4,14 +4,15 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class CommentFenceTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CommentFenceTests
 {
     [TestCase("/* */",TriviaKind.MultiLineComment,"")]
     [TestCase("/** /* */ text **/",TriviaKind.MultiLineComment,"")]
@@ -124,7 +125,7 @@ public sealed class CommentFenceTests
     public void OldFixedFenceRecordsCannotMasqueradeAsCurrentScannerOutput()
     {
         var source = SourceText.From("/* **/ */");
-        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 3,
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 3,
             Encode([(int)TokenKind.Star, 7, 1, (int)TokenKind.Slash, 8, 1, (int)TokenKind.EndOfFile, 9, 0]),
             Encode([2, (int)TriviaKind.MultiLineComment, 0, 6, 0, (int)TriviaKind.Whitespace, 6, 1, 0]),
             Encode([0])));

@@ -3,12 +3,12 @@
 using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Terrum.CodeAnalysis.Native;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Native;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Int32ToInt64WrappingExport(int value);

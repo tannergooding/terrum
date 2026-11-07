@@ -7,7 +7,7 @@ namespace Triangle.Interop;
 [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
 [Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
 [Terrum.Interop.NativeParameter(9, Write, NoEscape, 1)]
-[Terrum.Interop.NativeOutput(7, NonNegative)]
+[param(code): Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonNegative)]
 extern int32 D3DCompileFromFileRaw(
     ptr<char16> sourceFile,
     ptr<void> defines,
@@ -17,15 +17,50 @@ extern int32 D3DCompileFromFileRaw(
     uint32 flags1,
     uint32 flags2,
     write ptr<ptr<void>> code,
-    ptr<ptr<void>> diagnostics);
+    write ptr<ptr<void>> diagnostics);
 
 bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
-    mut InlineArray<char16, 260> shaderPath = [];
+    mut [char16; 260] shaderPath = [
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+        char16(0), char16(0), char16(0), char16(0)
+    ];
     mut uint32 pathLength = 0;
     mut uint32 scan = 0;
     mut uint32 prefixLength = 0;
     mut bool pathValid = false;
-    mut ptr<void> rawCode = null;
+    init ptr<void> rawCode;
+    mut ptr<void> rawDiagnostics = null;
     unsafe {
         pathLength = GetModuleFileNameW(null, &shaderPath[0], 260);
         if (pathLength > 0 && pathLength < 260) {
@@ -61,18 +96,34 @@ bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
             shaderPath[prefixLength + 12] = 108;
             shaderPath[prefixLength + 13] = 0;
             if (vertexShader) {
+                rawDiagnostics = null;
                 int32 result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
-                    utf8z("VertexMain"), utf8z("vs_5_0"), 0, 0, &rawCode, null);
+                    utf8z("VertexMain"), utf8z("vs_5_0"), 0, 0,
+                    &init rawCode, &rawDiagnostics);
                 if (result >= 0) {
                     code = unsafe(new ShaderBlobOwner(rawCode));
+                    if (rawDiagnostics != null) {
+                        Release(rawDiagnostics);
+                    }
                     return true;
                 }
+                if (rawDiagnostics != null) {
+                    Release(rawDiagnostics);
+                }
             } else {
+                rawDiagnostics = null;
                 int32 result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
-                    utf8z("PixelMain"), utf8z("ps_5_0"), 0, 0, &rawCode, null);
+                    utf8z("PixelMain"), utf8z("ps_5_0"), 0, 0,
+                    &init rawCode, &rawDiagnostics);
                 if (result >= 0) {
                     code = unsafe(new ShaderBlobOwner(rawCode));
+                    if (rawDiagnostics != null) {
+                        Release(rawDiagnostics);
+                    }
                     return true;
+                }
+                if (rawDiagnostics != null) {
+                    Release(rawDiagnostics);
                 }
             }
         }
@@ -81,7 +132,7 @@ bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
     return false;
 }
 
-[Blittable] [Layout(Sequential)]
+[Blittable] [Layout(LayoutKind.Sequential)]
 struct ModeDescription {
     uint32 Width;
     uint32 Height;
@@ -91,7 +142,7 @@ struct ModeDescription {
     uint32 ScanlineOrdering;
     uint32 Scaling;
 
-    [NoThrow]
+
     public ModeDescription(uint32 width, uint32 height, uint32 refreshNumerator,
         uint32 refreshDenominator, uint32 format, uint32 scanlineOrdering, uint32 scaling) {
         Width = width;
@@ -104,19 +155,19 @@ struct ModeDescription {
     }
 }
 
-[Blittable] [Layout(Sequential)]
+[Blittable] [Layout(LayoutKind.Sequential)]
 struct SampleDescription {
     uint32 Count;
     uint32 Quality;
 
-    [NoThrow]
+
     public SampleDescription(uint32 count, uint32 quality) {
         Count = count;
         Quality = quality;
     }
 }
 
-[Blittable] [Layout(Sequential)]
+[Blittable] [Layout(LayoutKind.Sequential)]
 struct SwapChainDescription {
     ModeDescription BufferDescription;
     SampleDescription SampleDescription;
@@ -127,7 +178,7 @@ struct SwapChainDescription {
     uint32 SwapEffect;
     uint32 Flags;
 
-    [NoThrow]
+
     public unsafe SwapChainDescription(ModeDescription bufferDescription,
         SampleDescription sampleDescription, uint32 bufferUsage, uint32 bufferCount,
         ptr<void> outputWindow, int32 windowed, uint32 swapEffect, uint32 flags) {
@@ -147,11 +198,11 @@ struct SwapChainDescription {
 [Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
 [Terrum.Interop.NativeParameter(5, Read, NoEscape, 1)]
 [Terrum.Interop.NativeParameter(8, Read, NoEscape, 1)]
-[Terrum.Interop.NativeOutput(8, NonNegative)]
-[Terrum.Interop.NativeOutput(9, NonNegative)]
-[Terrum.Interop.NativeOutput(10, NonNegative)]
-[Terrum.Interop.NativeOutput(11, NonNegative)]
-[NoThrow]
+[param(swapChain): Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+[param(device): Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+[param(selectedFeatureLevel): Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+[param(immediateContext): Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonNegative)]
+
 extern int32 D3D11CreateDeviceAndSwapChainRaw(
     ptr<void> adapter,
     int32 driverType,
@@ -166,7 +217,7 @@ extern int32 D3D11CreateDeviceAndSwapChainRaw(
     write ptr<uint32> selectedFeatureLevel,
     write ptr<ptr<void>> immediateContext);
 
-[NoThrow]
+
 unsafe bool CreateD3D11DeviceAndSwapChain(
     ptr<void> window,
     out SampleSwapChainOwner swapChain,
@@ -176,13 +227,14 @@ unsafe bool CreateD3D11DeviceAndSwapChain(
     SwapChainDescription description = unsafe(new SwapChainDescription(
         new ModeDescription(1, 1, 0, 0, 28, 0, 0),
         new SampleDescription(1, 0), 32, 1, window, 1, 0, 0));
-    mut ptr<void> rawSwapChain = null;
-    mut ptr<void> rawDevice = null;
-    mut uint32 selectedFeatureLevel = 0;
-    mut ptr<void> rawContext = null;
+    init ptr<void> rawSwapChain;
+    init ptr<void> rawDevice;
+    init uint32 selectedFeatureLevel;
+    init ptr<void> rawContext;
     if (unsafe(D3D11CreateDeviceAndSwapChainRaw(
         null, 5, null, 0, &featureLevel, 1, 7, &description,
-        &rawSwapChain, &rawDevice, &selectedFeatureLevel, &rawContext)) >= 0) {
+        &init rawSwapChain, &init rawDevice, &init selectedFeatureLevel,
+        &init rawContext)) >= 0) {
         ptr<void> swapChainPointer = rawSwapChain;
         ptr<void> devicePointer = rawDevice;
         ptr<void> contextPointer = rawContext;
@@ -197,22 +249,17 @@ unsafe bool CreateD3D11DeviceAndSwapChain(
     return false;
 }
 
-[NoThrow]
+
 [Terrum.Interop.NativeCallable]
 unsafe int64 WindowProcedure(ptr<void> window, uint32 message, uint64 wParam, int64 lParam) { unsafe {
         if (message == 5) {
             if (PostMessageW(window, 32768, wParam, 0) == 0) {
-                mut WindowMessage failureQuit = new WindowMessage();
-                PeekMessageW(&failureQuit, null, 18, 18, 1);
                 PostQuitMessage(1);
             }
             return 0;
         }
         if (message == 16) {
-            mut WindowMessage quit = new WindowMessage();
-            if (PeekMessageW(&quit, null, 18, 18, 0) == 0) {
-                PostQuitMessage(0);
-            }
+            PostQuitMessage(0);
             return 0;
         }
         return DefWindowProcW(window, message, wParam, lParam);
@@ -228,7 +275,11 @@ public unique struct WindowOwner {
         Atom = 0;
         ThreadId = GetCurrentThreadId();
         require ThreadId != 0;
-        mut InlineArray<char16, 17> className = [];
+        mut [char16; 17] className = [
+            char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+            char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0), char16(0),
+            char16(0)
+        ];
         className[0] = 84;
         className[1] = 101;
         className[2] = 114;
@@ -264,14 +315,14 @@ public unique struct WindowOwner {
         }
     }
 
-    [NoThrow]
+
     private static void ExitIfFalse(bool succeeded) {
         if (!succeeded) {
             unsafe { ExitProcess(87); }
         }
     }
 
-    [NoThrow] [Cleanup]
+     [Cleanup]
     public void Close() { unsafe {
         ExitIfFalse(ThreadId == GetCurrentThreadId());
         ExitIfFalse(DestroyWindow(Handle) != 0);
@@ -300,8 +351,7 @@ public unique struct WindowOwner {
                                 mut uint32 lastWidth = 0;
                                 mut uint32 lastHeight = 0;
                                 while (result > 0) {
-                                    while (PeekMessageW(
-                                        &message, null, 0, 0, 1) != 0) {
+                                    while (PeekMessageW(&message, null, 0, 0, 1) != 0) {
                                         uint32 queuedMessageId = message.Message;
                                         bool queuedWindowMessage = message.Window == Handle;
                                         if (queuedMessageId == 18) {
@@ -432,7 +482,7 @@ struct ClientRectangle {
     int32 Right;
     int32 Bottom;
 
-    [NoThrow]
+
     public ClientRectangle(int32 left, int32 top, int32 right, int32 bottom) {
         Left = left;
         Top = top;
@@ -440,7 +490,7 @@ struct ClientRectangle {
         Bottom = bottom;
     }
 
-    [NoThrow]
+
     public bool TryGetDimensions(out int32 width, out int32 height) {
         width = 0;
         height = 0;

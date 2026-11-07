@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task NativeGraphCliPreservesIntermediateAndRootArtifactsOnFailuresAsync()
@@ -27,53 +27,53 @@ public sealed partial class CliTests
         var root = Path.Combine(directory, "root.trng");
         try
         {
-            await File.WriteAllTextAsync(leafSource, " public int32 Leaf() { return 40; }");
+            await File.WriteAllTextAsync(leafSource, " public int32 Leaf() { return 40; }").ConfigureAwait(false);
             await File.WriteAllTextAsync(middleSource,
                 "public int32 Middle() { mut [uint32; 2] values = [0, 0]; "
-                + "return Leaf() + int32(values[0] + values[1]) + 1; }");
-            await File.WriteAllTextAsync(rootSource, "int32 Main() { return Middle() + 1; }");
+                + "return Leaf() + int32(values[0] + values[1]) + 1; }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(rootSource, "int32 Main() { return Middle() + 1; }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "NodeB",
-                "--export", "Leaf", "-o", leaf, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--export", "Leaf", "-o", leaf, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             var (middleExit, middleJson, _) = await RunAsync([], "compile-native-graph", "producer", middleSource,
-                "NodeA", "--provider", leaf, "--export", "Middle", "-o", middle, "--runtime", "fail-fast", "--json");
+                "NodeA", "--provider", leaf, "--export", "Middle", "-o", middle, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(middleExit, Is.EqualTo(0));
-            var middleBytes = await File.ReadAllBytesAsync(middle);
+            var middleBytes = await File.ReadAllBytesAsync(middle).ConfigureAwait(false);
             using var middleArtifact = JsonDocument.Parse(middleJson);
             Assert.That(middleArtifact.RootElement.GetProperty("artifact").GetProperty("kind").GetString(), Is.EqualTo("native-graph-producer"));
             var (rootExit, rootJson, _) = await RunAsync([], "compile-native-graph", "consumer", rootSource,
-                "--provider", middle, "-o", root, "--runtime", "fail-fast", "--json");
+                "--provider", middle, "-o", root, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(rootExit, Is.EqualTo(0));
-            var rootBytes = await File.ReadAllBytesAsync(root);
+            var rootBytes = await File.ReadAllBytesAsync(root).ConfigureAwait(false);
             using var rootArtifact = JsonDocument.Parse(rootJson);
             var metadata = rootArtifact.RootElement.GetProperty("artifact");
             Assert.That(metadata.GetProperty("kind").GetString(), Is.EqualTo("native-graph-consumer"));
             Assert.That(metadata.GetProperty("length").GetInt32(), Is.EqualTo(rootBytes.Length));
             Assert.That(metadata.GetProperty("sha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(rootBytes))));
             Assert.That((await RunAsync([], "validate-native-graph", root,
-                "--provider", middle, "--provider", leaf)).ExitCode, Is.EqualTo(0));
+                "--provider", middle, "--provider", leaf).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph", root,
-                "--provider", leaf, "--provider", middle, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(42));
+                "--provider", leaf, "--provider", middle, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
                 "--provider", leaf, "--provider", middle,
-                "--runtime", "fail-fast")).ExitCode, Is.EqualTo(42));
+                "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
 
             var badSource = Path.Combine(directory, "bad.terrum");
-            await File.WriteAllTextAsync(badSource, "int32 Invalid() { return Missing; }");
+            await File.WriteAllTextAsync(badSource, "int32 Invalid() { return Missing; }").ConfigureAwait(false);
             var (failed, failedJson, _) = await RunAsync([], "compile-native-graph", "consumer", rootSource,
-                "--source", badSource, "--provider", middle, "-o", root, "--runtime", "fail-fast", "--json");
+                "--source", badSource, "--provider", middle, "-o", root, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(failed, Is.EqualTo(1));
             using var errors = JsonDocument.Parse(failedJson);
             Assert.That(errors.RootElement.GetProperty("command").GetString(), Is.EqualTo("compile-native-graph"));
             Assert.That(global::System.Linq.Enumerable.Any(errors.RootElement.GetProperty("diagnostics").EnumerateArray(),item => item.GetProperty("sourceIndex").GetInt32() == 1),Is.True);
-            Assert.That(await File.ReadAllBytesAsync(root), Is.EqualTo(rootBytes));
+            Assert.That(await File.ReadAllBytesAsync(root).ConfigureAwait(false), Is.EqualTo(rootBytes));
 
             var (collision, collisionJson, _) = await RunAsync([], "compile-native-graph", "producer",
                 middleSource, "NodeB", "--provider", leaf, "--export", "Middle", "-o", middle,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(collision, Is.EqualTo(1));
             using var collisionError = JsonDocument.Parse(collisionJson);
             Assert.That(collisionError.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
-            Assert.That(await File.ReadAllBytesAsync(middle), Is.EqualTo(middleBytes));
+            Assert.That(await File.ReadAllBytesAsync(middle).ConfigureAwait(false), Is.EqualTo(middleBytes));
         }
         finally
         {

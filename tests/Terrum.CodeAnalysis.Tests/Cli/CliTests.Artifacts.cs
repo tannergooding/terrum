@@ -5,7 +5,8 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed partial class CliTests
 {
     private static string CreateTestArtifactPath(string fileName) =>
         Path.Combine(TestArtifactPaths.DirectoryPath, fileName);

@@ -6,18 +6,19 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Text;
 
-public sealed partial class SourceLineComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed partial class SourceLineComponentTests
 {
     [TestCase("")]
     [TestCase("plain")]
@@ -104,12 +105,16 @@ public sealed partial class SourceLineComponentTests
 
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
-            var producerCompilation = Compilation.Create(trees.Add(entry),
+            var producerCompilation = CompileWithLayoutCore(trees.Add(entry),
                 [new HostBuffer("Source", PrimitiveType.Char16, [0x1357, 0x2468, 0x369A], false) {
                     IsInvocationScoped = true,
                 }], policy);
             Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-            var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
                 ["Terrum.CodeAnalysis.GetSourceTextLength", "Terrum.CodeAnalysis.TryReadSourceCodeUnit",
                     "Terrum.CodeAnalysis.TryGetSourceRange", "Terrum.CodeAnalysis.TryReadSourceLine",
                     "Terrum.CodeAnalysis.TryGetSourcePosition", "Terrum.CodeAnalysis.TryGetSourceOffset",
@@ -121,15 +126,19 @@ public sealed partial class SourceLineComponentTests
 
             var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
             Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-            var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+            var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))();
             Assert.That(consumerProgram.RequiresSourceGrant, Is.True);
-            Assert.Throws<NotSupportedException>(() =>
+            _ = Assert.Throws<NotSupportedException>(() =>
                 NativeEmitter.EmitWithImports(consumerProgram, [], (NativeRuntimePolicy)policy));
             var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
             var linked = ModuleCompiler.Link(consumer, producer);
             Assert.That(linked.RequiresSourceGrant, Is.True);
-            Assert.Throws<ArgumentException>(() => NativeJit.Execute(linked, (NativeRuntimePolicy)policy));
-            Assert.Throws<NotSupportedException>(() => NativeEmitter.Emit(linked, (NativeRuntimePolicy)policy));
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.Execute(linked, (NativeRuntimePolicy)policy));
+            _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.Emit(linked, (NativeRuntimePolicy)policy));
 
             var neutralCompilation = Compilation.Create(SyntaxTree.Parse("""
                 namespace Terrum.CodeAnalysis;
@@ -137,19 +146,27 @@ public sealed partial class SourceLineComponentTests
                 int32 Main() { return 0; }
                 """, "source-grant-neutral-producer.terrum"), policy);
             Assert.That(neutralCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, neutralCompilation.Diagnostics));
-            var neutralProducer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = neutralCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
+            var neutralProducer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = neutralCompilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(),
                 ["Terrum.CodeAnalysis.Different"]);
-            Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, neutralProducer));
-            Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateReferenceSet([producer, neutralProducer]));
+            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, neutralProducer));
+            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateReferenceSet([producer, neutralProducer]));
             var neutralLengthCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
                 namespace Terrum.CodeAnalysis;
                 public int32 GetSourceTextLength() { return 0; }
                 """, "source-grant-neutral-length.terrum"), policy);
             Assert.That(neutralLengthCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, neutralLengthCompilation.Diagnostics));
             var neutralLengthProducer = ModuleCompiler.CreateProducer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = neutralLengthCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual3 = neutralLengthCompilation.Program;
+                    Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual3!;
+                }))(),
                 ["Terrum.CodeAnalysis.GetSourceTextLength"]);
-            Assert.Throws<ModuleContractException>(() =>
+            _ = Assert.Throws<ModuleContractException>(() =>
                 ModuleCompiler.CreateConsumer(consumerProgram, neutralLengthProducer));
 
             foreach (var text in snapshots)
@@ -176,31 +193,35 @@ public sealed partial class SourceLineComponentTests
                 """, "source-grant-length-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
             Assert.That(lengthConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, lengthConsumerCompilation.Diagnostics));
             var lengthConsumer = ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = lengthConsumerCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual4 = lengthConsumerCompilation.Program;
+                    Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual4!;
+                }))(), producer);
             var lengthLinked = ModuleCompiler.Link(lengthConsumer, producer);
             Assert.That(NativeJit.ExecuteWithSourceGrant(lengthLinked,
                 [CreateSourceGrant(new string('x', 16_384))], (NativeRuntimePolicy)policy), Is.EqualTo(16_384));
 
             var valid = CreateSourceGrant("");
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked, [], (NativeRuntimePolicy)policy));
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked, [valid, valid],
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked, [], (NativeRuntimePolicy)policy));
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked, [valid, valid],
                 (NativeRuntimePolicy)policy));
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
                 [valid with { IsWritable = true }], (NativeRuntimePolicy)policy));
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
                 [new HostBuffer("Source", PrimitiveType.Int32, [1], false) { IsInvocationScoped = true }],
                 (NativeRuntimePolicy)policy));
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
                 [new HostBuffer("Other", PrimitiveType.Char16, [65], false) { IsInvocationScoped = true }],
                 (NativeRuntimePolicy)policy));
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
                 [new HostBuffer("Source", PrimitiveType.Char16, [-1], false) { IsInvocationScoped = true }],
                 (NativeRuntimePolicy)policy));
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked,
                 [new HostBuffer("Source", PrimitiveType.Char16, [ushort.MaxValue + 1], false) {
                     IsInvocationScoped = true,
                 }], (NativeRuntimePolicy)policy));
-            Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(lengthLinked,
+            _ = Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(lengthLinked,
                 [CreateSourceGrant(new string('x', 16_385))], (NativeRuntimePolicy)policy));
         }
     }
@@ -226,7 +247,11 @@ public sealed partial class SourceLineComponentTests
                 IsInvocationScoped = true,
             }]);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = producerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = producerCompilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(),
             ["Terrum.CodeAnalysis.GetLastSourceCodeUnitOrMinusOne",
                 "Terrum.CodeAnalysis.GetFirstSourceCodeUnitOrMinusOne"]);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -234,7 +259,11 @@ public sealed partial class SourceLineComponentTests
             int32 Main() { return GetLastSourceCodeUnitOrMinusOne(); }
             """, "source-grant-index-consumer.terrum"), ModuleCompiler.CreateReference(producer));
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = consumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(),
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = consumerCompilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(),
             producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
@@ -260,7 +289,7 @@ public sealed partial class SourceLineComponentTests
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var entry = SyntaxTree.Parse($"namespace Terrum.CodeAnalysis; int32 Main() {{ {body} }}", "entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -277,9 +306,20 @@ public sealed partial class SourceLineComponentTests
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
-        { var __nunitItems7 = global::System.Linq.Enumerable.ToArray(compilation.SyntaxTrees); Assert.That(__nunitItems7, Has.Length.EqualTo(2)); Assert.That(__nunitItems7[0], Is.SameAs(entry)); Assert.That(__nunitItems7[1], Is.SameAs(write)); }
+        {
+            var __nunitItems7 = global::System.Linq.Enumerable.ToArray(compilation.SyntaxTrees);
+            Assert.That(__nunitItems7, Has.Length.EqualTo(2));
+            Assert.That(__nunitItems7[0], Is.SameAs(entry));
+            Assert.That(__nunitItems7[1], Is.SameAs(write));
+        }
         Assert.That(compilation.SourceDiagnostics, Is.Not.Empty);
-        {var __nunitItems0 = compilation.SourceDiagnostics;        Assert.Multiple(() => { foreach (var __nunitItem8 in __nunitItems0) { Assert.That(__nunitItem8.SyntaxTree, Is.SameAs(write)); } });}
+        {
+            var __nunitItems0 = compilation.SourceDiagnostics;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem8 in __nunitItems0)
+    {
+        Assert.That(__nunitItem8.SyntaxTree, Is.SameAs(write)); } });
+        }
     }
 
     private static async Task CheckAsync(string text)
@@ -312,18 +352,30 @@ public sealed partial class SourceLineComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Harness, "entry.terrum")),
+            var compilation = CompileWithLayoutCore(trees.Add(SyntaxTree.Parse(Harness, "entry.terrum")),
             [
                 new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
                 new HostBuffer("ExpectedLines", PrimitiveType.Int32, lines.ToImmutable(), false),
                 new HostBuffer("ExpectedPositions", PrimitiveType.Int32, positions.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual9 = compilation.Program;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual9!;
+            }))();
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
     }
+
+    private static Compilation CompileWithLayoutCore(
+        ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
+        => Compilation.Create(trees, buffers, new CompilationOptions {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
 
     private static async Task ExecuteAsync(BoundProgram program, NativeRuntimePolicy policy, int expectedExit = 0)
     {
@@ -360,7 +412,7 @@ public sealed partial class SourceLineComponentTests
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
         var names = includeLines || includeTests
             ? new[] { "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum", "sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum", "sources/Terrum.CodeAnalysis.Terrum/Text/SourceText.terrum", "sources/Terrum.CodeAnalysis.Terrum/Text/SourceLines.terrum" }
-            : new[] { "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum", "sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum", "sources/Terrum.CodeAnalysis.Terrum/Text/SourceText.terrum" };
+            : ["sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum", "sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum", "sources/Terrum.CodeAnalysis.Terrum/Text/SourceText.terrum"];
         foreach (var name in includeTests
             ? [.. names, "tests/Terrum.CodeAnalysis.Terrum.Tests/Text/SourceLineTests.terrum"]
             : names)
@@ -384,15 +436,15 @@ public sealed partial class SourceLineComponentTests
     {
         var last = source.Length == 0 ? -1 : source[source.Length - 1];
         var first = source.Length == 0 ? -1 : source[0];
-        var checksum = (source.Length * 2 + last + first + 2 * 65_521) % 65_521;
+        var checksum = ((source.Length * 2) + last + first + (2 * 65_521)) % 65_521;
         for (var index = 0; index < source.Length; index++)
         {
-            checksum = (checksum + (source[index] * ((index % 97) + 1)) % 65_521) % 65_521;
+            checksum = (checksum + (source[index] * ((index % 97) + 1) % 65_521)) % 65_521;
         }
         for (var position = 0; position <= source.Length; position++)
         {
             var line = source.GetLinePosition(position);
-            checksum = (checksum + (line.Line * 31 + line.Character) % 65_521) % 65_521;
+            checksum = (checksum + (((line.Line * 31) + line.Character) % 65_521)) % 65_521;
         }
         foreach (var line in source.Lines)
         {

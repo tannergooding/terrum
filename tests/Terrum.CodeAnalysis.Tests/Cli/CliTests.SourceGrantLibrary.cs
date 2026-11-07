@@ -8,14 +8,13 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Terrum.CodeAnalysis.Semantics;
 using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -36,12 +35,13 @@ public sealed partial class CliTests
                 "--export", "Terrum.CodeAnalysis.ReadUtf16ScalarChecked",
                 "-o", imagePath, "--runtime", runtime,
                 "--source-grant", "--abi-output", manifestPath,
-            ]);
+            ]).ConfigureAwait(false);
             Assert.That(ExitCode, Is.EqualTo(0));
             Assert.That(Error, Is.Empty);
 
-            var image = File.ReadAllBytes(imagePath);
-            using var manifest = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
+            var image = await File.ReadAllBytesAsync(imagePath).ConfigureAwait(true);
+            using var manifest = JsonDocument.Parse(
+                await File.ReadAllBytesAsync(manifestPath).ConfigureAwait(true));
             var root = manifest.RootElement;
             Assert.That(root.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(1));
             Assert.That(root.GetProperty("sourceGrantAbiVersion").GetInt32(), Is.EqualTo(1));
@@ -102,37 +102,39 @@ public sealed partial class CliTests
         var manifestPath = Path.Combine(temporaryDirectory, "library.abi.json");
         try
         {
-            File.WriteAllText(sourcePath, """
+            await File.WriteAllTextAsync(sourcePath, """
                 namespace SourceGrant.Pair;
                 public int32 GetValue(int32 value) { return value; }
                 int32 ReadSource(int32 at) { return int32(Host.Source[at]); }
-                """);
+                """).ConfigureAwait(true);
             var (initialExitCode, _, initialError) = await RunAsync([], [
                 "build-library", sourcePath, "--export", "SourceGrant.Pair.GetValue",
                 "-o", imagePath, "--runtime", "fail-fast", "--source-grant", "--abi-output", manifestPath,
-            ]);
+            ]).ConfigureAwait(false);
             Assert.That(initialExitCode, Is.EqualTo(0));
             Assert.That(initialError, Is.Empty);
-            var originalImage = File.ReadAllBytes(imagePath);
-            var originalManifest = File.ReadAllBytes(manifestPath);
+            var originalImage = await File.ReadAllBytesAsync(imagePath).ConfigureAwait(true);
+            var originalManifest = await File.ReadAllBytesAsync(manifestPath).ConfigureAwait(true);
 
-            File.WriteAllText(sourcePath, """
+            await File.WriteAllTextAsync(sourcePath, """
                 namespace SourceGrant.Pair;
                 public int32 GetValue(int32 at) { return int32(Host.Source[at]); }
-                """);
+                """).ConfigureAwait(true);
             var lockedPath = lockedArtifact == "image" ? imagePath : manifestPath;
             using (new FileStream(lockedPath, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 var (failedExitCode, output, error) = await RunAsync([], [
                     "build-library", sourcePath, "--export", "SourceGrant.Pair.GetValue",
                     "-o", imagePath, "--runtime", "fail-fast", "--source-grant", "--abi-output", manifestPath,
-                ]);
+                ]).ConfigureAwait(false);
                 Assert.That(failedExitCode, Is.EqualTo(2));
                 Assert.That(output + error, Does.Contain("TRM2002"));
             }
 
-            Assert.That(File.ReadAllBytes(imagePath), Is.EqualTo(originalImage));
-            Assert.That(File.ReadAllBytes(manifestPath), Is.EqualTo(originalManifest));
+            Assert.That(await File.ReadAllBytesAsync(imagePath).ConfigureAwait(true),
+                Is.EqualTo(originalImage));
+            Assert.That(await File.ReadAllBytesAsync(manifestPath).ConfigureAwait(true),
+                Is.EqualTo(originalManifest));
         }
         finally
         {

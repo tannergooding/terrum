@@ -6,7 +6,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeToken

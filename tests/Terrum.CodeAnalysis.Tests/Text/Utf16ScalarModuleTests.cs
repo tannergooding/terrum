@@ -6,18 +6,18 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Text;
 
-public sealed class Utf16ScalarModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class Utf16ScalarModuleTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -83,7 +83,11 @@ public sealed class Utf16ScalarModuleTests
         ], policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
             [
                 "Terrum.CodeAnalysis.DecodeRequestedScalar",
                 "Terrum.CodeAnalysis.VerifyBoundedBmpCodeUnits",
@@ -96,7 +100,11 @@ public sealed class Utf16ScalarModuleTests
             """, "utf16-scalar-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         foreach (var fixture in new[] {
@@ -126,7 +134,11 @@ public sealed class Utf16ScalarModuleTests
             """, "utf16-scalar-bounded-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
         Assert.That(boundedConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, boundedConsumerCompilation.Diagnostics));
         var boundedConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = boundedConsumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = boundedConsumerCompilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), producer);
         var boundedLinked = ModuleCompiler.Link(boundedConsumer, producer);
         var boundedGrant = CreateSourceGrant(boundedText, 1);
         Assert.That(NativeJit.ExecuteWithSourceGrant(boundedLinked, [boundedGrant], (NativeRuntimePolicy)policy), Is.EqualTo(ExpectedResult(boundedText, 1, endOffset: 1)));
@@ -137,7 +149,11 @@ public sealed class Utf16ScalarModuleTests
             """, "utf16-scalar-bmp-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
         Assert.That(bmpConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, bmpConsumerCompilation.Diagnostics));
         var bmpConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = bmpConsumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual3 = bmpConsumerCompilation.Program;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual3!;
+            }))(), producer);
         var bmpLinked = ModuleCompiler.Link(bmpConsumer, producer);
 
         for (var start = 0; start <= char.MaxValue; start += 16_384)
@@ -163,7 +179,11 @@ public sealed class Utf16ScalarModuleTests
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(supplementaryConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, supplementaryConsumerCompilation.Diagnostics));
         var supplementaryConsumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = supplementaryConsumerCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = supplementaryConsumerCompilation.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))(), producer);
         var supplementaryLinked = ModuleCompiler.Link(supplementaryConsumer, producer);
 
         const int firstSupplementaryScalar = 0x10000;
@@ -175,7 +195,7 @@ public sealed class Utf16ScalarModuleTests
             scalarStart += maximumPairsPerGrant)
         {
             var count = Math.Min(maximumPairsPerGrant, supplementaryScalarLimit - scalarStart);
-            var source = ImmutableArray.CreateBuilder<int>(2 + count * 2);
+            var source = ImmutableArray.CreateBuilder<int>(2 + (count * 2));
             source.Add(scalarStart & 0xFFFF);
             source.Add(scalarStart >> 16);
             for (var index = 0; index < count; index++)
@@ -209,7 +229,11 @@ public sealed class Utf16ScalarModuleTests
         var producerCompilation = Compilation.Create([componentTree, producerEntry], policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = producerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual5 = producerCompilation.Program;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual5!;
+            }))(),
             ["Terrum.CodeAnalysis.DecodeUtf16Scalar", "Terrum.CodeAnalysis.Utf16ScalarWidth"]);
 
         var fixtures = new (char First, char Second, bool HasSecond)[] {
@@ -228,16 +252,16 @@ public sealed class Utf16ScalarModuleTests
         var checks = new StringBuilder();
         for (var index = 0; index < fixtures.Length; index++)
         {
-            var fixture = fixtures[index];
-            var expected = expectedResults[index];
-            checks.Append("int32 scalar").Append(index).Append(" = DecodeUtf16Scalar(char16(")
-                .Append(((int)fixture.First).ToString(CultureInfo.InvariantCulture)).Append("), char16(")
-                .Append(((int)fixture.Second).ToString(CultureInfo.InvariantCulture)).AppendLine("));");
-            checks.Append("if (scalar").Append(index).Append(" != ")
-                .Append(expected.Scalar.ToString(CultureInfo.InvariantCulture))
+            var (First, Second, HasSecond) = fixtures[index];
+            var (Scalar, Width, Status) = expectedResults[index];
+            _ = checks.Append("int32 scalar").Append(index).Append(" = DecodeUtf16Scalar(char16(")
+                .Append(((int)First).ToString(CultureInfo.InvariantCulture)).Append("), char16(")
+                .Append(((int)Second).ToString(CultureInfo.InvariantCulture)).AppendLine("));");
+            _ = checks.Append("if (scalar").Append(index).Append(" != ")
+                .Append(Scalar.ToString(CultureInfo.InvariantCulture))
                 .Append(") { return ").Append((index + 1).ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
-            checks.Append("if (Utf16ScalarWidth(scalar").Append(index).Append(") != ")
-                .Append(expected.Width.ToString(CultureInfo.InvariantCulture)).Append(") { return ")
+            _ = checks.Append("if (Utf16ScalarWidth(scalar").Append(index).Append(") != ")
+                .Append(Width.ToString(CultureInfo.InvariantCulture)).Append(") { return ")
                 .Append((fixtures.Length + index + 1).ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
         }
         var consumerTree = SyntaxTree.Parse(
@@ -246,7 +270,11 @@ public sealed class Utf16ScalarModuleTests
         Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
         var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = consumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = consumerCompilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         var actual = NativeJit.Execute(linked, (NativeRuntimePolicy)policy);
         Assert.That(actual == 0, Is.True, actual > 0 && actual <= fixtures.Length * 2
@@ -261,7 +289,7 @@ public sealed class Utf16ScalarModuleTests
         var (scalar, width, _) = ExpectedDecode(text[position], position + 1 < text.Length - endOffset
             ? text[position + 1]
             : '\0', position + 1 < text.Length - endOffset);
-        return scalar < 0 ? -1 : scalar * 2 + width;
+        return scalar < 0 ? -1 : (scalar * 2) + width;
     }
 
     private static (int Scalar, int Width, OperationStatus Status) ExpectedDecode(

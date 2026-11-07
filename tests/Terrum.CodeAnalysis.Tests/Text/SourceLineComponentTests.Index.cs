@@ -5,17 +5,16 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Text;
 
-public sealed partial class SourceLineComponentTests
+internal sealed partial class SourceLineComponentTests
 {
     [TestCase("")]
     [TestCase("plain")]
@@ -109,7 +108,7 @@ public sealed partial class SourceLineComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-entry.terrum")),
+            var compilation = CompileWithLayoutCore(trees.Add(SyntaxTree.Parse(Entry, "index-entry.terrum")),
             [
                 new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
                 new HostBuffer("LineCount", PrimitiveType.Int32, [source.Lines.Length], false),
@@ -118,7 +117,11 @@ public sealed partial class SourceLineComponentTests
                 new HostBuffer("ExpectedContentExtents", PrimitiveType.Int32, contentExtents.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
@@ -152,11 +155,15 @@ public sealed partial class SourceLineComponentTests
             """, "capacity-index-entry.terrum");
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var compilation = Compilation.Create(trees.Add(entry),
+            var compilation = CompileWithLayoutCore(trees.Add(entry),
                 [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
                 (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), policy).ConfigureAwait(true);
+            await ExecuteAsync(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), policy).ConfigureAwait(true);
         }
     }
 
@@ -197,14 +204,18 @@ public sealed partial class SourceLineComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "crlf-boundary-entry.terrum")),
+            var compilation = CompileWithLayoutCore(trees.Add(SyntaxTree.Parse(Entry, "crlf-boundary-entry.terrum")),
             [
                 new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
                 new HostBuffer("ExpectedExtents", PrimitiveType.Int32, extents.ToImmutable(), false),
                 new HostBuffer("ExpectedContentExtents", PrimitiveType.Int32, contentExtents.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = compilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))();
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
@@ -234,11 +245,15 @@ public sealed partial class SourceLineComponentTests
                 return 0;
             }
             """, "sparse-index-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), policy).ConfigureAwait(true);
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(), policy).ConfigureAwait(true);
     }
     [TestCase(NativeRuntimePolicy.FailFast,false)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
@@ -286,11 +301,15 @@ public sealed partial class SourceLineComponentTests
                 return 0;
             }
             """, "dense-index-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), policy,
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(), policy,
             overflow && policy == NativeRuntimePolicy.FailFast ? unchecked((int)0xE0540001) : 0)
             .ConfigureAwait(true);
     }
@@ -319,10 +338,14 @@ public sealed partial class SourceLineComponentTests
                 return 0;
             }
             """;
-        var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-snapshot-entry.terrum")),
+        var compilation = CompileWithLayoutCore(trees.Add(SyntaxTree.Parse(Entry, "index-snapshot-entry.terrum")),
             [new HostBuffer("Source", PrimitiveType.Char16, [97, 13, 10, 98], true)], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), policy).ConfigureAwait(true);
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(), policy).ConfigureAwait(true);
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -346,11 +369,15 @@ public sealed partial class SourceLineComponentTests
             }
             """;
         var text = string.Concat(Enumerable.Repeat("x\r\n", 33)) + "z";
-        var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-packed-break-entry.terrum")),
+        var compilation = CompileWithLayoutCore(trees.Add(SyntaxTree.Parse(Entry, "index-packed-break-entry.terrum")),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], true)],
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), policy).ConfigureAwait(true);
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), policy).ConfigureAwait(true);
     }
     [TestCase("index.TryGetPosition(-1, init var line, init var character); return line;")]
     [TestCase("index.TryGetPosition(2, init var line, init var character); return character;")]
@@ -365,7 +392,7 @@ public sealed partial class SourceLineComponentTests
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
         var entry = SyntaxTree.Parse("namespace Terrum.CodeAnalysis; int32 Main() { "
             + "require SourceLineIndex.TryCreate(init var index); " + body + " }", "invalid-index-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -383,7 +410,7 @@ public sealed partial class SourceLineComponentTests
                 return index.GetLineCount();
             }
             """, "unpublished-index-entry.terrum");
-        var compilation = Compilation.Create(trees.Add(entry),
+        var compilation = CompileWithLayoutCore(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [], false)]);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -405,7 +432,7 @@ public sealed partial class SourceLineComponentTests
     {
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
         var source = trees[^1].Source;
-        var marker = source.Text.IndexOf("    [NoThrow]", StringComparison.Ordinal);
+        var marker = source.Text.IndexOf("    ", StringComparison.Ordinal);
         Assert.That(marker >= 0, Is.True);
         var instrumented = source.Text.Insert(marker,
             "    public int32 GetCapacityForTest() { return _starts.Capacity; }\n\n");

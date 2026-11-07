@@ -4,19 +4,20 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class StringLiteralModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringLiteralModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -157,14 +158,20 @@ public sealed class StringLiteralModuleTests
                 return 0;
             }
             """, "string-literal-module.terrum");
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees,
         [
             new HostBuffer("Source", PrimitiveType.Char16, [34, 120, 34], false) {
                 IsInvocationScoped = true,
             },
-        ], policy);
+        ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             [
                 "Terrum.CodeAnalysis.ReadFirstStringScalar",
                 "Terrum.CodeAnalysis.ReadRequestedStringScalar",
@@ -176,29 +183,43 @@ public sealed class StringLiteralModuleTests
             namespace Terrum.CodeAnalysis;
             int32 Main() { return ReadFirstStringScalar(); }
             """, "string-literal-consumer.terrum");
-        var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
+        var consumerCompilation = Compilation.Create(consumerTree,
+            ModuleCompiler.CreateReference(producer), options);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = consumerCompilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         var recordConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return VerifyLiteralScalarRecords(); }
-            """, "string-literal-record-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+            """, "string-literal-record-consumer.terrum"),
+            ModuleCompiler.CreateReference(producer), options);
         Assert.That(recordConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
         var recordConsumer = ModuleCompiler.Link(
             ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = recordConsumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer),
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual2 = recordConsumerCompilation.Program;
+                    Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual2!;
+                }))(), producer),
             producer);
         var countRecordConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return VerifyLiteralCountRecords(); }
             """, "string-literal-count-record-consumer.terrum"),
-            ModuleCompiler.CreateReference(producer), policy);
+            ModuleCompiler.CreateReference(producer), options);
         Assert.That(countRecordConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, countRecordConsumerCompilation.Diagnostics));
         var countRecordConsumer = ModuleCompiler.Link(
             ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = countRecordConsumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer),
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual3 = countRecordConsumerCompilation.Program;
+                    Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual3!;
+                }))(), producer),
             producer);
 
         foreach (var (text, scalar) in new (string Text, int? Scalar)[] {
@@ -333,7 +354,7 @@ public sealed class StringLiteralModuleTests
             {
                 var scalar = scalarStart + index;
                 var spelling = $"\"\\u{scalar:X4}\"";
-                batchText.Append(spelling).Append(' ');
+                _ = batchText.Append(spelling).Append(' ');
                 var valid = !char.IsSurrogate((char)scalar);
                 if (!valid)
                 {
@@ -359,7 +380,7 @@ public sealed class StringLiteralModuleTests
                 if (char.IsSurrogate((char)scalar))
                 {
                     Assert.That(lexed.Diagnostics[diagnosticIndex].Code, Is.EqualTo("TRM0005"));
-                    Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Start, Is.EqualTo(index * 9 + 1));
+                    Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Start, Is.EqualTo((index * 9) + 1));
                     Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Length, Is.EqualTo(6));
                     diagnosticIndex++;
                 }
@@ -382,7 +403,7 @@ public sealed class StringLiteralModuleTests
             for (var index = 0; index < scalarCount; index++)
             {
                 var spelling = $"\"{char.ConvertFromUtf32(scalarStart + index)}\"";
-                batchText.Append(spelling).Append(' ');
+                _ = batchText.Append(spelling).Append(' ');
                 records.Add(1);
                 records.Add((scalarStart + index) & 0xFFFF);
                 records.Add((scalarStart + index) >> 16);
@@ -415,7 +436,7 @@ public sealed class StringLiteralModuleTests
             {
                 var scalar = scalarStart + index;
                 var spelling = $"\"\\U{scalar:X8}\"";
-                batchText.Append(spelling).Append(' ');
+                _ = batchText.Append(spelling).Append(' ');
                 records.Add(1);
                 records.Add(scalar & 0xFFFF);
                 records.Add(scalar >> 16);
@@ -448,7 +469,7 @@ public sealed class StringLiteralModuleTests
             for (var index = 0; index < scalarCount; index++)
             {
                 var spelling = $"\"\\U{scalarStart + index:X8}\"";
-                batchText.Append(spelling).Append(' ');
+                _ = batchText.Append(spelling).Append(' ');
                 records.Add(0);
                 records.Add(0);
                 records.Add(0);
@@ -462,7 +483,7 @@ public sealed class StringLiteralModuleTests
             for (var index = 0; index < scalarCount; index++)
             {
                 Assert.That(lexed.Diagnostics[index].Code, Is.EqualTo("TRM0005"));
-                Assert.That(lexed.Diagnostics[index].Span.Start, Is.EqualTo(index * 13 + 1));
+                Assert.That(lexed.Diagnostics[index].Span.Start, Is.EqualTo((index * 13) + 1));
                 Assert.That(lexed.Diagnostics[index].Span.Length, Is.EqualTo(10));
                 Assert.That(lexed.Tokens[index].Kind, Is.EqualTo(TokenKind.StringLiteral));
                 Assert.That(lexed.Tokens[index].Text, Is.EqualTo($"\"\\U{scalarStart + index:X8}\""));
@@ -474,10 +495,15 @@ public sealed class StringLiteralModuleTests
         var requestedConsumer = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return ReadRequestedStringScalar(); }
-            """, "string-literal-position-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
+            """, "string-literal-position-consumer.terrum"),
+            ModuleCompiler.CreateReference(producer), options);
         Assert.That(requestedConsumer.HasErrors, Is.False, string.Join(Environment.NewLine, requestedConsumer.Diagnostics));
         var requestedProgram = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = requestedConsumer.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual4 = requestedConsumer.Program;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual4!;
+            }))(), producer);
         var requestedLinked = ModuleCompiler.Link(requestedProgram, producer);
 
         foreach (var (text, position, next, expected) in new (string Text, int Position, int Next, int Expected)[] {

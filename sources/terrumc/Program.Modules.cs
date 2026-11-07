@@ -17,8 +17,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--corelib] [--json]; "
-        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--json]; "
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--corelib] [--json]; "
+        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--json]; "
         + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -41,21 +41,67 @@ internal static partial class Program
             string profile;
             var selectedPolicy = NativeRuntimePolicy.FailFast;
             var sourceArithmeticProfile = SourceArithmeticProfile.Development;
+            LayoutCoreRegistrationSet? layoutCoreRegistration = null;
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output,
-                    out selectedPolicy, out sourceArithmeticProfile, out var coreLibrary))
+                    out selectedPolicy, out sourceArithmeticProfile, out var coreLibrary,
+                    out var layoutCoreManifestPath))
                 {
                     WriteInputError(json, "TRM2000", ModuleUsage);
                     return 2;
                 }
-                var requestedPath = Path.GetFullPath(output);
-                if (paths.Any(path => Path.GetFullPath(path).Equals(requestedPath, StringComparison.OrdinalIgnoreCase))
-                    || ((args[1] == "consumer") && Path.GetFullPath(args[3]).Equals(requestedPath, StringComparison.OrdinalIgnoreCase))
+                if (layoutCoreManifestPath is not null)
+                {
+                    try
+                    {
+                        if (PathsAlias(layoutCoreManifestPath, output)
+                            || paths.Any(path => path != "-"
+                                && PathsAlias(layoutCoreManifestPath, path))
+                            || (args[1] == "consumer"
+                                && PathsAlias(layoutCoreManifestPath, args[3])))
+                        {
+                            WriteInputError(json, "TRM2002",
+                                "The layout Core manifest must be distinct from every source, producer artifact and output.");
+                            return 2;
+                        }
+                    }
+                    catch (Exception exception) when (exception is IOException
+                        or UnauthorizedAccessException or ArgumentException
+                        or NotSupportedException)
+                    {
+                        WriteInputError(json, "TRM2002",
+                            $"Could not validate layout Core manifest path identity: {exception.Message}");
+                        return 2;
+                    }
+                }
+
+                if (paths.Any(path => path != "-" && PathsAlias(output, path))
+                    || ((args[1] == "consumer") && PathsAlias(output, args[3]))
                     || !Path.GetExtension(output).Equals(".trm", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new ModuleFormatException("Module output must be a distinct .trm artifact.");
+                }
+
+                if (layoutCoreManifestPath is not null)
+                {
+
+                    try
+                    {
+                        layoutCoreRegistration
+                            = LayoutCoreManifestReader.Read(
+                                layoutCoreManifestPath).Registration;
+                    }
+                    catch (Exception exception) when (exception is IOException
+                        or UnauthorizedAccessException
+                        or System.Text.DecoderFallbackException
+                        or ArgumentException or NotSupportedException
+                        or FormatException)
+                    {
+                        WriteInputError(json, "TRM2001", exception.Message);
+                        return 2;
+                    }
                 }
                 var snapshots = ReadModuleSources(paths);
                 var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
@@ -63,6 +109,7 @@ internal static partial class Program
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
                     RuntimePolicy = (BoundRuntimePolicy)selectedPolicy,
+                    LayoutCoreRegistration = layoutCoreRegistration,
                 };
                 var compilation = coreLibrary ? Compilation.CreateCoreLibrary(snapshots, options)
                     : snapshots.Length == 1
@@ -145,7 +192,8 @@ internal static partial class Program
 
     private static bool TryReadModuleOptions(string[] args, int count, out List<string> sources,
         out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy,
-        out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary)
+        out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary,
+        out string? layoutCoreManifestPath)
     {
         sources = [args[2]];
         var native = args[0] == "compile-native";
@@ -154,6 +202,7 @@ internal static partial class Program
         runtimePolicy = NativeRuntimePolicy.FailFast;
         sourceArithmeticProfile = SourceArithmeticProfile.Development;
         coreLibrary = false;
+        layoutCoreManifestPath = null;
         var hasOutput = false;
         var hasRuntime = false;
         var hasArithmeticProfile = false;
@@ -196,6 +245,15 @@ internal static partial class Program
                 case "--arithmetic-profile" when !hasArithmeticProfile
                     && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
                     hasArithmeticProfile = true;
+                    break;
+                case "--layout-core-manifest" when args[0] == "compile-module"
+                    && layoutCoreManifestPath is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    if (!TryGetFullPath(value, out layoutCoreManifestPath))
+                    {
+                        return false;
+                    }
                     break;
                 default:
                     return false;

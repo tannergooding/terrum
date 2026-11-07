@@ -4,16 +4,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32ArithmeticBitsExport(int left, int right);
@@ -21,25 +20,35 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64ArithmeticBitsExport(long left, long right);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float Float32ArithmeticOracleExport(float left, float right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double Float64ArithmeticOracleExport(double left, double right);
+
     private static void AssertFloatingArithmeticExports(IntPtr handle)
     {
         var oracleSyntaxTree = SyntaxTree.Parse("""
-            [NoThrow] public float32 Float32Add(float32 left, float32 right) { return left + right; }
-            [NoThrow] public float32 Float32Subtract(float32 left, float32 right) { return left - right; }
-            [NoThrow] public float32 Float32Multiply(float32 left, float32 right) { return left * right; }
-            [NoThrow] public float32 Float32Divide(float32 left, float32 right) { return left / right; }
-            [NoThrow] public float64 Float64Add(float64 left, float64 right) { return left + right; }
-            [NoThrow] public float64 Float64Subtract(float64 left, float64 right) { return left - right; }
-            [NoThrow] public float64 Float64Multiply(float64 left, float64 right) { return left * right; }
-            [NoThrow] public float64 Float64Divide(float64 left, float64 right) { return left / right; }
+             public float32 Float32Add(float32 left, float32 right) { return left + right; }
+             public float32 Float32Subtract(float32 left, float32 right) { return left - right; }
+             public float32 Float32Multiply(float32 left, float32 right) { return left * right; }
+             public float32 Float32Divide(float32 left, float32 right) { return left / right; }
+             public float64 Float64Add(float64 left, float64 right) { return left + right; }
+             public float64 Float64Subtract(float64 left, float64 right) { return left - right; }
+             public float64 Float64Multiply(float64 left, float64 right) { return left * right; }
+             public float64 Float64Divide(float64 left, float64 right) { return left / right; }
             """, "floating-arithmetic-native-abi-oracle.terrum");
         Assert.That(oracleSyntaxTree.HasErrors, Is.False, string.Join(Environment.NewLine, oracleSyntaxTree.Diagnostics));
         var oracleCompilation = Compilation.CreateLibrary(oracleSyntaxTree);
         Assert.That(oracleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
-        var oracleProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = oracleCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var oracleProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = oracleCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
 
         var oraclePath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-floating-arithmetic-abi-{Guid.NewGuid():N}.dll");
-        IntPtr oracleHandle = IntPtr.Zero;
+        var oracleHandle = IntPtr.Zero;
         try
         {
             File.WriteAllBytes(oraclePath, NativeEmitter.EmitLibrary(oracleProgram, [
@@ -48,19 +57,19 @@ public sealed partial class CliTests
             ], NativeRuntimePolicy.FailFast));
             oracleHandle = NativeLibrary.Load(oraclePath);
 
-            var float32Operations = new (string Name, Float32ArithmeticBitsExport Candidate, Float32ArithmeticBitsExport Oracle)[]
+            var float32Operations = new (string Name, Float32ArithmeticBitsExport Candidate, Float32ArithmeticOracleExport Oracle)[]
             {
-                ("Float32AddBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32AddBits"), LoadFloat32(oracleHandle, "Float32Add")),
-                ("Float32SubtractBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32SubtractBits"), LoadFloat32(oracleHandle, "Float32Subtract")),
-                ("Float32MultiplyBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32MultiplyBits"), LoadFloat32(oracleHandle, "Float32Multiply")),
-                ("Float32DivideBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32DivideBits"), LoadFloat32(oracleHandle, "Float32Divide")),
+                ("Float32AddBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32AddBits"), LoadFloat32Oracle(oracleHandle, "Float32Add")),
+                ("Float32SubtractBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32SubtractBits"), LoadFloat32Oracle(oracleHandle, "Float32Subtract")),
+                ("Float32MultiplyBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32MultiplyBits"), LoadFloat32Oracle(oracleHandle, "Float32Multiply")),
+                ("Float32DivideBits", LoadFloat32(handle, "Terrum.CodeAnalysis.Float32DivideBits"), LoadFloat32Oracle(oracleHandle, "Float32Divide")),
             };
-            var float64Operations = new (string Name, Float64ArithmeticBitsExport Candidate, Float64ArithmeticBitsExport Oracle)[]
+            var float64Operations = new (string Name, Float64ArithmeticBitsExport Candidate, Float64ArithmeticOracleExport Oracle)[]
             {
-                ("Float64AddBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64AddBits"), LoadFloat64(oracleHandle, "Float64Add")),
-                ("Float64SubtractBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64SubtractBits"), LoadFloat64(oracleHandle, "Float64Subtract")),
-                ("Float64MultiplyBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64MultiplyBits"), LoadFloat64(oracleHandle, "Float64Multiply")),
-                ("Float64DivideBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64DivideBits"), LoadFloat64(oracleHandle, "Float64Divide")),
+                ("Float64AddBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64AddBits"), LoadFloat64Oracle(oracleHandle, "Float64Add")),
+                ("Float64SubtractBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64SubtractBits"), LoadFloat64Oracle(oracleHandle, "Float64Subtract")),
+                ("Float64MultiplyBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64MultiplyBits"), LoadFloat64Oracle(oracleHandle, "Float64Multiply")),
+                ("Float64DivideBits", LoadFloat64(handle, "Terrum.CodeAnalysis.Float64DivideBits"), LoadFloat64Oracle(oracleHandle, "Float64Divide")),
             };
 
             uint[] float32Boundaries = [
@@ -112,13 +121,15 @@ public sealed partial class CliTests
 
             foreach (var (name, candidate, oracle) in float32Operations)
             {
-                foreach (var pair in float32Pairs)
+                foreach (var (Left, Right) in float32Pairs)
                 {
-                    var expected = unchecked((uint)oracle(unchecked((int)pair.Left), unchecked((int)pair.Right)));
-                    var actual = unchecked((uint)candidate(unchecked((int)pair.Left), unchecked((int)pair.Right)));
+                    var expected = BitConverter.SingleToUInt32Bits(oracle(
+                        BitConverter.UInt32BitsToSingle(Left),
+                        BitConverter.UInt32BitsToSingle(Right)));
+                    var actual = unchecked((uint)candidate(unchecked((int)Left), unchecked((int)Right)));
                     if (IsFloat32NaN(expected))
                     {
-                        Assert.That(IsFloat32NaN(actual), Is.True, $"{name}({pair.Left:X8}, {pair.Right:X8}) was not NaN.");
+                        Assert.That(IsFloat32NaN(actual), Is.True, $"{name}({Left:X8}, {Right:X8}) was not NaN.");
                     }
                     else
                     {
@@ -128,13 +139,15 @@ public sealed partial class CliTests
             }
             foreach (var (name, candidate, oracle) in float64Operations)
             {
-                foreach (var pair in float64Pairs)
+                foreach (var (Left, Right) in float64Pairs)
                 {
-                    var expected = unchecked((ulong)oracle(unchecked((long)pair.Left), unchecked((long)pair.Right)));
-                    var actual = unchecked((ulong)candidate(unchecked((long)pair.Left), unchecked((long)pair.Right)));
+                    var expected = BitConverter.DoubleToUInt64Bits(oracle(
+                        BitConverter.UInt64BitsToDouble(Left),
+                        BitConverter.UInt64BitsToDouble(Right)));
+                    var actual = unchecked((ulong)candidate(unchecked((long)Left), unchecked((long)Right)));
                     if (IsFloat64NaN(expected))
                     {
-                        Assert.That(IsFloat64NaN(actual), Is.True, $"{name}({pair.Left:X16}, {pair.Right:X16}) was not NaN.");
+                        Assert.That(IsFloat64NaN(actual), Is.True, $"{name}({Left:X16}, {Right:X16}) was not NaN.");
                     }
                     else
                     {
@@ -163,6 +176,20 @@ public sealed partial class CliTests
     private static Float64ArithmeticBitsExport LoadFloat64(IntPtr handle, string name)
     {
         return Marshal.GetDelegateForFunctionPointer<Float64ArithmeticBitsExport>(
+            NativeLibrary.GetExport(handle, name));
+    }
+
+    private static Float32ArithmeticOracleExport LoadFloat32Oracle(
+        IntPtr handle, string name)
+    {
+        return Marshal.GetDelegateForFunctionPointer<Float32ArithmeticOracleExport>(
+            NativeLibrary.GetExport(handle, name));
+    }
+
+    private static Float64ArithmeticOracleExport LoadFloat64Oracle(
+        IntPtr handle, string name)
+    {
+        return Marshal.GetDelegateForFunctionPointer<Float64ArithmeticOracleExport>(
             NativeLibrary.GetExport(handle, name));
     }
 

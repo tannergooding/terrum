@@ -5,17 +5,17 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerFormattingModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerFormattingModuleTests
 {
     private const int MaximumSourceCodeUnits = 16_384;
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -125,7 +125,11 @@ public sealed class IntegerFormattingModuleTests
             },
         ], policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             ["Terrum.CodeAnalysis.Numerics64.VerifySnapshot"]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -134,7 +138,11 @@ public sealed class IntegerFormattingModuleTests
             """, "integer-formatting-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         foreach (var (mode, radix, uppercase) in Snapshots())

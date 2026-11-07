@@ -6,14 +6,14 @@ unique struct Lease {
         Value = value;
     }
 
-    [NoThrow] [Cleanup] public void Close() {
+     [Cleanup] public void Close() {
     }
 
-    [NoThrow] public int32 Read() {
+     public int32 Read() {
         return Value;
     }
 
-    [NoThrow] public mut void Set(int32 value) {
+     public mut void Set(int32 value) {
         Value = value;
     }
 }

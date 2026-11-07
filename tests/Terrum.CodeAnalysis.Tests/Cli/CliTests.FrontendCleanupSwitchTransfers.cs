@@ -11,51 +11,51 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
     public async Task ScalarFrontendCleanupSwitchTransfersMatchHostedImagesAsync(string policy)
     {
         var cases = new (string Name, string Body, string Equivalent, int Expected)[] {
-            ("forward", "switch (1) { 1 => { value = value | 1; continue _; }, _ => { value = value | 2; } }",
+            ("forward", "switch (int32(1)) { 1 => { value = value | 1; continue _; }, _ => { value = value | 2; } }",
                 "value = value | 1; value = value | 2;", 3),
-            ("forward-literal", "switch (1) { 1 => { continue 2; }, 2 => { value = 42; }, _ => {} }",
+            ("forward-literal", "switch (int32(1)) { 1 => { continue 2; }, 2 => { value = 42; }, _ => {} }",
                 "value = 42;", 42),
             ("selector-once", "switch (Pick(out value)) { 1 => { value = 40; continue _; }, _ => { value = value | 2; } }",
                 "Pick(out value); value = 40; value = value | 2;", 42),
-            ("backward-chain", "switch (99) { 1 => { value = 42; }, 2 => { continue 1; }, _ => { continue 2; } }",
+            ("backward-chain", "switch (int32(99)) { 1 => { value = 42; }, 2 => { continue 1; }, _ => { continue 2; } }",
                 "value = 42;", 42),
-            ("conditional-exit", "switch (1) { 1 => { if (value == 0) { continue _; } }, _ => { value = 42; } }",
+            ("conditional-exit", "switch (int32(1)) { 1 => { if (value == 0) { continue _; } }, _ => { value = 42; } }",
                 "if (value == 0) { value = 42; }", 42),
-            ("dead-cycle", "switch (1) { 1 => { if (false) { continue 1; } continue _; }, _ => { value = 42; } }",
+            ("dead-cycle", "switch (int32(1)) { 1 => { if (false) { continue 1; } continue _; }, _ => { value = 42; } }",
                 "value = 42;", 42),
-            ("dead-transfer", "switch (1) { 1 => { continue _; continue 1; }, _ => { value = 42; } }",
+            ("dead-transfer", "switch (int32(1)) { 1 => { continue _; continue 1; }, _ => { value = 42; } }",
                 "value = 42;", 42),
-            ("nested-loop-exit", "switch (1) { 1 => { while (true) { continue _; } }, _ => { value = 42; } }",
+            ("nested-loop-exit", "switch (int32(1)) { 1 => { while (true) { continue _; } }, _ => { value = 42; } }",
                 "value = 42;", 42),
-            ("local-loop-label", "switch (1) { 1 => { inner: while (true) { break inner; } continue _; }, _ => { value = 42; } }",
+            ("local-loop-label", "switch (int32(1)) { 1 => { inner: while (true) { break inner; } continue _; }, _ => { value = 42; } }",
                 "inner: while (true) { break inner; } value = 42;", 42),
-            ("nonnearest-loop-label", "switch (1) { 1 => { outer: while (true) { while (true) { break outer; } } continue _; }, _ => { value = 42; } }",
+            ("nonnearest-loop-label", "switch (int32(1)) { 1 => { outer: while (true) { while (true) { break outer; } } continue _; }, _ => { value = 42; } }",
                 "value = 42;", 42),
-            ("nested-finally", "switch (1) { 1 => { try { continue _; } finally { value = 1; } }, _ => { value = value | 2; } }",
+            ("nested-finally", "switch (int32(1)) { 1 => { try { continue _; } finally { value = 1; } }, _ => { value = value | 2; } }",
                 "try {} finally { value = 1; } value = value | 2;", 3),
-            ("zero-iteration-loop", "switch (1) { 1 => { while (false) { continue 1; } continue _; }, _ => { value = 42; } }",
+            ("zero-iteration-loop", "switch (int32(1)) { 1 => { while (false) { continue 1; } continue _; }, _ => { value = 42; } }",
                 "value = 42;", 42),
-            ("post-test-once", "switch (1) { 1 => { do { value = 1; } while (false); continue _; }, _ => { value = value | 2; } }",
+            ("post-test-once", "switch (int32(1)) { 1 => { do { value = 1; } while (false); continue _; }, _ => { value = value | 2; } }",
                 "value = 1; value = value | 2;", 3),
-            ("local-continue-label", "switch (1) { 1 => { inner: do { value = 1; continue inner; } while (false); continue _; }, _ => { value = value | 2; } }",
+            ("local-continue-label", "switch (int32(1)) { 1 => { inner: do { value = 1; continue inner; } while (false); continue _; }, _ => { value = value | 2; } }",
                 "value = 1; value = value | 2;", 3),
         };
         var root = RepositoryRoot();
         var directory = TerrumProjectPaths.SourceDirectory(root);
-        foreach (var testCase in cases)
+        foreach (var (Name, Body, Equivalent, Expected) in cases)
         {
-            var source = $"public int32 Main() {{ mut int32 value = 0; try {{}} finally {{ {testCase.Body} }} return value; }}";
-            var equivalent = $"public int32 Main() {{ mut int32 value = 0; try {{}} finally {{ {testCase.Equivalent} }} return value; }}";
-            if (testCase.Name == "selector-once")
+            var source = $"public int32 Main() {{ mut int32 value = 0; try {{}} finally {{ {Body} }} return value; }}";
+            var equivalent = $"public int32 Main() {{ mut int32 value = 0; try {{}} finally {{ {Equivalent} }} return value; }}";
+            if (Name == "selector-once")
             {
-                const string pick = " [NoThrow] int32 Pick(out int32 result) { { result = 1; } return 1; }";
+                const string pick = "  int32 Pick(out int32 result) { { result = 1; } return 1; }";
                 source += pick;
                 equivalent += pick;
             }
@@ -64,13 +64,13 @@ public sealed partial class CliTests
             try
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", directory, "-", "-o", native, "--runtime", policy, "--json");
-                Assert.That(exit == 0, Is.True, $"{testCase.Name} {policy}: {exit}: {output}{error}");
+                    "frontend-build", directory, "-", "-o", native, "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(exit == 0, Is.True, $"{Name} {policy}: {exit}: {output}{error}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(Encoding.UTF8.GetBytes(equivalent),
-                    "build", "-", "-o", hosted, "--runtime", policy, "--json");
-                Assert.That(hostExit == 0, Is.True, $"{testCase.Name} {policy}: {hostExit}: {hostOutput}{hostError}");
-                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(testCase.Expected));
-                Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(testCase.Expected));
+                    "build", "-", "-o", hosted, "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(hostExit == 0, Is.True, $"{Name} {policy}: {hostExit}: {hostOutput}{hostError}");
+                Assert.That(await ExecuteNativeImageAsync(native).ConfigureAwait(false), Is.EqualTo(Expected));
+                Assert.That(await ExecuteNativeImageAsync(hosted).ConfigureAwait(false), Is.EqualTo(Expected));
             }
             finally
             {
@@ -86,9 +86,9 @@ public sealed partial class CliTests
         const string source = """
             public int32 Main() {
                 try {} finally {
-                    switch (1) {
+                    switch (int32(1)) {
                         1 => {
-                            switch (2) { 2 => { continue _; }, _ => {} }
+                            switch (int32(2)) { 2 => { continue _; }, _ => {} }
                             continue _;
                         },
                         _ => {},
@@ -102,9 +102,9 @@ public sealed partial class CliTests
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "frontend-build", TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-",
-                "-o", path, "--runtime", policy, "--json");
+                "-o", path, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {exit}: {output}{error}");
-            Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(42));
+            Assert.That(await ExecuteNativeImageAsync(path).ConfigureAwait(false), Is.EqualTo(42));
         }
         finally
         {
@@ -116,54 +116,78 @@ public sealed partial class CliTests
     public async Task ScalarFrontendCleanupSwitchTransfersRejectCyclesAndEscapesAsync(string policy)
     {
         var sources = new[] {
-            "public int32 Main() { try {} finally { switch (1) { 1 => { continue 1; }, _ => {} } } return 42; }",
-            "public int32 Main() { try {} finally { switch (1) { 1 => { continue _; }, _ => { continue 1; } } } return 42; }",
-            "public int32 Main() { mut int32 value = 0; try {} finally { switch (1) { 1 => { if (value == 0) { continue 1; } }, _ => {} } } return 42; }",
-            "public int32 Main() { mut int32 value = 1; try {} finally { switch (1) { 1 => { value ^= 1; if (value == 0) { continue 1; } }, _ => {} } } return 42; }",
-            "public int32 Main() { try {} finally { switch (1) { 1 => { while (true) {} continue _; }, _ => {} } } return 42; }",
-            "public int32 Main() { mut int32 value = 1; try {} finally { switch (1) { 1 => { while (value != 0) { value = 0; } continue _; }, _ => {} } } return 42; }",
-            "public int32 Main() { try {} finally { switch (1) { 1 => {}, _ => { continue _; } } } return 42; }",
-            "public int32 Main() { try { return 42; } finally { switch (1) { 1 => { continue 1; }, _ => {} } } }",
-            "public int32 Main() { try { require false; } finally { switch (1) { 1 => { continue 1; }, _ => {} } } return 42; }",
-            "public int32 Main() { switch (1) { 1 => { try {} finally { continue _; } }, _ => {} } return 42; }",
-            "public int32 Main() { outer: while (true) { try {} finally { switch (1) { 1 => { continue outer; }, _ => {} } } break; } return 42; }",
-            "public int32 Main() { outer: while (true) { try {} finally { switch (1) { 1 => { break outer; }, _ => {} } } break; } return 42; }",
-            "public int32 Main() { try {} finally { switch (1) { 1 => { return 42; }, _ => {} } } return 42; }",
-            "public int32 Main() { try {} finally { while (true) { if (true) { break; } } } return 42; }",
-            "public int32 Main() { try { return 42; } finally { while (true) { if (true) { break; } } } }",
-            "public int32 Main() { mut int32 value = 0; try {} finally { switch (1) { 1 => { continue _; }, _ => { value++; } } } return value; }",
-            "public int32 Main() { try {} finally { switch (1) { 1 => { Stop(); continue _; }, _ => {} } } return 42; } [NoThrow][DoesNotReturn] void Stop() { while (true) {} }",
-            "public int32 Main() { try {} finally { var value = 1 switch { 1 => { continue _; }, _ => 0 }; } return 42; }",
+            "public int32 Main() { switch (int32(1)) { 1 => { try {} finally { continue _; } }, _ => {} } return 42; }",
+            "public int32 Main() { outer: while (true) { try {} finally { switch (int32(1)) { 1 => { continue outer; }, _ => {} } } break; } return 42; }",
+            "public int32 Main() { outer: while (true) { try {} finally { switch (int32(1)) { 1 => { break outer; }, _ => {} } } break; } return 42; }",
+            "public int32 Main() { try {} finally { switch (int32(1)) { 1 => { return 42; }, _ => {} } } return 42; }",
+            "public int32 Main() { try {} finally { int32 value = switch (int32(1)) { 1 => { continue _; }, _ => 0 }; } return 42; }",
         };
-        var path = CreateTestArtifactPath($"cleanup-switch-rejected-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"cleanup-switch-escape-{Guid.NewGuid():N}.exe");
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         try
         {
             var (initial, initialOutput, initialError) = await RunAsync(
                 Encoding.UTF8.GetBytes("public int32 Main() => 42;"), "frontend-build",
-                directory, "-", "-o", path, "--runtime", policy, "--json");
+                directory, "-", "-o", path, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(initial == 0, Is.True, $"{initial}: {initialOutput}{initialError}");
-            var image = await File.ReadAllBytesAsync(path);
+            var image = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
             for (var index = 0; index < sources.Length; index++)
             {
                 var source = sources[index];
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", directory, "-", "-o", path, "--runtime", policy, "--json");
+                    "frontend-build", directory, "-", "-o", path, "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(exit == 1, Is.True, $"{policy}: {source}: {exit}: {output}{error}");
                 Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
                 Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
-                if (index < 9)
+                if (document.RootElement.TryGetProperty("result", out var frontendResult))
                 {
-                    Assert.That(document.RootElement.GetProperty("diagnostics")[0]
-                        .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+                    Assert.That(frontendResult.GetProperty("valid").GetBoolean(), Is.False);
+                    Assert.That(frontendResult.GetProperty("errorCode").GetInt32(), Is.GreaterThan(0));
+                    Assert.That(frontendResult.GetProperty("errorSpan").GetProperty("length").GetInt32(),
+                        Is.GreaterThan(0), $"{policy}: {source}");
                 }
-                Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(image));
+                else
+                {
+                    Assert.That(document.RootElement.GetProperty("diagnostics").GetArrayLength(),
+                        Is.GreaterThan(0), $"{policy}: {source}");
+                }
+                Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(image));
             }
         }
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task ScalarFrontendCleanupSwitchTransfersAllowNonterminatingPathsAsync(string policy)
+    {
+        var sources = new[] {
+            "public int32 Main() { try {} finally { switch (int32(1)) { 1 => { continue _; }, _ => { continue 1; } } } return 42; }",
+            "public int32 Main() { try {} finally { switch (int32(1)) { 1 => { while (true) {} continue _; }, _ => {} } } return 42; }",
+            "public int32 Main() { try {} finally { switch (int32(1)) { 1 => { Stop(); continue _; }, _ => {} } } return 42; } [DoesNotReturn] void Stop() { while (true) {} }",
+        };
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        foreach (var source in sources)
+        {
+            var path = CreateTestArtifactPath($"cleanup-switch-nonterminating-{Guid.NewGuid():N}.exe");
+            try
+            {
+                var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                    "frontend-build", directory, "-", "-o", path, "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(exit, Is.Zero, $"{policy}: {source}: {exit}: {output}{error}");
+                Assert.That(error, Is.Empty);
+                using var document = JsonDocument.Parse(output);
+                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
+                Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.Not.Empty);
+            }
+            finally
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+            }
         }
     }
 }

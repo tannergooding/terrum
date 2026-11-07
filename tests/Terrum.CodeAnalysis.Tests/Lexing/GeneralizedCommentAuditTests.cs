@@ -4,14 +4,15 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Text;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class GeneralizedCommentAuditTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class GeneralizedCommentAuditTests
 {
     [TestCase(1)]
     [TestCase(2)]
@@ -89,9 +90,9 @@ public sealed class GeneralizedCommentAuditTests
     public void CurrentAdapterRejectsMissingFenceDiagnosticsAndMisclassifiedDocumentation()
     {
         var source = SourceText.From("/* **/ */");
-        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 1,
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 1,
             Words((int)TokenKind.EndOfFile, 9, 0), Words(1, 3, 0, 9, 0), Words(0)));
-        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(SourceText.From("///"),
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(SourceText.From("///"),
             1, Words((int)TokenKind.EndOfFile, 3, 0), Words(1, 2, 0, 3, 0), Words(0)));
     }
 
@@ -112,9 +113,9 @@ public sealed class GeneralizedCommentAuditTests
         {
             foreach (var trivia in token.LeadingTrivia)
             {
-                text.Append(trivia.Text);
+                _ = text.Append(trivia.Text);
             }
-            text.Append(token.Text);
+            _ = text.Append(token.Text);
         }
         return text.ToString();
     }

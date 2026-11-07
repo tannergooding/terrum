@@ -5,17 +5,17 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerWrappingModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerWrappingModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -30,7 +30,11 @@ public sealed class IntegerWrappingModuleTests
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var conversions = CreateConversions();
         Assert.That(conversions.Count, Is.EqualTo(20));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             conversions.ConvertAll(static conversion =>
                 "Terrum.CodeAnalysis.Numerics64." + conversion.FunctionName));
         var reference = ModuleCompiler.CreateReference(producer);
@@ -41,7 +45,7 @@ public sealed class IntegerWrappingModuleTests
         var failureCode = 1;
         foreach (var conversion in conversions)
         {
-            helpers.Append("bool Check")
+            _ = helpers.Append("bool Check")
                 .Append(conversion.Source.Name).Append("To").Append(conversion.Destination.Name)
                 .Append('(').Append(conversion.Source.Code).Append(" value, ")
                 .Append(conversion.Destination.Code).AppendLine(" expected) {")
@@ -51,7 +55,7 @@ public sealed class IntegerWrappingModuleTests
             foreach (var value in CandidateInputs(conversion.Source, conversion.Destination))
             {
                 var expected = Wrap(value, conversion.Destination);
-                assertions.Append("if (!Check")
+                _ = assertions.Append("if (!Check")
                     .Append(conversion.Source.Name).Append("To").Append(conversion.Destination.Name)
                     .Append('(').Append(Literal(value, conversion.Source)).Append(", ")
                     .Append(Literal(expected, conversion.Destination)).Append(")) { return ")
@@ -61,9 +65,9 @@ public sealed class IntegerWrappingModuleTests
             }
         }
         checks.Add("all char16-to-integer widening inputs");
-        assertions.Append("if (!CheckAllChar16Widenings()) { return ")
+        _ = assertions.Append("if (!CheckAllChar16Widenings()) { return ")
             .Append(failureCode.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
-        helpers.AppendLine("""
+        _ = helpers.AppendLine("""
             bool CheckAllChar16Widenings() {
                 mut int32 codeUnit = 0;
                 while (codeUnit <= 65535) {
@@ -81,16 +85,20 @@ public sealed class IntegerWrappingModuleTests
             """);
 
         var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
-        consumerSource.Append(assertions);
-        consumerSource.AppendLine("return 0;");
-        consumerSource.AppendLine("}");
-        consumerSource.Append(helpers);
+        _ = consumerSource.Append(assertions);
+        _ = consumerSource.AppendLine("return 0;");
+        _ = consumerSource.AppendLine("}");
+        _ = consumerSource.Append(helpers);
         var consumerTree = SyntaxTree.Parse(consumerSource.ToString(), "integer-wrapping-consumer.terrum");
         Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
         var consumerCompilation = Compilation.Create(consumerTree, reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
         var actual = NativeJit.Execute(ModuleCompiler.Link(consumer, producer), (NativeRuntimePolicy)policy);
         Assert.That(actual == 0, Is.True, actual > 0 && actual <= checks.Count
                 ? $"Wrapping boundary {actual} failed: {checks[actual - 1]}."

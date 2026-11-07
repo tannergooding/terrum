@@ -11,19 +11,19 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase(true,42)]
     [TestCase(false,unchecked((int)0xE0540003))]
     public async Task NoReturnOutputBranchesExecuteWithoutManufacturedValuesAsync(bool success, int expected)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var source = await File.ReadAllTextAsync(Path.Combine(root, "samples", "LanguageFeatures", "Contracts", "no-return.terrum"));
+        var source = await File.ReadAllTextAsync(Path.Combine(root, "samples", "LanguageFeatures", "Contracts", "no-return.terrum")).ConfigureAwait(false);
         if (!success)
         {
             source = source.Replace("return Select(true);", "return Select(false);", StringComparison.Ordinal);
         }
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "jit", "-", "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "jit", "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(expected));
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
@@ -34,7 +34,7 @@ public sealed partial class CliTests
     {
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
             "[DoesNotReturn] void Stop() { require false; } int32 Main() { Stop(); }"),
-            "jit", "-", "--runtime", "fail-fast", "--json");
+            "jit", "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540003)), output + error);
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
@@ -45,7 +45,7 @@ public sealed partial class CliTests
     {
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
             "[DoesNotReturn] int32 Stop() { require false; } int32 Main() { return Stop(); }"),
-            "jit", "-", "--runtime", "fail-fast", "--json");
+            "jit", "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540003)));
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
@@ -57,7 +57,7 @@ public sealed partial class CliTests
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
             "struct S { public int32 Value; [DoesNotReturn] public S() { Value = 0; require false; } } "
             + "public int32 Main() { new S(); return 42; }"),
-            "jit", "-", "--runtime", "fail-fast", "--json");
+            "jit", "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540003)), output + error);
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
@@ -70,7 +70,7 @@ public sealed partial class CliTests
     {
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
             $"[DoesNotReturn] int32 Stop() {{ require false; }} public int32 Main() {{ return {condition} ? Stop() : 42; }}"),
-            "jit", "-", "--runtime", "fail-fast", "--json");
+            "jit", "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(expected), output + error);
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
@@ -83,15 +83,15 @@ public sealed partial class CliTests
         byte[] original = [1, 2, 3];
         try
         {
-            await File.WriteAllBytesAsync(path, original);
+            await File.WriteAllBytesAsync(path, original).ConfigureAwait(false);
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
                 "[DoesNotReturn] void Stop() { return; } int32 Main() { Stop(); }"),
-                "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
+                "build", "-", "-o", path, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM3018"));
-            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
+            Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(original));
         }
         finally
         {

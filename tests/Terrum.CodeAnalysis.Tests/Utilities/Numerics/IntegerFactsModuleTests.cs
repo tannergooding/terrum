@@ -5,17 +5,17 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerFactsModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerFactsModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -82,7 +82,11 @@ public sealed class IntegerFactsModuleTests
             "IntegerFactsInt64Mask",
             "IntegerFactsUInt64Mask",
         };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             exports);
         var assertions = new StringBuilder();
         var failureCases = new List<string>();
@@ -106,7 +110,11 @@ public sealed class IntegerFactsModuleTests
         Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
         var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = consumerCompilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         var actual = NativeJit.Execute(linked, (NativeRuntimePolicy)policy);
@@ -133,7 +141,7 @@ public sealed class IntegerFactsModuleTests
             {
                 var expected = expectedMask(left, right);
                 var caseNumber = failureCases.Count + 1;
-                assertions.Append("if (").Append(functionName).Append('(').Append(format(left)).Append(", ")
+                _ = assertions.Append("if (").Append(functionName).Append('(').Append(format(left)).Append(", ")
                     .Append(format(right)).Append(") != ").Append(expected.ToString(CultureInfo.InvariantCulture))
                     .Append(") { return ").Append(caseNumber.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
                 failureCases.Add($"{typeName} ({format(left)}, {format(right)}) expected mask {expected}");
@@ -156,19 +164,33 @@ public sealed class IntegerFactsModuleTests
         var maximumValue = new BigInteger(maximum.ToDecimal(CultureInfo.InvariantCulture));
         var mask = 0;
         if (leftValue + rightValue >= minimumValue && leftValue + rightValue <= maximumValue)
-        { mask += 1; }
+        {
+            mask += 1;
+        }
         if (leftValue - rightValue >= minimumValue && leftValue - rightValue <= maximumValue)
-        { mask += 2; }
+        {
+            mask += 2;
+        }
         if (leftValue * rightValue >= minimumValue && leftValue * rightValue <= maximumValue)
-        { mask += 4; }
+        {
+            mask += 4;
+        }
         if (!rightValue.IsZero && !(leftValue == minimumValue && rightValue == -BigInteger.One))
-        { mask += 8; }
+        {
+            mask += 8;
+        }
         if (!rightValue.IsZero)
-        { mask += 16; }
+        {
+            mask += 16;
+        }
         if (leftValue != minimumValue)
-        { mask += 32; }
+        {
+            mask += 32;
+        }
         if (leftValue != minimumValue)
-        { mask += 64; }
+        {
+            mask += 64;
+        }
         return mask;
     }
 
@@ -185,15 +207,25 @@ public sealed class IntegerFactsModuleTests
         var maximumValue = new BigInteger(maximum.ToDecimal(CultureInfo.InvariantCulture));
         var mask = 0;
         if (leftValue + rightValue <= maximumValue)
-        { mask += 1; }
+        {
+            mask += 1;
+        }
         if (leftValue >= rightValue)
-        { mask += 2; }
+        {
+            mask += 2;
+        }
         if (leftValue * rightValue <= maximumValue)
-        { mask += 4; }
+        {
+            mask += 4;
+        }
         if (!rightValue.IsZero)
-        { mask += 8; }
+        {
+            mask += 8;
+        }
         if (!rightValue.IsZero)
-        { mask += 16; }
+        {
+            mask += 16;
+        }
         return mask;
     }
 

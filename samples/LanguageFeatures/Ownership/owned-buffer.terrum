@@ -17,7 +17,7 @@ unique struct BufferOwner
         _words.Set(index, value);
     }
 
-    [NoThrow] public mut void Clear()
+     public mut void Clear()
     {
         _words.Clear();
     }

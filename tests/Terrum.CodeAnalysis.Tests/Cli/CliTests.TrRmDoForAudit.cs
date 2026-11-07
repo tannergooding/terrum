@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -25,23 +25,23 @@ public sealed partial class CliTests
             var body = iterator
                 ? TrRmDoForAuditTests.IteratorBody(42)
                 : TrRmDoForAuditTests.PostTestBody(42);
-            await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.Artifact(body));
+            await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.Artifact(body)).ConfigureAwait(false);
             var (ran, output, error) = await RunAsync([], "run-trrm", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(ran == 42, Is.True, $"Exit {ran}: {output}{Environment.NewLine}{error}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
-                "-o", executable, "--runtime", "fail-fast", "--json");
+                "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"{buildOutput}{Environment.NewLine}{buildError}");
-            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(42));
-            var retained = await File.ReadAllBytesAsync(executable);
+            Assert.That(await ExecuteTrRmImageAsync(executable).ConfigureAwait(false), Is.EqualTo(42));
+            var retained = await File.ReadAllBytesAsync(executable).ConfigureAwait(false);
 
             body[15] = iterator ? (byte)4 : (byte)3;
-            await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.Artifact(body));
+            await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.Artifact(body)).ConfigureAwait(false);
             var (rejected, rejectOutput, rejectError) = await RunAsync([], "build-trrm", artifact,
-                "-o", executable, "--runtime", "fail-fast", "--json");
+                "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(rejected == 1, Is.True, $"{rejectOutput}{Environment.NewLine}{rejectError}");
             Assert.That(rejectOutput, Does.Contain("TRM5001"));
-            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(retained));
+            Assert.That(await File.ReadAllBytesAsync(executable).ConfigureAwait(false), Is.EqualTo(retained));
         }
         finally
         {

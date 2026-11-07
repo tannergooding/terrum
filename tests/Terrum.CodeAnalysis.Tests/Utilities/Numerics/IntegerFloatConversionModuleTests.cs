@@ -3,16 +3,16 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerFloatConversionModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerFloatConversionModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -33,7 +33,11 @@ public sealed class IntegerFloatConversionModuleTests
         var compilation = Compilation.Create(trees, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
@@ -132,8 +136,8 @@ public sealed class IntegerFloatConversionModuleTests
                 unchecked((ulong)BitConverter.DoubleToInt64Bits((double)value)), ref check);
         }
 
-        source.AppendLine("return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("return 0;");
+        _ = source.AppendLine("}");
         return source.ToString();
     }
 
@@ -146,11 +150,11 @@ public sealed class IntegerFloatConversionModuleTests
         ulong float64Bits,
         ref int check)
     {
-        source.Append("if (").Append(prefix).Append("ToFloat32Bits(")
+        _ = source.Append("if (").Append(prefix).Append("ToFloat32Bits(")
             .Append(sourceType).Append('(').Append(value).Append(")) != uint32(0x")
             .Append(float32Bits.ToString("X8", CultureInfo.InvariantCulture))
             .Append(")) { return ").Append(check++).AppendLine("; }");
-        source.Append("if (").Append(prefix).Append("ToFloat64Bits(")
+        _ = source.Append("if (").Append(prefix).Append("ToFloat64Bits(")
             .Append(sourceType).Append('(').Append(value).Append(")) != uint64(0x")
             .Append(float64Bits.ToString("X16", CultureInfo.InvariantCulture))
             .Append(")) { return ").Append(check++).AppendLine("; }");

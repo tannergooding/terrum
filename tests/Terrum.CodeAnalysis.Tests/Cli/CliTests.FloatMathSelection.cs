@@ -6,25 +6,25 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float32UnarySelectionExport(int value);
+    private delegate float Float32UnarySelectionExport(float value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float32BinarySelectionExport(int left, int right);
+    private delegate float Float32BinarySelectionExport(float left, float right);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float32ClampSelectionExport(int value, int minimum, int maximum);
+    private delegate float Float32ClampSelectionExport(float value, float minimum, float maximum);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float64UnarySelectionExport(long value);
+    private delegate double Float64UnarySelectionExport(double value);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float64BinarySelectionExport(long left, long right);
+    private delegate double Float64BinarySelectionExport(double left, double right);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float64ClampSelectionExport(long value, long minimum, long maximum);
+    private delegate double Float64ClampSelectionExport(double value, double minimum, double maximum);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint Int32ToFloat32BitsExport(int value);
@@ -381,14 +381,12 @@ public sealed partial class CliTests
 
     private static float InvokeFloat32(Float32UnarySelectionExport export, float value)
     {
-        return BitConverter.Int32BitsToSingle(export(BitConverter.SingleToInt32Bits(value)));
+        return export(value);
     }
 
     private static float InvokeFloat32(Float32BinarySelectionExport export, float left, float right)
     {
-        return BitConverter.Int32BitsToSingle(export(
-            BitConverter.SingleToInt32Bits(left),
-            BitConverter.SingleToInt32Bits(right)));
+        return export(left, right);
     }
 
     private static float InvokeFloat32(
@@ -397,22 +395,17 @@ public sealed partial class CliTests
         float minimum,
         float maximum)
     {
-        return BitConverter.Int32BitsToSingle(export(
-            BitConverter.SingleToInt32Bits(value),
-            BitConverter.SingleToInt32Bits(minimum),
-            BitConverter.SingleToInt32Bits(maximum)));
+        return export(value, minimum, maximum);
     }
 
     private static double InvokeFloat64(Float64UnarySelectionExport export, double value)
     {
-        return BitConverter.Int64BitsToDouble(export(BitConverter.DoubleToInt64Bits(value)));
+        return export(value);
     }
 
     private static double InvokeFloat64(Float64BinarySelectionExport export, double left, double right)
     {
-        return BitConverter.Int64BitsToDouble(export(
-            BitConverter.DoubleToInt64Bits(left),
-            BitConverter.DoubleToInt64Bits(right)));
+        return export(left, right);
     }
 
     private static double InvokeFloat64(
@@ -421,10 +414,7 @@ public sealed partial class CliTests
         double minimum,
         double maximum)
     {
-        return BitConverter.Int64BitsToDouble(export(
-            BitConverter.DoubleToInt64Bits(value),
-            BitConverter.DoubleToInt64Bits(minimum),
-            BitConverter.DoubleToInt64Bits(maximum)));
+        return export(value, minimum, maximum);
     }
 
     private static void AssertFloat32Bits(float expected, float actual)

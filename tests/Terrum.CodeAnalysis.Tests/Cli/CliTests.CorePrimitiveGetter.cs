@@ -9,14 +9,14 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
     public async Task CorePrimitiveGetterSurvivesPersistedModuleAndNativeReplacementAsync(string policy)
     {
         var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"core-getter-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        _ = Directory.CreateDirectory(directory);
         var source = Path.Combine(directory, "core.terrum");
         var caller = Path.Combine(directory, "caller.terrum");
         var provider = Path.Combine(directory, "core.trm");
@@ -27,59 +27,59 @@ public sealed partial class CliTests
             public struct int32 {
                 private int32 value;
                 public static int32 Identity(int32 input) { return input.value; }
-                public int32 Value { [NoThrow] get { return value; } }
+                public int32 Value {  get { return value; } }
             }
             """;
         try
         {
-            await File.WriteAllTextAsync(source, Original);
+            await File.WriteAllTextAsync(source, Original).ConfigureAwait(false);
             await File.WriteAllTextAsync(caller,
-                "int32 Main() { return int32.Identity(7).Value; }");
+                "int32 Main() { return int32.Identity(7).Value; }").ConfigureAwait(false);
             var (produced, output, error) = await RunAsync([],
                 "compile-module", "producer", source, "int32.Identity",
                 "--export", "int32.#get:Value", "-o", provider,
-                "--runtime", policy, "--corelib", "--json");
+                "--runtime", policy, "--corelib", "--json").ConfigureAwait(false);
             Assert.That(produced == 0, Is.True, output + error);
             var (consumed, consumerOutput, consumerError) = await RunAsync([],
                 "compile-module", "consumer", caller, provider, "-o", consumer,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(consumed == 0, Is.True, consumerOutput + consumerError);
             var (executed, _, _) = await RunAsync([],
-                "run-module", consumer, provider, "--runtime", policy);
+                "run-module", consumer, provider, "--runtime", policy).ConfigureAwait(false);
             Assert.That(executed, Is.EqualTo(7));
 
             var (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
                 "compile-native", "producer", source, "CoreGetter",
                 "--export", "int32.Identity", "--export", "int32.#get:Value",
-                "-o", nativeProvider, "--runtime", policy, "--corelib", "--json");
+                "-o", nativeProvider, "--runtime", policy, "--corelib", "--json").ConfigureAwait(false);
             Assert.That(nativeProduced == 0, Is.True, nativeOutput + nativeError);
             var (nativeConsumed, nativeConsumerOutput, nativeConsumerError) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(nativeConsumed == 0, Is.True, nativeConsumerOutput + nativeConsumerError);
             var (nativeExecuted, _, _) = await RunAsync([],
-                "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
+                "run-native", nativeConsumer, nativeProvider, "--runtime", policy).ConfigureAwait(false);
             Assert.That(nativeExecuted, Is.EqualTo(7));
 
             await File.WriteAllTextAsync(source,
                 Original.Replace("get { return value; }", "get { return 8; }",
-                    StringComparison.Ordinal));
+                    StringComparison.Ordinal)).ConfigureAwait(false);
             (produced, output, error) = await RunAsync([],
                 "compile-module", "producer", source, "int32.Identity",
                 "--export", "int32.#get:Value", "-o", provider,
-                "--runtime", policy, "--corelib", "--json");
+                "--runtime", policy, "--corelib", "--json").ConfigureAwait(false);
             Assert.That(produced == 0, Is.True, output + error);
             (executed, _, _) = await RunAsync([],
-                "run-module", consumer, provider, "--runtime", policy);
+                "run-module", consumer, provider, "--runtime", policy).ConfigureAwait(false);
             Assert.That(executed, Is.EqualTo(8));
 
             (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
                 "compile-native", "producer", source, "CoreGetter",
                 "--export", "int32.Identity", "--export", "int32.#get:Value",
-                "-o", nativeProvider, "--runtime", policy, "--corelib", "--json");
+                "-o", nativeProvider, "--runtime", policy, "--corelib", "--json").ConfigureAwait(false);
             Assert.That(nativeProduced == 0, Is.True, nativeOutput + nativeError);
             (nativeExecuted, _, _) = await RunAsync([],
-                "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
+                "run-native", nativeConsumer, nativeProvider, "--runtime", policy).ConfigureAwait(false);
             Assert.That(nativeExecuted, Is.EqualTo(8));
         }
         finally

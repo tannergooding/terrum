@@ -7,7 +7,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int UInt64BaseLengthExport(ulong value, uint radix, ref int length);

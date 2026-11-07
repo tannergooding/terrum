@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task ClosedGenericStructSpecializationExecutesAsOrdinaryNativeTypesAsync()
@@ -35,15 +35,16 @@ public sealed partial class CliTests
                 return value.Get();
             }
             """;
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+
+        _ = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"generic-nominal-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        _ = Directory.CreateDirectory(directory);
         try
         {
             var executable = Path.Combine(directory, "generic-nominal.exe");
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
-                "build", "-", "-o", executable, "--runtime", "fail-fast", "--json");
+                "build", "-", "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(exit, Is.Zero, output + error);
 
             using var process = Process.Start(new ProcessStartInfo(executable) {
@@ -56,19 +57,19 @@ public sealed partial class CliTests
             var errorTask = process.StandardError.ReadToEndAsync();
             try
             {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
                 process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync();
+                await process.WaitForExitAsync().ConfigureAwait(false);
                 throw;
             }
-            Assert.That(process.ExitCode, Is.EqualTo(42), await outputTask + await errorTask);
+            Assert.That(process.ExitCode, Is.EqualTo(42), await outputTask.ConfigureAwait(false) + await errorTask.ConfigureAwait(false));
         }
         finally
         {
-            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory);
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory).ConfigureAwait(false);
         }
     }
 }

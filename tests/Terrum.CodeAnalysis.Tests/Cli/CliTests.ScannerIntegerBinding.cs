@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("int32 Main() { return 42; }")]
     [TestCase("int32 Main() { int32 value = 2147483647; return value - 2147483605; }")]
@@ -39,9 +39,9 @@ public sealed partial class CliTests
         {
             var input = Encoding.UTF8.GetBytes(source);
             var (hostExit, hostOutput, hostError) = await RunAsync(input, "build", "-", "-o",
-                ordinary, "--runtime", "fail-fast", "--json");
-            var (componentExit, componentOutput, componentError) = await RunAsync(input, "build-component",
-                scanner, "-", "-o", compiled, "--runtime", "fail-fast", "--json");
+                ordinary, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
+            var (componentExit, componentOutput, componentError) = await RunScannerCommandWithLayoutAsync(input, "build-component",
+                scanner, "-", "-o", compiled, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(hostExit, Is.EqualTo(0));
             Assert.That(componentExit, Is.EqualTo(0));
             Assert.That(hostError, Is.Empty);
@@ -49,7 +49,7 @@ public sealed partial class CliTests
             using var host = JsonDocument.Parse(hostOutput);
             using var component = JsonDocument.Parse(componentOutput);
             Assert.That(component.RootElement.GetProperty("contentId").GetString(), Is.EqualTo(host.RootElement.GetProperty("contentId").GetString()));
-            Assert.That(await File.ReadAllBytesAsync(compiled), Is.EqualTo(await File.ReadAllBytesAsync(ordinary)));
+            Assert.That(await File.ReadAllBytesAsync(compiled).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(ordinary).ConfigureAwait(false)));
         }
         finally
         {
@@ -101,9 +101,9 @@ public sealed partial class CliTests
         {
             var input = Encoding.UTF8.GetBytes(source);
             var (hostExit, hostOutput, hostError) = await RunAsync(input, "build", "-", "-o",
-                ordinary, "--runtime", "fail-fast", "--json");
-            var (componentExit, componentOutput, componentError) = await RunAsync(input, "build-component",
-                scanner, "-", "-o", compiled, "--runtime", "fail-fast", "--json");
+                ordinary, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
+            var (componentExit, componentOutput, componentError) = await RunScannerCommandWithLayoutAsync(input, "build-component",
+                scanner, "-", "-o", compiled, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(hostExit, Is.EqualTo(1));
             Assert.That(componentExit, Is.EqualTo(hostExit));
             Assert.That(hostError, Is.Empty);
@@ -156,15 +156,15 @@ public sealed partial class CliTests
         byte[] original = [1, 2, 3];
         try
         {
-            await File.WriteAllTextAsync(scanner, source);
-            await File.WriteAllBytesAsync(artifact, original);
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("42"),
-                "build-component", scanner, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+            await File.WriteAllTextAsync(scanner, source).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(artifact, original).ConfigureAwait(false);
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync(Encoding.UTF8.GetBytes("42"),
+                "build-component", scanner, "-", "-o", artifact, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
-            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(original));
+            Assert.That(await File.ReadAllBytesAsync(artifact).ConfigureAwait(false), Is.EqualTo(original));
         }
         finally
         {

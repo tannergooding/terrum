@@ -13,7 +13,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -31,9 +31,9 @@ public sealed partial class CliTests
         var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-float-{Guid.NewGuid():N}.dll");
         try
         {
-            var (componentExit, componentJson, componentError) = await RunAsync(
-                Encoding.UTF8.GetBytes(Source), "frontend-component", directory, "-",
-                "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(
+                Encoding.UTF8.GetBytes(Source), directory, "-",
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -56,19 +56,19 @@ public sealed partial class CliTests
 
             var (exit, json, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             Assert.That(error, Is.Empty);
+            AssertFrontendBuildFallback(json, "frontend-build-library", true);
             using (var document = JsonDocument.Parse(json))
             {
-                Assert.That(document.RootElement.GetProperty("result")
-                    .GetProperty("projectionVersion").GetInt32(), Is.EqualTo(88));
+                Assert.That(document.RootElement.GetProperty("output").GetString(), Is.EqualTo(output));
             }
             var (hostedExit, hostedJson, hostedError) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "build-library", "-", "--export", "Arithmetic", "--export", "Divide64",
-                "--export", "NotEqual64", "-o", hosted, "--runtime", policy, "--json");
+                "--export", "NotEqual64", "-o", hosted, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -80,8 +80,7 @@ public sealed partial class CliTests
     public async Task ScalarFrontendRejectsUnapprovedFloatingToChar16ConversionsAsync(string source)
     {
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), directory, "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -98,26 +97,51 @@ public sealed partial class CliTests
     }
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
-    public async Task ScalarFrontendRejectsNoThrowFloatingToIntegerConversionsAsync(string policy)
+    public async Task ScalarFrontendMatchesHostedFloatingToIntegerConversionsAsync(string policy)
     {
         const string Source =
-            "[NoThrow] public int32 Convert(float32 value) { return int32(value); }";
+            " public int32 Convert(float32 value) { return int32(value); }";
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath,
-            $"terrum-scalar-no-throw-float-to-int-{Guid.NewGuid():N}.dll");
+            $"terrum-scalar-float-to-int-{Guid.NewGuid():N}.dll");
+        var hostedPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-hosted-float-to-int-{Guid.NewGuid():N}.dll");
         try
         {
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+            var input = Encoding.UTF8.GetBytes(Source);
+            if (policy == "checked-exceptions")
+            {
+                await AssertCheckedExceptionLibraryExportRejectedAsync(input, directory, outputPath)
+                    .ConfigureAwait(false);
+                var (hostedRejectedExit, hostedRejectedOutput, hostedRejectedError) = await RunAsync(
+                    input, "build-library", "-", "--export", "Convert", "-o", hostedPath,
+                    "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(hostedRejectedExit, Is.EqualTo(1),
+                    $"{hostedRejectedOutput}{hostedRejectedError}");
+                Assert.That(hostedRejectedError, Is.Empty);
+                using var hostedRejected = JsonDocument.Parse(hostedRejectedOutput);
+                Assert.That(hostedRejected.RootElement.GetProperty("success").GetBoolean(), Is.False);
+                Assert.That(hostedRejected.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM4002"));
+                Assert.That(File.Exists(hostedPath), Is.False);
+                return;
+            }
+
+            var (exit, output, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", outputPath,
-                "--runtime", policy, "--json");
-            Assert.That(exit, Is.EqualTo(1));
-            Assert.That(error, Is.Empty);
-            using var document = JsonDocument.Parse(output);
-            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+                "--runtime", policy, "--json").ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(0), $"{output}{error}");
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                Encoding.UTF8.GetBytes(Source), "build-library", "-", "--export", "Convert",
+                "-o", hostedPath, "--runtime", policy, "--json").ConfigureAwait(false);
+            Assert.That(hostedExit, Is.EqualTo(0), $"{hostedOutput}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(outputPath).ConfigureAwait(false),
+                Is.EqualTo(await File.ReadAllBytesAsync(hostedPath).ConfigureAwait(false)));
         }
         finally
         {
             File.Delete(outputPath);
+            File.Delete(hostedPath);
         }
     }
     [TestCase("fail-fast","public float32 Literal() => 0.1;",7,3)]
@@ -141,8 +165,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -158,13 +181,13 @@ public sealed partial class CliTests
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Literal", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -189,8 +212,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -216,14 +238,14 @@ public sealed partial class CliTests
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Decimal32", "--export", "NegativeZero32",
                 "--export", "Hex64", "--export", "AddLiteral32", "--export",
-                "CompareLiteral32", "-o", hosted, "--runtime", policy, "--json");
+                "CompareLiteral32", "-o", hosted, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -242,8 +264,7 @@ public sealed partial class CliTests
             public float64 BasedHex64() { return 0x123; }
             """;
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
-            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(Source), directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
         Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
         using var document = JsonDocument.Parse(output);
         var functions = document.RootElement.GetProperty("result").GetProperty("functions");
@@ -269,8 +290,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -284,14 +304,14 @@ public sealed partial class CliTests
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "UpperHexFloat", "--export",
                 "UpperBinary", "--export", "UpperHexInteger", "--export",
-                "DecimalExponent", "-o", hosted, "--runtime", policy, "--json");
+                "DecimalExponent", "-o", hosted, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -314,8 +334,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -325,15 +344,21 @@ public sealed partial class CliTests
                 Assert.That(ProjectedFloatLiteralBits(functions[2], 7), Is.EqualTo(0x3DCCCCCDUL));
             }
 
+            if (policy == "checked-exceptions")
+            {
+                await AssertCheckedExceptionLibraryExportRejectedAsync(input, directory, output)
+                    .ConfigureAwait(false);
+                return;
+            }
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Call64", "--export", "Local32",
-                "-o", hosted, "--runtime", policy, "--json");
+                "-o", hosted, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -358,8 +383,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -369,15 +393,21 @@ public sealed partial class CliTests
                 Assert.That(ProjectedFloatLiteralBits(functions[1], 8), Is.EqualTo(0UL));
             }
 
+            if (policy == "checked-exceptions")
+            {
+                await AssertCheckedExceptionLibraryExportRejectedAsync(input, directory, output)
+                    .ConfigureAwait(false);
+                return;
+            }
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -406,8 +436,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -417,15 +446,21 @@ public sealed partial class CliTests
                 Assert.That(ProjectedFloatLiteralBits(functions[1], type), Is.EqualTo(0UL));
             }
 
+            if (policy == "checked-exceptions")
+            {
+                await AssertCheckedExceptionLibraryExportRejectedAsync(input, directory, output)
+                    .ConfigureAwait(false);
+                return;
+            }
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -455,8 +490,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -465,15 +499,21 @@ public sealed partial class CliTests
                 Assert.That(ProjectedFloatLiteralBits(functions[0], type), Is.EqualTo(type == 7 ? 0x40F80000UL : 0x401F000000000000UL));
             }
 
+            if (policy == "checked-exceptions")
+            {
+                await AssertCheckedExceptionLibraryExportRejectedAsync(input, directory, output)
+                    .ConfigureAwait(false);
+                return;
+            }
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -502,8 +542,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -512,15 +551,21 @@ public sealed partial class CliTests
                 Assert.That(ProjectedFloatLiteralBits(functions[0], type), Is.EqualTo(type == 7 ? 0x40F80000UL : 0x401F000000000000UL));
             }
 
+            if (policy == "checked-exceptions")
+            {
+                await AssertCheckedExceptionLibraryExportRejectedAsync(input, directory, output)
+                    .ConfigureAwait(false);
+                return;
+            }
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -547,8 +592,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -560,13 +604,13 @@ public sealed partial class CliTests
 
             var (buildExit, buildJson, buildError) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(buildExit == 0, Is.True, $"{policy}: {buildJson}{buildError}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Fill", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -593,8 +637,7 @@ public sealed partial class CliTests
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
-            var (componentExit, componentJson, componentError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
@@ -606,13 +649,13 @@ public sealed partial class CliTests
 
             var (buildExit, buildJson, buildError) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(buildExit == 0, Is.True, $"{policy}: {buildJson}{buildError}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Fill", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
         }
         finally
         {
@@ -698,8 +741,14 @@ public sealed partial class CliTests
             Inspect(result);
         }
 
-        {var __nunitItems0 = matches;
-        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0, Is.EqualTo(1)); } });}
+        {
+            var __nunitItems0 = matches;
+        Assert.Multiple(() => {
+            foreach (var __nunitItem0 in __nunitItems0)
+            {
+                Assert.That(__nunitItem0, Is.EqualTo(1)); }
+        });
+        }
     }
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -738,14 +787,13 @@ public sealed partial class CliTests
         foreach (var source in new[] { StandaloneSource, ProgramSource })
         {
             var input = Encoding.UTF8.GetBytes(source);
-            var (projectionExit, projectionJson, projectionError) = await RunAsync(input,
-                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            var (projectionExit, projectionJson, projectionError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(projectionExit == 0, Is.True, $"{policy}: {projectionJson}{projectionError}");
             AssertProjectedChar16FloatLiterals(projectionJson, source,
                 source == StandaloneSource ? 87 : 88);
 
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                "frontend-run", directory, "-", "--runtime", policy);
+                "frontend-run", directory, "-", "--runtime", policy).ConfigureAwait(false);
             Assert.That(exit == 42, Is.True, $"{policy}: {output}{error}");
             Assert.That(error, Is.Empty);
         }
@@ -763,7 +811,7 @@ public sealed partial class CliTests
             """;
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
-            "frontend-run", directory, "-", "--runtime", policy);
+            "frontend-run", directory, "-", "--runtime", policy).ConfigureAwait(false);
         Assert.That(exit == 42, Is.True, $"{policy}: {output}{error}");
         Assert.That(error, Is.Empty);
     }
@@ -782,7 +830,7 @@ public sealed partial class CliTests
             $"int32 Main() {{ return int32({targetType}({sourceType}(1.0 / 0.0))); }}");
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(source, "frontend-run", directory, "-",
-            "--runtime", "fail-fast");
+            "--runtime", "fail-fast").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540001)));
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
@@ -794,7 +842,7 @@ public sealed partial class CliTests
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
         var outputDirectory = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-scalar-float-conversions-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(outputDirectory);
+        _ = Directory.CreateDirectory(outputDirectory);
         try
         {
             var sourceTypes = new[] {
@@ -810,37 +858,48 @@ public sealed partial class CliTests
                     TargetType: targetType,
                     Name: $"Convert_{sourceType}_to_{targetType}"));
             }).ToArray();
-            var source = Encoding.UTF8.GetBytes(string.Join(" ", conversions.Select(conversion =>
-            {
-                var noThrow = conversion.SourceType == "char16" ? "[NoThrow] " : string.Empty;
-                return $"{noThrow}public {conversion.TargetType} {conversion.Name}"
-                    + $"({conversion.SourceType} value) => {conversion.TargetType}(value);";
-            })));
+            var source = Encoding.UTF8.GetBytes(string.Join(" ", conversions.Select(conversion => $"public {conversion.TargetType} {conversion.Name}"
+                    + $"({conversion.SourceType} value) => {conversion.TargetType}(value);")));
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
-                var output = Path.Combine(outputDirectory, "scalar.dll");
-                var hosted = Path.Combine(outputDirectory, "hosted.dll");
-                var (componentExit, componentJson, componentError) = await RunAsync(source,
-                    "frontend-component", directory, "-", "--runtime", policy, "--json");
+                var output = Path.Combine(outputDirectory, $"scalar-{policy}.dll");
+                var hosted = Path.Combine(outputDirectory, $"hosted-{policy}.dll");
+                var (componentExit, componentJson, componentError) = await RunFrontendComponentAsync(source, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
-                var (exit, json, error) = await RunAsync(source,
-                    "frontend-build-library", directory, "-", "-o", output,
-                    "--runtime", policy, "--json");
-                Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
                 var hostedArguments = new List<string> { "build-library", "-" };
-                foreach (var conversion in conversions)
+                foreach (var (SourceType, TargetType, Name) in conversions)
                 {
                     hostedArguments.Add("--export");
-                    hostedArguments.Add(conversion.Name);
+                    hostedArguments.Add(Name);
                 }
                 hostedArguments.Add("-o");
                 hostedArguments.Add(hosted);
                 hostedArguments.Add("--runtime");
                 hostedArguments.Add(policy);
                 hostedArguments.Add("--json");
-                var (hostedExit, hostedJson, hostedError) = await RunAsync(source, [.. hostedArguments]);
+                if (policy == "checked-exceptions")
+                {
+                    await AssertCheckedExceptionLibraryExportRejectedAsync(
+                        source, directory, output).ConfigureAwait(false);
+                    var (hostedRejectedExit, hostedRejectedOutput, hostedRejectedError) =
+                        await RunAsync(source, [.. hostedArguments]).ConfigureAwait(false);
+                    Assert.That(hostedRejectedExit, Is.EqualTo(1),
+                        $"{hostedRejectedOutput}{hostedRejectedError}");
+                    Assert.That(hostedRejectedError, Is.Empty);
+                    using var hostedRejected = JsonDocument.Parse(hostedRejectedOutput);
+                    Assert.That(hostedRejected.RootElement.GetProperty("success").GetBoolean(), Is.False);
+                    Assert.That(hostedRejected.RootElement.GetProperty("diagnostics")[0]
+                        .GetProperty("code").GetString(), Is.EqualTo("TRM4002"));
+                    Assert.That(File.Exists(hosted), Is.False);
+                    continue;
+                }
+                var (exit, json, error) = await RunAsync(source,
+                    "frontend-build-library", directory, "-", "-o", output,
+                    "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
+                var (hostedExit, hostedJson, hostedError) = await RunAsync(source, [.. hostedArguments]).ConfigureAwait(false);
                 Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
-                Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
             }
         }
         finally

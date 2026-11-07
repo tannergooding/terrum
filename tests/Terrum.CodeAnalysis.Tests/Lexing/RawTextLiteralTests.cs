@@ -2,13 +2,14 @@
 
 using System;
 using System.Linq;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class RawTextLiteralTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class RawTextLiteralTests
 {
     [TestCase("\"\"\"plain\"\"\"", "plain")]
     [TestCase("\"\"\"a\\n{value}\"\"\"", "a\\n{value}")]

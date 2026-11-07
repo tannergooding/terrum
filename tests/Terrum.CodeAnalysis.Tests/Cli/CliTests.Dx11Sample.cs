@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [InteractiveWindowTest]
     [Category("InteractiveWindow")]
@@ -139,15 +139,29 @@ public sealed partial class CliTests
     internal static async Task BuildDx11PipelineAsync(string sourceName, string path)
     {
         var directory = Path.Combine(RepositoryRoot(), "samples", "Win32Dx11Triangle");
-        var (exit, output, error) = await RunAsync([], "build-native-import",
-            Path.Combine(directory, sourceName),
-            "--source", Path.Combine(directory, "dx11-api.terrum"),
-            "--source", Path.Combine(directory, "win32-api.terrum"),
-            "-o", path, "--runtime", "checked-exceptions", "--json").ConfigureAwait(false);
-        Assert.That(exit, Is.Zero, output + error);
-        Assert.That(error, Is.Empty);
-        using var result = JsonDocument.Parse(output);
-        Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
+        var nativeManifest = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-dx11-native-core-{Guid.NewGuid():N}.json");
+        try
+        {
+            await File.WriteAllTextAsync(nativeManifest,
+                CreateNativeCoreManifest()).ConfigureAwait(false);
+            var (exit, output, error) = await RunAsync([], "build-native-import",
+                Path.Combine(directory, sourceName),
+                "--source", Path.Combine(directory, "dx11-api.terrum"),
+                "--source", Path.Combine(directory, "win32-api.terrum"),
+                "--native-core-manifest", nativeManifest,
+                "-o", path, "--runtime", "checked-exceptions", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero, output + error);
+            Assert.That(error, Is.Empty);
+            using var result = JsonDocument.Parse(output);
+            Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(nativeManifest)
+                .ConfigureAwait(false);
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]

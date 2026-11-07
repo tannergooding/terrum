@@ -40,7 +40,7 @@ internal static partial class Program
         var exports = new List<string>();
         string? output = null;
         NativeRuntimePolicy? policy = null;
-        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development;
+        var sourceArithmeticProfile = SourceArithmeticProfile.Development;
         var hasArithmeticProfile = false;
         var firstOption = producer ? 4 : compile ? 3 : 2;
         if (((count - firstOption) & 1) != 0)

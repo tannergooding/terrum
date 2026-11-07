@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task NativeGraphCliRetainsOriginAndPreservesOutputOnMissingCleanupProviderAsync()
@@ -28,29 +28,29 @@ public sealed partial class CliTests
             await File.WriteAllTextAsync(leafSource, """
                 [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                     public int32 Value;
-                    [NoThrow] public Ticket(int32 value) { Value = value; }
-                    [NoThrow] [Cleanup] public void Close() {}
+                     public Ticket(int32 value) { Value = value; }
+                     [Cleanup] public void Close() {}
                 }
                 public Ticket Make() { return new Ticket(20); }
-                """);
-            await File.WriteAllTextAsync(middleSource, "public Ticket Forward() { return Make(); }");
+                """).ConfigureAwait(false);
+            await File.WriteAllTextAsync(middleSource, "public Ticket Forward() { return Make(); }").ConfigureAwait(false);
             await File.WriteAllTextAsync(rootSource,
-                "int32 Main() { Ticket value = Forward(); return value.Value + 22; }");
+                "int32 Main() { Ticket value = Forward(); return value.Value + 22; }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "Leaf",
                 "--export", "Make", "--export", "Ticket.Close", "-o", leaf,
-                "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "producer", middleSource, "Middle",
-                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,
                 "--provider", middle, "--provider", leaf, "-o", root,
-                "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
-            var unchanged = await File.ReadAllBytesAsync(root);
+                "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            var unchanged = await File.ReadAllBytesAsync(root).ConfigureAwait(false);
             Assert.That((await RunAsync([], "run-native-graph", root, "--provider", leaf,
-                "--provider", middle, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(42));
+                "--provider", middle, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             var (failureExit, _, _) = await RunAsync([], "compile-native-graph", "consumer", rootSource,
-                "--provider", middle, "-o", root, "--runtime", "fail-fast");
+                "--provider", middle, "-o", root, "--runtime", "fail-fast").ConfigureAwait(false);
             Assert.That(failureExit, Is.Not.EqualTo(0));
-            Assert.That(await File.ReadAllBytesAsync(root), Is.EqualTo(unchanged));
+            Assert.That(await File.ReadAllBytesAsync(root).ConfigureAwait(false), Is.EqualTo(unchanged));
         }
         finally
         {

@@ -55,8 +55,8 @@ internal static class StringLiteralDecoder
                     {
                         return false;
                     }
-                    builder.Append(character);
-                    builder.Append(text[position++]);
+                    _ = builder.Append(character);
+                    _ = builder.Append(text[position++]);
                 }
                 else if (char.IsLowSurrogate(character))
                 {
@@ -64,7 +64,7 @@ internal static class StringLiteralDecoder
                 }
                 else
                 {
-                    builder.Append(character);
+                    _ = builder.Append(character);
                 }
                 continue;
             }
@@ -77,36 +77,36 @@ internal static class StringLiteralDecoder
             switch (text[position++])
             {
                 case 'n':
-                    builder.Append('\n');
+                    _ = builder.Append('\n');
                     break;
                 case 'r':
-                    builder.Append('\r');
+                    _ = builder.Append('\r');
                     break;
                 case 't':
-                    builder.Append('\t');
+                    _ = builder.Append('\t');
                     break;
                 case '\\':
-                    builder.Append('\\');
+                    _ = builder.Append('\\');
                     break;
                 case '"':
-                    builder.Append('"');
+                    _ = builder.Append('"');
                     break;
                 case '0':
-                    builder.Append('\0');
+                    _ = builder.Append('\0');
                     break;
                 case 'u':
                     if (!TryReadEscape(text, ref position, end, 4, out var shortScalar))
                     {
                         return false;
                     }
-                    builder.Append(char.ConvertFromUtf32(shortScalar));
+                    _ = builder.Append(char.ConvertFromUtf32(shortScalar));
                     break;
                 case 'U':
                     if (!TryReadEscape(text, ref position, end, 8, out var longScalar))
                     {
                         return false;
                     }
-                    builder.Append(char.ConvertFromUtf32(longScalar));
+                    _ = builder.Append(char.ConvertFromUtf32(longScalar));
                     break;
                 default:
                     return false;

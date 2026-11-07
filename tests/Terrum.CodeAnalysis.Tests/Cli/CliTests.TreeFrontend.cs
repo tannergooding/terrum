@@ -5,15 +5,14 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("public int32 Value(int32 x, int32 y) { return x + y + x; }")]
     [TestCase("public int32 Value(int32 x) => +(+(+(+(+(+(+(+x))))))) + x + x + x + x + x + x;")]
@@ -46,17 +45,9 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var input = Encoding.UTF8.GetBytes(source);
-                var (nativeExit, _, nativeError) = await RunAsync(input,
-                    "frontend-build-library", frontend, "-", "-o", nativePath,
-                    "--runtime", policy, "--json");
-                var (hostedExit, _, hostedError) = await RunAsync(input,
-                    "build-library", "-", "--export", "Value", "-o", hostedPath,
-                    "--runtime", policy, "--json");
-                Assert.That(nativeExit, Is.EqualTo(0));
-                Assert.That(hostedExit, Is.EqualTo(0));
-                Assert.That(nativeError, Is.Empty);
-                Assert.That(hostedError, Is.Empty);
-                Assert.That(await File.ReadAllBytesAsync(nativePath), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)));
+                _ = await AssertFrontendBuildLibraryParityAsync(input, frontend,
+                    "Value", policy, nativePath, hostedPath)
+                    .ConfigureAwait(false);
             }
         }
         finally
@@ -76,9 +67,9 @@ public sealed partial class CliTests
         {
             var input = Encoding.UTF8.GetBytes(source);
             var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                "frontend-run", frontend, "-", "--runtime", policy, "--json");
+                "frontend-run", frontend, "-", "--runtime", policy, "--json").ConfigureAwait(false);
             var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
-                "jit", "-", "--runtime", policy, "--json");
+                "jit", "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(nativeExit, Is.EqualTo(expected));
             Assert.That(nativeExit, Is.EqualTo(hostedExit));
             Assert.That(nativeOutput, Is.Empty);
@@ -90,7 +81,7 @@ public sealed partial class CliTests
     [TestCase("public int32 Value(int32 x) => (x + missing) * 2;",3,"missing")]
     [TestCase("public int32 Value(int32 x) => x + (true * 2);",2,"2")]
     [TestCase("public int32 Value(int32 x) => x + 2147483648;",2,"2147483648")]
-    [TestCase("public uint64 Value(uint64 x) => x + -1;",2,"1")]
+    [TestCase("public uint64 Value(uint64 x) => x + true;",2,"+")]
     [TestCase("public bool Value(int32 x) => (x < 5) && x;",2,"&&")]
     [TestCase("public int32 Value(int32 x) => x + (2 * 3;",1,";")]
     [TestCase("public int32 Value(int32 x) => x + 2 * 3);",1,")")]
@@ -107,8 +98,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = TerrumProjectPaths.SourceDirectory(root);
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", frontend, "-", "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), frontend, "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -125,9 +115,8 @@ public sealed partial class CliTests
             "..", "..", "..", "..", "..", ".."));
         var source = "int32 Main() => " + new string('(', 17) + "42"
             + new string(')', 17) + ";";
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", TerrumProjectPaths.SourceDirectory(root), "-",
-            "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), TerrumProjectPaths.SourceDirectory(root), "-",
+            "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -144,9 +133,8 @@ public sealed partial class CliTests
         Array.Fill(operands, "x");
         var source = "public int32 Value(int32 x) => "
             + string.Join(" + ", operands) + ";";
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", TerrumProjectPaths.SourceDirectory(root), "-",
-            "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), TerrumProjectPaths.SourceDirectory(root), "-",
+            "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -160,9 +148,8 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var source = "public int32 Value(int32 x) => x + (x * 2);";
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", TerrumProjectPaths.SourceDirectory(root), "-",
-            "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), TerrumProjectPaths.SourceDirectory(root), "-",
+            "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -203,15 +190,15 @@ public sealed partial class CliTests
             var (success, _, _) = await RunAsync(Encoding.UTF8.GetBytes(
                 "public int32 Value(int32 x) => x * (3 + 4);"),
                 "frontend-build-library", frontend, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(success, Is.EqualTo(0));
-            var previous = await File.ReadAllBytesAsync(output);
+            var previous = await File.ReadAllBytesAsync(output).ConfigureAwait(false);
             var (failure, _, _) = await RunAsync(Encoding.UTF8.GetBytes(
                 "public int32 Value(int32 x) => x * (3 + missing);"),
                 "frontend-build-library", frontend, "-", "-o", output,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(failure, Is.EqualTo(1));
-            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(previous));
+            Assert.That(await File.ReadAllBytesAsync(output).ConfigureAwait(false), Is.EqualTo(previous));
         }
         finally
         {

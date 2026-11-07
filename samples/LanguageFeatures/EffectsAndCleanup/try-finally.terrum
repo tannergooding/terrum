@@ -1,5 +1,5 @@
 // Normal-exit cleanup is structured; checked failures still terminate the process.
-[NoThrow] void Touch() {
+ void Touch() {
     mut int32 marker = 1;
     marker = 2;
 }

@@ -9,16 +9,16 @@ using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerParsingComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerParsingComponentTests
 {
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -112,12 +112,14 @@ public sealed class IntegerParsingComponentTests
             };
             if (test.Expected is not null)
             {
-                _ = checks.AppendLine($"if (!{method}({start}, {test.Text.Length}, {test.Radix}, init var parsed)"
+                _ = checks.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                    $"if (!{method}({start}, {test.Text.Length}, {test.Radix}, init var parsed)"
                     + $" || parsed != {test.Expected}) {{ return {index + 1}; }}");
             }
             else
             {
-                _ = checks.AppendLine($"if ({method}({start}, {test.Text.Length}, {test.Radix}, init var ignored))"
+                _ = checks.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                    $"if ({method}({start}, {test.Text.Length}, {test.Radix}, init var ignored))"
                     + $" {{ return {index + 1}; }}");
             }
             _ = checks.AppendLine("}");
@@ -151,7 +153,11 @@ public sealed class IntegerParsingComponentTests
         ], [new HostBuffer("Source", PrimitiveType.Char16,
             [.. source.ToString().Select(unit => (int)unit)], false)], (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"integer-parsing-{Guid.NewGuid():N}.exe");

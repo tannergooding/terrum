@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -38,22 +38,22 @@ public sealed partial class CliTests
         var root = RepositoryRoot();
         // A void cleanup helper keeps each function inside the frontend's
         // existing 12-statement budget, including the local-continue shape.
-        foreach (var testCase in cases)
+        foreach (var (Name, Loop, Expected) in cases)
         {
             var path = CreateTestArtifactPath($"cleanup-counted-for-{Guid.NewGuid():N}.exe");
             try
             {
                 var source = "public int32 Main() { mut int32 value = 0; Clean(out value); return value; } "
-                    + $"void Clean(out int32 value) {{ value = 0; try {{}} finally {{ switch (1) {{ "
-                    + $"1 => {{ {testCase.Loop} continue _; }}, _ => {{}} }} }} }}";
-                if (testCase.Name == "by-value-call")
+                    + $"void Clean(out int32 value) {{ value = 0; try {{}} finally {{ switch (int32(1)) {{ "
+                    + $"1 => {{ {Loop} continue _; }}, _ => {{}} }} }} }}";
+                if (Name == "by-value-call")
                 {
-                    source += " [NoThrow] void Observe(int32 i) {}";
+                    source += "  void Observe(int32 i) {}";
                 }
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", TerrumProjectPaths.SourceDirectory(root), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.That(exit == 0, Is.True, $"{testCase.Name} {policy}: {exit}: {output}{error}");
-                Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(testCase.Expected));
+                    "frontend-build", TerrumProjectPaths.SourceDirectory(root), "-", "-o", path, "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(exit == 0, Is.True, $"{Name} {policy}: {exit}: {output}{error}");
+                Assert.That(await ExecuteNativeImageAsync(path).ConfigureAwait(false), Is.EqualTo(Expected));
             }
             finally
             {
@@ -66,103 +66,89 @@ public sealed partial class CliTests
     }
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
-    public async Task ScalarFrontendCleanupCountedForRejectsUnsupportedProofsAsync(string policy)
+    public async Task ScalarFrontendCleanupCountedForSupportsGeneralLoopShapesAsync(string policy)
     {
-        var loops = new[] {
-            "for (mut int32 i = value; i < 4; i = i + 1) {}",
-            "mut int32 i = 0; for (; i < 4; i = i + 1) {}",
-            "for (value = 0; value < 4; value = value + 1) {}",
-            "for (mut int32 i = 0; i < value; i = i + 1) {}",
-            "for (mut int32 i = 0; i < 4; i = i + 2) {}",
-            "for (mut int32 i = 4; i > 0; i = i - 2) {}",
-            "for (mut int32 i = 0; i <= 4; i = i + 1) {}",
-            "for (mut int32 i = 4; i >= 0; i = i - 1) {}",
-            "for (mut int32 i = 0; i < 4; i = i - 1) {}",
-            "for (mut int32 i = 4; i > 0; i = i + 1) {}",
-            "for (mut int32 i = 4; i < 0; i = i - 1) {}",
-            "for (mut int32 i = 0; i < 4; i = i + value) {}",
-            "for (mut int32 i = 0; i < 4; i = 1 + i) {}",
-            "for (mut int32 i = 0; i < 4; i += 1) {}",
-            "for (mut int32 i = 0; i < 4; i++) {}",
-            "for (mut int32 i = 0; 4 > i; i = i + 1) {}",
-            "for (mut int32 i = 0; i < 4; value = value | 1) {}",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { i = 0; }",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { if (value == 0) { i = 0; } }",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { i |= 1; }",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { Overwrite(out i); }",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { while (value != 0) { value = 0; } }",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { value = value + 1; }",
-            "for (mut int64 i = 0; i < 4; i = i + 1) {}",
-            "for (mut uint32 i = 0; i < 4; i = i + 1) {}",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { continue 1; }",
-            "for (mut int32 i = 0; i < 4; i = i + 1) { return; }",
-            "while (value != 0) { value = 0; }",
-            "{ mut int32 i = 0; while (i < 4) { {} i = i + 1; } }",
+        var loops = new (string Loop, bool Completes)[] {
+            ("for (mut int32 i = value; i < 4; i = i + 1) {}", true),
+            ("mut int32 i = 0; for (; i < 4; i = i + 1) {}", true),
+            ("for (value = 0; value < 4; value = value + 1) {}", true),
+            ("for (mut int32 i = 0; i < value; i = i + 1) {}", true),
+            ("for (mut int32 i = 0; i < 4; i = i + 2) {}", true),
+            ("for (mut int32 i = 4; i > 0; i = i - 2) {}", true),
+            ("for (mut int32 i = 0; i <= 4; i = i + 1) {}", true),
+            ("for (mut int32 i = 4; i >= 0; i = i - 1) {}", true),
+            ("for (mut int32 i = 0; i < 4; i = i - 1) {}", false),
+            ("for (mut int32 i = 4; i > 0; i = i + 1) {}", false),
+            ("for (mut int32 i = 4; i < 0; i = i - 1) {}", true),
+            ("for (mut int32 i = 0; i < 4; i = i + value) {}", true),
+            ("for (mut int32 i = 0; i < 4; i = 1 + i) {}", true),
+            ("for (mut int32 i = 0; i < 4; i += 1) {}", true),
+            ("for (mut int32 i = 0; i < 4; i++) {}", true),
+            ("for (mut int32 i = 0; 4 > i; i = i + 1) {}", true),
+            ("for (mut int32 i = 0; i < 4; value = value | 1) {}", false),
+            ("for (mut int32 i = 0; i < 4; i = i + 1) { i = 0; }", false),
+            ("for (mut int32 i = 0; i < 4; i = i + 1) { if (value == 0) { i = 0; } }", true),
+            ("for (mut int32 i = 0; i < 4; i = i + 1) { i |= 1; }", true),
+            ("for (mut int32 i = 0; i < 4; i = i + 1) { Overwrite(out i); }", false),
+            ("for (mut int32 i = 0; i < 4; i = i + 1) { while (value != 0) { value = 0; } }", true),
+            ("for (mut int32 i = 0; i < 4; i = i + 1) { value = value + 1; }", true),
+            ("for (mut int64 i = 0; i < 4; i = i + 1) {}", true),
+            ("for (mut uint32 i = 0; i < 4; i = i + 1) {}", true),
+            ("for (mut int32 i = 0; i < 4; i = i + 1) { continue 1; }", false),
+            ("while (value != 0) { value = 0; }", true),
+            ("{ mut int32 i = 0; while (i < 4) { {} i = i + 1; } }", true),
         };
         var root = RepositoryRoot();
         var directory = TerrumProjectPaths.SourceDirectory(root);
-        var path = CreateTestArtifactPath($"cleanup-counted-for-rejected-{Guid.NewGuid():N}.exe");
-        try
+        foreach (var (loop, completes) in loops)
         {
-            var (initial, initialOutput, initialError) = await RunAsync(
-                Encoding.UTF8.GetBytes("public int32 Main() => 42;"), "frontend-build",
-                directory, "-", "-o", path, "--runtime", policy, "--json");
-            Assert.That(initial == 0, Is.True, $"{initial}: {initialOutput}{initialError}");
-            var image = await File.ReadAllBytesAsync(path);
-            foreach (var loop in loops)
+            var source = "public int32 Main() { mut int32 value = 1; Clean(out value); return 42; } "
+                + $"void Clean(out int32 value) {{ value = 1; try {{}} finally {{ switch (int32(1)) {{ "
+                + $"1 => {{ {loop} continue _; }}, _ => {{}} }} }} }}"
+                + "  int32 Overwrite(out int32 value) { { value = 0; } return 0; }";
+            var path = CreateTestArtifactPath($"cleanup-counted-for-general-{Guid.NewGuid():N}.exe");
+            try
             {
-                var source = "public int32 Main() { mut int32 value = 1; Clean(out value); return 42; } "
-                    + $"void Clean(out int32 value) {{ value = 1; try {{}} finally {{ switch (1) {{ "
-                    + $"1 => {{ {loop} continue _; }}, _ => {{}} }} }} }}"
-                    + " [NoThrow] int32 Overwrite(out int32 value) { { value = 0; } return 0; }";
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", directory, "-", "-o", path, "--runtime", policy, "--json");
-                Assert.That(exit == 1, Is.True, $"{policy}: {loop}: {exit}: {output}{error}");
+                    "frontend-build", directory, "-", "-o", path, "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(exit, Is.Zero, $"{policy}: {loop}: {exit}: {output}{error}");
                 Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
-                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
-                Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
-                Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(image));
+                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
+                if (completes)
+                {
+                    Assert.That(await ExecuteNativeImageAsync(path).ConfigureAwait(false), Is.EqualTo(42));
+                }
             }
-        }
-        finally
-        {
-            File.Delete(path);
+            finally
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+            }
         }
     }
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
-    public async Task ScalarFrontendCleanupCountedForRetainsOrdinaryLoopBoundaryAsync(string policy)
+    public async Task ScalarFrontendCleanupCountedForSupportsOrdinaryLoopBoundaryAsync(string policy)
     {
-        var cases = new (string Source, bool Accepted)[] {
-            ("public int32 Main() { mut int32 value = 0; for (mut int32 i = 0; i < 4; i = i + 1) { value = value | i; } return value; }", true),
-            ("public int32 Main() { try {} finally { for (mut int32 i = 0; i < 4; i = i + 1) {} } return 3; }", false),
-            ("public int32 Main() { try {} finally { switch (1) { 1 => { for (mut int32 i = 0; i < 4; i = i + 1) {} }, _ => {} } } return 3; }", false),
-            ("[NoThrow] public int32 Main() { for (mut int32 i = 0; i < 4; i = i + 1) {} return 3; }", false),
+        var cases = new (string Source, int Expected)[] {
+            ("public int32 Main() { mut int32 value = 0; for (mut int32 i = 0; i < 4; i = i + 1) { value = value | i; } return value; }", 3),
+            ("public int32 Main() { try {} finally { for (mut int32 i = 0; i < 4; i = i + 1) {} } return 3; }", 3),
+            ("public int32 Main() { try {} finally { switch (int32(1)) { 1 => { for (mut int32 i = 0; i < 4; i = i + 1) {} }, _ => {} } } return 3; }", 3),
+            (" public int32 Main() { for (mut int32 i = 0; i < 4; i = i + 1) {} return 3; }", 3),
         };
         var root = RepositoryRoot();
         var path = CreateTestArtifactPath($"cleanup-counted-for-ordinary-{Guid.NewGuid():N}.exe");
         try
         {
-            var image = Array.Empty<byte>();
-            foreach (var testCase in cases)
+            foreach (var (Source, Expected) in cases)
             {
-                var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(testCase.Source),
-                    "frontend-build", TerrumProjectPaths.SourceDirectory(root), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.That(exit == (testCase.Accepted ? 0 : 1), Is.True, $"{policy}: {testCase.Source}: {exit}: {output}{error}");
+                var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+                    "frontend-build", TerrumProjectPaths.SourceDirectory(root), "-", "-o", path, "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(exit, Is.Zero, $"{policy}: {Source}: {exit}: {output}{error}");
                 Assert.That(error, Is.Empty);
-                if (testCase.Accepted)
-                {
-                    Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(3));
-                    image = await File.ReadAllBytesAsync(path);
-                }
-                else
-                {
-                    using var document = JsonDocument.Parse(output);
-                    Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
-                    Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
-                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(image));
-                }
+                using var document = JsonDocument.Parse(output);
+                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
+                Assert.That(await ExecuteNativeImageAsync(path).ConfigureAwait(false), Is.EqualTo(Expected));
             }
         }
         finally

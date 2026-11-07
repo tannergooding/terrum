@@ -12,7 +12,8 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed partial class ManagedScannerComponentTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed partial class ManagedScannerComponentTests
 {
     [TestCase(NativeRuntimePolicy.FailFast,false)]
     [TestCase(NativeRuntimePolicy.FailFast,true)]
@@ -24,45 +25,122 @@ public sealed partial class ManagedScannerComponentTests
             + "for (mut int32 i = 0; i < 4; i = i + 1) { "
             + (localContinue ? "continue; " : "value = value | i; ")
             + "} continue _; }, _ => {} } } return value; }"
-            + " [NoThrow] int32 Overwrite(out int32 value) { { value = 0; } return 0; }";
-        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            + "  int32 Overwrite(out int32 value) { { value = 0; } return 0; }";
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy).ConfigureAwait(false);
         var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes, (BoundRuntimePolicy)policy);
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = read.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = read.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var function = program.Functions[0];
-        var cleanup = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual1 = function.Body.Statements[1]; Assert.That(__nunitActual1, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual1!; }))();
-        var selection = ((global::System.Func<BoundBlock>)(() => { var __nunitActual2 = global::System.Linq.Enumerable.Single(cleanup.Finally.Statements); Assert.That(__nunitActual2, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual2!; }))();
-        var dispatcher = ((global::System.Func<BoundWhile>)(() => { var __nunitActual3 = selection.Statements[2]; Assert.That(__nunitActual3, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual3!; }))();
-        var arms = ((global::System.Func<BoundIf>)(() => { var __nunitActual4 = dispatcher.Body; Assert.That(__nunitActual4, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual4!; }))();
-        var first = ((global::System.Func<BoundBlock>)(() => { var __nunitActual5 = arms.Then; Assert.That(__nunitActual5, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual5!; }))();
-        var counted = ((global::System.Func<BoundBlock>)(() => { var __nunitActual6 = first.Statements[0]; Assert.That(__nunitActual6, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual6!; }))();
+        var cleanup = ((global::System.Func<BoundTryFinally>)(() => {
+            var __nunitActual1 = function.Body.Statements[1];
+            Assert.That(__nunitActual1, Is.TypeOf<BoundTryFinally>());
+            return (BoundTryFinally)__nunitActual1!;
+        }))();
+        var selection = ((global::System.Func<BoundBlock>)(() => {
+            var __nunitActual2 = global::System.Linq.Enumerable.Single(cleanup.Finally.Statements);
+            Assert.That(__nunitActual2, Is.TypeOf<BoundBlock>());
+            return (BoundBlock)__nunitActual2!;
+        }))();
+        var dispatcher = ((global::System.Func<BoundWhile>)(() => {
+            var __nunitActual3 = selection.Statements[2];
+            Assert.That(__nunitActual3, Is.TypeOf<BoundWhile>());
+            return (BoundWhile)__nunitActual3!;
+        }))();
+        Assert.That(dispatcher.SwitchArmVariable, Is.GreaterThanOrEqualTo(0));
+        var arms = ((global::System.Func<BoundIf>)(() => {
+            var __nunitActual4 = dispatcher.Body;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundIf>());
+            return (BoundIf)__nunitActual4!;
+        }))();
+        var first = ((global::System.Func<BoundBlock>)(() => {
+            var __nunitActual5 = arms.Then;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundBlock>());
+            return (BoundBlock)__nunitActual5!;
+        }))();
+        var counted = ((global::System.Func<BoundBlock>)(() => {
+            var __nunitActual6 = first.Statements[0];
+            Assert.That(__nunitActual6, Is.TypeOf<BoundBlock>());
+            return (BoundBlock)__nunitActual6!;
+        }))();
         Assert.That(counted.IsManagedLexicalScope, Is.True);
-        var initial = ((global::System.Func<BoundLocal>)(() => { var __nunitActual7 = counted.Statements[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual7!; }))();
-        var loop = ((global::System.Func<BoundWhile>)(() => { var __nunitActual8 = counted.Statements[1]; Assert.That(__nunitActual8, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual8!; }))();
+        var initial = ((global::System.Func<BoundLocal>)(() => {
+            var __nunitActual7 = counted.Statements[0];
+            Assert.That(__nunitActual7, Is.TypeOf<BoundLocal>());
+            return (BoundLocal)__nunitActual7!;
+        }))();
+        var loop = ((global::System.Func<BoundWhile>)(() => {
+            var __nunitActual8 = counted.Statements[1];
+            Assert.That(__nunitActual8, Is.TypeOf<BoundWhile>());
+            return (BoundWhile)__nunitActual8!;
+        }))();
         Assert.That(loop.Span, Is.EqualTo(counted.Span));
         Assert.That(loop.IsPostTested, Is.False);
         BoundBlock body;
         BoundAssignment iterator;
         if (localContinue)
         {
-            body = ((global::System.Func<BoundBlock>)(() => { var __nunitActual9 = loop.Body; Assert.That(__nunitActual9, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual9!; }))();
-            iterator = ((global::System.Func<BoundAssignment>)(() => { var __nunitActual10 = loop.Iterator; Assert.That(__nunitActual10, Is.TypeOf<BoundAssignment>()); return (BoundAssignment)__nunitActual10!; }))();
+            body = ((global::System.Func<BoundBlock>)(() => {
+                var __nunitActual9 = loop.Body;
+                Assert.That(__nunitActual9, Is.TypeOf<BoundBlock>());
+                return (BoundBlock)__nunitActual9!;
+            }))();
+            iterator = ((global::System.Func<BoundAssignment>)(() => {
+                var __nunitActual10 = loop.Iterator;
+                Assert.That(__nunitActual10, Is.TypeOf<BoundAssignment>());
+                return (BoundAssignment)__nunitActual10!;
+            }))();
             Assert.That(global::System.Linq.Enumerable.Single(body.Statements), Is.TypeOf<BoundContinue>());
         }
         else
         {
             Assert.That(loop.Iterator, Is.Null);
-            var appended = ((global::System.Func<BoundBlock>)(() => { var __nunitActual11 = loop.Body; Assert.That(__nunitActual11, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual11!; }))();
-            body = ((global::System.Func<BoundBlock>)(() => { var __nunitActual12 = appended.Statements[0]; Assert.That(__nunitActual12, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual12!; }))();
-            iterator = ((global::System.Func<BoundAssignment>)(() => { var __nunitActual13 = appended.Statements[1]; Assert.That(__nunitActual13, Is.TypeOf<BoundAssignment>()); return (BoundAssignment)__nunitActual13!; }))();
+            var appended = ((global::System.Func<BoundBlock>)(() => {
+                var __nunitActual11 = loop.Body;
+                Assert.That(__nunitActual11, Is.TypeOf<BoundBlock>());
+                return (BoundBlock)__nunitActual11!;
+            }))();
+            body = ((global::System.Func<BoundBlock>)(() => {
+                var __nunitActual12 = appended.Statements[0];
+                Assert.That(__nunitActual12, Is.TypeOf<BoundBlock>());
+                return (BoundBlock)__nunitActual12!;
+            }))();
+            iterator = ((global::System.Func<BoundAssignment>)(() => {
+                var __nunitActual13 = appended.Statements[1];
+                Assert.That(__nunitActual13, Is.TypeOf<BoundAssignment>());
+                return (BoundAssignment)__nunitActual13!;
+            }))();
         }
-        var condition = ((global::System.Func<BoundBinary>)(() => { var __nunitActual14 = loop.Condition; Assert.That(__nunitActual14, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual14!; }))();
-        var step = ((global::System.Func<BoundBinary>)(() => { var __nunitActual15 = iterator.Value; Assert.That(__nunitActual15, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual15!; }))();
+        var condition = ((global::System.Func<BoundBinary>)(() => {
+            var __nunitActual14 = loop.Condition;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundBinary>());
+            return (BoundBinary)__nunitActual14!;
+        }))();
+        var step = ((global::System.Func<BoundBinary>)(() => {
+            var __nunitActual15 = iterator.Value;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundBinary>());
+            return (BoundBinary)__nunitActual15!;
+        }))();
         Assert.That(iterator.Variable, Is.EqualTo(initial.Variable));
-        Assert.That(((global::System.Func<BoundRead>)(() => { var __nunitActual16 = condition.Left; Assert.That(__nunitActual16, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual16!; }))().Variable, Is.EqualTo(initial.Variable));
-        Assert.That(((global::System.Func<BoundRead>)(() => { var __nunitActual17 = step.Left; Assert.That(__nunitActual17, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual17!; }))().Variable, Is.EqualTo(initial.Variable));
+        Assert.That(((global::System.Func<BoundRead>)(() => {
+            var __nunitActual16 = condition.Left;
+            Assert.That(__nunitActual16, Is.TypeOf<BoundRead>());
+            return (BoundRead)__nunitActual16!;
+        }))().Variable, Is.EqualTo(initial.Variable));
+        Assert.That(((global::System.Func<BoundRead>)(() => {
+            var __nunitActual17 = step.Left;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundRead>());
+            return (BoundRead)__nunitActual17!;
+        }))().Variable, Is.EqualTo(initial.Variable));
         Assert.That(condition.Operator, Is.EqualTo(TokenKind.Less));
         Assert.That(step.Operator, Is.EqualTo(TokenKind.Plus));
-        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual18 = step.Right; Assert.That(__nunitActual18, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual18!; }))().Value, Is.EqualTo(1));
+        Assert.That(((global::System.Func<BoundConstant>)(() => {
+            var __nunitActual18 = step.Right;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundConstant>());
+            return (BoundConstant)__nunitActual18!;
+        }))().Value, Is.EqualTo(1));
         Assert.That(NativeJit.Execute(program with { EntryPoint = 0 }, policy), Is.EqualTo(localContinue ? 0 : 3));
         var returning = program with {
             EntryPoint = 0,
@@ -96,8 +174,12 @@ public sealed partial class ManagedScannerComponentTests
             Assert.That(NativeJit.Execute(exceptional, policy), Is.EqualTo(localContinue ? 0 : 3));
         }
 
-        BoundWhile WithBody(BoundBlock replacement) => localContinue ? loop with { Body = replacement }
+        BoundWhile WithBody(BoundBlock replacement)
+        {
+            return localContinue ? loop with { Body = replacement }
             : loop with { Body = new BoundBlock([replacement, iterator], loop.Body.Span) };
+        }
+
         var counterRead = new BoundRead(initial.Variable, PrimitiveType.Int32, loop.Span);
         var zero = new BoundConstant(0, PrimitiveType.Int32, loop.Span);
         var mutations = new (string Name, BoundLocal Initial, BoundWhile Loop, ImmutableArray<BoundVariable> Variables)[] {
@@ -140,17 +222,42 @@ public sealed partial class ManagedScannerComponentTests
                     zero, PrimitiveType.Bool, loop.Span), new BoundBlock([], loop.Span), loop.Span),
             ] }), function.Variables),
         };
-        foreach (var mutation in mutations)
+        foreach (var (Name, Initial, Loop, Variables) in mutations)
         {
-            var candidate = ReplaceCountedLoop(program, mutation.Initial, mutation.Loop, mutation.Variables);
-            var error = TestExceptionCapture.Capture(() => SemanticVerifier.VerifyLibrary(candidate));
-            Assert.That(error is ArgumentException, Is.True, $"{mutation.Name}: {error}");
-            Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(candidate, ["Main"], policy));
+            var candidate = ReplaceCountedLoop(program, Initial, Loop, Variables);
+            if (Name is "unknown-initial" or "body-write" or "body-shared-step"
+                or "cleanup-write" or "body-update" or "body-alias" or "unproved-body-loop"
+                || (Name == "post-tested" && !localContinue))
+            {
+                SemanticVerifier.VerifyLibrary(candidate);
+                var checkedExportNeedsMissingProof = policy
+                    == NativeRuntimePolicy.CheckedExceptions
+                    && Name is "post-tested" or "body-write"
+                        or "body-shared-step" or "cleanup-write"
+                        or "body-update" or "body-alias";
+                if (checkedExportNeedsMissingProof)
+                {
+                    _ = Assert.Throws<ArgumentException>(
+                        () => NativeEmitter.EmitLibrary(candidate,
+                            ["Main"], policy), Name);
+                }
+                else
+                {
+                    Assert.That(NativeEmitter.EmitLibrary(candidate,
+                        ["Main"], policy), Is.Not.Empty, Name);
+                }
+            }
+            else
+            {
+                var error = TestExceptionCapture.Capture(() => SemanticVerifier.VerifyLibrary(candidate));
+                Assert.That(error is ArgumentException, Is.True, $"{Name}: {error}");
+                _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(candidate, ["Main"], policy));
+            }
         }
         if (!localContinue)
         {
             var bypass = WithBody(body with { Statements = [new BoundContinue(loop.Span)] });
-            Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(
                 ReplaceCountedLoop(program, initial, bypass, function.Variables)));
         }
         var composed = WithBody(new BoundBlock([
@@ -175,7 +282,7 @@ public sealed partial class ManagedScannerComponentTests
         }
         else
         {
-            Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(outerContinue));
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(outerContinue));
         }
         // The full signed int32 distance exceeds int32.MaxValue. Verification
         // must be structural; do not execute or unroll these multi-billion-step loops.
@@ -203,7 +310,9 @@ public sealed partial class ManagedScannerComponentTests
         }
 
         BoundProgram ReplaceCountedLoop(BoundProgram original, BoundLocal replacementInitial,
-            BoundWhile replacementLoop, ImmutableArray<BoundVariable> variables) => original with {
+            BoundWhile replacementLoop, ImmutableArray<BoundVariable> variables)
+        {
+            return original with {
                 Functions = original.Functions.SetItem(0, function with {
                     Variables = variables,
                     Body = function.Body with {
@@ -223,5 +332,6 @@ public sealed partial class ManagedScannerComponentTests
                     },
                 }),
             };
+        }
     }
 }

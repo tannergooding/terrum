@@ -271,7 +271,7 @@ public static partial class ScalarFrontendHost
                 var flags = words[offset + 1];
                 var local = new ScalarFrontendLocal(words[offset], (flags & 1) != 0,
                     Span(offset + 2)) { IsInitialization = (flags & 2) != 0, IsConstant = (flags & 4) != 0 };
-                if (!ScalarType(local.Type)
+                if (local.Type is < 0 or > 8
                     || flags is not (0 or 1 or 2 or 3 or 4 or 8)
                     || !ValidSpan(local.Name, nonempty: true))
                 {
@@ -1584,7 +1584,7 @@ public static partial class ScalarFrontendHost
                     }
                     else if (entry.Kind == 37)
                     {
-                        if (!IsUnitValueRoot(entry.Root)
+                        if ((!IsUnitValueRoot(entry.Root) && !IsDiscardableCallRoot(entry.Root))
                             || !TakeTree(entry.Root)
                             || (clause == 0 && !Take(TokenKind.Semicolon)))
                         {
@@ -1647,6 +1647,17 @@ public static partial class ScalarFrontendHost
                     102 or 105 => true,
                     _ => false,
                 };
+            }
+
+            bool IsDiscardableCallRoot(int root)
+            {
+                while ((uint)root < (uint)tree.Length
+                    && tree[root].Operation is 46 or 110)
+                {
+                    root = tree[root].Left;
+                }
+                return (uint)root < (uint)tree.Length
+                    && tree[root].Operation is 102 or 105;
             }
 
             bool IsUnitLiteralSpan(TextSpan span)

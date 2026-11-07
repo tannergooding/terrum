@@ -38,6 +38,7 @@ internal static partial class Program
         NativeRuntimePolicy? selectedPolicy = null;
         var sourceArithmeticProfile = SourceArithmeticProfile.Development;
         var hasArithmeticProfile = false;
+        string? layoutCoreManifestPath = null;
         for (var index = 3; index < count;)
         {
             if (index + 1 >= count)
@@ -60,13 +61,22 @@ internal static partial class Program
                     && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
                     hasArithmeticProfile = true;
                     break;
+                case "--layout-core-manifest" when layoutCoreManifestPath is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    if (!TryGetFullPath(value, out layoutCoreManifestPath))
+                    {
+                        WriteInputError(json, "TRM2000", Usage);
+                        return 2;
+                    }
+                    break;
                 default:
                     WriteInputError(json, "TRM2000", Usage);
                     return 2;
             }
             index += 2;
         }
-        if (selectedPolicy is not NativeRuntimePolicy policy || build && outputArgument is null)
+        if (selectedPolicy is not NativeRuntimePolicy policy || (build && outputArgument is null))
         {
             WriteInputError(json, "TRM2000", Usage);
             return 2;
@@ -74,6 +84,7 @@ internal static partial class Program
 
         SourceText source;
         string? outputPath = null;
+        LayoutCoreRegistrationSet? layoutCoreRegistration = null;
         List<SyntaxTree> trees = new();
         string[] componentPaths = [
             Path.Combine("Text", "SourceRange.terrum"),
@@ -118,6 +129,35 @@ internal static partial class Program
                     return 2;
                 }
             }
+            var componentSourcePaths = componentPaths
+                .Select(path => Path.GetFullPath(Path.Combine(args[1], path)))
+                .ToArray();
+            var inputPath = args[2] == "-" ? null : Path.GetFullPath(args[2]);
+            if (layoutCoreManifestPath is not null)
+            {
+                try
+                {
+                    if (componentSourcePaths.Any(path =>
+                            PathsAlias(layoutCoreManifestPath, path))
+                        || (inputPath is not null
+                            && PathsAlias(layoutCoreManifestPath, inputPath)))
+                    {
+                        WriteInputError(json, "TRM2002",
+                            "The layout Core manifest must be distinct from every frontend component source and subject input.");
+                        return 2;
+                    }
+                }
+                catch (Exception exception) when (exception is IOException
+                    or UnauthorizedAccessException or ArgumentException
+                    or NotSupportedException)
+                {
+                    WriteInputError(json, "TRM2002",
+                        $"Could not validate frontend component path identity: {exception.Message}");
+                    return 2;
+                }
+                layoutCoreRegistration = LayoutCoreManifestReader.Read(
+                    layoutCoreManifestPath).Registration;
+            }
             source = SourceText.From(ReadSource(args[2]), args[2] == "-" ? "<stdin>" : args[2]);
             if (build || runExecutable)
             {
@@ -129,14 +169,14 @@ internal static partial class Program
                 WriteInputError(json, "TRM2001", "The frontend input exceeds its bounded source limit.");
                 return 2;
             }
-            foreach (var componentPath in componentPaths)
+            foreach (var path in componentSourcePaths)
             {
-                var path = Path.Combine(args[1], componentPath);
                 trees.Add(SyntaxTree.Parse(ReadSource(path), path));
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-            or DecoderFallbackException or ArgumentException or NotSupportedException)
+            or DecoderFallbackException or ArgumentException or NotSupportedException
+            or FormatException)
         {
             WriteInputError(json, "TRM2001", exception.Message);
             return 2;
@@ -149,8 +189,12 @@ internal static partial class Program
         trees.Add(SyntaxTree.Parse(
             "using Terrum.CodeAnalysis; int32 Main() { if (!TryPublishScalarFrontend()) { return 1; } return 0; }",
             "<frontend-component>"));
-        var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source),
-            (BoundRuntimePolicy)policy);
+        var componentOptions = new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            LayoutCoreRegistration = layoutCoreRegistration,
+        };
+        var compilation = Compilation.Create(trees,
+            ScalarFrontendHost.CreateBuffers(source), componentOptions);
         if (compilation.HasErrors)
         {
             WriteCompilationResult(args[0], compilation, compilation.SourceDiagnostics,
@@ -228,7 +272,7 @@ internal static partial class Program
             }
             if ((build || runExecutable) && result.IsValid)
             {
-                var functions = result.Functions.IsDefault ? ImmutableArray.Create(result) : result.Functions;
+                var functions = result.Functions.IsDefault ? [result] : result.Functions;
                 var exports = functions.Where(static function => function.IsPublic)
                     .Select(function => function.QualifiedName.Length != 0
                         ? function.QualifiedName
@@ -350,8 +394,14 @@ internal static partial class Program
         };
         if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         {
-            var assemblyPath = typeof(Program).Assembly.Location;
-            if (assemblyPath.Length == 0)
+            var assemblyName = typeof(Program).Assembly.GetName().Name;
+            if (string.IsNullOrEmpty(assemblyName))
+            {
+                throw new NotSupportedException("The compiler assembly path is unavailable for source fallback.");
+            }
+            var assemblyPath = Path.Combine(AppContext.BaseDirectory,
+                assemblyName + ".dll");
+            if (!File.Exists(assemblyPath))
             {
                 throw new NotSupportedException("The compiler assembly path is unavailable for source fallback.");
             }

@@ -6,10 +6,10 @@ unique struct Child {
         Id = id;
     }
 
-    [NoThrow] [Cleanup] public void Close() {
+     [Cleanup] public void Close() {
     }
 
-    [NoThrow] public int32 Read() {
+     public int32 Read() {
         return Id;
     }
 }
@@ -25,10 +25,10 @@ unique struct Package {
         require First.Read() == 40;
     }
 
-    [NoThrow] [Cleanup] public void Close() {
+     [Cleanup] public void Close() {
     }
 
-    [NoThrow] public int32 Read() {
+     public int32 Read() {
         return First.Read() + Second.Read();
     }
 }

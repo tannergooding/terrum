@@ -2,17 +2,17 @@ using System;
 using System.Collections.Immutable;
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class CharacterFactsModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class CharacterFactsModuleTests
 {
     private const int BatchSize = 16_384;
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -71,7 +71,11 @@ public sealed class CharacterFactsModuleTests
         ], policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
             ["Terrum.CodeAnalysis.VerifyBatch"]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -80,7 +84,11 @@ public sealed class CharacterFactsModuleTests
             """, "character-facts-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         for (var start = 0; start < char.MaxValue + 1; start += BatchSize)

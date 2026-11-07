@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     private const string OverflowingMain = """
          int32 Main() {
@@ -31,7 +31,7 @@ public sealed partial class CliTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var input = Encoding.UTF8.GetBytes(OverflowingMain);
         var (developmentExit, developmentOutput, developmentError) = await RunAsync(input,
-            "analyze", "-", "--runtime", runtimePolicy, "--json");
+            "analyze", "-", "--runtime", runtimePolicy, "--json").ConfigureAwait(false);
         Assert.That(developmentExit, Is.Zero);
         Assert.That(developmentError, Is.Empty);
         using (var development = JsonDocument.Parse(developmentOutput))
@@ -40,13 +40,13 @@ public sealed partial class CliTests
         }
 
         var (developmentJitExit, developmentJitOutput, developmentJitError) = await RunAsync(input,
-            "jit", "-", "--runtime", runtimePolicy, "--json");
+            "jit", "-", "--runtime", runtimePolicy, "--json").ConfigureAwait(false);
         Assert.That(developmentJitExit, Is.EqualTo(unchecked((int)0xE0540001)));
         Assert.That(developmentJitOutput, Is.Empty);
         Assert.That(developmentJitError, Is.Empty);
 
         var (analysisExit, analysisOutput, analysisError) = await RunAsync(input,
-            "analyze", "-", "--arithmetic-profile", "release", "--runtime", runtimePolicy, "--json");
+            "analyze", "-", "--arithmetic-profile", "release", "--runtime", runtimePolicy, "--json").ConfigureAwait(false);
         Assert.That(analysisExit, Is.Zero);
         Assert.That(analysisError, Is.Empty);
         using (var analysis = JsonDocument.Parse(analysisOutput))
@@ -55,15 +55,14 @@ public sealed partial class CliTests
         }
 
         var (jitExit, jitOutput, jitError) = await RunAsync(input,
-            "jit", "-", "--runtime", runtimePolicy, "--arithmetic-profile", "release", "--json");
+            "jit", "-", "--runtime", runtimePolicy, "--arithmetic-profile", "release", "--json").ConfigureAwait(false);
         Assert.That(jitExit, Is.EqualTo(42));
         Assert.That(jitOutput, Is.Empty);
         Assert.That(jitError, Is.Empty);
 
         var frontend = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (componentExit, componentOutput, componentError) = await RunAsync(input,
-            "frontend-component", frontend, "-", "--arithmetic-profile", "release",
-            "--runtime", runtimePolicy, "--json");
+        var (componentExit, componentOutput, componentError) = await RunFrontendComponentAsync(input, frontend, "-", "--arithmetic-profile", "release",
+            "--runtime", runtimePolicy, "--json").ConfigureAwait(false);
         Assert.That(componentExit, Is.Zero, componentOutput + componentError);
         Assert.That(componentError, Is.Empty);
         using (var component = JsonDocument.Parse(componentOutput))
@@ -73,7 +72,7 @@ public sealed partial class CliTests
 
         var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
             "frontend-run", frontend, "-", "--runtime", runtimePolicy,
-            "--arithmetic-profile", "release", "--json");
+            "--arithmetic-profile", "release", "--json").ConfigureAwait(false);
         Assert.That(frontendExit, Is.EqualTo(42));
         Assert.That(frontendOutput, Is.Empty);
         Assert.That(frontendError, Is.Empty);
@@ -89,6 +88,7 @@ public sealed partial class CliTests
         var hosted = prefix + ".hosted.exe";
         var nativeImport = prefix + ".native-import.exe";
         var nativeLibrary = prefix + ".native-library.dll";
+        var nativeCoreManifest = prefix + ".native-core.json";
         var scanner = prefix + ".scanner.exe";
         var frontend = prefix + ".frontend.exe";
         var frontendLibrary = prefix + ".frontend-library.dll";
@@ -99,38 +99,42 @@ public sealed partial class CliTests
             " public int32 Value() { mut int32 value = 2147483647; value++; return value < 0 ? 42 : 0; }");
         try
         {
+            await File.WriteAllTextAsync(nativeCoreManifest,
+                CreateNativeCoreManifest()).ConfigureAwait(false);
             var (hostedExit, hostedOutput, hostedError) = await RunAsync(source,
                 "build", "-", "-o", hosted, "--arithmetic-profile", "release",
-                "--runtime", runtimePolicy, "--json");
+                "--runtime", runtimePolicy, "--json").ConfigureAwait(false);
             Assert.That(hostedExit, Is.Zero, hostedOutput + hostedError);
             Assert.That(await ExecuteNativeImageAsync(hosted).ConfigureAwait(true), Is.EqualTo(42));
 
             var (nativeImportExit, nativeImportOutput, nativeImportError) = await RunAsync([],
-                "build-native-import", nativeImportSource, "--runtime", runtimePolicy,
-                "--arithmetic-profile", "release", "-o", nativeImport, "--json");
+                "build-native-import", nativeImportSource,
+                "--native-core-manifest", nativeCoreManifest,
+                "--runtime", runtimePolicy,
+                "--arithmetic-profile", "release", "-o", nativeImport, "--json").ConfigureAwait(false);
             Assert.That(nativeImportExit, Is.Zero, nativeImportOutput + nativeImportError);
 
             var (libraryExit, libraryOutput, libraryError) = await RunAsync(librarySource,
                 "build-library", "-", "--export", "Value", "-o", nativeLibrary,
-                "--runtime", runtimePolicy, "--arithmetic-profile", "release", "--json");
+                "--runtime", runtimePolicy, "--arithmetic-profile", "release", "--json").ConfigureAwait(false);
             Assert.That(libraryExit, Is.Zero, libraryOutput + libraryError);
 
             var sourceDirectory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-            var (scannerExit, scannerOutput, scannerError) = await RunAsync(source,
+            var (scannerExit, scannerOutput, scannerError) = await RunScannerCommandWithLayoutAsync(source,
                 "build-component", sourceDirectory, "-", "-o", scanner,
-                "--arithmetic-profile", "release", "--runtime", runtimePolicy, "--json");
+                "--arithmetic-profile", "release", "--runtime", runtimePolicy, "--json").ConfigureAwait(false);
             Assert.That(scannerExit, Is.Zero, scannerOutput + scannerError);
             Assert.That(await ExecuteNativeImageAsync(scanner).ConfigureAwait(true), Is.EqualTo(42));
 
             var (frontendExit, frontendOutput, frontendError) = await RunAsync(source,
                 "frontend-build", sourceDirectory, "-", "--runtime", runtimePolicy,
-                "-o", frontend, "--arithmetic-profile", "release", "--json");
+                "-o", frontend, "--arithmetic-profile", "release", "--json").ConfigureAwait(false);
             Assert.That(frontendExit, Is.Zero, frontendOutput + frontendError);
             Assert.That(await ExecuteNativeImageAsync(frontend).ConfigureAwait(true), Is.EqualTo(42));
 
             var (frontendLibraryExit, frontendLibraryOutput, frontendLibraryError) = await RunAsync(
                 librarySource, "frontend-build-library", sourceDirectory, "-", "-o", frontendLibrary,
-                "--arithmetic-profile", "release", "--runtime", runtimePolicy, "--json");
+                "--arithmetic-profile", "release", "--runtime", runtimePolicy, "--json").ConfigureAwait(false);
             Assert.That(frontendLibraryExit, Is.Zero, frontendLibraryOutput + frontendLibraryError);
         }
         finally
@@ -139,6 +143,7 @@ public sealed partial class CliTests
             {
                 File.Delete(path);
             }
+            File.Delete(nativeCoreManifest);
             await TestFileCleanup.DeleteWithRetryAsync(hosted).ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(nativeImport).ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(scanner).ConfigureAwait(true);
@@ -192,75 +197,75 @@ public sealed partial class CliTests
         const string SimpleConsumer = "int32 Main() { return Compute(); }";
         try
         {
-            await File.WriteAllBytesAsync(providerSourcePath, providerSource);
-            await File.WriteAllTextAsync(consumerSourcePath, SimpleConsumer);
-            await File.WriteAllTextAsync(nativeConsumerSourcePath, ConsumerSource);
-            await File.WriteAllTextAsync(helperSourcePath, "public int32 Helper() { return 0; }");
-            await File.WriteAllTextAsync(setSourcePath, ConsumerSource);
+            await File.WriteAllBytesAsync(providerSourcePath, providerSource).ConfigureAwait(false);
+            await File.WriteAllTextAsync(consumerSourcePath, SimpleConsumer).ConfigureAwait(false);
+            await File.WriteAllTextAsync(nativeConsumerSourcePath, ConsumerSource).ConfigureAwait(false);
+            await File.WriteAllTextAsync(helperSourcePath, "public int32 Helper() { return 0; }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(setSourcePath, ConsumerSource).ConfigureAwait(false);
             await File.WriteAllTextAsync(middleSourcePath,
-                " public int32 Middle() { return Compute(); }");
-            await File.WriteAllTextAsync(rootSourcePath, GraphRootSource);
+                " public int32 Middle() { return Compute(); }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(rootSourcePath, GraphRootSource).ConfigureAwait(false);
 
             var (trrmExit, trrmOutput, trrmError) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
                 "compile-trrm", "-", "--identity", "arithmetic-cli", "-o", trrm,
-                "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json");
+                "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json").ConfigureAwait(false);
             Assert.That(trrmExit, Is.Zero, trrmOutput + trrmError);
 
             var (moduleProviderExit, moduleProviderOutput, moduleProviderError) = await RunAsync(
                 [], "compile-module", "producer", providerSourcePath, "Compute",
                 "--arithmetic-profile", "release", "-o", moduleProvider,
-                "--runtime", "checked-exceptions", "--json");
+                "--runtime", "checked-exceptions", "--json").ConfigureAwait(false);
             Assert.That(moduleProviderExit, Is.Zero, moduleProviderOutput + moduleProviderError);
             var (moduleConsumerExit, moduleConsumerOutput, moduleConsumerError) = await RunAsync(
                 [], "compile-module", "consumer", consumerSourcePath,
                 moduleProvider, "-o", moduleConsumer, "--runtime", "checked-exceptions",
-                "--arithmetic-profile", "development", "--json");
+                "--arithmetic-profile", "development", "--json").ConfigureAwait(false);
             Assert.That(moduleConsumerExit, Is.Zero, moduleConsumerOutput + moduleConsumerError);
             var (moduleRun, moduleOutput, moduleError) = await RunAsync([],
-                "run-module", moduleConsumer, moduleProvider, "--runtime", "checked-exceptions");
+                "run-module", moduleConsumer, moduleProvider, "--runtime", "checked-exceptions").ConfigureAwait(false);
             Assert.That(moduleRun, Is.EqualTo(42), moduleOutput + moduleError);
 
             var (nativeProviderExit, nativeProviderOutput, nativeProviderError) = await RunAsync(
                 [], "compile-native", "producer", providerSourcePath, "ArithmeticCliProvider",
                 "--export", "Compute", "-o", nativeProvider, "--runtime", "checked-exceptions",
-                "--arithmetic-profile", "release", "--json");
+                "--arithmetic-profile", "release", "--json").ConfigureAwait(false);
             Assert.That(nativeProviderExit, Is.Zero, nativeProviderOutput + nativeProviderError);
             var (nativeConsumerExit, nativeConsumerOutput, nativeConsumerError) = await RunAsync(
                 [], "compile-native", "consumer", nativeConsumerSourcePath,
                 nativeProvider, "-o", nativeConsumer, "--arithmetic-profile", "release",
-                "--runtime", "checked-exceptions", "--json");
+                "--runtime", "checked-exceptions", "--json").ConfigureAwait(false);
             Assert.That(nativeConsumerExit, Is.Zero, nativeConsumerOutput + nativeConsumerError);
             var (nativeRun, nativeOutput, nativeError) = await RunAsync([],
-                "run-native", nativeConsumer, nativeProvider, "--runtime", "checked-exceptions");
+                "run-native", nativeConsumer, nativeProvider, "--runtime", "checked-exceptions").ConfigureAwait(false);
             Assert.That(nativeRun, Is.EqualTo(42), nativeOutput + nativeError);
 
             var (helperExit, helperOutput, helperError) = await RunAsync(
                 [], "compile-native", "producer", helperSourcePath, "ArithmeticCliHelper",
-                "--export", "Helper", "-o", nativeHelper, "--runtime", "checked-exceptions", "--json");
+                "--export", "Helper", "-o", nativeHelper, "--runtime", "checked-exceptions", "--json").ConfigureAwait(false);
             Assert.That(helperExit, Is.Zero, helperOutput + helperError);
             var (setExit, setOutput, setError) = await RunAsync(
                 [], "compile-native-set", setSourcePath,
                 "--provider", nativeProvider, "--provider", nativeHelper, "-o", nativeSet,
-                "--arithmetic-profile", "release", "--runtime", "checked-exceptions", "--json");
+                "--arithmetic-profile", "release", "--runtime", "checked-exceptions", "--json").ConfigureAwait(false);
             Assert.That(setExit, Is.Zero, setOutput + setError);
             var (setRun, setOutputText, setErrorText) = await RunAsync([],
                 "run-native-set", nativeSet, "--provider", nativeHelper,
-                "--provider", nativeProvider, "--runtime", "checked-exceptions");
+                "--provider", nativeProvider, "--runtime", "checked-exceptions").ConfigureAwait(false);
             Assert.That(setRun, Is.EqualTo(42), setOutputText + setErrorText);
             var (middleExit, middleOutput, middleError) = await RunAsync(
                 [], "compile-native-graph", "producer", middleSourcePath, "ArithmeticCliMiddle",
                 "--provider", nativeProvider, "--export", "Middle", "-o", graphMiddle,
-                "--runtime", "checked-exceptions", "--arithmetic-profile", "development", "--json");
+                "--runtime", "checked-exceptions", "--arithmetic-profile", "development", "--json").ConfigureAwait(false);
             Assert.That(middleExit, Is.Zero, middleOutput + middleError);
             var (rootExit, rootOutput, rootError) = await RunAsync(
                 [], "compile-native-graph", "consumer", rootSourcePath,
                 "--provider", graphMiddle, "-o", graphRoot, "--arithmetic-profile", "release",
-                "--runtime", "checked-exceptions", "--json");
+                "--runtime", "checked-exceptions", "--json").ConfigureAwait(false);
             Assert.That(rootExit, Is.Zero, rootOutput + rootError);
             var (graphRun, graphOutput, graphError) = await RunAsync([],
                 "run-native-graph", graphRoot, "--provider", graphMiddle,
-                "--provider", nativeProvider, "--runtime", "checked-exceptions");
+                "--provider", nativeProvider, "--runtime", "checked-exceptions").ConfigureAwait(false);
             Assert.That(graphRun, Is.EqualTo(42), graphOutput + graphError);
         }
         finally
@@ -285,15 +290,15 @@ public sealed partial class CliTests
         byte[] original = [1, 2, 3];
         try
         {
-            await File.WriteAllBytesAsync(outputPath, original);
+            await File.WriteAllBytesAsync(outputPath, original).ConfigureAwait(false);
             var invalid = new[] {
                 new[] { "analyze", "-", "--arithmetic-profile", "Development", "--json" },
-                new[] { "analyze", "-", "--arithmetic-profile", "debug", "--json" },
-                new[] { "analyze", "-", "--arithmetic-profile", "1", "--json" },
-                new[] { "analyze", "-", "--arithmetic-profile=release", "--json" },
-                new[] { "analyze", "-", "--arithmetic-profile", "--json" },
-                new[] { "build", "-", "-o", outputPath, "--runtime", "fail-fast",
-                    "--arithmetic-profile", "release", "--arithmetic-profile", "release", "--json" },
+                ["analyze", "-", "--arithmetic-profile", "debug", "--json"],
+                ["analyze", "-", "--arithmetic-profile", "1", "--json"],
+                ["analyze", "-", "--arithmetic-profile=release", "--json"],
+                ["analyze", "-", "--arithmetic-profile", "--json"],
+                [ "build", "-", "-o", outputPath, "--runtime", "fail-fast",
+                    "--arithmetic-profile", "release", "--arithmetic-profile", "release", "--json" ],
             };
             foreach (var arguments in invalid)
             {
@@ -303,39 +308,39 @@ public sealed partial class CliTests
 
             var ineligible = new[] {
                 new[] { "check", "-", "--arithmetic-profile", "release", "--json" },
-                new[] { "tokens", "-", "--arithmetic-profile", "release", "--json" },
-                new[] { "tree", "-", "--arithmetic-profile", "release", "--json" },
-                new[] { "scan-component", "missing-component", "-", "--runtime", "fail-fast",
-                    "--arithmetic-profile", "release", "--json" },
-                new[] { "validate-trrm-structure", "missing.trrm", "--arithmetic-profile", "release", "--json" },
-                new[] { "validate-trrm-compact", "missing.trrm", "--arithmetic-profile", "release", "--json" },
-                new[] { "build-trrm", "missing.trrm", "-o", "unused.exe", "--runtime", "fail-fast",
-                    "--arithmetic-profile", "release", "--json" },
-                new[] { "build-trrm-library", "missing.trrm", "--export", "Value", "-o", "unused.dll",
-                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" },
-                new[] { "run-trrm", "missing.trrm", "--runtime", "fail-fast",
-                    "--arithmetic-profile", "release", "--json" },
-                new[] { "link-module", "missing-consumer.trm", "missing-provider.trm", "-o", "unused.exe",
-                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" },
-                new[] { "run-module", "missing-consumer.trm", "missing-provider.trm",
-                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" },
-                new[] { "validate-native", "missing-consumer.trmn", "missing-provider.trmn",
-                    "--arithmetic-profile", "release", "--json" },
-                new[] { "run-native", "missing-consumer.trmn", "missing-provider.trmn",
-                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" },
-                new[] { "validate-native-set", "missing.tnset", "--provider", "first.trmn",
-                    "--provider", "second.trmn", "--arithmetic-profile", "release", "--json" },
-                new[] { "run-native-set", "missing.tnset", "--provider", "first.trmn",
+                ["tokens", "-", "--arithmetic-profile", "release", "--json"],
+                ["tree", "-", "--arithmetic-profile", "release", "--json"],
+                [ "scan-component", "missing-component", "-", "--runtime", "fail-fast",
+                    "--arithmetic-profile", "release", "--json" ],
+                ["validate-trrm-structure", "missing.trrm", "--arithmetic-profile", "release", "--json"],
+                ["validate-trrm-compact", "missing.trrm", "--arithmetic-profile", "release", "--json"],
+                [ "build-trrm", "missing.trrm", "-o", "unused.exe", "--runtime", "fail-fast",
+                    "--arithmetic-profile", "release", "--json" ],
+                [ "build-trrm-library", "missing.trrm", "--export", "Value", "-o", "unused.dll",
+                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" ],
+                [ "run-trrm", "missing.trrm", "--runtime", "fail-fast",
+                    "--arithmetic-profile", "release", "--json" ],
+                [ "link-module", "missing-consumer.trm", "missing-provider.trm", "-o", "unused.exe",
+                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" ],
+                [ "run-module", "missing-consumer.trm", "missing-provider.trm",
+                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" ],
+                [ "validate-native", "missing-consumer.trmn", "missing-provider.trmn",
+                    "--arithmetic-profile", "release", "--json" ],
+                [ "run-native", "missing-consumer.trmn", "missing-provider.trmn",
+                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" ],
+                [ "validate-native-set", "missing.tnset", "--provider", "first.trmn",
+                    "--provider", "second.trmn", "--arithmetic-profile", "release", "--json" ],
+                [ "run-native-set", "missing.tnset", "--provider", "first.trmn",
                     "--provider", "second.trmn", "--runtime", "fail-fast",
-                    "--arithmetic-profile", "release", "--json" },
-                new[] { "validate-native-graph", "missing.trng", "--provider", "provider.trmn",
-                    "--arithmetic-profile", "release", "--json" },
-                new[] { "resolve-native-graph", "missing.trng", "--candidate", "provider.trmn",
-                    "--arithmetic-profile", "release", "--json" },
-                new[] { "run-native-graph", "missing.trng", "--provider", "provider.trmn",
-                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" },
-                new[] { "run-native-graph-jit", "missing.trng", "--provider", "provider.trmn",
-                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" },
+                    "--arithmetic-profile", "release", "--json" ],
+                [ "validate-native-graph", "missing.trng", "--provider", "provider.trmn",
+                    "--arithmetic-profile", "release", "--json" ],
+                [ "resolve-native-graph", "missing.trng", "--candidate", "provider.trmn",
+                    "--arithmetic-profile", "release", "--json" ],
+                [ "run-native-graph", "missing.trng", "--provider", "provider.trmn",
+                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" ],
+                [ "run-native-graph-jit", "missing.trng", "--provider", "provider.trmn",
+                    "--runtime", "fail-fast", "--arithmetic-profile", "release", "--json" ],
             };
             foreach (var arguments in ineligible)
             {
@@ -355,14 +360,14 @@ public sealed partial class CliTests
         var optionPath = Path.Combine(directory, "--arithmetic-profile");
         try
         {
-            await File.WriteAllTextAsync(optionPath, "int32 Main() { return 42; }");
+            await File.WriteAllTextAsync(optionPath, "int32 Main() { return 42; }").ConfigureAwait(false);
             var (positionalExit, positionalOutput, positionalError) = await RunAsync([],
-                ["analyze", "--arithmetic-profile", "--json"], directory);
+                ["analyze", "--arithmetic-profile", "--json"], directory).ConfigureAwait(false);
             Assert.That(positionalExit, Is.Zero, positionalOutput + positionalError);
-            await File.WriteAllTextAsync(optionPath, "int32 Helper() { return 42; }");
+            await File.WriteAllTextAsync(optionPath, "int32 Helper() { return 42; }").ConfigureAwait(false);
             var (sourceExit, sourceOutput, sourceError) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { return Helper(); }"),
-                ["analyze", "-", "--source", "--arithmetic-profile", "--json"], directory);
+                ["analyze", "-", "--source", "--arithmetic-profile", "--json"], directory).ConfigureAwait(false);
             Assert.That(sourceExit, Is.Zero, sourceOutput + sourceError);
         }
         finally
@@ -407,7 +412,7 @@ public sealed partial class CliTests
             """);
         var agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
         var (analysisExit, analysisOutput, analysisError) = await RunAsync(input,
-            "analyze", "-", "--native-lowering-agreement", agreement, "--json");
+            "analyze", "-", "--native-lowering-agreement", agreement, "--json").ConfigureAwait(false);
         Assert.That(analysisExit, Is.Zero, analysisOutput + analysisError);
         Assert.That(analysisError, Is.Empty);
         using (var analysis = JsonDocument.Parse(analysisOutput))
@@ -429,7 +434,7 @@ public sealed partial class CliTests
         {
             var (buildExit, buildOutput, buildError) = await RunAsync(input,
                 "build", "-", "-o", outputPath, "--runtime", "fail-fast",
-                "--native-lowering-agreement", agreement, "--json");
+                "--native-lowering-agreement", agreement, "--json").ConfigureAwait(false);
             Assert.That(buildExit, Is.Zero, buildOutput + buildError);
             Assert.That(buildError, Is.Empty);
             using (var build = JsonDocument.Parse(buildOutput))
@@ -443,7 +448,7 @@ public sealed partial class CliTests
             var (nativeImportExit, nativeImportOutput, nativeImportError) =
                 await RunAsync(input, "build-native-import", "-", "-o", nativeImportPath,
                     "--runtime", "fail-fast", "--native-lowering-agreement",
-                    agreement, "--json");
+                    agreement, "--json").ConfigureAwait(false);
             Assert.That(nativeImportExit, Is.EqualTo(1),
                 nativeImportOutput + nativeImportError);
             Assert.That(nativeImportError, Is.Empty);
@@ -456,7 +461,7 @@ public sealed partial class CliTests
 
             var (jitExit, jitOutput, jitError) = await RunAsync(input,
                 "jit", "-", "--runtime", "fail-fast", "--native-lowering-agreement",
-                agreement, "--json");
+                agreement, "--json").ConfigureAwait(false);
             Assert.That(jitExit, Is.EqualTo(83), jitOutput + jitError);
             Assert.That(jitOutput, Is.Empty);
             Assert.That(jitError, Is.Empty);
@@ -464,7 +469,7 @@ public sealed partial class CliTests
             var (unsupportedBuildExit, unsupportedBuildOutput, unsupportedBuildError) =
                 await RunAsync(unsupportedInput, "build", "-", "-o", unsupportedOutputPath,
                     "--runtime", "fail-fast", "--native-lowering-agreement",
-                    agreement, "--json");
+                    agreement, "--json").ConfigureAwait(false);
             Assert.That(unsupportedBuildExit, Is.EqualTo(1),
                 unsupportedBuildOutput + unsupportedBuildError);
             Assert.That(unsupportedBuildError, Is.Empty);
@@ -478,14 +483,14 @@ public sealed partial class CliTests
             var invalid = new[] {
                 new[] { "analyze", "-", "--native-lowering-agreement",
                     "terrum.experimental.windows-x64.Normal-backing", "--json" },
-                new[] { "analyze", "-", "--native-lowering-agreement", agreement,
-                    "--native-lowering-agreement", agreement, "--json" },
-                new[] { "check", "-", "--native-lowering-agreement", agreement, "--json" },
-                new[] { "analyze", "-", "--corelib", "--native-lowering-agreement",
-                    agreement, "--json" },
-                new[] { "build-library", "-", "--export", "Main", "-o",
+                [ "analyze", "-", "--native-lowering-agreement", agreement,
+                    "--native-lowering-agreement", agreement, "--json" ],
+                ["check", "-", "--native-lowering-agreement", agreement, "--json"],
+                [ "analyze", "-", "--corelib", "--native-lowering-agreement",
+                    agreement, "--json" ],
+                [ "build-library", "-", "--export", "Main", "-o",
                     outputPath, "--runtime", "fail-fast", "--native-lowering-agreement",
-                    agreement, "--json" },
+                    agreement, "--json" ],
             };
             foreach (var arguments in invalid)
             {
@@ -497,6 +502,84 @@ public sealed partial class CliTests
             await TestFileCleanup.DeleteWithRetryAsync(outputPath).ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(nativeImportPath).ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(unsupportedOutputPath).ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task RootlessReferenceAgreementSelectsSourceBuildAndJitAsync()
+    {
+        var input = Encoding.UTF8.GetBytes("""
+            int32 Read(ref<int32> value) { return *value; }
+            int32 Main() {
+                mut int32 local = 41;
+                return Read(ref local);
+            }
+            """);
+        const string agreement
+            = CompilationOptions.WindowsX64RootlessReferencesAgreement;
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"rootless-references-{Guid.NewGuid():N}.exe");
+        var nativeImportPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"rootless-references-native-import-{Guid.NewGuid():N}.exe");
+        try
+        {
+            var (analysisExit, analysisOutput, analysisError)
+                = await RunAsync(input, "analyze", "-",
+                    "--native-lowering-agreement", agreement, "--json").ConfigureAwait(false);
+            Assert.That(analysisExit, Is.Zero,
+                analysisOutput + analysisError);
+            Assert.That(analysisError, Is.Empty);
+            using (var analysis = JsonDocument.Parse(analysisOutput))
+            {
+                Assert.That(analysis.RootElement.GetProperty("success")
+                    .GetBoolean(), Is.True);
+                Assert.That(analysis.RootElement.GetProperty(
+                    "nativeLoweringAgreement").GetString(),
+                    Is.EqualTo(agreement));
+            }
+
+            var (buildExit, buildOutput, buildError)
+                = await RunAsync(input, "build", "-", "-o", outputPath,
+                    "--runtime", "fail-fast",
+                    "--native-lowering-agreement", agreement, "--json").ConfigureAwait(false);
+            Assert.That(buildExit, Is.Zero, buildOutput + buildError);
+            Assert.That(buildError, Is.Empty);
+            Assert.That(
+                await ExecuteNativeImageAsync(outputPath).ConfigureAwait(true),
+                Is.EqualTo(41));
+
+            var (jitExit, jitOutput, jitError) = await RunAsync(input,
+                "jit", "-", "--runtime", "fail-fast",
+                "--native-lowering-agreement", agreement, "--json").ConfigureAwait(false);
+            Assert.That(jitExit, Is.EqualTo(41), jitOutput + jitError);
+            Assert.That(jitOutput, Is.Empty);
+            Assert.That(jitError, Is.Empty);
+
+            AssertUsageError(await RunAsync(input, "analyze", "-",
+                "--native-lowering-agreement",
+                "terrum.experimental.windows-x64.Rootless-references",
+                "--json").ConfigureAwait(false));
+            AssertUsageError(await RunAsync(input, "analyze", "-",
+                "--native-lowering-agreement", agreement,
+                "--native-lowering-agreement", agreement, "--json").ConfigureAwait(false));
+
+            var messageBoxSource = Path.Combine(RepositoryRoot(), "samples",
+                "Win32MessageBox", "message-box.terrum");
+            var (nativeImportExit, nativeImportOutput, nativeImportError)
+                = await RunAsync([], "build-native-import", messageBoxSource,
+                    "-o", nativeImportPath, "--runtime", "fail-fast",
+                    "--native-lowering-agreement", agreement, "--json").ConfigureAwait(false);
+            Assert.That(nativeImportExit, Is.Zero,
+                nativeImportOutput + nativeImportError);
+            Assert.That(nativeImportError, Is.Empty);
+            Assert.That(File.Exists(nativeImportPath), Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(outputPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(nativeImportPath)
+                .ConfigureAwait(true);
         }
     }
 

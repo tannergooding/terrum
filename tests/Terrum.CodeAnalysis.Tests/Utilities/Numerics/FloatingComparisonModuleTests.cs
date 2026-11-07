@@ -4,16 +4,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class FloatingComparisonModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FloatingComparisonModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -34,7 +34,11 @@ public sealed class FloatingComparisonModuleTests
         var compilation = Compilation.Create([comparison, componentTests, verification], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
@@ -50,11 +54,11 @@ public sealed class FloatingComparisonModuleTests
             """);
         foreach (var verifier in verifiers)
         {
-            source.Append("if (!").Append(verifier).AppendLine("()) { return 1; }");
+            _ = source.Append("if (!").Append(verifier).AppendLine("()) { return 1; }");
         }
-        source.AppendLine("return 0;");
-        source.AppendLine("}");
-        source.Append(definitions);
+        _ = source.AppendLine("return 0;");
+        _ = source.AppendLine("}");
+        _ = source.Append(definitions);
         return source.ToString();
     }
 
@@ -122,18 +126,20 @@ public sealed class FloatingComparisonModuleTests
         {
             var verifier = $"VerifyFloat32Batch{verifiers.Count}";
             verifiers.Add(verifier);
-            definitions.Append("bool ").Append(verifier).AppendLine("() {");
+            _ = definitions.Append("bool ").Append(verifier).AppendLine("() {");
             var end = Math.Min(start + 32, pairs.Count);
             for (var index = start; index < end; index++)
             {
-                var pair = pairs[index];
-                var left = BitConverter.Int32BitsToSingle(unchecked((int)pair.Left));
-                var right = BitConverter.Int32BitsToSingle(unchecked((int)pair.Right));
-                AppendCheck(definitions, "CompareFloat32Bits", "uint32", pair.Left.ToString("X8"),
-                    pair.Right.ToString("X8"), GetComparisonResult(left, right));
+                var (Left, Right) = pairs[index];
+                var left = BitConverter.Int32BitsToSingle(unchecked((int)Left));
+                var right = BitConverter.Int32BitsToSingle(unchecked((int)Right));
+                AppendCheck(definitions, "CompareFloat32Bits", "uint32",
+                    Left.ToString("X8", System.Globalization.CultureInfo.InvariantCulture),
+                    Right.ToString("X8", System.Globalization.CultureInfo.InvariantCulture),
+                    GetComparisonResult(left, right));
             }
-            definitions.AppendLine("return true;");
-            definitions.AppendLine("}");
+            _ = definitions.AppendLine("return true;");
+            _ = definitions.AppendLine("}");
         }
     }
 
@@ -146,18 +152,20 @@ public sealed class FloatingComparisonModuleTests
         {
             var verifier = $"VerifyFloat64Batch{verifiers.Count}";
             verifiers.Add(verifier);
-            definitions.Append("bool ").Append(verifier).AppendLine("() {");
+            _ = definitions.Append("bool ").Append(verifier).AppendLine("() {");
             var end = Math.Min(start + 32, pairs.Count);
             for (var index = start; index < end; index++)
             {
-                var pair = pairs[index];
-                var left = BitConverter.Int64BitsToDouble(unchecked((long)pair.Left));
-                var right = BitConverter.Int64BitsToDouble(unchecked((long)pair.Right));
-                AppendCheck(definitions, "CompareFloat64Bits", "uint64", pair.Left.ToString("X16"),
-                    pair.Right.ToString("X16"), GetComparisonResult(left, right));
+                var (Left, Right) = pairs[index];
+                var left = BitConverter.Int64BitsToDouble(unchecked((long)Left));
+                var right = BitConverter.Int64BitsToDouble(unchecked((long)Right));
+                AppendCheck(definitions, "CompareFloat64Bits", "uint64",
+                    Left.ToString("X16", System.Globalization.CultureInfo.InvariantCulture),
+                    Right.ToString("X16", System.Globalization.CultureInfo.InvariantCulture),
+                    GetComparisonResult(left, right));
             }
-            definitions.AppendLine("return true;");
-            definitions.AppendLine("}");
+            _ = definitions.AppendLine("return true;");
+            _ = definitions.AppendLine("}");
         }
     }
 
@@ -169,7 +177,7 @@ public sealed class FloatingComparisonModuleTests
         string rightBits,
         int expected)
     {
-        source.Append("if (").Append(function).Append('(').Append(integerType).Append("(0x").Append(leftBits)
+        _ = source.Append("if (").Append(function).Append('(').Append(integerType).Append("(0x").Append(leftBits)
             .Append("), ").Append(integerType).Append("(0x").Append(rightBits).Append(")) != ")
             .Append(expected).AppendLine(") { return false; }");
     }

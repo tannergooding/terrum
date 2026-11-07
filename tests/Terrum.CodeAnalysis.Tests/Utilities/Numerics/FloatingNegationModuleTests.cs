@@ -5,16 +5,16 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class FloatingNegationModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FloatingNegationModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -34,7 +34,11 @@ public sealed class FloatingNegationModuleTests
         var compilation = Compilation.Create([component, verification], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
@@ -57,8 +61,8 @@ public sealed class FloatingNegationModuleTests
                 bits ^ 0x8000000000000000, ref check);
         }
 
-        source.AppendLine("return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("return 0;");
+        _ = source.AppendLine("}");
         return source.ToString();
     }
 
@@ -72,7 +76,7 @@ public sealed class FloatingNegationModuleTests
     {
         var index = check++;
         var width = type == "uint32" ? 8 : 16;
-        source.Append("if (").Append(function).Append('(').Append(type).Append("(0x")
+        _ = source.Append("if (").Append(function).Append('(').Append(type).Append("(0x")
             .Append(bits.ToString(width == 8 ? "X8" : "X16", CultureInfo.InvariantCulture))
             .Append(")) != ").Append(type).Append("(0x")
             .Append(expected.ToString(width == 8 ? "X8" : "X16", CultureInfo.InvariantCulture))

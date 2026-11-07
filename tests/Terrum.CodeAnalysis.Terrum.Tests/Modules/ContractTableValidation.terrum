@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis;
 
-public static bool TryValidateContractTable(int32 recordCount,
+public static bool TryValidateDevelopmentContractTable(int32 recordCount,
     int32 typeDefCount, int32 methodDefCount, int32 signatureCount,
     int32 paramCount, int32 typeSpecCount)
 {

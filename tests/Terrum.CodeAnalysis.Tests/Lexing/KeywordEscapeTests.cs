@@ -6,20 +6,21 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class KeywordEscapeTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class KeywordEscapeTests
 {
     // Independent vocabulary fixture: do not derive expected permission from the implementation catalog.
-    private const string Vocabulary = "using namespace public internal private struct class interface enum union alias type partial extension extern static operator get set init field this where const void var unique own move mut ref write pin implicit params if else switch default when is some and or not while do for in break continue return yield async await require ensure try catch finally throw defer unsafe policy true false null new via";
+    private const string Vocabulary = "using namespace public internal private struct class interface enum union alias type partial extension extern static operator get set init field this where const void var unique own move mut ref write gc pin implicit params if else switch default when is some and or not while do for in break continue return yield async await require ensure try catch finally throw defer unsafe policy true false null new via";
 
     public static IEnumerable<object[]> Keywords => Vocabulary.Split(' ').Select(word => new object[] { word });
     [TestCaseSource(nameof(Keywords))]
@@ -45,9 +46,10 @@ public sealed class KeywordEscapeTests
     public async Task NativeScannerRecognizesTheIndependentCatalogAndBoundaryCasesAsync()
     {
         var words = Vocabulary.Split(' ');
-        Assert.That(IdentifierName.EscapableKeywords, Is.EqualTo(words));
-        await ScannerTests.CheckScannerAsync(string.Join(' ', words.Select(word => "@" + word)));
-        await ScannerTests.CheckScannerAsync("@ @ await @_ @ordinaryName @int32 @out @foreach @abstract @Await @await_ @await\u0301 @await\u200C @aw\u0061it @\U00010400 @a\u00E9 @ae\u0301 @\uD800 /* trailing */ @// line\nawait");
+        Assert.That(IdentifierName.EscapableKeywords.ToArray(),
+            Is.EqualTo(words));
+        await ScannerTests.CheckScannerAsync(string.Join(' ', words.Select(word => "@" + word))).ConfigureAwait(false);
+        await ScannerTests.CheckScannerAsync("@ @ await @_ @ordinaryName @int32 @out @foreach @abstract @Await @await_ @await\u0301 @await\u200C @aw\u0061it @\U00010400 @a\u00E9 @ae\u0301 @\uD800 /* trailing */ @// line\nawait").ConfigureAwait(false);
     }
     [TestCase("@ordinaryName")]
     [TestCase("@int32")]
@@ -96,7 +98,7 @@ public sealed class KeywordEscapeTests
     public async Task ManyInvalidEscapesAdaptWithAllDiagnosticsAsync()
     {
         var source = string.Join(' ', Enumerable.Repeat("@ordinaryName", 256));
-        await ScannerTests.CheckScannerAsync(source);
+        await ScannerTests.CheckScannerAsync(source).ConfigureAwait(false);
     }
     [TestCase("int32 Main() { int32 @const = 42; return const; }")]
     [TestCase("int32 Main() { int32 const = 42; return @const; }")]
@@ -111,7 +113,11 @@ public sealed class KeywordEscapeTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
     [TestCase("int32 Main(int32 const, int32 @const) { return 0; }","TRM3004")]
     [TestCase("int32 Main() { int32 const = 0; int32 @const = 1; return 0; }","TRM3004")]
@@ -156,7 +162,11 @@ public sealed class KeywordEscapeTests
                     .Replace("@await<@class>", "@await", StringComparison.Ordinal);
             var compilation = Compilation.Create(SyntaxTree.Parse(selected));
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), NativeRuntimePolicy.FailFast), Is.EqualTo(46));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = compilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), NativeRuntimePolicy.FailFast), Is.EqualTo(46));
         }
     }
     [TestCase(false)]
@@ -203,21 +213,21 @@ public sealed class KeywordEscapeTests
         }
         if (duplicate)
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         }
         else
         {
             var program = ScalarFrontendHost.BindLibrary(source, bytes, BoundRuntimePolicy.FailFast);
             Assert.That(global::System.Linq.Enumerable.Single(program.Functions).Name, Is.EqualTo("await"));
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("@const", "@int32", StringComparison.Ordinal)), bytes));
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("const;", "await;", StringComparison.Ordinal)), bytes));
         }
 
         void Node(int index, int start, int length, int slot)
         {
-            var offset = 42 + index * 8;
+            var offset = 42 + (index * 8);
             words[offset] = 0;
             words[offset + 1] = 1;
             words[offset + 2] = start;
@@ -254,35 +264,64 @@ public sealed class KeywordEscapeTests
         words[24] = 1;
         words[25] = binary ? 2 : 0;
         words[26] = text.IndexOf("const", text.IndexOf("return", StringComparison.Ordinal), StringComparison.Ordinal);
-        words[27] = text.IndexOf(';', words[26]) - words[26];
+        words[27] = text.IndexOf(';', words[26], System.StringComparison.Ordinal) - words[26];
         var bytes = new byte[words.Length * 4];
         for (var index = 0; index < words.Length; index++)
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4), words[index]);
         }
         var program = ScalarFrontendHost.BindLibrary(SourceText.From(text), bytes, BoundRuntimePolicy.FailFast);
-        var body = ((global::System.Func<BoundBlock>)(() => { var __nunitActual2 = global::System.Linq.Enumerable.Single(program.Functions).Body; Assert.That(__nunitActual2, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual2!; }))();
-        var expression = ((global::System.Func<BoundReturn>)(() => { var __nunitActual3 = global::System.Linq.Enumerable.Single(body.Statements); Assert.That(__nunitActual3, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual3!; }))().Value;
+        var body = ((global::System.Func<BoundBlock>)(() => {
+            var __nunitActual2 = global::System.Linq.Enumerable.Single(program.Functions).Body;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundBlock>());
+            return (BoundBlock)__nunitActual2!;
+        }))();
+        var expression = ((global::System.Func<BoundReturn>)(() => {
+            var __nunitActual3 = global::System.Linq.Enumerable.Single(body.Statements);
+            Assert.That(__nunitActual3, Is.TypeOf<BoundReturn>());
+            return (BoundReturn)__nunitActual3!;
+        }))().Value;
         if (binary)
         {
-            var sum = ((global::System.Func<BoundBinary>)(() => { var __nunitActual4 = expression; Assert.That(__nunitActual4, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual4!; }))();
+            var sum = ((global::System.Func<BoundBinary>)(() => {
+                var __nunitActual4 = expression;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundBinary>());
+                return (BoundBinary)__nunitActual4!;
+            }))();
             Assert.That(text.Substring(sum.Left.Span.Start, sum.Left.Span.Length), Is.EqualTo("const"));
             Assert.That(text.Substring(sum.Right.Span.Start, sum.Right.Span.Length), Is.EqualTo("@some"));
         }
         else
         {
-            var read = ((global::System.Func<BoundRead>)(() => { var __nunitActual5 = expression; Assert.That(__nunitActual5, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual5!; }))();
+            var read = ((global::System.Func<BoundRead>)(() => {
+                var __nunitActual5 = expression;
+                Assert.That(__nunitActual5, Is.TypeOf<BoundRead>());
+                return (BoundRead)__nunitActual5!;
+            }))();
             Assert.That(text.Substring(read.Span.Start, read.Span.Length), Is.EqualTo("const"));
         }
     }
     [TestCase("@if (true) { return 42; }")]
     [TestCase("@const 42;")]
-    [TestCase("if (value is @some present) { return 42; }")]
     public void EscapingSuppressesKeywordPositions(string body)
     {
         var tree = SyntaxTree.Parse("int32 Main() { " + body + " return 0; }");
         Assert.That(tree.Diagnostics, Is.Not.Empty);
     }
+
+    [Test]
+    public void EscapingContextualSomeUsesOrdinaryPatternGrammar()
+    {
+        const string source = "int32 Main() { if (value is @some present) { return 42; } return 0; }";
+        var tree = SyntaxTree.Parse(source);
+
+        Assert.That(tree.Diagnostics, Is.Empty, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.DescendantNodes().Any(static node =>
+            node.Kind == SyntaxKind.IsPatternExpression), Is.True);
+        Assert.That(tree.Root.DescendantNodes().Any(static node =>
+            node.Kind == SyntaxKind.IsSomeExpression), Is.False);
+    }
+
     [TestCase("@ordinaryName")]
     [TestCase("@ await")]
     [TestCase("@int32")]
@@ -298,7 +337,7 @@ public sealed class KeywordEscapeTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes, (int)TokenKind.Identifier);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), text.Length);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), text.Length);
-        Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(source, 2, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(source, 2, bytes));
     }
 
     [Test]
@@ -309,10 +348,10 @@ public sealed class KeywordEscapeTests
             (int)TokenKind.EndOfFile, 6, 0]);
         var diagnostics = Words([1, 1, 0, 1]);
         Assert.That(ScannerHost.ReadTokens(source, 3, tokens).Length, Is.EqualTo(3));
-        Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 3, tokens, Words([0]), diagnostics));
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadLexResult(source, 3, tokens, Words([0]), diagnostics));
         var incomplete = Words([(int)TokenKind.Identifier, 0, 6, (int)TokenKind.Identifier, 6, 1,
             (int)TokenKind.EndOfFile, 7, 0]);
-        Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(SourceText.From("@await_"), 3, incomplete));
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(SourceText.From("@await_"), 3, incomplete));
 
         static byte[] Words(int[] words)
         {
@@ -330,10 +369,14 @@ public sealed class KeywordEscapeTests
     {
         BoundProgram Producer(string name)
         {
-            var namespaceName = name.StartsWith('@') ? "@some" : "some";
+            var namespaceName = name.StartsWith('@', System.StringComparison.Ordinal) ? "@some" : "some";
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"namespace {namespaceName}; public int32 {name}() {{ return 42; }}"), (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            return ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+            return ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual6 = compilation.Program;
+                Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual6!;
+            }))();
         }
         var escaped = Producer("@const");
         var ordinary = Producer("const");
@@ -342,14 +385,22 @@ public sealed class KeywordEscapeTests
         const string Client = "using some; int32 Main() { return const(); }";
         var client = Compilation.Create(SyntaxTree.Parse(Client), ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = client.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = client.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy), Is.EqualTo(42));
         var nativeProducer = NativeModuleCompiler.CreateProducer(escaped, ["some.const"], "KeywordEscapes", policy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(ordinary, ["some.const"], "KeywordEscapes", policy);
         var nativeClient = Compilation.Create(SyntaxTree.Parse(Client),
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), (BoundRuntimePolicy)policy);
         Assert.That(nativeClient.HasErrors, Is.False, string.Join(Environment.NewLine, nativeClient.Diagnostics));
-        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = nativeClient.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), [nativeProducer], policy);
-        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement], TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = nativeClient.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))(), [nativeProducer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement], TimeSpan.FromSeconds(10), policy).ConfigureAwait(false), Is.EqualTo(42));
     }
 }

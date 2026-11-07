@@ -4,20 +4,20 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
-using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task CheckedJitApphostCatchesAndReportsUnhandledFailuresUnderCetAsync()
     {
         var apphost = GraphJitApphostPath();
-        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+
+        _ = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var source = Path.Combine(TestArtifactPaths.DirectoryPath, "checked-jit-apphost-"
             + Guid.NewGuid().ToString("N") + ".terrum");
@@ -28,7 +28,7 @@ public sealed partial class CliTests
                 ("require false; return 0;", unchecked((int)0xE0540003)),
             })
             {
-                await File.WriteAllTextAsync(source, "int32 Main() { " + body + " }");
+                await File.WriteAllTextAsync(source, "int32 Main() { " + body + " }").ConfigureAwait(false);
                 var start = new ProcessStartInfo(apphost) {
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -43,12 +43,12 @@ public sealed partial class CliTests
                 var error = process.StandardError.ReadToEndAsync();
                 try
                 {
-                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
                 }
                 catch (TimeoutException)
                 {
                     process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync();
+                    await process.WaitForExitAsync().ConfigureAwait(false);
                     throw;
                 }
                 Assert.That(process.ExitCode, Is.EqualTo(expected));
@@ -83,21 +83,21 @@ public sealed partial class CliTests
                     require buffer.TryAppend(2);
                     return move buffer;
                 }
-                """);
+                """).ConfigureAwait(false);
             await File.WriteAllTextAsync(middleSource,
-                "public OwnedInt32Buffer Forward() { return Build(); }");
+                "public OwnedInt32Buffer Forward() { return Build(); }").ConfigureAwait(false);
             await File.WriteAllTextAsync(rootSource,
-                "int32 Main() { OwnedInt32Buffer value = Forward(); return value.Read(0) + value.Read(1); }");
+                "int32 Main() { OwnedInt32Buffer value = Forward(); return value.Read(0) + value.Read(1); }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "Leaf",
-                "--export", "Build", "-o", leaf, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Build", "-o", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "producer", middleSource, "Middle",
-                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,
-                "--provider", middle, "-o", root, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--provider", middle, "-o", root, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph", root,
-                "--provider", middle, "--provider", leaf, "--runtime", policy)).ExitCode, Is.EqualTo(42));
+                "--provider", middle, "--provider", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             var (jitExit, jitOutput, jitError) = await RunAsync([], "run-native-graph-jit", root,
-                "--provider", leaf, "--provider", middle, "--runtime", policy);
+                "--provider", leaf, "--provider", middle, "--runtime", policy).ConfigureAwait(false);
             Assert.That(jitExit == 42, Is.True, $"Expected 42, got {jitExit}: stdout: {jitOutput}; stderr: {jitError}");
         }
         finally
@@ -123,30 +123,30 @@ public sealed partial class CliTests
             await File.WriteAllTextAsync(leafSource, """
                 [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Child {
                     public int32 Value;
-                    [NoThrow] public Child(int32 value) { Value = value; }
-                    [NoThrow] [Cleanup] public void Close() {}
+                     public Child(int32 value) { Value = value; }
+                     [Cleanup] public void Close() {}
                 }
                 [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Parent {
                     public Child Owned;
-                    [NoThrow] public Parent(int32 value) { Owned = new Child(value); }
+                     public Parent(int32 value) { Owned = new Child(value); }
                 }
                 public Parent Make() { return new Parent(40); }
-                """);
-            await File.WriteAllTextAsync(middleSource, "public Parent Forward() { return Make(); }");
+                """).ConfigureAwait(false);
+            await File.WriteAllTextAsync(middleSource, "public Parent Forward() { return Make(); }").ConfigureAwait(false);
             await File.WriteAllTextAsync(rootSource, policy == "checked-exceptions"
                 ? "int32 Main() { unsafe { try { Parent value = Forward(); require false; } "
                     + "catch { return 42; } } return 0; }"
-                : "int32 Main() { Parent value = Forward(); return value.Owned.Value + 2; }");
+                : "int32 Main() { Parent value = Forward(); return value.Owned.Value + 2; }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "Leaf",
-                "--export", "Make", "--export", "Child.Close", "-o", leaf, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Make", "--export", "Child.Close", "-o", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "producer", middleSource, "Middle",
-                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,
-                "--provider", middle, "--provider", leaf, "-o", root, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--provider", middle, "--provider", leaf, "-o", root, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph", root,
-                "--provider", middle, "--provider", leaf, "--runtime", policy)).ExitCode, Is.EqualTo(42));
+                "--provider", middle, "--provider", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
-                "--provider", leaf, "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(42));
+                "--provider", leaf, "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
         }
         finally
         {
@@ -171,59 +171,59 @@ public sealed partial class CliTests
         {
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(fixture, "owned-leaf.terrum"), "Leaf", "--export", "Make",
-                "--export", "Ticket.Close", "-o", leaf, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Ticket.Close", "-o", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "producer",
                 Path.Combine(fixture, "owned-middle.terrum"), "Middle", "--provider", leaf,
-                "--export", "Forward", "--export", "TryForward", "-o", middle, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Forward", "--export", "TryForward", "-o", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer",
                 Path.Combine(fixture, "owned-consumer.terrum"), "--provider", middle,
-                "--provider", leaf, "-o", root, "--runtime", policy)).ExitCode, Is.EqualTo(0));
-            var originalRoot = await File.ReadAllBytesAsync(root);
-            var originalMiddle = await File.ReadAllBytesAsync(middle);
+                "--provider", leaf, "-o", root, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            var originalRoot = await File.ReadAllBytesAsync(root).ConfigureAwait(false);
+            var originalMiddle = await File.ReadAllBytesAsync(middle).ConfigureAwait(false);
             Assert.That((await RunAsync([], "run-native-graph", root, "--provider", middle,
-                "--provider", leaf, "--runtime", policy)).ExitCode, Is.EqualTo(42));
+                "--provider", leaf, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             Assert.That((await RunAsync([], "run-native-graph-jit", root, "--provider", leaf,
-                "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(42));
+                "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             var (apphostOriginal, originalError) = await RunGraphJitApphostAsync(
-                "run-native-graph-jit", root, "--provider", middle, "--provider", leaf, "--runtime", policy);
+                "run-native-graph-jit", root, "--provider", middle, "--provider", leaf, "--runtime", policy).ConfigureAwait(false);
             Assert.That(apphostOriginal, Is.EqualTo(42));
             Assert.That(originalError, Is.Empty);
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(fixture, "owned-leaf-replacement.terrum"), "Leaf", "--export", "Make",
-                "--export", "Ticket.Close", "-o", replacement, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Ticket.Close", "-o", replacement, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph", root, "--provider", replacement,
-                "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(44));
+                "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(44));
             Assert.That((await RunAsync([], "run-native-graph-jit", root, "--provider", middle,
-                "--provider", replacement, "--runtime", policy)).ExitCode, Is.EqualTo(44));
+                "--provider", replacement, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(44));
             var (apphostReplacement, replacementError) = await RunGraphJitApphostAsync(
-                "run-native-graph-jit", root, "--provider", replacement, "--provider", middle, "--runtime", policy);
+                "run-native-graph-jit", root, "--provider", replacement, "--provider", middle, "--runtime", policy).ConfigureAwait(false);
             Assert.That(apphostReplacement, Is.EqualTo(44));
             Assert.That(replacementError, Is.Empty);
-            Assert.That(await File.ReadAllBytesAsync(root), Is.EqualTo(originalRoot));
-            Assert.That(await File.ReadAllBytesAsync(middle), Is.EqualTo(originalMiddle));
+            Assert.That(await File.ReadAllBytesAsync(root).ConfigureAwait(false), Is.EqualTo(originalRoot));
+            Assert.That(await File.ReadAllBytesAsync(middle).ConfigureAwait(false), Is.EqualTo(originalMiddle));
 
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
-                "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(1));
+                "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(1));
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
                 "--provider", replacement, "--provider", replacement, "--provider", middle,
-                "--runtime", policy)).ExitCode, Is.EqualTo(1));
+                "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(1));
             var incompatibleSource = Path.Combine(directory, "incompatible.terrum");
             var incompatible = Path.Combine(directory, "incompatible.trmn");
-            var originalSource = await File.ReadAllTextAsync(Path.Combine(fixture, "owned-leaf.terrum"));
+            var originalSource = await File.ReadAllTextAsync(Path.Combine(fixture, "owned-leaf.terrum")).ConfigureAwait(false);
             await File.WriteAllTextAsync(incompatibleSource,
                 originalSource.Replace("public int32 Value;", "public int64 Value;", StringComparison.Ordinal)
-                    .Replace("Value = value;", "Value = int64(value);", StringComparison.Ordinal));
+                    .Replace("Value = value;", "Value = int64(value);", StringComparison.Ordinal)).ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", incompatibleSource, "Leaf",
                 "--export", "Make", "--export", "Ticket.Close", "-o", incompatible,
-                "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
-                "--provider", incompatible, "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(1));
+                "--provider", incompatible, "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(1));
             var damaged = Path.Combine(directory, "damaged.trmn");
-            var bytes = await File.ReadAllBytesAsync(replacement);
+            var bytes = await File.ReadAllBytesAsync(replacement).ConfigureAwait(false);
             bytes[^1] ^= 1;
-            await File.WriteAllBytesAsync(damaged, bytes);
+            await File.WriteAllBytesAsync(damaged, bytes).ConfigureAwait(false);
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
-                "--provider", damaged, "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(1));
+                "--provider", damaged, "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(1));
         }
         finally
         {
@@ -245,19 +245,19 @@ public sealed partial class CliTests
             "..", "..", "..", "..", "..", ".."));
         try
         {
-            await File.WriteAllTextAsync(rootSource, "int32 Main() { int32 n = Leaf(); " + body + " }");
+            await File.WriteAllTextAsync(rootSource, "int32 Main() { int32 n = Leaf(); " + body + " }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(repository, "samples", "DependencyGraphServicing", "leaf.terrum"),
                 "NodeB", "--export", "Leaf", "-o", leaf,
-                "--runtime", "checked-exceptions")).ExitCode, Is.EqualTo(0));
+                "--runtime", "checked-exceptions").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,
-                "--provider", leaf, "-o", root, "--runtime", "checked-exceptions")).ExitCode, Is.EqualTo(0));
+                "--provider", leaf, "-o", root, "--runtime", "checked-exceptions").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph", root,
-                "--provider", leaf, "--runtime", "checked-exceptions")).ExitCode, Is.EqualTo(expected));
+                "--provider", leaf, "--runtime", "checked-exceptions").ConfigureAwait(false)).ExitCode, Is.EqualTo(expected));
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
-                "--provider", leaf, "--runtime", "checked-exceptions")).ExitCode, Is.EqualTo(expected));
+                "--provider", leaf, "--runtime", "checked-exceptions").ConfigureAwait(false)).ExitCode, Is.EqualTo(expected));
             var (apphostExit, apphostError) = await RunGraphJitApphostAsync(
-                "run-native-graph-jit", root, "--provider", leaf, "--runtime", "checked-exceptions");
+                "run-native-graph-jit", root, "--provider", leaf, "--runtime", "checked-exceptions").ConfigureAwait(false);
             Assert.That(apphostExit, Is.EqualTo(expected));
             Assert.That(apphostError, Is.Empty);
         }
@@ -284,36 +284,36 @@ public sealed partial class CliTests
         {
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(fixtures, "scoped-view-leaf.terrum"), "NodeB", "--export", "Leaf",
-                "-o", original, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "-o", original, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "producer",
                 Path.Combine(fixtures, "middle.terrum"), "NodeA", "--provider", original,
-                "--export", "Middle", "-o", middle, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Middle", "-o", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer",
                 Path.Combine(fixtures, "consumer.terrum"), "--provider", middle,
-                "-o", root, "--runtime", policy)).ExitCode, Is.EqualTo(0));
-            var originalRoot = await File.ReadAllBytesAsync(root);
-            var originalMiddle = await File.ReadAllBytesAsync(middle);
+                "-o", root, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            var originalRoot = await File.ReadAllBytesAsync(root).ConfigureAwait(false);
+            var originalMiddle = await File.ReadAllBytesAsync(middle).ConfigureAwait(false);
             Assert.That((await RunAsync([], "run-native-graph-jit", root,
-                "--provider", original, "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(42));
+                "--provider", original, "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(fixtures, "scoped-view-leaf-replacement.terrum"), "NodeB",
-                "--export", "Leaf", "-o", replacement, "--runtime", policy)).ExitCode, Is.EqualTo(0));
-            Assert.That(NativeModuleCompiler.Inspect(await File.ReadAllBytesAsync(replacement))
+                "--export", "Leaf", "-o", replacement, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            Assert.That(NativeModuleCompiler.Inspect(await File.ReadAllBytesAsync(replacement).ConfigureAwait(false))
                 .NativeProfileVersion, Is.EqualTo("native-16"));
             Assert.That((await RunAsync([], "validate-native-graph", root,
-                "--provider", middle, "--provider", replacement)).ExitCode, Is.EqualTo(0));
+                "--provider", middle, "--provider", replacement).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph", root,
-                "--provider", replacement, "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(44));
+                "--provider", replacement, "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(44));
             var (jitExit, jitOutput, jitError) = await RunAsync([], "run-native-graph-jit", root,
-                "--provider", middle, "--provider", replacement, "--runtime", policy);
+                "--provider", middle, "--provider", replacement, "--runtime", policy).ConfigureAwait(false);
             Assert.That(jitExit == 44, Is.True, $"Expected 44, got {jitExit}: stdout: {jitOutput}; stderr: {jitError}");
             var (apphostExit, apphostError) = await RunGraphJitApphostAsync(
                 "run-native-graph-jit", root, "--provider", replacement, "--provider", middle,
-                "--runtime", policy);
+                "--runtime", policy).ConfigureAwait(false);
             Assert.That(apphostExit == 44, Is.True, $"Expected 44, got {apphostExit}: {apphostError}");
             Assert.That(apphostError, Is.Empty);
-            Assert.That(await File.ReadAllBytesAsync(root), Is.EqualTo(originalRoot));
-            Assert.That(await File.ReadAllBytesAsync(middle), Is.EqualTo(originalMiddle));
+            Assert.That(await File.ReadAllBytesAsync(root).ConfigureAwait(false), Is.EqualTo(originalRoot));
+            Assert.That(await File.ReadAllBytesAsync(middle).ConfigureAwait(false), Is.EqualTo(originalMiddle));
         }
         finally
         {

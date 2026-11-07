@@ -4,6 +4,22 @@ public static bool TryValidateMethodSigParamTables(int32 recordCount,
     int32 paramCount, int32 genericParamCount, int32 typeSpecCount,
     int32 typeDefCount, int32 importCount)
 {
+    return TryValidateMethodSigParamTablesCore(recordCount, paramCount,
+        genericParamCount, typeSpecCount, typeDefCount, importCount, false);
+}
+
+public static bool TryValidateDevelopmentMethodSigParamTables(int32 recordCount,
+    int32 paramCount, int32 genericParamCount, int32 typeSpecCount,
+    int32 typeDefCount, int32 importCount)
+{
+    return TryValidateMethodSigParamTablesCore(recordCount, paramCount,
+        genericParamCount, typeSpecCount, typeDefCount, importCount, true);
+}
+
+bool TryValidateMethodSigParamTablesCore(int32 recordCount,
+    int32 paramCount, int32 genericParamCount, int32 typeSpecCount,
+    int32 typeDefCount, int32 importCount, bool developmentProfile)
+{
     if (recordCount <= 0 || recordCount > 0xFF_FFFF
         || !IsValidMethodTableCount(paramCount)
         || !IsValidMethodTableCount(genericParamCount)
@@ -71,11 +87,14 @@ public static bool TryValidateMethodSigParamTables(int32 recordCount,
             || !TryReadMethodSigParamParameterWord(rowStart, 4, init var ordinal)
             || ordinal != uint32(row) - cachedFirst
             || !TryReadMethodSigParamParameterWord(rowStart, 8, init var type)
-            || type == 0 || type > uint32(typeSpecCount)
+            || !TryValidateMethodSigParamType(type, typeSpecCount)
             || !TryReadMethodSigParamParameterByte(rowStart + 12, init var mode)
-            || mode > 4
+            || (developmentProfile ? mode > 4 : mode != 0)
             || !TryReadMethodSigParamParameterByte(rowStart + 13, init var flags)
-            || flags != 0
+            || (developmentProfile
+                ? flags != 0
+                : flags > 1 || (flags == 1
+                    && !IsImplicitReadonlyReference(type, typeSpecCount)))
             || !TryReadMethodSigParamParameterByte(rowStart + 14, init var reservedFirst)
             || reservedFirst != 0
             || !TryReadMethodSigParamParameterByte(rowStart + 15, init var reservedSecond)
@@ -87,6 +106,51 @@ public static bool TryValidateMethodSigParamTables(int32 recordCount,
 
     // Row ownership plus the equal range total proves Param ranges partition the table.
     return true;
+}
+
+bool TryValidateMethodSigParamType(uint32 typeSpecRef, int32 typeSpecCount)
+{
+    if (typeSpecRef == 0)
+    {
+        return false;
+    }
+
+    return (typeSpecRef >> 24) == 0
+        ? typeSpecRef <= uint32(typeSpecCount)
+        : TryValidateInlineTypeSpecRef(typeSpecRef, false);
+}
+
+bool IsImplicitReadonlyReference(uint32 typeSpecRef, int32 typeSpecCount)
+{
+    if ((typeSpecRef >> 24) == 0xF3)
+    {
+        return ((typeSpecRef >> 16) & 0xFF) == 0
+            && ((typeSpecRef >> 8) & 0xFF) == 0x8B;
+    }
+
+    if (typeSpecRef == 0 || typeSpecRef > uint32(typeSpecCount)
+        || !TryGetTypeSpecRowExtent(typeSpecCount, int32(typeSpecRef),
+            init var rowStart, init var rowLength)
+        || !TryReadTypeSpecByte(rowStart, rowLength, 0, init var form)
+        || !TryReadTypeSpecByte(rowStart, rowLength, 1, init var qualifiers)
+        || qualifiers != 0)
+    {
+        return false;
+    }
+
+    if (form == 0x07)
+    {
+        return true;
+    }
+    if ((form == 1 || form == 0x0C)
+        && rowLength == (form == 1 ? 4 : 7)
+        && TryReadTypeSpecByte(rowStart, rowLength,
+            form == 1 ? 2 : 2, init var familyCode))
+    {
+        return familyCode == 0x8B;
+    }
+
+    return false;
 }
 
 bool TryReadMethodSigParamSignatureWord(int32 rowStart, int32 offset, init ref<uint32> value)

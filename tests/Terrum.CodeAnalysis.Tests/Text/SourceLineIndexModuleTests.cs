@@ -3,19 +3,20 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Text;
 
-public sealed class SourceLineIndexModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class SourceLineIndexModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -97,14 +98,20 @@ public sealed class SourceLineIndexModuleTests
             }
             """, "source-line-index-module.terrum");
         var sample = "a\r\nb\rc\nd";
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees,
         [
             new HostBuffer("Source", PrimitiveType.Char16, [.. sample.Select(static unit => (int)unit)], false) {
                 IsInvocationScoped = true,
             },
-        ], policy);
+        ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             [
                 "Terrum.CodeAnalysis.GetIndexedLineCount",
                 "Terrum.CodeAnalysis.GetIndexedLineRange",
@@ -129,16 +136,21 @@ public sealed class SourceLineIndexModuleTests
         };
         var maximumLineCount = fixtures.Max(static text => SourceText.From(text).Lines.Length);
         var maximumSourceLength = fixtures.Max(static text => text.Length);
-        var consumers = new BoundProgram[maximumLineCount * 2 + 1];
+        var consumers = new BoundProgram[(maximumLineCount * 2) + 1];
         BoundProgram CreateConsumer(string body)
         {
             var consumerTree = SyntaxTree.Parse($$"""
                 namespace Terrum.CodeAnalysis;
                 int32 Main() { {{body}} }
                 """, "source-line-index-consumer.terrum");
-            var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
+            var consumerCompilation = Compilation.Create(consumerTree,
+                ModuleCompiler.CreateReference(producer), options);
             Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-            var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
             return ModuleCompiler.Link(consumer, producer);
         }
 
@@ -207,9 +219,9 @@ public sealed class SourceLineIndexModuleTests
                     ? PackRange(source.Lines[line].SpanIncludingLineBreak)
                     : -2;
                 var content = line < source.Lines.Length ? PackRange(source.Lines[line].Span) : -2;
-                Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[line * 2 + 1],
+                Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[(line * 2) + 1],
                     [grant], (NativeRuntimePolicy)policy), Is.EqualTo(includingBreak));
-                Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[line * 2 + 2],
+                Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[(line * 2) + 2],
                     [grant], (NativeRuntimePolicy)policy), Is.EqualTo(content));
             }
             for (var query = 0; query < positionInputs.Length; query++)
@@ -223,8 +235,8 @@ public sealed class SourceLineIndexModuleTests
             }
             for (var query = 0; query < offsetInputs.Count; query++)
             {
-                var input = offsetInputs[query];
-                var expectedOffset = source.TryGetOffset(input.Line, input.Character, out var offset)
+                var (Line, Character) = offsetInputs[query];
+                var expectedOffset = source.TryGetOffset(Line, Character, out var offset)
                     ? offset
                     : -1;
                 Assert.That(NativeJit.ExecuteWithSourceGrant(offsetConsumers[query],
@@ -242,9 +254,9 @@ public sealed class SourceLineIndexModuleTests
         Assert.That(NativeJit.ExecuteWithSourceGrant(maximumCrLfConsumer, [maximumCrLfGrant], (NativeRuntimePolicy)policy), Is.EqualTo(SourceText.From(maximumCrLfSource).Lines.Length));
     }
 
-    private static int PackRange(TextSpan range) => range.Start * 256 + range.Length;
+    private static int PackRange(TextSpan range) => (range.Start * 256) + range.Length;
 
-    private static int PackPosition(LinePosition position) => position.Line * 256 + position.Character;
+    private static int PackPosition(LinePosition position) => (position.Line * 256) + position.Character;
 
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

@@ -176,7 +176,7 @@ public sealed class Lexer
             trivia.Add(new SyntaxTrivia(kind, span, _source.GetSubText(span)));
         }
 
-        return trivia?.ToImmutable() ?? ImmutableArray<SyntaxTrivia>.Empty;
+        return trivia?.ToImmutable() ?? [];
     }
 
     private void ReadBlockComment(int start, int slashCount)
@@ -849,7 +849,7 @@ public sealed class Lexer
         }
 
         if (validFloatMantissa && digitCount != 0 && floatIndex < _source.Length
-            && _source[floatIndex] is ('p' or 'P'))
+            && _source[floatIndex] is 'p' or 'P')
         {
             var exponentIndex = floatIndex + 1;
             if (exponentIndex < _source.Length && _source[exponentIndex] is '+' or '-')
@@ -1143,7 +1143,7 @@ public sealed class Lexer
     }
 
     private ImmutableArray<Diagnostic> GetDiagnostics() =>
-        _diagnostics?.ToImmutable() ?? ImmutableArray<Diagnostic>.Empty;
+        _diagnostics?.ToImmutable() ?? [];
 
     private static TokenKind Keyword(ReadOnlySpan<char> text) => text switch {
         "_" => TokenKind.Underscore,

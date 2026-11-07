@@ -5,16 +5,16 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class FloatingFormatConversionModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FloatingFormatConversionModuleTests
 {
     [TestCase(true,BoundRuntimePolicy.FailFast)]
     [TestCase(true,BoundRuntimePolicy.CheckedExceptions)]
@@ -39,7 +39,11 @@ public sealed class FloatingFormatConversionModuleTests
         var compilation = Compilation.Create([component, verification], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var result = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
         Assert.That(result == 0, Is.True, $"Floating conversion fixture {result} failed.");
     }
@@ -68,8 +72,8 @@ public sealed class FloatingFormatConversionModuleTests
             }
         }
 
-        source.AppendLine("return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("return 0;");
+        _ = source.AppendLine("}");
         return source.ToString();
     }
 
@@ -83,9 +87,9 @@ public sealed class FloatingFormatConversionModuleTests
         if (float.IsNaN(value))
         {
             var result = "result" + index.ToString(CultureInfo.InvariantCulture);
-            source.Append("uint64 ").Append(result).Append(" = Float32BitsToFloat64Bits(uint32(0x")
+            _ = source.Append("uint64 ").Append(result).Append(" = Float32BitsToFloat64Bits(uint32(0x")
                 .Append(bits.ToString("X8", CultureInfo.InvariantCulture)).AppendLine("));");
-            source.Append("if ((").Append(result).Append(" & uint64(0x7FF0000000000000))")
+            _ = source.Append("if ((").Append(result).Append(" & uint64(0x7FF0000000000000))")
                 .Append(" != uint64(0x7FF0000000000000) || (").Append(result)
                 .Append(" & uint64(0x000FFFFFFFFFFFFF)) == 0) { return ")
                 .Append(index).AppendLine("; }");
@@ -93,7 +97,7 @@ public sealed class FloatingFormatConversionModuleTests
         }
 
         var expected = unchecked((ulong)BitConverter.DoubleToInt64Bits((double)value));
-        source.Append("if (Float32BitsToFloat64Bits(uint32(0x")
+        _ = source.Append("if (Float32BitsToFloat64Bits(uint32(0x")
             .Append(bits.ToString("X8", CultureInfo.InvariantCulture))
             .Append(")) != uint64(0x")
             .Append(expected.ToString("X16", CultureInfo.InvariantCulture))
@@ -110,9 +114,9 @@ public sealed class FloatingFormatConversionModuleTests
         if (double.IsNaN(value))
         {
             var result = "result" + index.ToString(CultureInfo.InvariantCulture);
-            source.Append("uint32 ").Append(result).Append(" = Float64BitsToFloat32Bits(uint64(0x")
+            _ = source.Append("uint32 ").Append(result).Append(" = Float64BitsToFloat32Bits(uint64(0x")
                 .Append(bits.ToString("X16", CultureInfo.InvariantCulture)).AppendLine("));");
-            source.Append("if ((").Append(result).Append(" & uint32(0x7F800000))")
+            _ = source.Append("if ((").Append(result).Append(" & uint32(0x7F800000))")
                 .Append(" != uint32(0x7F800000) || (").Append(result)
                 .Append(" & uint32(0x007FFFFF)) == 0) { return ")
                 .Append(index).AppendLine("; }");
@@ -120,7 +124,7 @@ public sealed class FloatingFormatConversionModuleTests
         }
 
         var expected = unchecked((uint)BitConverter.SingleToInt32Bits((float)value));
-        source.Append("if (Float64BitsToFloat32Bits(uint64(0x")
+        _ = source.Append("if (Float64BitsToFloat32Bits(uint64(0x")
             .Append(bits.ToString("X16", CultureInfo.InvariantCulture))
             .Append(")) != uint32(0x")
             .Append(expected.ToString("X8", CultureInfo.InvariantCulture))

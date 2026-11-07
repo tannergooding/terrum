@@ -2,12 +2,13 @@
 
 using System;
 using System.Linq;
-using Terrum.CodeAnalysis.Text;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Text;
 
-public sealed class SourceTextTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class SourceTextTests
 {
     [Test]
     public void TracksEveryLineBreakAndUtf16Offset()

@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task NativeSetCliCompilesValidatesAndPreservesOutputOnFailureAsync()
@@ -28,27 +28,27 @@ public sealed partial class CliTests
         try
         {
             await File.WriteAllTextAsync(firstSource,
-                "public int32 Alpha() { mut [uint32; 2] values = [10, 10]; return int32(values[0] + values[1]); }");
-            await File.WriteAllTextAsync(secondSource, "public int32 Beta() { return 22; }");
+                "public int32 Alpha() { mut [uint32; 2] values = [10, 10]; return int32(values[0] + values[1]); }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(secondSource, "public int32 Beta() { return 22; }").ConfigureAwait(false);
             await File.WriteAllTextAsync(source,
-                "int32 Main() { mut [uint16; 1] local = [1]; return Alpha() + Beta() + int32(local[0]) - 1; }");
+                "int32 Main() { mut [uint16; 1] local = [1]; return Alpha() + Beta() + int32(local[0]) - 1; }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", firstSource, "First",
-                "--export", "Alpha", "-o", first, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--export", "Alpha", "-o", first, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native", "producer", secondSource, "Second",
-                "--export", "Beta", "-o", second, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--export", "Beta", "-o", second, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             var (compiled, json, _) = await RunAsync([], "compile-native-set", source,
-                "--provider", second, "--provider", first, "-o", relativeConsumer, "--runtime", "fail-fast", "--json");
+                "--provider", second, "--provider", first, "-o", relativeConsumer, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(compiled, Is.EqualTo(0));
             using var artifact = JsonDocument.Parse(json);
             var metadata = artifact.RootElement.GetProperty("artifact");
             Assert.That(metadata.GetProperty("dependencies").GetArrayLength(), Is.EqualTo(2));
-            var bytes = await File.ReadAllBytesAsync(consumer);
+            var bytes = await File.ReadAllBytesAsync(consumer).ConfigureAwait(false);
             Assert.That(metadata.GetProperty("kind").GetString(), Is.EqualTo("native-consumer-set"));
             Assert.That(metadata.GetProperty("path").GetString(), Is.EqualTo(Path.GetFullPath(consumer)));
             Assert.That(metadata.GetProperty("length").GetInt32(), Is.EqualTo(bytes.Length));
             Assert.That(metadata.GetProperty("sha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(bytes))));
             var (validation, validationJson, _) = await RunAsync([], "validate-native-set", relativeConsumer,
-                "--provider", first, "--provider", second, "--json");
+                "--provider", first, "--provider", second, "--json").ConfigureAwait(false);
             Assert.That(validation, Is.EqualTo(0));
             using var checkedArtifact = JsonDocument.Parse(validationJson);
             var checkedMetadata = checkedArtifact.RootElement.GetProperty("artifact");
@@ -56,19 +56,19 @@ public sealed partial class CliTests
             Assert.That(checkedMetadata.GetProperty("length").GetInt32(), Is.EqualTo(bytes.Length));
             Assert.That(checkedMetadata.GetProperty("sha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(bytes))));
             Assert.That((await RunAsync([], "run-native-set", consumer,
-                "--provider", second, "--provider", first, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(42));
+                "--provider", second, "--provider", first, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(42));
             var (rejected, output, _) = await RunAsync([], "compile-native-set", source,
-                "--provider", first, "--provider", first, "-o", consumer, "--runtime", "fail-fast", "--json");
+                "--provider", first, "--provider", first, "-o", consumer, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(rejected, Is.EqualTo(1));
             using var error = JsonDocument.Parse(output);
             Assert.That(error.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
-            Assert.That(await File.ReadAllBytesAsync(consumer), Is.EqualTo(bytes));
+            Assert.That(await File.ReadAllBytesAsync(consumer).ConfigureAwait(false), Is.EqualTo(bytes));
 
             var secondary = Path.Combine(directory, "broken.terrum");
-            await File.WriteAllTextAsync(secondary, "int32 Broken() { return Missing; }");
+            await File.WriteAllTextAsync(secondary, "int32 Broken() { return Missing; }").ConfigureAwait(false);
             var (badSource, badJson, _) = await RunAsync([], "compile-native-set", source,
                 "--source", secondary, "--provider", first, "--provider", second,
-                "-o", consumer, "--runtime", "fail-fast", "--json");
+                "-o", consumer, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(badSource, Is.EqualTo(1));
             using var diagnostics = JsonDocument.Parse(badJson);
             var root = diagnostics.RootElement;
@@ -76,7 +76,7 @@ public sealed partial class CliTests
             Assert.That(root.GetProperty("sources").GetArrayLength(), Is.EqualTo(2));
             Assert.That(root.GetProperty("sources")[1].GetProperty("path").GetString(), Is.EqualTo(secondary));
             Assert.That(global::System.Linq.Enumerable.Any(root.GetProperty("diagnostics").EnumerateArray(),item => item.GetProperty("sourceIndex").GetInt32() == 1),Is.True);
-            Assert.That(await File.ReadAllBytesAsync(consumer), Is.EqualTo(bytes));
+            Assert.That(await File.ReadAllBytesAsync(consumer).ConfigureAwait(false), Is.EqualTo(bytes));
         }
         finally
         {

@@ -5,15 +5,14 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("mut int32 x = 0; outer: while (x < 3) { mut int32 y = 0; while (y++ < 2) { x++; if (x == 2) { break outer; } } } return x == 2 ? 42 : 0;")]
     [TestCase("mut int32 x = 0; outer: for (; x < 3; x++) { mut int32 y = 0; while (y++ < 2) { if (x == 1) { continue outer; } } } return x == 3 ? 42 : 0;")]
@@ -28,19 +27,19 @@ public sealed partial class CliTests
         {
             var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { " + body + " }"),
                 "compile-trrm", "-", "--identity", "named-cli", "-o", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(compiled == 0, Is.True, $"{output}{error}");
-            var bytes = await File.ReadAllBytesAsync(artifact);
+            var bytes = await File.ReadAllBytesAsync(artifact).ConfigureAwait(false);
             TrRmStructuralMetadataValidator.ValidateCompact(bytes);
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(ran == 42, Is.True, $"{runOutput}{runError}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
-                "-o", executable, "--runtime", "fail-fast", "--json");
+                "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"{buildOutput}{buildError}");
-            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast)));
-            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(42));
-            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(bytes));
+            Assert.That(await File.ReadAllBytesAsync(executable).ConfigureAwait(false), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast)));
+            Assert.That(await ExecuteTrRmImageAsync(executable).ConfigureAwait(false), Is.EqualTo(42));
+            Assert.That(await File.ReadAllBytesAsync(artifact).ConfigureAwait(false), Is.EqualTo(bytes));
         }
         finally
         {
@@ -60,13 +59,13 @@ public sealed partial class CliTests
         {
             var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "compile-trrm", "-", "--identity", "named-export", "-o", artifact,
-                "--runtime", "fail-fast", "--library", "--json");
+                "--runtime", "fail-fast", "--library", "--json").ConfigureAwait(false);
             Assert.That(compiled == 0, Is.True, $"{output}{error}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm-library", artifact,
-                "--export", "await", "-o", library, "--runtime", "fail-fast", "--json");
+                "--export", "await", "-o", library, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"{buildOutput}{buildError}");
-            var loaded = TrRmExecutableCompiler.Load(await File.ReadAllBytesAsync(artifact));
-            Assert.That(await File.ReadAllBytesAsync(library), Is.EqualTo(NativeEmitter.EmitLibrary(loaded, ["await"], NativeRuntimePolicy.FailFast)));
+            var loaded = TrRmExecutableCompiler.Load(await File.ReadAllBytesAsync(artifact).ConfigureAwait(false));
+            Assert.That(await File.ReadAllBytesAsync(library).ConfigureAwait(false), Is.EqualTo(NativeEmitter.EmitLibrary(loaded, ["await"], NativeRuntimePolicy.FailFast)));
             var handle = NativeLibrary.Load(library);
             try
             {

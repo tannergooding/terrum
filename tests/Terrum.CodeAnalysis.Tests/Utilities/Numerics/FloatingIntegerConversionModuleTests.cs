@@ -5,16 +5,16 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class FloatingIntegerConversionModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FloatingIntegerConversionModuleTests
 {
     [TestCase(true,true,BoundRuntimePolicy.FailFast)]
     [TestCase(true,true,BoundRuntimePolicy.CheckedExceptions)]
@@ -43,7 +43,11 @@ public sealed class FloatingIntegerConversionModuleTests
         var compilation = Compilation.Create([component, verification], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
@@ -58,7 +62,7 @@ public sealed class FloatingIntegerConversionModuleTests
         {
             foreach (var bits in GetFloat32Inputs())
             {
-                float value = BitConverter.Int32BitsToSingle(unchecked((int)bits));
+                var value = BitConverter.Int32BitsToSingle(unchecked((int)bits));
                 AppendFloat32Checks(source, bits, value, isSigned, ref check);
             }
         }
@@ -66,13 +70,13 @@ public sealed class FloatingIntegerConversionModuleTests
         {
             foreach (var bits in GetFloat64Inputs())
             {
-                double value = BitConverter.Int64BitsToDouble(unchecked((long)bits));
+                var value = BitConverter.Int64BitsToDouble(unchecked((long)bits));
                 AppendFloat64Checks(source, bits, value, isSigned, ref check);
             }
         }
 
-        source.AppendLine("return 0;");
-        source.AppendLine("}");
+        _ = source.AppendLine("return 0;");
+        _ = source.AppendLine("}");
         return source.ToString();
     }
 
@@ -86,16 +90,16 @@ public sealed class FloatingIntegerConversionModuleTests
         if (isSigned)
         {
             AppendCheck(source, "TryFloat32BitsToInt32", "uint32", bits,
-                TryConvert(() => checked((int)value), out int int32Result), FormatExpected(int32Result), ref check);
+                TryConvert(() => checked((int)value), out var int32Result), FormatExpected(int32Result), ref check);
             AppendCheck(source, "TryFloat32BitsToInt64", "uint32", bits,
-                TryConvert(() => checked((long)value), out long int64Result), FormatExpected(int64Result), ref check);
+                TryConvert(() => checked((long)value), out var int64Result), FormatExpected(int64Result), ref check);
         }
         else
         {
             AppendCheck(source, "TryFloat32BitsToUInt32", "uint32", bits,
-                TryConvert(() => checked((uint)value), out uint uint32Result), FormatExpected(uint32Result), ref check);
+                TryConvert(() => checked((uint)value), out var uint32Result), FormatExpected(uint32Result), ref check);
             AppendCheck(source, "TryFloat32BitsToUInt64", "uint32", bits,
-                TryConvert(() => checked((ulong)value), out ulong uint64Result), FormatExpected(uint64Result), ref check);
+                TryConvert(() => checked((ulong)value), out var uint64Result), FormatExpected(uint64Result), ref check);
         }
     }
 
@@ -109,16 +113,16 @@ public sealed class FloatingIntegerConversionModuleTests
         if (isSigned)
         {
             AppendCheck(source, "TryFloat64BitsToInt32", "uint64", bits,
-                TryConvert(() => checked((int)value), out int int32Result), FormatExpected(int32Result), ref check);
+                TryConvert(() => checked((int)value), out var int32Result), FormatExpected(int32Result), ref check);
             AppendCheck(source, "TryFloat64BitsToInt64", "uint64", bits,
-                TryConvert(() => checked((long)value), out long int64Result), FormatExpected(int64Result), ref check);
+                TryConvert(() => checked((long)value), out var int64Result), FormatExpected(int64Result), ref check);
         }
         else
         {
             AppendCheck(source, "TryFloat64BitsToUInt32", "uint64", bits,
-                TryConvert(() => checked((uint)value), out uint uint32Result), FormatExpected(uint32Result), ref check);
+                TryConvert(() => checked((uint)value), out var uint32Result), FormatExpected(uint32Result), ref check);
             AppendCheck(source, "TryFloat64BitsToUInt64", "uint64", bits,
-                TryConvert(() => checked((ulong)value), out ulong uint64Result), FormatExpected(uint64Result), ref check);
+                TryConvert(() => checked((ulong)value), out var uint64Result), FormatExpected(uint64Result), ref check);
         }
     }
 
@@ -134,26 +138,26 @@ public sealed class FloatingIntegerConversionModuleTests
         var index = check++;
         var local = "result" + index.ToString(CultureInfo.InvariantCulture);
         var bitWidth = sourceType == "uint32" ? 8 : 16;
-        source.Append("if (");
+        _ = source.Append("if (");
         if (expectedSuccess)
         {
-            source.Append('!');
+            _ = source.Append('!');
         }
 
-        source.Append(function).Append('(')
+        _ = source.Append(function).Append('(')
             .Append(sourceType).Append("(0x")
             .Append(bits.ToString(bitWidth == 8 ? "X8" : "X16", CultureInfo.InvariantCulture))
             .Append("), init var ").Append(local).Append(')');
         if (expectedSuccess)
         {
-            source.Append(" || ").Append(local).Append(" != ").Append(expectedValue);
+            _ = source.Append(" || ").Append(local).Append(" != ").Append(expectedValue);
         }
         else
         {
-            source.Append(" || ").Append(local).Append(" is init");
+            _ = source.Append(" || ").Append(local).Append(" is init");
         }
 
-        source.Append(") { return ").Append(index + 1).AppendLine("; }");
+        _ = source.Append(") { return ").Append(index + 1).AppendLine("; }");
     }
 
     private static bool TryConvert<T>(Func<T> convert, out T result) where T : struct

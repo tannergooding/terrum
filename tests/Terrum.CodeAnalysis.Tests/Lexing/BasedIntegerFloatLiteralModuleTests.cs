@@ -5,17 +5,17 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class BasedIntegerFloatLiteralModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class BasedIntegerFloatLiteralModuleTests
 {
     private const string Float32BitsExport = "Terrum.CodeAnalysis.GetBasedIntegerFloat32BitsOrMinusOne";
     private const string Float64BitsExport = "Terrum.CodeAnalysis.GetBasedIntegerFloat64BitsOrMinusOne";
@@ -127,7 +127,11 @@ public sealed class BasedIntegerFloatLiteralModuleTests
         ], policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Terrum.CodeAnalysis.VerifyRecords"]);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(), ["Terrum.CodeAnalysis.VerifyRecords"]);
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -137,7 +141,11 @@ public sealed class BasedIntegerFloatLiteralModuleTests
             consumerTree, ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.Link(
-            ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer),
+            ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer),
             producer);
 
         var fixtures = s_fixtures.Concat(CreateRandomFixtures()).ToArray();
@@ -149,7 +157,7 @@ public sealed class BasedIntegerFloatLiteralModuleTests
 
         var records = CreateRecords(fixtures, hostedBits);
         records.AddRange(CreateRecords(
-            s_invalidSpellings.Select(static spelling => new Fixture(32, spelling, null)).ToArray(),
+            [.. s_invalidSpellings.Select(static spelling => new Fixture(32, spelling, null))],
             null));
         Assert.That(ExecuteRecords(consumer, records, (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
@@ -248,13 +256,25 @@ public sealed class BasedIntegerFloatLiteralModuleTests
         var compilation = Compilation.CreateLibrary(trees);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))();
         var results = new ulong[fixtures.Length];
         for (var index = 0; index < fixtures.Length; index++)
         {
             var function = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == $"Read{index}");
-            var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual3 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual3, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual3!; }))();
-            var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual4 = result.Value; Assert.That(__nunitActual4, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual4!; }))();
+            var result = ((global::System.Func<BoundReturn>)(() => {
+                var __nunitActual3 = global::System.Linq.Enumerable.Single(function.Body.Statements);
+                Assert.That(__nunitActual3, Is.TypeOf<BoundReturn>());
+                return (BoundReturn)__nunitActual3!;
+            }))();
+            var constant = ((global::System.Func<BoundConstant>)(() => {
+                var __nunitActual4 = result.Value;
+                Assert.That(__nunitActual4, Is.TypeOf<BoundConstant>());
+                return (BoundConstant)__nunitActual4!;
+            }))();
             Assert.That(constant.Type, Is.EqualTo(fixtures[index].Precision == 32 ? PrimitiveType.Float32 : PrimitiveType.Float64));
             results[index] = unchecked((ulong)constant.Value);
         }
@@ -296,10 +316,10 @@ public sealed class BasedIntegerFloatLiteralModuleTests
         var result = new System.Text.StringBuilder(digits.Length + (digits.Length / 4));
         for (var index = 0; index < digits.Length; index++)
         {
-            result.Append(digits[index]);
+            _ = result.Append(digits[index]);
             if (index + 1 < digits.Length && random.Next(5) == 0)
             {
-                result.Append('_');
+                _ = result.Append('_');
             }
         }
 

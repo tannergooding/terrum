@@ -231,4 +231,6 @@ public enum TokenKind
     InterpolationHoleEnd,
     /// <summary>The closing delimiter of raw interpolated text.</summary>
     InterpolatedRawTextEnd,
+    /// <summary>The <c>gc</c> backing qualifier.</summary>
+    GcKeyword,
 }

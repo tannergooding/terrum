@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -18,7 +18,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"expression-bodies-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        _ = Directory.CreateDirectory(directory);
         var producerSource = Path.Combine(directory, "producer.terrum");
         var consumerSource = Path.Combine(directory, "consumer.terrum");
         var producer = Path.Combine(directory, "producer.trm");
@@ -27,6 +27,7 @@ public sealed partial class CliTests
         var nativeConsumer = Path.Combine(directory, "consumer.trmn");
         var hostedImage = Path.Combine(directory, "host.exe");
         var scannedImage = Path.Combine(directory, "scanner.exe");
+        var layoutManifest = Path.Combine(directory, "layout.json");
         const string Library = """
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Value {
                 public int32 Field;
@@ -39,39 +40,44 @@ public sealed partial class CliTests
         const string Entry = "int32 Main() => Read(Value.Create(42));";
         try
         {
-            await File.WriteAllTextAsync(producerSource, Library);
-            await File.WriteAllTextAsync(consumerSource, Entry);
+            await File.WriteAllTextAsync(producerSource, Library).ConfigureAwait(false);
+            await File.WriteAllTextAsync(consumerSource, Entry).ConfigureAwait(false);
+            await File.WriteAllTextAsync(layoutManifest,
+                CreateLayoutCoreManifest()).ConfigureAwait(false);
             var (result, output, error) = await RunAsync([], "compile-module", "producer",
                 producerSource, "Read", "--export", "Value.Create", "--export",
-                "Value.#get:Result", "-o", producer, "--runtime", policy, "--json");
+                "Value.#get:Result", "-o", producer, "--runtime", policy,
+                "--layout-core-manifest", layoutManifest, "--json").ConfigureAwait(false);
             Assert.That(result == 0, Is.True, output + error);
             (result, output, error) = await RunAsync([], "compile-module", "consumer",
-                consumerSource, producer, "-o", consumer, "--runtime", policy, "--json");
+                consumerSource, producer, "-o", consumer, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(result == 0, Is.True, output + error);
-            (result, _, _) = await RunAsync([], "run-module", consumer, producer, "--runtime", policy);
+            (result, _, _) = await RunAsync([], "run-module", consumer, producer, "--runtime", policy).ConfigureAwait(false);
             Assert.That(result, Is.EqualTo(42));
 
             (result, output, error) = await RunAsync([], "compile-native", "producer",
                 producerSource, "ExpressionProducer", "--export", "Read", "--export",
                 "Value.Create", "--export", "Value.#get:Result", "-o", nativeProducer,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--layout-core-manifest", layoutManifest,
+                "--json").ConfigureAwait(false);
             Assert.That(result == 0, Is.True, output + error);
             (result, output, error) = await RunAsync([], "compile-native", "consumer",
-                consumerSource, nativeProducer, "-o", nativeConsumer, "--runtime", policy, "--json");
+                consumerSource, nativeProducer, "-o", nativeConsumer, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(result == 0, Is.True, output + error);
             (result, _, _) = await RunAsync([], "run-native", nativeConsumer, nativeProducer,
-                "--runtime", policy);
+                "--runtime", policy).ConfigureAwait(false);
             Assert.That(result, Is.EqualTo(42));
 
             var bytes = Encoding.UTF8.GetBytes(Entry + Environment.NewLine + Library);
             (result, output, error) = await RunAsync(bytes, "build", "-", "-o", hostedImage,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--layout-core-manifest", layoutManifest,
+                "--json").ConfigureAwait(false);
             Assert.That(result == 0, Is.True, output + error);
-            (result, output, error) = await RunAsync(bytes, "build-component",
+            (result, output, error) = await RunScannerCommandWithLayoutAsync(bytes, "build-component",
                 TerrumProjectPaths.SourceDirectory(root), "-", "-o", scannedImage,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(result == 0, Is.True, output + error);
-            Assert.That(await File.ReadAllBytesAsync(scannedImage), Is.EqualTo(await File.ReadAllBytesAsync(hostedImage)));
+            Assert.That(await File.ReadAllBytesAsync(scannedImage).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hostedImage).ConfigureAwait(false)));
         }
         finally
         {

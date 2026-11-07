@@ -389,11 +389,19 @@ internal static class NativeCoreManifestReader
             ? resolutionModes.Identity : (CoreDeclarationIdentity?)null;
         var resolutionPolicyIdentity = expectedRole == "native-import"
             ? resolutionPolicies.Identity : (CoreDeclarationIdentity?)null;
+        var parsedArguments = arguments.MoveToImmutable();
+        var schemaArguments = ImmutableArray.CreateBuilder<
+            CoreNativeAttributeArgument>(parsedArguments.Length);
+        foreach (var argument in parsedArguments)
+        {
+            schemaArguments.Add(ToCoreArgument(argument));
+        }
         return new ParsedSchema(new CoreNativeAttributeSchema(identity,
-            qualifiedName, roleValue, conventionIdentity,
+            qualifiedName, roleValue, schemaArguments.MoveToImmutable(),
+            placement, targets, conventionIdentity,
             resolutionModeIdentity, resolutionPolicyIdentity,
             (int)genericArity, isPublic, isPrimary, isRepeatable),
-            placement, targets, arguments.MoveToImmutable());
+            placement, targets, parsedArguments);
     }
 
     private static bool Matches(ParsedArgument actual,
@@ -406,6 +414,32 @@ internal static class NativeCoreManifestReader
             && actual.AllowsNamed == expected.AllowsNamed
             && actual.Contexts.SetEquals(expected.Contexts)
             && actual.Default == expected.Default;
+
+    private static CoreNativeAttributeArgument ToCoreArgument(
+        ParsedArgument argument)
+    {
+        var kind = argument.Kind switch {
+            "library-name-literal"
+                => CoreNativeAttributeArgumentKind.LibraryNameLiteral,
+            "entry-name-literal"
+                => CoreNativeAttributeArgumentKind.EntryNameLiteral,
+            "enum" => CoreNativeAttributeArgumentKind.Enum,
+            _ => throw new InvalidOperationException(),
+        };
+        CoreNativeAttributeDefault? defaultValue = argument.Default switch {
+            ParsedDefault { Kind: "declaration-name", Member: null }
+                => new CoreNativeAttributeDefault(
+                    CoreNativeAttributeDefaultKind.DeclarationName, null),
+            ParsedDefault { Kind: "enum-member", Member: CoreDeclarationIdentity member }
+                => new CoreNativeAttributeDefault(
+                    CoreNativeAttributeDefaultKind.EnumMember, member),
+            null => null,
+            _ => throw new InvalidOperationException(),
+        };
+        return new CoreNativeAttributeArgument(argument.Name, kind,
+            argument.EnumType, argument.IsRequired, argument.AllowsPositional,
+            argument.AllowsNamed, argument.Contexts, defaultValue);
+    }
 
     private static ParsedArgument[] ReadNativeImportArguments(
         CoreEnumDefinition conventions, CoreEnumDefinition modes,
@@ -845,8 +879,17 @@ internal static class NativeCoreManifestReader
                 break;
             }
             case JsonValueKind.String:
-                ValidateUnicode(element.GetString() ?? "", manifestPath,
-                    path);
+                string value;
+                try
+                {
+                    value = element.GetString() ?? "";
+                }
+                catch (InvalidOperationException)
+                {
+                    throw Invalid(manifestPath, path,
+                        "text contains an unpaired surrogate");
+                }
+                ValidateUnicode(value, manifestPath, path);
                 break;
         }
     }

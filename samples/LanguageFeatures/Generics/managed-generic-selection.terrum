@@ -1,7 +1,7 @@
 struct Stamp {
     public int64 First;
     public int64 Second;
-    [NoThrow] public Stamp(int64 first, int64 second) {
+     public Stamp(int64 first, int64 second) {
         First = first;
         Second = second;
     }
@@ -35,7 +35,7 @@ U RetainReversed<T, U>(T witness, U value)
     return RetainAfterCollection(value, witness);
 }
 
-[NoThrow] bool TrySelect<T>(bool enabled, T value, out T result)
+ bool TrySelect<T>(bool enabled, T value, out T result)
     where T : [Copy] {
     if (!enabled) { return false; }
     result = value;

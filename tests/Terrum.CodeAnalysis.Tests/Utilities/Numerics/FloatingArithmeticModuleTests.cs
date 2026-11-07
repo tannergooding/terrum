@@ -5,19 +5,19 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class FloatingArithmeticModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class FloatingArithmeticModuleTests
 {
-    private delegate int Float32Binary(int left, int right);
-    private delegate long Float64Binary(long left, long right);
+    private delegate float Float32Binary(float left, float right);
+    private delegate double Float64Binary(double left, double right);
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task FloatingBinaryArithmeticMatchesHostedEmitterAsync(BoundRuntimePolicy policy)
@@ -33,27 +33,31 @@ public sealed class FloatingArithmeticModuleTests
         Assert.That(componentTests.HasErrors, Is.False, string.Join(Environment.NewLine, componentTests.Diagnostics));
 
         var oracleSyntaxTree = SyntaxTree.Parse("""
-            [NoThrow] public float32 Float32Add(float32 left, float32 right) { return left + right; }
-            [NoThrow] public float32 Float32Subtract(float32 left, float32 right) { return left - right; }
-            [NoThrow] public float32 Float32Multiply(float32 left, float32 right) { return left * right; }
-            [NoThrow] public float32 Float32Divide(float32 left, float32 right) { return left / right; }
-            [NoThrow] public float64 Float64Add(float64 left, float64 right) { return left + right; }
-            [NoThrow] public float64 Float64Subtract(float64 left, float64 right) { return left - right; }
-            [NoThrow] public float64 Float64Multiply(float64 left, float64 right) { return left * right; }
-            [NoThrow] public float64 Float64Divide(float64 left, float64 right) { return left / right; }
+             public float32 Float32Add(float32 left, float32 right) { return left + right; }
+             public float32 Float32Subtract(float32 left, float32 right) { return left - right; }
+             public float32 Float32Multiply(float32 left, float32 right) { return left * right; }
+             public float32 Float32Divide(float32 left, float32 right) { return left / right; }
+             public float64 Float64Add(float64 left, float64 right) { return left + right; }
+             public float64 Float64Subtract(float64 left, float64 right) { return left - right; }
+             public float64 Float64Multiply(float64 left, float64 right) { return left * right; }
+             public float64 Float64Divide(float64 left, float64 right) { return left / right; }
             """, "floating-arithmetic-hosted-oracle.terrum");
         Assert.That(oracleSyntaxTree.HasErrors, Is.False, string.Join(Environment.NewLine, oracleSyntaxTree.Diagnostics));
         var oracleCompilation = Compilation.CreateLibrary(oracleSyntaxTree);
         Assert.That(oracleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
-        var oracleProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = oracleCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var oracleProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = oracleCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))();
         var oraclePath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-floating-arithmetic-{Guid.NewGuid():N}.dll");
         var oracleLibrary = IntPtr.Zero;
         try
         {
-            File.WriteAllBytes(oraclePath, NativeEmitter.EmitLibrary(oracleProgram, [
+            await File.WriteAllBytesAsync(oraclePath, NativeEmitter.EmitLibrary(oracleProgram, [
                 "Float32Add", "Float32Subtract", "Float32Multiply",
                 "Float32Divide", "Float64Add", "Float64Subtract", "Float64Multiply", "Float64Divide",
-            ], NativeRuntimePolicy.FailFast));
+            ], NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
             oracleLibrary = NativeLibrary.Load(oraclePath);
             var float32Add = Export<Float32Binary>(oracleLibrary, "Float32Add");
             var float32Subtract = Export<Float32Binary>(oracleLibrary, "Float32Subtract");
@@ -84,7 +88,8 @@ public sealed class FloatingArithmeticModuleTests
                         "Subtract" => float32Subtract,
                         "Multiply" => float32Multiply,
                         "Divide" => float32Divide,
-                        _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+                        _ => throw new InvalidOperationException(
+                            "Unsupported floating arithmetic operation."),
                     };
                     verificationSource = CreateFloat32VerificationSource(operation, oracle);
                 }
@@ -95,19 +100,24 @@ public sealed class FloatingArithmeticModuleTests
                         "Subtract" => float64Subtract,
                         "Multiply" => float64Multiply,
                         "Divide" => float64Divide,
-                        _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+                        _ => throw new InvalidOperationException(
+                            "Unsupported floating arithmetic operation."),
                     };
                     verificationSource = CreateFloat64VerificationSource(operation, oracle);
                 }
 
                 var verification = SyntaxTree.Parse(
                     verificationSource,
-                    $"floating-{format.ToLowerInvariant()}-{operation.ToLowerInvariant()}-oracle.terrum");
+                    $"floating-{format.ToUpperInvariant()}-{operation.ToUpperInvariant()}-oracle.terrum");
                 Assert.That(verification.HasErrors, Is.False, string.Join(Environment.NewLine, verification.Diagnostics));
                 var compilation = Compilation.Create([arithmetic, componentTests, verification], policy);
                 Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-                var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+                var program = ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = compilation.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))();
                 var result = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
                 Assert.That(result == 0, Is.True, $"{format} {operation} batch {result} did not match the hosted emitter.");
             }
@@ -146,14 +156,14 @@ public sealed class FloatingArithmeticModuleTests
         {
             var group = $"VerifyFloatingArithmeticGroup{groups.Count}";
             groups.Add(group);
-            definitions.Append("bool ").Append(group).AppendLine("() {");
+            _ = definitions.Append("bool ").Append(group).AppendLine("() {");
             var end = Math.Min(start + 8, verifiers.Count);
             for (var index = start; index < end; index++)
             {
-                definitions.Append("if (!").Append(verifiers[index]).AppendLine("()) { return false; }");
+                _ = definitions.Append("if (!").Append(verifiers[index]).AppendLine("()) { return false; }");
             }
-            definitions.AppendLine("return true;");
-            definitions.AppendLine("}");
+            _ = definitions.AppendLine("return true;");
+            _ = definitions.AppendLine("}");
         }
 
         var roots = new List<string>();
@@ -161,14 +171,14 @@ public sealed class FloatingArithmeticModuleTests
         {
             var root = $"VerifyFloatingArithmeticRoot{roots.Count}";
             roots.Add(root);
-            definitions.Append("bool ").Append(root).AppendLine("() {");
+            _ = definitions.Append("bool ").Append(root).AppendLine("() {");
             var end = Math.Min(start + 8, groups.Count);
             for (var index = start; index < end; index++)
             {
-                definitions.Append("if (!").Append(groups[index]).AppendLine("()) { return false; }");
+                _ = definitions.Append("if (!").Append(groups[index]).AppendLine("()) { return false; }");
             }
-            definitions.AppendLine("return true;");
-            definitions.AppendLine("}");
+            _ = definitions.AppendLine("return true;");
+            _ = definitions.AppendLine("}");
         }
 
         var source = new StringBuilder("""
@@ -177,18 +187,18 @@ public sealed class FloatingArithmeticModuleTests
             """);
         for (var index = 0; index < roots.Count; index++)
         {
-            source.Append("if (!").Append(roots[index]).Append("()) { return ")
+            _ = source.Append("if (!").Append(roots[index]).Append("()) { return ")
                 .Append(index + 1).AppendLine("; }");
         }
-        source.AppendLine("if (!CheckFloat32Division()) { return 900; }");
-        source.AppendLine("if (!CheckFloat64DivisionA()) { return 901; }");
-        source.AppendLine("if (!CheckFloat64DivisionA2()) { return 902; }");
-        source.AppendLine("if (!CheckFloat64DivisionB()) { return 903; }");
-        source.AppendLine("return 0;");
-        source.AppendLine("}");
-        source.AppendLine("bool IsOracleFloat32NaNBits(uint32 bits) { return (bits & uint32(0x7F800000)) == uint32(0x7F800000) && (bits & uint32(0x007FFFFF)) != 0; }");
-        source.AppendLine("bool IsOracleFloat64NaNBits(uint64 bits) { return (bits & uint64(0x7FF0000000000000)) == uint64(0x7FF0000000000000) && (bits & uint64(0x000FFFFFFFFFFFFF)) != 0; }");
-        source.Append(definitions);
+        _ = source.AppendLine("if (!CheckFloat32Division()) { return 900; }");
+        _ = source.AppendLine("if (!CheckFloat64DivisionA()) { return 901; }");
+        _ = source.AppendLine("if (!CheckFloat64DivisionA2()) { return 902; }");
+        _ = source.AppendLine("if (!CheckFloat64DivisionB()) { return 903; }");
+        _ = source.AppendLine("return 0;");
+        _ = source.AppendLine("}");
+        _ = source.AppendLine("bool IsOracleFloat32NaNBits(uint32 bits) { return (bits & uint32(0x7F800000)) == uint32(0x7F800000) && (bits & uint32(0x007FFFFF)) != 0; }");
+        _ = source.AppendLine("bool IsOracleFloat64NaNBits(uint64 bits) { return (bits & uint64(0x7FF0000000000000)) == uint64(0x7FF0000000000000) && (bits & uint64(0x000FFFFFFFFFFFFF)) != 0; }");
+        _ = source.Append(definitions);
         return source.ToString();
     }
 
@@ -325,15 +335,17 @@ public sealed class FloatingArithmeticModuleTests
     {
         var verifier = $"VerifyFloat32{operation}Batch{verifiers.Count}";
         verifiers.Add(verifier);
-        definitions.Append("bool ").Append(verifier).AppendLine("() {");
+        _ = definitions.Append("bool ").Append(verifier).AppendLine("() {");
         for (var index = start; index < end; index++)
         {
-            var pair = pairs[index];
-            uint expected = unchecked((uint)oracle(unchecked((int)pair.Left), unchecked((int)pair.Right)));
-            AppendFloat32Check(definitions, $"Float32{operation}Bits", pair.Left, pair.Right, expected);
+            var (Left, Right) = pairs[index];
+            var left = BitConverter.Int32BitsToSingle(unchecked((int)Left));
+            var right = BitConverter.Int32BitsToSingle(unchecked((int)Right));
+            var expected = unchecked((uint)BitConverter.SingleToInt32Bits(oracle(left, right)));
+            AppendFloat32Check(definitions, $"Float32{operation}Bits", Left, Right, expected);
         }
-        definitions.AppendLine("return true;");
-        definitions.AppendLine("}");
+        _ = definitions.AppendLine("return true;");
+        _ = definitions.AppendLine("}");
     }
 
     private static void AppendFloat64Verifiers(
@@ -361,15 +373,17 @@ public sealed class FloatingArithmeticModuleTests
     {
         var verifier = $"VerifyFloat64{operation}Batch{verifiers.Count}";
         verifiers.Add(verifier);
-        definitions.Append("bool ").Append(verifier).AppendLine("() {");
+        _ = definitions.Append("bool ").Append(verifier).AppendLine("() {");
         for (var index = start; index < end; index++)
         {
-            var pair = pairs[index];
-            ulong expected = unchecked((ulong)oracle(unchecked((long)pair.Left), unchecked((long)pair.Right)));
-            AppendFloat64Check(definitions, $"Float64{operation}Bits", pair.Left, pair.Right, expected);
+            var (Left, Right) = pairs[index];
+            var left = BitConverter.Int64BitsToDouble(unchecked((long)Left));
+            var right = BitConverter.Int64BitsToDouble(unchecked((long)Right));
+            var expected = unchecked((ulong)BitConverter.DoubleToInt64Bits(oracle(left, right)));
+            AppendFloat64Check(definitions, $"Float64{operation}Bits", Left, Right, expected);
         }
-        definitions.AppendLine("return true;");
-        definitions.AppendLine("}");
+        _ = definitions.AppendLine("return true;");
+        _ = definitions.AppendLine("}");
     }
 
     private static void AppendFloat32Check(StringBuilder source, string function, uint left, uint right, uint expected)
@@ -377,12 +391,14 @@ public sealed class FloatingArithmeticModuleTests
         var call = $"{function}(uint32(0x{left:X8}), uint32(0x{right:X8}))";
         if (IsFloat32NaN(expected))
         {
-            source.Append("if (!IsOracleFloat32NaNBits(").Append(call).AppendLine(")) { return false; }");
+            _ = source.Append("if (!IsOracleFloat32NaNBits(").Append(call).AppendLine(")) { return false; }");
         }
         else
         {
-            source.Append("if (").Append(call).Append(" != uint32(0x")
-                .Append(expected.ToString("X8")).AppendLine(")) { return false; }");
+            _ = source.Append("if (").Append(call).Append(" != uint32(0x")
+                .Append(expected.ToString("X8",
+                    System.Globalization.CultureInfo.InvariantCulture))
+                .AppendLine(")) { return false; }");
         }
     }
 
@@ -396,12 +412,14 @@ public sealed class FloatingArithmeticModuleTests
         var call = $"{function}(uint64(0x{left:X16}), uint64(0x{right:X16}))";
         if (IsFloat64NaN(expected))
         {
-            source.Append("if (!IsOracleFloat64NaNBits(").Append(call).AppendLine(")) { return false; }");
+            _ = source.Append("if (!IsOracleFloat64NaNBits(").Append(call).AppendLine(")) { return false; }");
         }
         else
         {
-            source.Append("if (").Append(call).Append(" != uint64(0x")
-                .Append(expected.ToString("X16")).AppendLine(")) { return false; }");
+            _ = source.Append("if (").Append(call).Append(" != uint64(0x")
+                .Append(expected.ToString("X16",
+                    System.Globalization.CultureInfo.InvariantCulture))
+                .AppendLine(")) { return false; }");
         }
     }
 

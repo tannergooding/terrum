@@ -6,13 +6,12 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using NUnit.Framework;
-using Terrum.CodeAnalysis.Tests.Syntax;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Syntax;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCaseSource(typeof(LoopLabelAttachmentTests), nameof(LoopLabelAttachmentTests.Boundaries))]
     public async Task NativeLoopLabelsEnforceEveryPhysicalLineBoundaryAsync(string loop, string gap, bool invalid)
@@ -20,8 +19,8 @@ public sealed partial class CliTests
         var input = Encoding.UTF8.GetBytes(LoopLabelAttachmentTests.Source(loop, gap));
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
-            var (exit, output, error) = await RunAsync(input, "frontend-component",
-                TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-", "--runtime", policy, "--json");
+            var (exit, output, error) = await RunFrontendComponentAsync(input,
+                TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == (invalid ? 1 : 0), Is.True, $"{output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
@@ -29,7 +28,7 @@ public sealed partial class CliTests
             if (!invalid)
             {
                 Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
-                Assert.That(result.GetProperty("noThrow").GetBoolean(), Is.True);
+                Assert.That(result.TryGetProperty("noThrow", out _), Is.False);
             }
         }
     }
@@ -47,17 +46,22 @@ public sealed partial class CliTests
                 foreach (var mode in new[] { "build", "build-component", "frontend-build" })
                 {
                     var args = mode == "build" ? new[] { "-", "-o", path, "--runtime", policy, "--json" }
-                        : new[] { TerrumProjectPaths.SourceDirectory(root),
-                            "-", "-o", path, "--runtime", policy, "--json" };
+                        : [ TerrumProjectPaths.SourceDirectory(root),
+                            "-", "-o", path, "--runtime", policy, "--json" ];
                     var source = Encoding.UTF8.GetBytes($"int32 Main() {{ {valid} return 42; }}");
-                    var (exit, output, error) = await RunAsync(source, [mode, .. args]);
+                    string[] arguments = [mode, .. args];
+                    var (exit, output, error) = mode == "build-component"
+                        ? await RunScannerCommandWithLayoutAsync(source, arguments).ConfigureAwait(false)
+                        : await RunAsync(source, arguments).ConfigureAwait(false);
                     Assert.That(exit == 0, Is.True, $"{output}{error}");
-                    var bytes = await File.ReadAllBytesAsync(path);
-                    Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(42));
+                    var bytes = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
+                    Assert.That(await ExecuteNativeImageAsync(path).ConfigureAwait(false), Is.EqualTo(42));
                     source = Encoding.UTF8.GetBytes($"int32 Main() {{ {invalid} return 42; }}");
-                    (exit, output, error) = await RunAsync(source, [mode, .. args]);
+                    (exit, output, error) = mode == "build-component"
+                        ? await RunScannerCommandWithLayoutAsync(source, arguments).ConfigureAwait(false)
+                        : await RunAsync(source, arguments).ConfigureAwait(false);
                     Assert.That(exit == 1, Is.True, $"{output}{error}");
-                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
+                    Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(bytes));
                 }
             }
         }

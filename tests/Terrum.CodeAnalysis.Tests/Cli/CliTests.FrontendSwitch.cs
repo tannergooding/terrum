@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task ScalarFrontendSwitchProjectsAndMatchesHostedIfChainAsync()
@@ -50,8 +50,7 @@ public sealed partial class CliTests
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
-                var (componentExit, componentOutput, componentError) = await RunAsync(input,
-                    "frontend-component", directory, "-", "--runtime", policy, "--json");
+                var (componentExit, componentOutput, componentError) = await RunFrontendComponentAsync(input, directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(componentExit == 0, Is.True, $"{componentExit}: {componentOutput}{componentError}");
                 using (var component = JsonDocument.Parse(componentOutput))
                 {
@@ -60,17 +59,17 @@ public sealed partial class CliTests
                 }
 
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                    "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json").ConfigureAwait(false);
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(equivalentInput,
-                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
+                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(nativeExit == 0, Is.True, $"{nativeExit}: {nativeOutput}{nativeError}");
                 Assert.That(hostedExit == 0, Is.True, $"{hostedExit}: {hostedOutput}{hostedError}");
-                Assert.That(await File.ReadAllBytesAsync(nativePath), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)));
-                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(2));
-                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(2));
+                Assert.That(await File.ReadAllBytesAsync(nativePath).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath).ConfigureAwait(false)));
+                Assert.That(await ExecuteNativeImageAsync(nativePath).ConfigureAwait(false), Is.EqualTo(2));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath).ConfigureAwait(false), Is.EqualTo(2));
 
                 var (runExit, runOutput, runError) = await RunAsync(input,
-                    "frontend-run", directory, "-", "--runtime", policy, "--json");
+                    "frontend-run", directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(runExit, Is.EqualTo(2));
                 Assert.That(runOutput, Is.Empty);
                 Assert.That(runError, Is.Empty);
@@ -144,25 +143,25 @@ public sealed partial class CliTests
         };
         var root = RepositoryRoot();
         var directory = TerrumProjectPaths.SourceDirectory(root);
-        foreach (var testCase in cases)
+        foreach (var (Name, Source, HostedEquivalent, ExpectedResult) in cases)
         {
             var nativePath = Path.Combine(TestArtifactPaths.DirectoryPath,
-                $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.native.exe");
+                $"switch-{Name}-{policy}-{Guid.NewGuid():N}.native.exe");
             var hostedPath = Path.Combine(TestArtifactPaths.DirectoryPath,
-                $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.hosted.exe");
+                $"switch-{Name}-{policy}-{Guid.NewGuid():N}.hosted.exe");
             try
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(
-                    Encoding.UTF8.GetBytes(testCase.Source), "frontend-build", directory, "-",
-                    "-o", nativePath, "--runtime", policy, "--json");
+                    Encoding.UTF8.GetBytes(Source), "frontend-build", directory, "-",
+                    "-o", nativePath, "--runtime", policy, "--json").ConfigureAwait(false);
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(
-                    Encoding.UTF8.GetBytes(testCase.HostedEquivalent), "build", "-",
-                    "-o", hostedPath, "--runtime", policy, "--json");
-                Assert.That(nativeExit == 0, Is.True, $"{testCase.Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
-                Assert.That(hostedExit == 0, Is.True, $"{testCase.Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.That(await File.ReadAllBytesAsync(nativePath), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)));
-                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(testCase.ExpectedResult));
-                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(testCase.ExpectedResult));
+                    Encoding.UTF8.GetBytes(HostedEquivalent), "build", "-",
+                    "-o", hostedPath, "--runtime", policy, "--json").ConfigureAwait(false);
+                Assert.That(nativeExit == 0, Is.True, $"{Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.That(hostedExit == 0, Is.True, $"{Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.That(await File.ReadAllBytesAsync(nativePath).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath).ConfigureAwait(false)));
+                Assert.That(await ExecuteNativeImageAsync(nativePath).ConfigureAwait(false), Is.EqualTo(ExpectedResult));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath).ConfigureAwait(false), Is.EqualTo(ExpectedResult));
             }
             finally
             {
@@ -226,7 +225,7 @@ public sealed partial class CliTests
             ("const-label", """
                 public int32 Main() {
                     const int32 N = 1;
-                    switch (1) {
+                    switch (int32(1)) {
                         N => { return 42; },
                         _ => { return 0; },
                     }
@@ -240,26 +239,26 @@ public sealed partial class CliTests
         };
         var root = RepositoryRoot();
         var directory = TerrumProjectPaths.SourceDirectory(root);
-        foreach (var testCase in cases)
+        foreach (var (Name, Source, HostedEquivalent) in cases)
         {
-            var input = Encoding.UTF8.GetBytes(testCase.Source);
-            var equivalentInput = Encoding.UTF8.GetBytes(testCase.HostedEquivalent);
+            var input = Encoding.UTF8.GetBytes(Source);
+            var equivalentInput = Encoding.UTF8.GetBytes(HostedEquivalent);
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var nativePath = Path.Combine(TestArtifactPaths.DirectoryPath,
-                    $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.native.exe");
+                    $"switch-{Name}-{policy}-{Guid.NewGuid():N}.native.exe");
                 var hostedPath = Path.Combine(TestArtifactPaths.DirectoryPath,
-                    $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.hosted.exe");
+                    $"switch-{Name}-{policy}-{Guid.NewGuid():N}.hosted.exe");
                 try
                 {
                     var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                        "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                        "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json").ConfigureAwait(false);
                     var (hostedExit, hostedOutput, hostedError) = await RunAsync(equivalentInput,
-                        "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
-                    Assert.That(nativeExit == 0, Is.True, $"{testCase.Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
-                    Assert.That(hostedExit == 0, Is.True, $"{testCase.Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                    Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(42));
-                    Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(42));
+                        "build", "-", "-o", hostedPath, "--runtime", policy, "--json").ConfigureAwait(false);
+                    Assert.That(nativeExit == 0, Is.True, $"{Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                    Assert.That(hostedExit == 0, Is.True, $"{Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                    Assert.That(await ExecuteNativeImageAsync(nativePath).ConfigureAwait(false), Is.EqualTo(42));
+                    Assert.That(await ExecuteNativeImageAsync(hostedPath).ConfigureAwait(false), Is.EqualTo(42));
                 }
                 finally
                 {
@@ -287,7 +286,7 @@ public sealed partial class CliTests
             ("char16", "char16(65535)"),
         })
         {
-            string source = $$"""
+            var source = $$"""
                 public int32 Main() {
                     {{type}} value = {{value}};
                     switch (value) {
@@ -296,7 +295,7 @@ public sealed partial class CliTests
                     }
                 }
                 """;
-            string hostedEquivalent = $$"""
+            var hostedEquivalent = $$"""
                 public int32 Main() {
                     {{type}} value = {{value}};
                     if (value == {{value}}) { return 42; } else { return 0; }
@@ -309,14 +308,14 @@ public sealed partial class CliTests
             try
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                    "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json").ConfigureAwait(false);
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(
                     Encoding.UTF8.GetBytes(hostedEquivalent), "build", "-", "-o", hostedPath,
-                    "--runtime", policy, "--json");
+                    "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(nativeExit == 0, Is.True, $"{type} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
                 Assert.That(hostedExit == 0, Is.True, $"{type} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(42));
-                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(nativePath).ConfigureAwait(false), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath).ConfigureAwait(false), Is.EqualTo(42));
             }
             finally
             {
@@ -339,7 +338,7 @@ public sealed partial class CliTests
             ("char16", "char16(55296)", "char16(0)"),
         })
         {
-            string source = $$"""
+            var source = $$"""
                 public int32 Main() {
                     {{type}} value = {{value}};
                     switch (value) {
@@ -348,7 +347,7 @@ public sealed partial class CliTests
                     }
                 }
                 """;
-            string hostedEquivalent = $$"""
+            var hostedEquivalent = $$"""
                 public int32 Main() {
                     {{type}} value = {{value}};
                     if (value == {{label}}) { return 0; } else { return 42; }
@@ -361,14 +360,14 @@ public sealed partial class CliTests
             try
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                    "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json").ConfigureAwait(false);
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(
                     Encoding.UTF8.GetBytes(hostedEquivalent), "build", "-", "-o", hostedPath,
-                    "--runtime", policy, "--json");
+                    "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(nativeExit == 0, Is.True, $"{type} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
                 Assert.That(hostedExit == 0, Is.True, $"{type} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(42));
-                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(nativePath).ConfigureAwait(false), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath).ConfigureAwait(false), Is.EqualTo(42));
             }
             finally
             {
@@ -391,15 +390,14 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { int32 x = 1; switch (x) { 1 => {} } return 0; }")]
     [TestCase("int32 Main() { int32 x = 1; switch (x) { case 1 => {}, _ => {} } return 0; }")]
     [TestCase("int32 Main() { int32 x = 1; switch (x) { 1: return 1; _ => {} } return 0; }")]
-    [TestCase("int32 Main() { switch (1) { 1 => {} _ => {} } return 0; }")]
+    [TestCase("int32 Main() { switch (int32(1)) { 1 => {} _ => {} } return 0; }")]
     [TestCase("int32 Main() { float32 x = 1.0; switch (x) { 1.0 => {}, _ => {} } return 0; }")]
     [TestCase("int32 Main() { float64 x = 1.0; switch (x) { 1.0 => {}, _ => {} } return 0; }")]
-    [TestCase("int32 Main() { switch (1) { 1 => {}, _ => {} } return 0; } int32 Broken() { int32 value = ; return 0; }")]
+    [TestCase("int32 Main() { switch (int32(1)) { 1 => {}, _ => {} } return 0; } int32 Broken() { int32 value = ; return 0; }")]
     public async Task ScalarFrontendSwitchRejectsUnsupportedFormsAsync(string source)
     {
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), directory, "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -409,10 +407,9 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task ScalarFrontendSwitchSeparatorDiagnosticRetainsTheOffendingSpanAsync(string policy)
     {
-        const string source = "void Main() { switch (0) { 0 => {} _ => {} } }";
+        const string source = "void Main() { switch (int32(0)) { 0 => {} _ => {} } }";
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        var (exit, output, error) = await RunFrontendComponentAsync(Encoding.UTF8.GetBytes(source), directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -431,22 +428,20 @@ public sealed partial class CliTests
         {
             var cases = string.Join(", ", Enumerable.Range(0, count)
                 .Select(static value => $"{value} => {{}}"));
-            return $"void Main() {{ switch (0) {{ {cases}, _ => {{}} }} }}";
+            return $"void Main() {{ switch (int32(0)) {{ {cases}, _ => {{}} }} }}";
         }
 
         var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
-        var (atLimitExit, atLimitOutput, atLimitError) = await RunAsync(
-            Encoding.UTF8.GetBytes(SourceWithCases(10)),
-            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        var (atLimitExit, atLimitOutput, atLimitError) = await RunFrontendComponentAsync(
+            Encoding.UTF8.GetBytes(SourceWithCases(10)), directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
         Assert.That(atLimitExit == 0, Is.True, $"{atLimitExit}: {atLimitOutput}{atLimitError}");
         using (var atLimit = JsonDocument.Parse(atLimitOutput))
         {
             Assert.That(atLimit.RootElement.GetProperty("success").GetBoolean(), Is.True);
         }
 
-        var (overLimitExit, overLimitOutput, overLimitError) = await RunAsync(
-            Encoding.UTF8.GetBytes(SourceWithCases(11)),
-            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        var (overLimitExit, overLimitOutput, overLimitError) = await RunFrontendComponentAsync(
+            Encoding.UTF8.GetBytes(SourceWithCases(11)), directory, "-", "--runtime", policy, "--json").ConfigureAwait(false);
         Assert.That(overLimitExit, Is.EqualTo(1));
         Assert.That(overLimitError, Is.Empty);
         using var overLimit = JsonDocument.Parse(overLimitOutput);

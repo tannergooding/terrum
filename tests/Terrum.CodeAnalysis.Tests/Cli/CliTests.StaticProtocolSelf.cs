@@ -13,7 +13,7 @@ using Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task BodylessStaticRequirementAcceptsTheFreshCliReproductionAsync()

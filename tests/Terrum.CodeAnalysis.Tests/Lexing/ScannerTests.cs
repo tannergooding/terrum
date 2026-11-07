@@ -18,12 +18,14 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using Terrum.CodeAnalysis.Tests.Semantics.Generics;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class ScannerTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ScannerTests
 {
     [TestCase(PrimitiveType.Int64)]
     [TestCase(PrimitiveType.UInt64)]
@@ -74,7 +76,11 @@ public sealed class ScannerTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("State", PrimitiveType.Int32, [0, 0], true)]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), expected).ConfigureAwait(true);
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), expected).ConfigureAwait(true);
     }
     [TestCase("")]
     [TestCase(" \t\r\n\u0085\u2028\u2029\u00A0\u3000")]
@@ -124,9 +130,9 @@ public sealed class ScannerTests
     [Test]
     public async Task IntegerMagnitudeOverflowBoundariesMatchAcrossRadicesAsync()
     {
-        string binaryMaximum = "0b" + new string('1', 64);
-        string binaryOverflow = "0b1" + new string('0', 64);
-        string source = string.Join(' ',
+        var binaryMaximum = "0b" + new string('1', 64);
+        var binaryOverflow = "0b1" + new string('0', 64);
+        var source = string.Join(' ',
             "18446744073709551615",
             "18446744073709551616",
             "0xFFFFFFFFFFFFFFFF",
@@ -281,7 +287,9 @@ public sealed class ScannerTests
     {
         const string Operators = "_ ( ) { } [ ] ; , . .. ..^ : ? ?. ?? ??= + - ++ -- * / % ! ~ = == => != < <= > >= & && | || ^"
             + " << >> >>> += -= *= /= %= &= |= ^= <<= >>= >>>=";
-        var lexed = Lexer.Lex(SourceText.From(Operators));
+        const string InterpolatedRawText = "$\"\"\"raw {42} text\"\"\"";
+        var source = Operators + " " + InterpolatedRawText;
+        var lexed = Lexer.Lex(SourceText.From(source));
         var actual = lexed.Tokens.Select(token => token.Kind).ToHashSet();
         foreach (var kind in Enum.GetValues<TokenKind>())
         {
@@ -294,6 +302,7 @@ public sealed class ScannerTests
             Assert.That(actual, Does.Contain(kind));
         }
 
+        await CheckScannerAsync(source, executeNativeScanner: false).ConfigureAwait(true);
         await CheckScannerAsync(Operators).ConfigureAwait(true);
         await CheckScannerAsync(" \t\u00A0\u1680\u2000\u202F\u205F\u3000\n\r\r\n\u0085\u2028\u2029// line\n/* block */"
             + "x \t// eof", repeat: true).ConfigureAwait(true);
@@ -423,18 +432,27 @@ public sealed class ScannerTests
         var scanner = await ReadScannerSourceAsync(root).ConfigureAwait(true);
         scanner = scanner.Replace("int32 Scan()", "public int32 Scan()", StringComparison.Ordinal);
         var seed = SourceText.From("seed 1");
-        var providerCompilation = Compilation.Create(SyntaxTree.Parse(scanner + "\nint32 Main() { return 0; }"),
+        var providerCompilation = CreateScannerCompilation(
+            SyntaxTree.Parse(scanner + "\nint32 Main() { return 0; }"),
             ScannerHost.CreateInvocationProfileBuffers(seed), policy);
         Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = providerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+        var provider = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = providerCompilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(),
             ["Terrum.CodeAnalysis.Scan"]);
 
-        var alternateCompilation = Compilation.Create(
+        var alternateCompilation = CreateScannerCompilation(
             SyntaxTree.Parse(scanner + "\nint32 Main() { return 0; }"),
             ScannerHost.CreateInvocationProfileBuffers(SourceText.From("a differently sized seed")), policy);
         Assert.That(alternateCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
         var alternateProvider = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = alternateCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Terrum.CodeAnalysis.Scan"]);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual2 = alternateCompilation.Program;
+                Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual2!;
+            }))(), ["Terrum.CodeAnalysis.Scan"]);
         Assert.That(alternateProvider, Is.EqualTo(provider));
 
         var invalidProvider = provider.ToArray();
@@ -451,7 +469,11 @@ public sealed class ScannerTests
             reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = consumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), provider);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual3 = consumerCompilation.Program;
+                Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual3!;
+            }))(), provider);
         var linked = ModuleCompiler.Link(consumer, provider);
 
         var sources = new List<string> {
@@ -463,7 +485,7 @@ public sealed class ScannerTests
         var maximumTokenAndTriviaSource = new StringBuilder(ScannerHost.MaximumSourceLength);
         for (var index = 0; index < ScannerHost.MaximumSourceLength / 2; index++)
         {
-            maximumTokenAndTriviaSource.Append("a ");
+            _ = maximumTokenAndTriviaSource.Append("a ");
         }
         Assert.That(maximumTokenAndTriviaSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         sources.Add(maximumTokenAndTriviaSource.ToString());
@@ -474,7 +496,7 @@ public sealed class ScannerTests
         var maximumIntegerRecordSource = new StringBuilder(ScannerHost.MaximumSourceLength);
         for (var index = 0; index < ScannerHost.MaximumSourceLength / 2; index++)
         {
-            maximumIntegerRecordSource.Append("1 ");
+            _ = maximumIntegerRecordSource.Append("1 ");
         }
         Assert.That(maximumIntegerRecordSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var maximumIntegerRecordText = maximumIntegerRecordSource.ToString();
@@ -500,13 +522,13 @@ public sealed class ScannerTests
         {
             var scalarCount = Math.Min(maximumBmpEscapesPerSource,
                 char.MaxValue + 1 - scalarStart);
-            var text = new StringBuilder(scalarCount * 6 + 2).Append('"');
+            var text = new StringBuilder((scalarCount * 6) + 2).Append('"');
             for (var index = 0; index < scalarCount; index++)
             {
-                text.Append("\\u").Append((scalarStart + index).ToString("X4",
+                _ = text.Append("\\u").Append((scalarStart + index).ToString("X4",
                     CultureInfo.InvariantCulture));
             }
-            text.Append('"');
+            _ = text.Append('"');
             sources.Add(text.ToString());
         }
 
@@ -523,7 +545,7 @@ public sealed class ScannerTests
         var supplementaryEscapeSource = new StringBuilder();
         foreach (var scalar in supplementaryEscapes)
         {
-            supplementaryEscapeSource.Append("\"\\U")
+            _ = supplementaryEscapeSource.Append("\"\\U")
                 .Append(scalar.ToString("X8", CultureInfo.InvariantCulture))
                 .Append("\" ");
         }
@@ -539,13 +561,13 @@ public sealed class ScannerTests
             scalarStart += maximumSurrogateEscapesPerSource)
         {
             var scalarCount = Math.Min(maximumSurrogateEscapesPerSource, 0xE000 - scalarStart);
-            var text = new StringBuilder(scalarCount * 10 + 2).Append('"');
+            var text = new StringBuilder((scalarCount * 10) + 2).Append('"');
             for (var index = 0; index < scalarCount; index++)
             {
-                text.Append("\\U").Append((scalarStart + index).ToString("X8",
+                _ = text.Append("\\U").Append((scalarStart + index).ToString("X8",
                     CultureInfo.InvariantCulture));
             }
-            text.Append('"');
+            _ = text.Append('"');
             Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
         }
@@ -553,7 +575,7 @@ public sealed class ScannerTests
         var rawSurrogateSource = new StringBuilder(0x8000);
         for (var codeUnit = 0xD800; codeUnit <= 0xDFFF; codeUnit++)
         {
-            rawSurrogateSource.Append('"').Append((char)codeUnit).Append("\" ");
+            _ = rawSurrogateSource.Append('"').Append((char)codeUnit).Append("\" ");
         }
         Assert.That(rawSurrogateSource.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
         sources.Add(rawSurrogateSource.ToString());
@@ -563,13 +585,13 @@ public sealed class ScannerTests
             scalarStart += maximumSupplementaryEscapesPerSource)
         {
             var scalarCount = Math.Min(maximumSupplementaryEscapesPerSource, 0x110000 - scalarStart);
-            var text = new StringBuilder(scalarCount * 10 + 2).Append('"');
+            var text = new StringBuilder((scalarCount * 10) + 2).Append('"');
             for (var index = 0; index < scalarCount; index++)
             {
-                text.Append("\\U").Append((scalarStart + index).ToString("X8",
+                _ = text.Append("\\U").Append((scalarStart + index).ToString("X8",
                     CultureInfo.InvariantCulture));
             }
-            text.Append('"');
+            _ = text.Append('"');
             Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
         }
@@ -577,11 +599,11 @@ public sealed class ScannerTests
         var supplementarySource = new StringBuilder();
         foreach (var scalar in supplementaryEscapes)
         {
-            if (scalar == 0 || scalar > 0x10FFFF || scalar is >= 0xD800 and <= 0xDFFF)
+            if (scalar is 0 or > 0x10FFFF or (>= 0xD800 and <= 0xDFFF))
             {
                 continue;
             }
-            supplementarySource.Append('"')
+            _ = supplementarySource.Append('"')
                 .Append(char.ConvertFromUtf32(scalar))
                 .Append("\" ");
         }
@@ -592,12 +614,12 @@ public sealed class ScannerTests
             scalarStart += maximumRawSupplementaryScalarsPerSource)
         {
             var scalarCount = Math.Min(maximumRawSupplementaryScalarsPerSource, 0x110000 - scalarStart);
-            var text = new StringBuilder(scalarCount * 2 + 2).Append('"');
+            var text = new StringBuilder((scalarCount * 2) + 2).Append('"');
             for (var index = 0; index < scalarCount; index++)
             {
-                text.Append(char.ConvertFromUtf32(scalarStart + index));
+                _ = text.Append(char.ConvertFromUtf32(scalarStart + index));
             }
-            text.Append('"');
+            _ = text.Append('"');
             Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
         }
@@ -612,7 +634,7 @@ public sealed class ScannerTests
             for (var index = 0; index < scalarCount; index++)
             {
                 var scalar = char.ConvertFromUtf32(scalarStart + index);
-                text.Append(scalar).Append("x A").Append(scalar).Append("x ");
+                _ = text.Append(scalar).Append("x A").Append(scalar).Append("x ");
             }
             Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
@@ -839,10 +861,8 @@ public sealed class ScannerTests
         Assert.That(global::System.Linq.Enumerable.Single(ScannerHost.ReadIntegerValues(source, tokens, bytes)), Is.EqualTo(new ScannerIntegerValue(0, "", false, expected)));
     }
 
-    internal static async Task CheckScannerAsync(string source, bool repeat = false)
+    internal static async Task CheckScannerAsync(string source, bool repeat = false, bool executeNativeScanner = true)
     {
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = await ReadScannerSourceAsync(root).ConfigureAwait(true);
         var lexed = Lexer.Lex(SourceText.From(source));
         var expected = ImmutableArray.CreateBuilder<int>();
         var expectedTrivia = ImmutableArray.CreateBuilder<int>();
@@ -944,6 +964,13 @@ public sealed class ScannerTests
         Assert.That(adaptedTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span)), Is.EqualTo(hostTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span))));
         Assert.That(adaptedTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span)), Is.EqualTo(hostTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span))));
 
+        if (!executeNativeScanner)
+        {
+            return;
+        }
+
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var scanner = await ReadScannerSourceAsync(root).ConfigureAwait(true);
         var buffers = ScannerHost.CreateBuffers(SourceText.From(source))
             .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false))
             .Add(new HostBuffer("ExpectedTrivia", PrimitiveType.Int32, expectedTrivia.ToImmutable(), false))
@@ -1023,10 +1050,23 @@ public sealed class ScannerTests
                 return CheckScan();
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(scanner + Harness + (repeat ? Twice : Once)), buffers);
+        var compilation = CreateScannerCompilation(
+            SyntaxTree.Parse(scanner + Harness + (repeat ? Twice : Once)), buffers);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), 0).ConfigureAwait(true);
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(), 0).ConfigureAwait(true);
     }
+
+    internal static Compilation CreateScannerCompilation(
+        SyntaxTree tree, ImmutableArray<HostBuffer> buffers,
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
+        => Compilation.Create(tree, buffers, new CompilationOptions {
+            RuntimePolicy = policy,
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
 
     internal static async Task<string> ReadScannerSourceAsync(string root)
     {

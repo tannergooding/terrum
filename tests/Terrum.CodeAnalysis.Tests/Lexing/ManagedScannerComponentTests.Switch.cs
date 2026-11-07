@@ -4,15 +4,15 @@ using System;
 using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed partial class ManagedScannerComponentTests
+internal sealed partial class ManagedScannerComponentTests
 {
     [Test]
     public async Task ScalarFrontendSwitchUsesV86AndReaderRejectsTamperedRecordsAsync()
@@ -21,7 +21,7 @@ public sealed partial class ManagedScannerComponentTests
         var source = SourceText.From(text);
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy).ConfigureAwait(false);
             Assert.That(BinaryPrimitives.ReadInt32LittleEndian(programBytes), Is.EqualTo(88));
 
             var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
@@ -55,36 +55,30 @@ public sealed partial class ManagedScannerComponentTests
             var functionIndex = Array.FindIndex(read.Projection.Functions.ToArray(),
                 static projected => projected.Statements.Any(statement => statement.Kind == 38));
             Assert.That(functionIndex, Is.InRange(0, read.Projection.Functions.Length - 1));
-            var functionPayloadOffset = 4 + functionIndex * ScalarFrontendHost.ProgramFrameWordCount + 4;
+            var functionPayloadOffset = 4 + (functionIndex * ScalarFrontendHost.ProgramFrameWordCount) + 4;
             var selectorLocalIndex = Array.FindIndex(function.Locals.ToArray(),
                 static local => local.IsSwitchSelector);
             Assert.That(selectorLocalIndex, Is.InRange(0, function.Locals.Length - 1));
             var selectorFlagsOffset = (functionPayloadOffset + 300
-                + selectorLocalIndex * 4 + 1) * sizeof(int);
+                + (selectorLocalIndex * 4) + 1) * sizeof(int);
             var tamperedLocal = (byte[])programBytes.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(tamperedLocal.AsSpan(selectorFlagsOffset), 0);
-            Assert.Throws<ArgumentException>(() => {
-                ScalarFrontendHost.ReadProgram(source, bytes, tamperedLocal, (BoundRuntimePolicy)policy);
-            });
+            _ = Assert.Throws<ArgumentException>(() => _ = ScalarFrontendHost.ReadProgram(source, bytes, tamperedLocal, (BoundRuntimePolicy)policy));
 
             var selectorTypeOffset = (functionPayloadOffset + 300
-                + selectorLocalIndex * 4) * sizeof(int);
+                + (selectorLocalIndex * 4)) * sizeof(int);
             var tamperedSelectorType = (byte[])programBytes.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(tamperedSelectorType.AsSpan(selectorTypeOffset), 7);
-            Assert.Throws<ArgumentException>(() => {
-                ScalarFrontendHost.ReadProgram(source, bytes, tamperedSelectorType, (BoundRuntimePolicy)policy);
-            });
+            _ = Assert.Throws<ArgumentException>(() => _ = ScalarFrontendHost.ReadProgram(source, bytes, tamperedSelectorType, (BoundRuntimePolicy)policy));
 
             var switchIndex = Array.FindIndex(function.Statements.ToArray(),
                 static statement => statement.Kind == 38);
             Assert.That(switchIndex, Is.InRange(0, function.Statements.Length - 1));
             var switchKindOffset = (functionPayloadOffset + 332
-                + switchIndex * 5) * sizeof(int);
+                + (switchIndex * 5)) * sizeof(int);
             var tamperedStatement = (byte[])programBytes.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(tamperedStatement.AsSpan(switchKindOffset), 40);
-            Assert.Throws<ArgumentException>(() => {
-                ScalarFrontendHost.ReadProgram(source, bytes, tamperedStatement, (BoundRuntimePolicy)policy);
-            });
+            _ = Assert.Throws<ArgumentException>(() => _ = ScalarFrontendHost.ReadProgram(source, bytes, tamperedStatement, (BoundRuntimePolicy)policy));
         }
     }
 
@@ -97,10 +91,8 @@ public sealed partial class ManagedScannerComponentTests
 
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(sourceText, policy);
-            Assert.Throws<ArgumentException>(() => {
-                ScalarFrontendHost.ReadProgram(malformedSource, bytes, programBytes, (BoundRuntimePolicy)policy);
-            });
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(sourceText, policy).ConfigureAwait(false);
+            _ = Assert.Throws<ArgumentException>(() => _ = ScalarFrontendHost.ReadProgram(malformedSource, bytes, programBytes, (BoundRuntimePolicy)policy));
         }
     }
 }

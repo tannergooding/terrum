@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("Signed32One() / Signed32Zero() == Signed32Zero()",unchecked((int)0xE0540002))]
     [TestCase("Signed32One() % Signed32Zero() == Signed32Zero()",unchecked((int)0xE0540002))]
@@ -81,12 +81,12 @@ public sealed partial class CliTests
             var (compiled, compileOutput, compileError) = await RunAsync(
                 Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
                 "init-output-arithmetic-failure", "-o", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(compiled == 0, Is.True, $"{compileOutput}{Environment.NewLine}{compileError}");
             Assert.That(compileError, Is.Empty);
 
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(ran, Is.EqualTo(expected));
             Assert.That(runOutput, Is.Empty);
             Assert.That(runError, Is.Empty);

@@ -4,12 +4,12 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Terrum.CodeAnalysis.Native;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Native;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct GuardedConversionResult<T>
@@ -110,7 +110,7 @@ public sealed partial class CliTests
             uint.MaxValue, (ulong)uint.MaxValue + 1, long.MaxValue,
             (ulong)long.MaxValue + 1, ulong.MaxValue - 1, ulong.MaxValue,
         ];
-        ushort[] char16Values = new ushort[ushort.MaxValue + 1];
+        var char16Values = new ushort[ushort.MaxValue + 1];
         for (var index = 0; index < char16Values.Length; index++)
         {
             char16Values[index] = (ushort)index;

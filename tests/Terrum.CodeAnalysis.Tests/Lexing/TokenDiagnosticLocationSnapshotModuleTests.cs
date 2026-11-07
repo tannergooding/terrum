@@ -2,19 +2,20 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class TokenDiagnosticLocationSnapshotModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TokenDiagnosticLocationSnapshotModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -63,11 +64,17 @@ public sealed class TokenDiagnosticLocationSnapshotModuleTests
             """, "token-diagnostic-location-module.terrum");
 
         var seed = SourceText.From("seed");
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees,
-            ScannerHost.CreateInvocationProfileBuffers(seed), policy);
+            ScannerHost.CreateInvocationProfileBuffers(seed), options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
             ["Terrum.CodeAnalysis.VerifyDiagnosticLocations"]);
 
         var consumerCompilation = Compilation.Create(
@@ -75,10 +82,14 @@ public sealed class TokenDiagnosticLocationSnapshotModuleTests
                 namespace Terrum.CodeAnalysis;
                 int32 Main() { return VerifyDiagnosticLocations(); }
                 """, "token-diagnostic-location-consumer.terrum"),
-            ModuleCompiler.CreateReference(producer), policy);
+            ModuleCompiler.CreateReference(producer), options);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(linked.RequiresSourceGrant, Is.True);
 

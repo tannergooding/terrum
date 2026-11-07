@@ -5,7 +5,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int UInt32BinaryPredicateExport(uint left, uint right);
@@ -31,18 +31,29 @@ public sealed partial class CliTests
         {
             const string Prefix = "Terrum.CodeAnalysis.";
 
-            Int32BinaryMathExport GetInt32Binary(string name) =>
-                Marshal.GetDelegateForFunctionPointer<Int32BinaryMathExport>(
+            Int32BinaryMathExport GetInt32Binary(string name)
+            {
+                return Marshal.GetDelegateForFunctionPointer<Int32BinaryMathExport>(
                     NativeLibrary.GetExport(handle, Prefix + name));
-            UInt32BinaryPredicateExport GetUInt32Binary(string name) =>
-                Marshal.GetDelegateForFunctionPointer<UInt32BinaryPredicateExport>(
-                    NativeLibrary.GetExport(handle, Prefix + name));
-            Int64BinaryPredicateExport GetInt64Binary(string name) =>
-                Marshal.GetDelegateForFunctionPointer<Int64BinaryPredicateExport>(
-                    NativeLibrary.GetExport(handle, Prefix + name));
-            UInt64BinaryPredicateExport GetUInt64Binary(string name) =>
-                Marshal.GetDelegateForFunctionPointer<UInt64BinaryPredicateExport>(
-                    NativeLibrary.GetExport(handle, Prefix + name));
+            }
+
+            UInt32BinaryPredicateExport GetUInt32Binary(string name)
+            {
+                return Marshal.GetDelegateForFunctionPointer<UInt32BinaryPredicateExport>(
+                                NativeLibrary.GetExport(handle, Prefix + name));
+            }
+
+            Int64BinaryPredicateExport GetInt64Binary(string name)
+            {
+                return Marshal.GetDelegateForFunctionPointer<Int64BinaryPredicateExport>(
+                                NativeLibrary.GetExport(handle, Prefix + name));
+            }
+
+            UInt64BinaryPredicateExport GetUInt64Binary(string name)
+            {
+                return Marshal.GetDelegateForFunctionPointer<UInt64BinaryPredicateExport>(
+                                NativeLibrary.GetExport(handle, Prefix + name));
+            }
 
             var int32Checks = new (string Name, Int32BinaryMathExport Function, string Operation)[] {
                 ("CanAddInt32ForAbiTest", GetInt32Binary("CanAddInt32ForAbiTest"), "add"),

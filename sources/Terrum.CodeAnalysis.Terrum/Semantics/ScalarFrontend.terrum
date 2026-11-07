@@ -2825,7 +2825,82 @@ mut class ScalarFrontendState
             if (condition == 0) { return whenFalse; }
             if (whenTrue == whenFalse) { return whenTrue; }
         }
+        if (operation >= 65 && operation <= 70)
+        {
+            if (!TryTreeIntegerLiteral(TreeWord(selected, 4),
+                    init var leftType, init var left)
+                || !TryTreeIntegerLiteral(TreeWord(selected, 5),
+                    init var rightType, init var right)
+                || leftType != rightType)
+            {
+                return -1;
+            }
+            mut uint64 mask = uint64(0xFFFFFFFF);
+            if (leftType == 6)
+            {
+                mask = uint64(0xFFFF);
+            }
+            else if (leftType == 3 || leftType == 4)
+            {
+                mask = mask | (mask << 32);
+            }
+            uint64 maskedLeft = left & mask;
+            uint64 maskedRight = right & mask;
+            if (operation == 65) { return maskedLeft == maskedRight ? 1 : 0; }
+            if (operation == 66) { return maskedLeft != maskedRight ? 1 : 0; }
+
+            mut bool less = false;
+            if (leftType == 1 || leftType == 3)
+            {
+                int32 signBit = leftType == 1 ? 31 : 63;
+                bool leftNegative = (maskedLeft & (uint64(1) << signBit)) != 0;
+                bool rightNegative = (maskedRight & (uint64(1) << signBit)) != 0;
+                less = leftNegative != rightNegative
+                    ? leftNegative : maskedLeft < maskedRight;
+            }
+            else
+            {
+                less = maskedLeft < maskedRight;
+            }
+            if (operation == 67) { return less ? 1 : 0; }
+            if (operation == 68) { return less || maskedLeft == maskedRight ? 1 : 0; }
+            if (operation == 69) { return !less && maskedLeft != maskedRight ? 1 : 0; }
+            return !less ? 1 : 0;
+        }
         return -1;
+    }
+
+    private bool TryTreeIntegerLiteral(int32 root, init ref<int32> type,
+        init ref<uint64> value)
+    {
+        int32 operation = TreeWord(root, 0);
+        type = TreeWord(root, 1);
+        if (type != 1 && type != 2 && type != 3 && type != 4 && type != 6)
+        {
+            return false;
+        }
+        if (operation == 3)
+        {
+            value = TreeWordBits(TreeWord(root, 6))
+                | (TreeWordBits(TreeWord(root, 7)) << 32);
+            return true;
+        }
+        if (operation == 83
+            && TryTreeIntegerLiteral(TreeWord(root, 4),
+                init var operandType, init var operandValue)
+            && operandType == type)
+        {
+            value = operandValue;
+            return true;
+        }
+        return false;
+    }
+
+    private uint64 TreeWordBits(int32 word)
+    {
+        // Tree words are raw 32-bit bit patterns stored in signed slots.
+        return word >= 0 ? uint64(word)
+            : uint64(int64(uint32.MaxValue) + int64(word) + 1);
     }
 
     private bool TreeBodyHasTransfer(int32 start, int32 end, int32 loop, int32 transfer)
@@ -5053,13 +5128,6 @@ uint64 ScalarFrontendSourceUnits(int32 start, int32 count)
 int32 ScalarFrontendEffect(Token token)
 {
     int32 at = token.Range.Start;
-    if (token.Range.Length == 7)
-    {
-        // "NoTh", "row".
-        if (ScalarFrontendSourceUnits(at, 4) != uint64(0x00680054006F004E)) { return 0; }
-        if (ScalarFrontendSourceUnits(at + 4, 3) != uint64(0x0077006F0072)) { return 0; }
-        return 2;
-    }
     if (token.Range.Length == 13)
     {
         // "Does", "NotR", "etur", "n".

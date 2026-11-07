@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -23,10 +23,10 @@ public sealed partial class CliTests
         const string Source = "int32 Main(\n) { return int32(\n ( /* grouping */ 42 )\n); }";
         foreach (var arguments in new[] {
             new[] { "jit", "-", "--runtime", policy, "--json" },
-            new[] { "frontend-run", frontend, "-", "--runtime", policy, "--json" },
+            ["frontend-run", frontend, "-", "--runtime", policy, "--json"],
         })
         {
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), arguments);
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), arguments).ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(42));
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
@@ -41,43 +41,69 @@ public sealed partial class CliTests
         {
             foreach (var arguments in new[] {
                 new[] { "build", "-", "-o", hosted, "--runtime", policy, "--json" },
-                new[] { "build-component", scanner, "-", "-o", component, "--runtime", policy, "--json" },
-                new[] { "frontend-build", frontend, "-", "-o", native, "--runtime", policy, "--json" },
+                ["build-component", scanner, "-", "-o", component, "--runtime", policy, "--json"],
+                ["frontend-build", frontend, "-", "-o", native, "--runtime", policy, "--json"],
             })
             {
-                var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), arguments);
+                var input = Encoding.UTF8.GetBytes(Source);
+                var (exit, _, error) = arguments[0] == "build-component"
+                    ? await RunScannerCommandWithLayoutAsync(input, arguments).ConfigureAwait(false)
+                    : await RunAsync(input, arguments).ConfigureAwait(false);
                 Assert.That(exit, Is.EqualTo(0));
                 Assert.That(error, Is.Empty);
             }
-            Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(42));
-            Assert.That(await ExecuteNativeImageAsync(component), Is.EqualTo(42));
-            Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(42));
-            Assert.That(await File.ReadAllBytesAsync(component), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
-            Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
-            const string Library = "public int32 @await(\nint32 @const, int32 some\n) { return int32(\nconst + @some\n); }";
+            Assert.That(await ExecuteNativeImageAsync(hosted).ConfigureAwait(false), Is.EqualTo(42));
+            Assert.That(await ExecuteNativeImageAsync(component).ConfigureAwait(false), Is.EqualTo(42));
+            Assert.That(await ExecuteNativeImageAsync(native).ConfigureAwait(false), Is.EqualTo(42));
+            Assert.That(await File.ReadAllBytesAsync(component).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
+            Assert.That(await File.ReadAllBytesAsync(native).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
+            const string FailingLibrary = "public int32 @await(\nint32 @const, int32 some\n) { return int32(\nconst + @some\n); }";
+            if (policy == "checked-exceptions")
+            {
+                foreach (var arguments in new[] {
+                    new[] { "frontend-build-library", frontend, "-", "-o", library, "--runtime", policy, "--json" },
+                    ["build-library", "-", "--export", "await", "-o", hostedLibrary, "--runtime", policy, "--json"],
+                })
+                {
+                    var (exit, output, error) = await RunAsync(
+                        Encoding.UTF8.GetBytes(FailingLibrary), arguments).ConfigureAwait(false);
+                    Assert.That(exit, Is.EqualTo(1), $"{arguments[0]}: {output}{error}");
+                    Assert.That(output, Does.Contain("TRM4002"));
+                    Assert.That(error, Is.Empty);
+                }
+                Assert.That(File.Exists(library), Is.False);
+                Assert.That(File.Exists(hostedLibrary), Is.False);
+            }
+            var librarySource = policy == "checked-exceptions"
+                ? "public int32 @await(\nint32 @const, int32 some\n) { return int32(\nconst\n); }"
+                : FailingLibrary;
+            var firstArgument = policy == "checked-exceptions" ? 42 : 20;
+            var secondArgument = policy == "checked-exceptions" ? 0 : 22;
             foreach (var arguments in new[] {
                 new[] { "frontend-build-library", frontend, "-", "-o", library, "--runtime", policy, "--json" },
-                new[] { "build-library", "-", "--export", "await", "-o", hostedLibrary, "--runtime", policy, "--json" },
+                ["build-library", "-", "--export", "await", "-o", hostedLibrary, "--runtime", policy, "--json"],
             })
             {
-                var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(Library), arguments);
-                Assert.That(exit, Is.EqualTo(0));
+                var (exit, output, error) = await RunAsync(
+                    Encoding.UTF8.GetBytes(librarySource), arguments).ConfigureAwait(false);
+                Assert.That(exit, Is.EqualTo(0),
+                    $"{arguments[0]}: {output}{error}");
                 Assert.That(error, Is.Empty);
             }
-            Assert.That(await File.ReadAllBytesAsync(library), Is.EqualTo(await File.ReadAllBytesAsync(hostedLibrary)));
+            Assert.That(await File.ReadAllBytesAsync(library).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hostedLibrary).ConfigureAwait(false)));
             var handle = NativeLibrary.Load(library);
             try
             {
                 var invoke = Marshal.GetDelegateForFunctionPointer<ScalarBinary>(NativeLibrary.GetExport(handle, "await"));
-                Assert.That(invoke(20, 22), Is.EqualTo(42));
+                Assert.That(invoke(firstArgument, secondArgument), Is.EqualTo(42));
             }
             finally
             {
                 NativeLibrary.Free(handle);
             }
 
-            var originalImage = await File.ReadAllBytesAsync(native);
-            var originalLibrary = await File.ReadAllBytesAsync(library);
+            var originalImage = await File.ReadAllBytesAsync(native).ConfigureAwait(false);
+            var originalLibrary = await File.ReadAllBytesAsync(library).ConfigureAwait(false);
             foreach (var gap in new[] { " ", "\n", "/* boundary */", "/// boundary\n" })
             {
                 foreach (var invalid in new[] {
@@ -87,22 +113,25 @@ public sealed partial class CliTests
                 {
                     foreach (var arguments in new[] {
                         new[] { "build-component", scanner, "-", "-o", component, "--runtime", policy, "--json" },
-                        new[] { "frontend-build", frontend, "-", "-o", native, "--runtime", policy, "--json" },
+                        ["frontend-build", frontend, "-", "-o", native, "--runtime", policy, "--json"],
                     })
                     {
-                        var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(invalid), arguments);
+                        var input = Encoding.UTF8.GetBytes(invalid);
+                        var (exit, _, error) = arguments[0] == "build-component"
+                            ? await RunScannerCommandWithLayoutAsync(input, arguments).ConfigureAwait(false)
+                            : await RunAsync(input, arguments).ConfigureAwait(false);
                         Assert.That(exit, Is.EqualTo(1));
                         Assert.That(error, Is.Empty);
                     }
-                    Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(originalImage));
-                    Assert.That(await File.ReadAllBytesAsync(component), Is.EqualTo(originalImage));
+                    Assert.That(await File.ReadAllBytesAsync(native).ConfigureAwait(false), Is.EqualTo(originalImage));
+                    Assert.That(await File.ReadAllBytesAsync(component).ConfigureAwait(false), Is.EqualTo(originalImage));
                 }
                 var (libraryExit, _, libraryError) = await RunAsync(Encoding.UTF8.GetBytes(
                     "public int32 @await" + gap + "(int32 @const, int32 some) { return const + some; }"),
-                    "frontend-build-library", frontend, "-", "-o", library, "--runtime", policy, "--json");
+                    "frontend-build-library", frontend, "-", "-o", library, "--runtime", policy, "--json").ConfigureAwait(false);
                 Assert.That(libraryExit, Is.EqualTo(1));
                 Assert.That(libraryError, Is.Empty);
-                Assert.That(await File.ReadAllBytesAsync(library), Is.EqualTo(originalLibrary));
+                Assert.That(await File.ReadAllBytesAsync(library).ConfigureAwait(false), Is.EqualTo(originalLibrary));
             }
         }
         finally

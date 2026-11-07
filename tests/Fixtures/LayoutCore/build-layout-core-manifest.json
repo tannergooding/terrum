@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "coreAuthorityIdentity": "terrum.repository.test-host",
+  "usingModuleIdentity": "terrum.compiler-primitives",
+  "providers": [
+    {
+      "moduleIdentity": "terrum.layout-test-core",
+      "revisionIdentity": "repository-layout-test-revision-1",
+      "schema": {
+        "identity": "terrum.layout-test-core.declarations",
+        "revision": 1
+      },
+      "governingSemanticEdition": 1,
+      "targetRequirement": 0,
+      "runtimePolicy": 0
+    }
+  ],
+  "layoutKinds": {
+    "identity": {
+      "providerIdentity": "terrum.layout-test-core",
+      "exportKey": "LayoutKind",
+      "kind": "enum-type"
+    },
+    "qualifiedName": "LayoutKind",
+    "underlyingType": "int32",
+    "members": [
+      {
+        "identity": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind.Auto",
+          "kind": "enum-member"
+        },
+        "declaringEnum": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind",
+          "kind": "enum-type"
+        },
+        "declarationKey": "layout-kind/member/Auto",
+        "name": "Auto",
+        "value": 0,
+        "isPublic": true
+      },
+      {
+        "identity": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind.Sequential",
+          "kind": "enum-member"
+        },
+        "declaringEnum": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind",
+          "kind": "enum-type"
+        },
+        "declarationKey": "layout-kind/member/Sequential",
+        "name": "Sequential",
+        "value": 1,
+        "isPublic": true
+      },
+      {
+        "identity": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind.Union",
+          "kind": "enum-member"
+        },
+        "declaringEnum": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind",
+          "kind": "enum-type"
+        },
+        "declarationKey": "layout-kind/member/Union",
+        "name": "Union",
+        "value": 2,
+        "isPublic": true
+      },
+      {
+        "identity": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind.Transparent",
+          "kind": "enum-member"
+        },
+        "declaringEnum": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind",
+          "kind": "enum-type"
+        },
+        "declarationKey": "layout-kind/member/Transparent",
+        "name": "Transparent",
+        "value": 3,
+        "isPublic": true
+      }
+    ],
+    "genericArity": 0,
+    "isPublic": true,
+    "isPrimary": true,
+    "isFlags": false,
+    "blittableTargetRequirement": 0
+  },
+  "layout": {
+    "identity": {
+      "providerIdentity": "terrum.layout-test-core",
+      "exportKey": "Layout",
+      "kind": "attribute-schema"
+    },
+    "qualifiedName": "Layout",
+    "arguments": [
+      {
+        "name": "Kind",
+        "kind": "layout-kind",
+        "enumType": {
+          "providerIdentity": "terrum.layout-test-core",
+          "exportKey": "LayoutKind",
+          "kind": "enum-type"
+        },
+        "isRequired": true,
+        "allowsPositional": true,
+        "defaultUInt32": null
+      },
+      {
+        "name": "Packing",
+        "kind": "uint32",
+        "enumType": null,
+        "isRequired": false,
+        "allowsPositional": false,
+        "defaultUInt32": 16
+      },
+      {
+        "name": "Alignment",
+        "kind": "uint32",
+        "enumType": null,
+        "isRequired": false,
+        "allowsPositional": false,
+        "defaultUInt32": null
+      }
+    ],
+    "targets": ["inline-struct"],
+    "isPrimaryTargetOnly": true,
+    "genericArity": 0,
+    "isPublic": true,
+    "isPrimary": true,
+    "isRepeatable": false
+  },
+  "blittable": {
+    "identity": {
+      "providerIdentity": "terrum.layout-test-core",
+      "exportKey": "Blittable",
+      "kind": "attribute-schema"
+    },
+    "qualifiedName": "Blittable",
+    "arguments": [],
+    "targets": ["inline-struct", "integer-backed-enum"],
+    "isPrimaryTargetOnly": true,
+    "genericArity": 0,
+    "isPublic": true,
+    "isPrimary": true,
+    "isRepeatable": false
+  }
+}

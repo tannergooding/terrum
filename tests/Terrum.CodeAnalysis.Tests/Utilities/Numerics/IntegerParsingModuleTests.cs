@@ -4,17 +4,17 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerParsingModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerParsingModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -75,7 +75,11 @@ public sealed class IntegerParsingModuleTests
             "ParseInt32",
             "ParseChar16",
         };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             [.. exports.Select(static name => "Terrum.CodeAnalysis.Numerics64." + name)]);
 
         var consumers = new BoundProgram[exports.Length];
@@ -86,7 +90,11 @@ public sealed class IntegerParsingModuleTests
                 "integer-parsing-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
             Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = consumerCompilation.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))(), producer);
             consumers[index] = ModuleCompiler.Link(consumer, producer);
         }
 
@@ -133,33 +141,33 @@ public sealed class IntegerParsingModuleTests
     private static int ExpectedResult(ParseFixture fixture, int parser)
     {
         if (!fixture.IsDecimalSpelling
-            || !BigInteger.TryParse(fixture.Text.Replace("_", string.Empty), NumberStyles.AllowLeadingSign,
+            || !BigInteger.TryParse(fixture.Text.Replace("_", string.Empty, System.StringComparison.Ordinal), NumberStyles.AllowLeadingSign,
                 CultureInfo.InvariantCulture, out var value))
         {
             return -100;
         }
 
-        if ((parser is 0 or 2 or 4) && fixture.Text.StartsWith("-", StringComparison.Ordinal))
+        if ((parser is 0 or 2 or 4) && fixture.Text.StartsWith('-', System.StringComparison.Ordinal))
         {
             return -100;
         }
 
         return parser switch {
-            0 when value < 0 || value > ulong.MaxValue => -100,
+            0 when value < BigInteger.Zero || value > ulong.MaxValue => -100,
             0 when value == ulong.MaxValue => -101,
             0 when value > int.MaxValue => -102,
             0 => (int)value,
-            1 when value < long.MinValue || value > long.MaxValue => -100,
+            1 when value < (BigInteger)long.MinValue || value > (BigInteger)long.MaxValue => -100,
             1 when value == long.MinValue => -101,
-            1 when value < int.MinValue || value > int.MaxValue => -102,
+            1 when value < (BigInteger)int.MinValue || value > (BigInteger)int.MaxValue => -102,
             1 => (int)value,
-            2 when value < 0 || value > uint.MaxValue => -100,
+            2 when value < BigInteger.Zero || value > uint.MaxValue => -100,
             2 when value == uint.MaxValue => -101,
             2 when value > int.MaxValue => -102,
             2 => (int)value,
-            3 when value < int.MinValue || value > int.MaxValue => -100,
+            3 when value < (BigInteger)int.MinValue || value > (BigInteger)int.MaxValue => -100,
             3 => (int)value,
-            4 when value < 0 || value > char.MaxValue => -100,
+            4 when value < BigInteger.Zero || value > char.MaxValue => -100,
             4 => (int)value,
             _ => throw new ArgumentOutOfRangeException(nameof(parser)),
         };

@@ -13,7 +13,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task CompoundAssignmentGenericClosersRetainLexicalAndTreeStreamsAsync()
@@ -21,7 +21,7 @@ public sealed partial class CliTests
         var input = Encoding.UTF8.GetBytes("void F(Box<Box<int32 /* close */ >> value) {}");
         foreach (var command in new[] { "tokens", "tree" })
         {
-            var (exit, output, error) = await RunAsync(input, command, "-", "--json");
+            var (exit, output, error) = await RunAsync(input, command, "-", "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"{command} exited {exit}: {output}{error}");
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
@@ -55,20 +55,20 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"compound-assignments-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
+        _ = Directory.CreateDirectory(directory);
         try
         {
             var hosted = Path.Combine(directory, "hosted.exe");
             var scanned = Path.Combine(directory, "scanned.exe");
             var input = Encoding.UTF8.GetBytes(source);
             var (exit, output, error) = await RunAsync(input, "build", "-", "-o", hosted,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"build {policy} exited {exit}: {output}{error}");
-            (exit, output, error) = await RunAsync(input, "build-component",
+            (exit, output, error) = await RunScannerCommandWithLayoutAsync(input, "build-component",
                 TerrumProjectPaths.SourceDirectory(root), "-", "-o", scanned,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit == 0, Is.True, $"build-component {policy} exited {exit}: {output}{error}");
-            Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+            Assert.That(await File.ReadAllBytesAsync(scanned).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
             using var process = Process.Start(new ProcessStartInfo(scanned) {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -79,20 +79,20 @@ public sealed partial class CliTests
             var stderr = process.StandardError.ReadToEndAsync();
             try
             {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
                 if (!process.HasExited)
                 {
                     process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync();
+                    await process.WaitForExitAsync().ConfigureAwait(false);
                 }
                 throw;
             }
             Assert.That(process.ExitCode, Is.EqualTo(40));
-            Assert.That(await stdout, Is.Empty);
-            Assert.That(await stderr, Is.Empty);
+            Assert.That(await stdout.ConfigureAwait(false), Is.Empty);
+            Assert.That(await stderr.ConfigureAwait(false), Is.Empty);
         }
         finally
         {

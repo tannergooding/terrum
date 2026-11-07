@@ -5,17 +5,17 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerMathModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerMathModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -45,7 +45,11 @@ public sealed class IntegerMathModuleTests
             "ClampInt64",
             "GreatestCommonDivisorInt64",
         };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             Array.ConvertAll(exports, static name => "Terrum.CodeAnalysis.Numerics64." + name));
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
@@ -183,15 +187,19 @@ public sealed class IntegerMathModuleTests
         }
 
         Assert.That(checks.Count, Is.EqualTo(858));
-        consumerSource.AppendLine("return 0;");
-        consumerSource.AppendLine("}");
-        consumerSource.Append(helpers);
+        _ = consumerSource.AppendLine("return 0;");
+        _ = consumerSource.AppendLine("}");
+        _ = consumerSource.Append(helpers);
         var consumerTree = SyntaxTree.Parse(consumerSource.ToString(), "integer-math-consumer.terrum");
         Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
         var consumerCompilation = Compilation.Create(consumerTree, reference, policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
         var actual = NativeJit.Execute(ModuleCompiler.Link(consumer, producer), (NativeRuntimePolicy)policy);
         Assert.That(actual == 0, Is.True, actual > 0 && actual <= checks.Count
                 ? $"IntegerMath boundary {actual} failed: {checks[actual - 1]}."
@@ -222,7 +230,7 @@ public sealed class IntegerMathModuleTests
             ("TryAbsInt64", "int64"),
         })
         {
-            source.Append("bool Check").Append(function).Append('(').Append(type)
+            _ = source.Append("bool Check").Append(function).Append('(').Append(type)
                 .Append(" value, ").Append(type).AppendLine(" expected, bool shouldSucceed) {")
                 .AppendLine("    if (shouldSucceed) {")
                 .Append("        if (!").Append(function)
@@ -238,7 +246,7 @@ public sealed class IntegerMathModuleTests
     private static void AppendCheck(StringBuilder source, List<string> checks, ref int failureCode,
         string expression, string description)
     {
-        source.Append("if (!(").Append(expression).Append(")) { return ")
+        _ = source.Append("if (!(").Append(expression).Append(")) { return ")
             .Append(failureCode.ToString(CultureInfo.InvariantCulture)).AppendLine("; }");
         checks.Add(description);
         failureCode++;

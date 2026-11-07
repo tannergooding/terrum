@@ -9,18 +9,18 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed partial class ManagedScannerComponentTests
+internal sealed partial class ManagedScannerComponentTests
 {
     [TestCase("@await",true)]
     [TestCase("@union",true)]
@@ -51,9 +51,9 @@ public sealed partial class ManagedScannerComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy);
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(false);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
-            await ExecuteAotAsync(program, policy);
+            await ExecuteAotAsync(program, policy).ConfigureAwait(false);
         }
     }
     [TestCase("",false)]
@@ -1137,7 +1137,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(hostedSource), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = hosted.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual0 = hosted.Program;
+                    Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual0!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -1204,7 +1208,11 @@ public sealed partial class ManagedScannerComponentTests
                     text + " int32 Main() { if (Value() == true) { return 42; } return 1; }"),
                     (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = hosted.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), policy), Is.EqualTo(expected ? 42 : 1));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = hosted.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))(), policy), Is.EqualTo(expected ? 42 : 1));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -1271,7 +1279,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = hosted.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual2 = hosted.Program;
+                    Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual2!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -1371,7 +1383,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = hosted.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual3 = hosted.Program;
+                    Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual3!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -1501,7 +1517,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = hosted.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual4 = hosted.Program;
+                    Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual4!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -1576,7 +1596,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = hosted.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual5 = hosted.Program;
+                    Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual5!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarConditionalParser").ConfigureAwait(true);
@@ -1649,7 +1673,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = hosted.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual6 = hosted.Program;
+                    Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual6!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarConditionalAddParser").ConfigureAwait(true);
@@ -1727,7 +1755,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = hosted.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual7 = hosted.Program;
+                    Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual7!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarComparisonConditionalParser").ConfigureAwait(true);
@@ -1802,7 +1834,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = hosted.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual8 = hosted.Program;
+                    Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual8!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -1889,7 +1925,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = hosted.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual9 = hosted.Program;
+                    Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual9!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -1960,7 +2000,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = hosted.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual10 = hosted.Program;
+                    Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual10!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2001,7 +2045,11 @@ public sealed partial class ManagedScannerComponentTests
             {
                 var hosted = Compilation.Create(SyntaxTree.Parse(text), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = hosted.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), policy), Is.EqualTo(value));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual11 = hosted.Program;
+                    Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual11!;
+                }))(), policy), Is.EqualTo(value));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2042,7 +2090,11 @@ public sealed partial class ManagedScannerComponentTests
                     $" int32 Main() {{ uint32 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = hosted.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual12 = hosted.Program;
+                    Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual12!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2091,7 +2143,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = hosted.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual13 = hosted.Program;
+                    Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual13!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2131,7 +2187,11 @@ public sealed partial class ManagedScannerComponentTests
                     $" int32 Main() {{ uint64 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = hosted.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual14 = hosted.Program;
+                    Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual14!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2199,7 +2259,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = hosted.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual15 = hosted.Program;
+                    Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual15!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2264,7 +2328,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = hosted.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual16 = hosted.Program;
+                    Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual16!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2298,7 +2366,7 @@ public sealed partial class ManagedScannerComponentTests
             "uint64" => "UInt64",
             _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
         };
-        var operation = expression.Contains('/') ? "Divide" : "Remainder";
+        var operation = expression.Contains('/', System.StringComparison.Ordinal) ? "Divide" : "Remainder";
         var evaluator = $"TryEvaluate{width}{operation}Return";
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var assertion = evaluable
@@ -2332,7 +2400,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = hosted.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual17 = hosted.Program;
+                    Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual17!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2361,8 +2433,8 @@ public sealed partial class ManagedScannerComponentTests
             "uint64" => "UInt64",
             _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
         };
-        var operation = expression.Contains('&') ? "And"
-            : expression.Contains('|') ? "Or" : "Xor";
+        var operation = expression.Contains('&', System.StringComparison.Ordinal) ? "And"
+            : expression.Contains('|', System.StringComparison.Ordinal) ? "Or" : "Xor";
         var evaluator = $"TryEvaluate{width}{operation}Return";
         var text = $"{typeName} Value() {{ return {expression}; }}";
         var entry = $$"""
@@ -2386,7 +2458,11 @@ public sealed partial class ManagedScannerComponentTests
                 """;
             var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = hosted.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), policy), Is.EqualTo(42));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual18 = hosted.Program;
+                Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual18!;
+            }))(), policy), Is.EqualTo(42));
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
@@ -2513,7 +2589,11 @@ public sealed partial class ManagedScannerComponentTests
             {
                 var hosted = Compilation.Create(SyntaxTree.Parse(text), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = hosted.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(), policy), Is.EqualTo(value));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual19 = hosted.Program;
+                    Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual19!;
+                }))(), policy), Is.EqualTo(value));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2564,7 +2644,11 @@ public sealed partial class ManagedScannerComponentTests
                     $" int32 Main() {{ uint32 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = hosted.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual20 = hosted.Program;
+                    Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual20!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2614,7 +2698,11 @@ public sealed partial class ManagedScannerComponentTests
                     $" int32 Main() {{ uint64 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = hosted.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual21 = hosted.Program;
+                    Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual21!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2678,7 +2766,11 @@ public sealed partial class ManagedScannerComponentTests
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = hosted.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))(), policy), Is.EqualTo(42));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual22 = hosted.Program;
+                    Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual22!;
+                }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -2955,16 +3047,16 @@ public sealed partial class ManagedScannerComponentTests
         Assert.That(syntax.Diagnostics, Is.Empty);
         var functionName = syntax.Tokens[1].Span;
         var valueStart = text.IndexOf("return ", StringComparison.Ordinal) + "return ".Length;
-        var valueLength = text.IndexOf(';', valueStart) - valueStart;
+        var valueLength = text.IndexOf(';', valueStart, System.StringComparison.Ordinal) - valueStart;
         var conditionOperation = conditional
             ? text.Contains(" < ", StringComparison.Ordinal) ? 67
                 : text.Contains(" >= ", StringComparison.Ordinal) ? 70 : 66
             : 0;
         var conditionStart = conditional ? text.IndexOf("if (", StringComparison.Ordinal) + 4 : 0;
-        var conditionLength = conditional ? text.IndexOf(')', conditionStart) - conditionStart : 0;
+        var conditionLength = conditional ? text.IndexOf(')', conditionStart, System.StringComparison.Ordinal) - conditionStart : 0;
         var secondReturnStart = conditional
             ? text.IndexOf("return ", valueStart, StringComparison.Ordinal) + "return ".Length : 0;
-        var secondReturnLength = conditional ? text.IndexOf(';', secondReturnStart) - secondReturnStart : 0;
+        var secondReturnLength = conditional ? text.IndexOf(';', secondReturnStart, System.StringComparison.Ordinal) - secondReturnStart : 0;
         var firstParameter = syntax.Tokens[4].Span;
         var secondParameter = count == 2 ? syntax.Tokens[7].Span : default;
         var firstTypeText = text.Substring(syntax.Tokens[3].Span.Start, syntax.Tokens[3].Span.Length);
@@ -2995,7 +3087,7 @@ public sealed partial class ManagedScannerComponentTests
                 || result.WhenTrue.RightParameter != {{right}}
                 || result.WhenTrue.Span.Start != {{valueStart}}
                 || result.WhenTrue.Span.Length != {{valueLength}}
-                || result.HasCondition != {{conditional.ToString().ToLowerInvariant()}}
+                || result.HasCondition != {{(conditional ? "true" : "false")}}
                 || result.Condition.Operation != {{conditionOperation}}
                 || result.Condition.Type != {{(conditional ? 5 : 0)}}
                 || result.Condition.Span.Start != {{conditionStart}}
@@ -3017,7 +3109,11 @@ public sealed partial class ManagedScannerComponentTests
             var hostedSource = text + $" int32 Main() {{ if (ValueResult()) {{ return 42; }} return 1; }} bool ValueResult() {{ return {call} == {expected}; }}";
             var hosted = Compilation.Create(SyntaxTree.Parse(hostedSource), (BoundRuntimePolicy)policy);
             Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
-            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = hosted.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))(), policy), Is.EqualTo(42));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual23 = hosted.Program;
+                Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual23!;
+            }))(), policy), Is.EqualTo(42));
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarFrontend").ConfigureAwait(true);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
@@ -3100,17 +3196,17 @@ public sealed partial class ManagedScannerComponentTests
                 TokenKind.ShiftRightUnsigned => 3,
                 _ => 1,
             };
-            entry.Append(CultureInfo.InvariantCulture,
+            _ = entry.Append(CultureInfo.InvariantCulture,
                 $"Host.Tokens[{index * 3}] = {(int)kinds[index]};"
-                + $" Host.Tokens[{index * 3 + 1}] = {start};"
-                + $" Host.Tokens[{index * 3 + 2}] = {width};");
+                + $" Host.Tokens[{(index * 3) + 1}] = {start};"
+                + $" Host.Tokens[{(index * 3) + 2}] = {width};");
             start += width;
         }
         Assert.That(start, Is.EqualTo(text.Length));
-        entry.Append(
+        _ = entry.Append(
             $"Host.Tokens[{kinds.Length * 3}] = 0;"
-            + $" Host.Tokens[{kinds.Length * 3 + 1}] = {text.Length};"
-            + $" Host.Tokens[{kinds.Length * 3 + 2}] = 0;"
+            + $" Host.Tokens[{(kinds.Length * 3) + 1}] = {text.Length};"
+            + $" Host.Tokens[{(kinds.Length * 3) + 2}] = 0;"
             + $" require TokenSnapshot.TryBuild({kinds.Length + 1}, init var tokens);"
             + " var error = tokens.GetScalarOperatorSpacingError();"
             + $" if (error.Start != 0 || error.Length != {text.Length}) {{ return 1; }}"
@@ -3119,9 +3215,9 @@ public sealed partial class ManagedScannerComponentTests
             + " return 42; }");
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy, "ScalarFrontend");
+            var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy, "ScalarFrontend").ConfigureAwait(false);
             Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
-            await ExecuteAotAsync(program, policy);
+            await ExecuteAotAsync(program, policy).ConfigureAwait(false);
         }
     }
     [TestCase("b ? 1 : 2","")]
@@ -3367,7 +3463,7 @@ public sealed partial class ManagedScannerComponentTests
                 Assert.That(projected.Name, Is.EqualTo(default(TextSpan)));
                 Assert.That(projected.ErrorSpan.Start, Is.EqualTo(source.IndexOf("y;", StringComparison.Ordinal)));
                 Assert.That(projected.ErrorSpan.Length, Is.EqualTo(1));
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.BindLibrary(
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.BindLibrary(
                     SourceText.From(source),
                     native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                         ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy));
@@ -3411,10 +3507,10 @@ public sealed partial class ManagedScannerComponentTests
         }
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).IsValid, Is.True);
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 2);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4), value);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
     }
     [TestCase("int32 Value(int32 x, int32 y, int32 z) { return z + 5; }",40157)]
     [TestCase("int32 Value(int32 x, int32 y, int32 z) { return (-5) + z; }",41557)]
@@ -3444,23 +3540,23 @@ public sealed partial class ManagedScannerComponentTests
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset),
                 word == 0 ? 18 : original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
-        int operationWord = expressionWords.Operation;
-        int operationOffset = operationWord * sizeof(int);
-        int actualOperation = result.WhenTrue.Operation;
+        var operationWord = expressionWords.Operation;
+        var operationOffset = operationWord * sizeof(int);
+        var actualOperation = result.WhenTrue.Operation;
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation - 40000);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         foreach (var forged in new[] { actualOperation + 100, actualOperation + 200, actualOperation + 40000 })
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), forged);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         }
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation);
         var changed = text.ToCharArray();
-        changed[text.LastIndexOf('z')] = 'x';
-        Assert.Throws<ArgumentException>(() =>
+        changed[text.LastIndexOf('z', System.StringComparison.Ordinal)] = 'x';
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(new string(changed)), bytes));
     }
     [TestCase("int32 Value(int32 x, int32 y, int32 x) { return x; }",4)]
@@ -3540,21 +3636,25 @@ public sealed partial class ManagedScannerComponentTests
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = compilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
-            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual24 = compilation.Program;
+                Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual24!;
+            }))();
+            AssertLibraryEmissionParity(actual, hosted, ["Fill"], policy);
 
             foreach (var version in new[] { 73, 74, 75, 76, 77, 78 })
             {
                 BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                     bytes, (BoundRuntimePolicy)policy));
             }
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(17 * sizeof(int)), 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                 bytes, (BoundRuntimePolicy)policy));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(17 * sizeof(int)), 0);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                 bytes, (BoundRuntimePolicy)policy));
         }
     }
@@ -3585,13 +3685,17 @@ public sealed partial class ManagedScannerComponentTests
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = compilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))();
-            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual25 = compilation.Program;
+                Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual25!;
+            }))();
+            AssertLibraryEmissionParity(actual, hosted, ["Fill"], policy);
 
             foreach (var version in new[] { 73, 82 })
             {
                 BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                     bytes, (BoundRuntimePolicy)policy));
             }
         }
@@ -3623,13 +3727,17 @@ public sealed partial class ManagedScannerComponentTests
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))();
-            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual26 = compilation.Program;
+                Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual26!;
+            }))();
+            AssertLibraryEmissionParity(actual, hosted, ["Fill"], policy);
 
             foreach (var version in new[] { 73, 79, 80, 82 })
             {
                 BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
+                _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                     bytes, (BoundRuntimePolicy)policy));
             }
         }
@@ -3658,8 +3766,12 @@ public sealed partial class ManagedScannerComponentTests
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = compilation.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))();
-            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
+            var hosted = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual27 = compilation.Program;
+                Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual27!;
+            }))();
+            AssertLibraryEmissionParity(actual, hosted, ["Fill"], policy);
         }
     }
     [TestCase("int32 Value(bool x, bool y, bool z) { if (z && x) { return 42; } return 0; }",true,false,true)]
@@ -3720,7 +3832,7 @@ public sealed partial class ManagedScannerComponentTests
         }
         Assert.That(ScalarFrontendHost.ReadResult(
             SourceText.From("int32 Value(int32 x) { return x; }"), bytes).IsValid, Is.True);
-        Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
     }
     [TestCase("int32 Value() { return 42; }")]
@@ -3742,7 +3854,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var value = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
         }
     }
@@ -3765,7 +3877,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), replacement);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
     }
@@ -3780,7 +3892,7 @@ public sealed partial class ManagedScannerComponentTests
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(program, policy);
         Assert.That(native.ExitCode, Is.EqualTo(42));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source),
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source),
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int))));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
@@ -3810,15 +3922,15 @@ public sealed partial class ManagedScannerComponentTests
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
             var right = BinaryPrimitives.ReadInt32LittleEndian(projected.AsSpan(25 * sizeof(int)));
             BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(25 * sizeof(int)), 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
             BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(25 * sizeof(int)), right);
             var length = BinaryPrimitives.ReadInt32LittleEndian(projected.AsSpan(27 * sizeof(int)));
             BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(27 * sizeof(int)), length - 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
             BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(27 * sizeof(int)), length);
             var start = BinaryPrimitives.ReadInt32LittleEndian(projected.AsSpan(26 * sizeof(int)));
             BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(26 * sizeof(int)), start + 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
         }
         var library = ScalarFrontendHost.BindLibrary(source,
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
@@ -3826,7 +3938,7 @@ public sealed partial class ManagedScannerComponentTests
         Assert.That(library.Functions, Has.Exactly(1).Items);
         Assert.That(library.Functions[0].IsInternal, Is.True);
         Assert.That(library.Buffers, Is.Empty);
-        Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(library, ["Value"], policy));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(library, ["Value"], policy));
 
         var result = new BoundCall(0, [
             new BoundConstant(first, PrimitiveType.Int32, default),
@@ -3938,7 +4050,7 @@ public sealed partial class ManagedScannerComponentTests
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset),
                 word == 0 ? version - 1 : original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -3971,7 +4083,8 @@ public sealed partial class ManagedScannerComponentTests
     [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x < -5; }",        PrimitiveType.Int32,-6L,1367)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return (-5) < x; }",        PrimitiveType.Int32,42L,67)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return x == -2147483648; }",        PrimitiveType.Int32,int.MinValue,1365)]
-    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x == -0xFFFFFFFF; }",        PrimitiveType.Int32,1L,1365)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return x == -0x80000000; }",        PrimitiveType.Int32,int.MinValue,1365)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x == -0x7FFFFFFF; }",        PrimitiveType.Int32,-2147483647L,1365)]
     [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x < +42; }",        PrimitiveType.Int32,41L,1767)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return (+42) < x; }",        PrimitiveType.Int32,43L,67)]
     [TestCase(NativeRuntimePolicy.FailFast,"bool Value(uint64 x) { return x == +42; }",        PrimitiveType.UInt64,42L,1765)]
@@ -3993,11 +4106,11 @@ public sealed partial class ManagedScannerComponentTests
         if (operation >= 1200)
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)),
                 operation - (operation >= 1600 ? 1600 : 1200));
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)), operation);
         }
         foreach (var word in new[] { 22, 23, 24, 25 })
@@ -4005,7 +4118,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4023,6 +4136,30 @@ public sealed partial class ManagedScannerComponentTests
         Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
+
+    [TestCase("int32", "-0x7FFFFFFF", "-0xFFFFFFFF")]
+    [TestCase("int64", "-0x7FFFFFFFFFFFFFFF", "-0xFFFFFFFFFFFFFFFF")]
+    [TestCase("int32", "+0x7FFFFFFF", "+0xFFFFFFFF")]
+    public async Task ScalarFrontendReaderRejectsOutOfRangeSignedBasedProjectionAsync(
+        string typeName, string validLiteral, string invalidLiteral)
+    {
+        var text = $"bool Value({typeName} x) {{ return x == {validLiteral}; }}";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.FailFast);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.Not.Zero);
+
+        var invalidText = text.Replace(validLiteral, invalidLiteral, StringComparison.Ordinal);
+        Assert.That(invalidText.Length, Is.EqualTo(text.Length));
+        _ = Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(invalidText), bytes));
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x) { return ~x; }",        -43L,63)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x) { return ~x; }",        -43L,63)]
     [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return ~0xFFFFFFD5; }",        0L,163)]
@@ -4049,7 +4186,7 @@ public sealed partial class ManagedScannerComponentTests
         {
             Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 6);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         }
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
@@ -4058,7 +4195,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4089,7 +4226,7 @@ public sealed partial class ManagedScannerComponentTests
     [TestCase(NativeRuntimePolicy.FailFast,"int64 Value(int64 x) { return ~(-(x)); }",13,10058,"int64",-1L,0L,1,-2L)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(-2147483648); }",13,10003,"int32",0L,0L,0,2147483647L)]
     [TestCase(NativeRuntimePolicy.FailFast,"int64 Value() { return ~(-9223372036854775808); }",13,10003,"int64",0L,0L,0,9223372036854775807L)]
-    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(-0xFFFFFFFF); }",13,10003,"int32",0L,0L,0,-2L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(-0x80000000); }",13,10003,"int32",0L,0L,0,2147483647L)]
     [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return ~(-(42)); }",13,10658,"int32",0L,0L,0,41L)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(+((42))); }",13,10657,"int32",0L,0L,0,-43L)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x) { return -(~x); }",14,14063,"int32",42L,0L,1,43L)]
@@ -4127,32 +4264,32 @@ public sealed partial class ManagedScannerComponentTests
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
         var operationOffset = expressionWords.Operation * sizeof(int);
         var originalOperation = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(operationOffset));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation + 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation);
         var operandOffset = expressionWords.Left * sizeof(int);
         var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(operandOffset));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operandOffset), original ^ 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operandOffset), original);
         if (operation is 4057 or 6057 or 22057)
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("x + y", "x - y", StringComparison.Ordinal)), bytes));
         }
         if (operation is 10003 or 10058 or 10658)
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("-", "+", StringComparison.Ordinal)), bytes));
         }
         if (operation is 12063 or 12163 or 14063 or 14163 or 30057 or 32057 or 38057)
         {
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("~", "-", StringComparison.Ordinal)), bytes));
         }
         var type = typeName switch {
@@ -4181,6 +4318,26 @@ public sealed partial class ManagedScannerComponentTests
         SemanticVerifier.Verify(executable);
         Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+    [Test]
+    public async Task ScalarFrontendGroupedBasedInt32MinimumRetainsUnaryNegationAsync()
+    {
+        const string text = "int32 Value() { return -(0x80000000); }";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { if (TryPublishScalarFrontend()) { return 42; } return 43; }",
+            BoundRuntimePolicy.CheckedExceptions, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.CheckedExceptions);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, BoundRuntimePolicy.CheckedExceptions);
+        var returned = ((BoundReturn)library.Functions[0].Body.Statements[0]).Value;
+        Assert.That(returned, Is.TypeOf<BoundUnary>());
+        var unary = (BoundUnary)returned!;
+        Assert.That(unary.Operator, Is.EqualTo(TokenKind.Minus));
+        Assert.That(unary.Operand, Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)unary.Operand).Value, Is.EqualTo(int.MinValue));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -4233,21 +4390,21 @@ public sealed partial class ManagedScannerComponentTests
         var actualOperation = ExpectedScalarFrontendOperation(source, bytes, operation);
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         var operationOffset = expressionWords.Operation * sizeof(int);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation + 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation);
         if (version == 15)
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), 4067);
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation);
         }
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("x < y", "y < x", StringComparison.Ordinal)), bytes));
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var call = new BoundCall(0,
@@ -4283,20 +4440,20 @@ public sealed partial class ManagedScannerComponentTests
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 8);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
         var operationOffset = expressionWords.Operation * sizeof(int);
         var originalOperation = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(operationOffset));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation + 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation);
         foreach (var word in new[] { 24, 25 })
         {
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4334,12 +4491,12 @@ public sealed partial class ManagedScannerComponentTests
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
         Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 9);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         var offset = 24 * sizeof(int);
         var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var parameterType = typeName == "uint64" ? PrimitiveType.UInt64 : PrimitiveType.Int32;
@@ -4387,7 +4544,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4437,7 +4594,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4480,7 +4637,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         await ExecuteAotAsync(stage, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
@@ -4509,7 +4666,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4545,7 +4702,7 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4582,12 +4739,12 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(15 * sizeof(int)), 1);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(15 * sizeof(int)), 2);
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -4657,7 +4814,13 @@ public sealed partial class ManagedScannerComponentTests
         Assert.That(result.IsValid, Is.False);
         Assert.That(result.ErrorCode, Is.EqualTo(code));
         Assert.That(result.ErrorSpan, Is.EqualTo(new TextSpan(text.IndexOf(marker, StringComparison.Ordinal), 1)));
-        {var __nunitItems0 = bytes.AsSpan(37 * sizeof(int)).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem28 in __nunitItems0) { Assert.That(__nunitItem28, Is.EqualTo(0)); } });}
+        {
+            var __nunitItems0 = bytes.AsSpan(37 * sizeof(int)).ToArray();
+            Assert.Multiple(() => {
+    foreach (var __nunitItem28 in __nunitItems0)
+    {
+        Assert.That(__nunitItem28, Is.EqualTo(0)); } });
+        }
         await ExecuteAotAsync(stage, policy).ConfigureAwait(true);
     }
 
@@ -4690,7 +4853,7 @@ public sealed partial class ManagedScannerComponentTests
             throw new InvalidOperationException("The scalar frontend true-expression root is invalid.");
         }
 
-        var offset = root < 32 ? 42 + root * 8 : 392 + (root - 32) * 8;
+        var offset = root < 32 ? 42 + (root * 8) : 392 + ((root - 32) * 8);
         return (true, offset + 1, offset, offset + 4, offset + 5);
     }
 
@@ -4791,12 +4954,59 @@ public sealed partial class ManagedScannerComponentTests
             _ => throw new InvalidOperationException("The scalar frontend tree root has no operator."),
         };
 
-        static bool IsBinaryScalarOperator(TokenKind kind) => kind is
+        static bool IsBinaryScalarOperator(TokenKind kind)
+        {
+            return kind is
             TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent
             or TokenKind.EqualsEquals or TokenKind.BangEquals or TokenKind.Less or TokenKind.LessEquals
             or TokenKind.Greater or TokenKind.GreaterEquals or TokenKind.Ampersand
             or TokenKind.AmpersandAmpersand or TokenKind.Pipe or TokenKind.PipePipe or TokenKind.Caret
             or TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned;
+        }
+    }
+
+    private static void AssertLibraryEmissionParity(
+        BoundProgram actual, BoundProgram hosted, IReadOnlyList<string> exports,
+        NativeRuntimePolicy policy)
+    {
+        var (Image, Error) = TryEmitLibrary(actual, exports, policy);
+        var hostedEmission = TryEmitLibrary(hosted, exports, policy);
+        if (Error is Exception actualError)
+        {
+            if (hostedEmission.Error is not Exception hostedError)
+            {
+                throw new InvalidOperationException(
+                    "Only the projected program rejected library emission.");
+            }
+            Assert.That(hostedError.GetType(), Is.EqualTo(actualError.GetType()));
+            Assert.That(hostedError.Message, Is.EqualTo(actualError.Message));
+            Assert.That(hostedError.Data["Terrum.InvalidEffect"],
+                Is.EqualTo(actualError.Data["Terrum.InvalidEffect"]));
+            Assert.That(hostedError.Data["Terrum.SourceSpan"],
+                Is.EqualTo(actualError.Data["Terrum.SourceSpan"]));
+            return;
+        }
+
+        Assert.That(hostedEmission.Error, Is.Null);
+        Assert.That(Image, Is.EqualTo(hostedEmission.Image));
+    }
+
+    private static (byte[]? Image, Exception? Error) TryEmitLibrary(
+        BoundProgram program, IReadOnlyList<string> exports,
+        NativeRuntimePolicy policy)
+    {
+        try
+        {
+            return (NativeEmitter.EmitLibrary(program, exports, policy), null);
+        }
+        catch (ArgumentException exception)
+        {
+            return (null, exception);
+        }
+        catch (NotSupportedException exception)
+        {
+            return (null, exception);
+        }
     }
 
     private static async Task<BoundProgram> CompileAsync(string text, string entry,
@@ -4870,9 +5080,18 @@ public sealed partial class ManagedScannerComponentTests
         var buffers = parserName is not null
             ? ScalarFrontendHost.CreateBuffers(SourceText.From(text))
             : ScannerHost.CreateBuffers(SourceText.From(text));
-        var compilation = Compilation.Create(trees, buffers, policy);
+        var compilation = Compilation.Create(trees, buffers,
+            new CompilationOptions {
+                RuntimePolicy = policy,
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual29 = compilation.Program; Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual29!; }))();
+        return ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual29 = compilation.Program;
+            Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual29!;
+        }))();
     }
 
     private static async Task ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)

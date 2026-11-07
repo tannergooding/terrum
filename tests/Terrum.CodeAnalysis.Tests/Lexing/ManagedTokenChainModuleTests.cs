@@ -3,17 +3,18 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class ManagedTokenChainModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class ManagedTokenChainModuleTests
 {
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -95,10 +96,16 @@ public sealed class ManagedTokenChainModuleTests
             """, "managed-token-chain-verifier.terrum");
         Assert.That(trees[^1].HasErrors, Is.False, string.Join(Environment.NewLine, trees[^1].Diagnostics));
 
-        var producerCompilation = Compilation.Create(trees, policy);
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(policy);
+        var producerCompilation = Compilation.Create(trees, options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = producerCompilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
             ["Terrum.CodeAnalysis.VerifyManagedTokenChain"]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -106,10 +113,14 @@ public sealed class ManagedTokenChainModuleTests
             int32 Main() { return VerifyManagedTokenChain(); }
             """, "managed-token-chain-consumer.terrum");
         var consumerCompilation = Compilation.Create(
-            consumerTree, ModuleCompiler.CreateReference(producer), policy);
+            consumerTree, ModuleCompiler.CreateReference(producer), options);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual1 = consumerCompilation.Program;
+                Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual1!;
+            }))(), producer);
 
         var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"managed-token-chain-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");

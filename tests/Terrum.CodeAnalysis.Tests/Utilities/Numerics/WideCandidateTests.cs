@@ -9,18 +9,27 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class WideCandidateTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class WideCandidateTests
 {
+    private static string ToTerrumIntegerType(string suffix)
+        => suffix switch {
+            "Int32" => "int32",
+            "UInt32" => "uint32",
+            "Int64" => "int64",
+            "UInt64" => "uint64",
+            _ => throw new ArgumentOutOfRangeException(nameof(suffix)),
+        };
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WideCompilerCandidatesExecuteFromIndependentModulesAsync(NativeRuntimePolicy policy)
@@ -32,7 +41,11 @@ public sealed class WideCandidateTests
         var entry = ReadTree(Path.Combine(root, "samples", "ModuleReplacement", "wide-entry.terrum"));
         var compilation = Compilation.Create([tests, entry], reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(0));
         await ExecuteBothAsync(consumer, producer, 0, policy).ConfigureAwait(true);
     }
@@ -65,7 +78,11 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = compilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -93,7 +110,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildBitOperationsConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual2 = compilation.Program;
+            Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual2!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -139,7 +160,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildFloat32MathSelectionConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = compilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -166,7 +191,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))(), producer);
         var program = ModuleCompiler.Link(consumer, producer);
         var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"float32-math-failure-{Guid.NewGuid():N}.exe");
         try
@@ -191,7 +220,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildFloat64MathSelectionConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual5 = compilation.Program;
+            Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual5!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -218,7 +251,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual6 = compilation.Program;
+            Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual6!;
+        }))(), producer);
         var program = ModuleCompiler.Link(consumer, producer);
         var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"float64-math-failure-{Guid.NewGuid():N}.exe");
         try
@@ -254,7 +291,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildIntegerMathConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual7 = compilation.Program;
+            Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual7!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -269,11 +310,18 @@ public sealed class WideCandidateTests
     public async Task IntegerMathCandidatesPreserveCheckedFailureSemanticsAsync(
         NativeRuntimePolicy policy, string expression, int expected)
     {
-        var component = File.ReadAllText(TerrumProjectPaths.RepositoryFile(RepositoryRoot(), "sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/IntegerMath.terrum"));
+        var component = await File.ReadAllTextAsync(TerrumProjectPaths.RepositoryFile(
+            RepositoryRoot(),
+            "sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/IntegerMath.terrum"))
+            .ConfigureAwait(true);
         var compilation = Compilation.Create(SyntaxTree.Parse(
             component + $"\nint32 Main() {{ return {expression}; }}"), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual8 = compilation.Program;
+            Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual8!;
+        }))();
         var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"integer-math-failure-{Guid.NewGuid():N}.exe");
         try
         {
@@ -296,7 +344,7 @@ public sealed class WideCandidateTests
         var producer = CreateNumericsLibrary(library, policy,
             $"Terrum.CodeAnalysis.Numerics64.TryNegate{suffix}",
             $"Terrum.CodeAnalysis.Numerics64.TryAbsolute{suffix}");
-        var type = suffix.ToLowerInvariant();
+        var type = ToTerrumIntegerType(suffix);
         var consumerSource = SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
@@ -317,7 +365,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual9 = compilation.Program;
+            Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual9!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -328,7 +380,7 @@ public sealed class WideCandidateTests
         var library = suffix == "Int32" ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
         var producer = CreateNumericsLibrary(library, NativeRuntimePolicy.FailFast,
             $"Terrum.CodeAnalysis.Numerics64.TryAbsolute{suffix}");
-        var type = suffix.ToLowerInvariant();
+        var type = ToTerrumIntegerType(suffix);
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
@@ -348,7 +400,7 @@ public sealed class WideCandidateTests
         var library = suffix == "Int32" ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
         var producer = CreateNumericsLibrary(library, policy,
             $"Terrum.CodeAnalysis.Numerics64.Magnitude{suffix}");
-        var type = suffix.ToLowerInvariant();
+        var type = ToTerrumIntegerType(suffix);
         var unsignedType = "u" + type;
         var consumerSource = SyntaxTree.Parse($$"""
             using Terrum.CodeAnalysis.Numerics64;
@@ -367,7 +419,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual10 = compilation.Program;
+            Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual10!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -405,7 +461,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual11 = compilation.Program;
+            Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual11!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -438,7 +498,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual12 = compilation.Program;
+            Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual12!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -483,7 +547,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual13 = compilation.Program;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual13!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -498,10 +566,10 @@ public sealed class WideCandidateTests
     public async Task CheckedDivisionAndRemainderPreserveBoundarySemanticsAcrossModulesAsync(
         NativeRuntimePolicy policy, string suffix)
     {
-        string type = suffix.ToLowerInvariant();
-        string library = suffix.EndsWith("32", StringComparison.Ordinal)
+        var type = ToTerrumIntegerType(suffix);
+        var library = suffix.EndsWith("32", StringComparison.Ordinal)
             ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
-        string signedCases = suffix.StartsWith("Int", StringComparison.Ordinal)
+        var signedCases = suffix.StartsWith("Int", StringComparison.Ordinal)
             ? $$"""
                 if (TryDivide{{suffix}}({{type}}.MinValue, -1, init var overflow)) { return 3; }
                 require TryRemainder{{suffix}}({{type}}.MinValue, -1, init var minRemainder);
@@ -533,7 +601,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual14 = compilation.Program;
+            Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual14!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -598,7 +670,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual15 = compilation.Program;
+            Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual15!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -646,7 +722,11 @@ public sealed class WideCandidateTests
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(source, reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual16 = compilation.Program;
+            Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual16!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -713,7 +793,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual17 = compilation.Program;
+            Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual17!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -757,7 +841,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(source, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual18 = compilation.Program;
+            Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual18!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -799,7 +887,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual19 = compilation.Program;
+            Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual19!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -841,7 +933,11 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(source, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = compilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual20 = compilation.Program;
+            Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual20!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -864,23 +960,39 @@ public sealed class WideCandidateTests
     {
         var original = Compilation.CreateLibrary(SyntaxTree.Parse("public int64 Echo(int64 value) { return value; }"));
         Assert.That(original.HasErrors, Is.False, string.Join(Environment.NewLine, original.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = original.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(), ["Echo"]);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual21 = original.Program;
+            Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual21!;
+        }))(), ["Echo"]);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return int32(Echo(42)); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = compilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual22 = compilation.Program;
+            Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual22!;
+        }))(), producer);
         var preserved = (byte[])consumer.Clone();
         await ExecuteBothAsync(consumer, producer, 42).ConfigureAwait(true);
         var changed = Compilation.CreateLibrary(SyntaxTree.Parse("public int64 Echo(int64 value) { return value + 1; }"));
         Assert.That(changed.HasErrors, Is.False, string.Join(Environment.NewLine, changed.Diagnostics));
-        var replacement = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = changed.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))(), ["Echo"]);
+        var replacement = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual23 = changed.Program;
+            Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual23!;
+        }))(), ["Echo"]);
         await ExecuteBothAsync(consumer, replacement, 43).ConfigureAwait(true);
         Assert.That(consumer, Is.EqualTo(preserved));
 
         var incompatible = Compilation.CreateLibrary(SyntaxTree.Parse("public uint64 Echo(uint64 value) { return value; }"));
         Assert.That(incompatible.HasErrors, Is.False, string.Join(Environment.NewLine, incompatible.Diagnostics));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer,
-            ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = incompatible.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))(), ["Echo"])))!;
+            ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual24 = incompatible.Program;
+                Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual24!;
+            }))(), ["Echo"])))!;
     }
 
     private static byte[] CreateCandidateLibrary(BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
@@ -888,7 +1000,11 @@ public sealed class WideCandidateTests
         var path = TerrumProjectPaths.RepositoryFile(RepositoryRoot(), "sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/WideIntegerFacts.terrum");
         var compilation = Compilation.CreateLibrary(ReadTree(path), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = compilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))(), [
+        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual25 = compilation.Program;
+            Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual25!;
+        }))(), [
             "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
             "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
             "Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64",
@@ -907,7 +1023,11 @@ public sealed class WideCandidateTests
             Path.Combine("Utilities", "Numerics", name)));
         var compilation = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(), exports);
+        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual26 = compilation.Program;
+            Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual26!;
+        }))(), exports);
     }
 
     private static byte[] CreateIntegerFormattingLibrary(NativeRuntimePolicy policy, params string[] exports)
@@ -919,7 +1039,11 @@ public sealed class WideCandidateTests
         };
         var compilation = Compilation.CreateLibrary(trees, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = compilation.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))(), exports);
+        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual27 = compilation.Program;
+            Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual27!;
+        }))(), exports);
     }
 
     private static byte[] CreateBitOperationsLibrary(NativeRuntimePolicy policy) =>
@@ -951,7 +1075,11 @@ public sealed class WideCandidateTests
             SyntaxTree.Parse(BuildBitOperationsPositionConsumer(includeUInt64)),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = compilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual28 = compilation.Program;
+            Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual28!;
+        }))(), producer);
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
@@ -1043,7 +1171,7 @@ public sealed class WideCandidateTests
                 Hex(BitOperations.RoundUpToPowerOf2(ulong.MaxValue)), false, ref failureCode);
         }
 
-        source.AppendLine("return 42;").AppendLine("}");
+        _ = source.AppendLine("return 42;").AppendLine("}");
         return source.ToString();
     }
 
@@ -1056,7 +1184,7 @@ public sealed class WideCandidateTests
             0x0123456789ABCDEF, 0xAAAAAAAAAAAAAAAA, 0x5555555555555555, ulong.MaxValue];
         int[] counts = [int.MinValue, -65, -64, -33, -32, -1, 0, 1, 31, 32, 33, 63, 64, 65, int.MaxValue];
 
-        foreach (uint value in values32)
+        foreach (var value in values32)
         {
             var literal = Hex(value);
             AppendBitCheck(source, $"LeadingZeroCountUInt32({literal})",
@@ -1070,7 +1198,7 @@ public sealed class WideCandidateTests
                 Hex(BinaryPrimitives.ReverseEndianness(value)), ref failureCode);
             AppendBitCheck(source, $"IsPow2UInt32({literal})",
                 BitOperations.IsPow2(value) ? "true" : "false", ref failureCode);
-            foreach (int count in counts)
+            foreach (var count in counts)
             {
                 var countLiteral = count.ToString(CultureInfo.InvariantCulture);
                 AppendBitCheck(source, $"RotateLeftUInt32({literal}, {countLiteral})",
@@ -1080,7 +1208,7 @@ public sealed class WideCandidateTests
             }
         }
 
-        foreach (ulong value in values64)
+        foreach (var value in values64)
         {
             var literal = Hex(value);
             AppendBitCheck(source, $"LeadingZeroCountUInt64({literal})",
@@ -1094,7 +1222,7 @@ public sealed class WideCandidateTests
                 Hex(BinaryPrimitives.ReverseEndianness(value)), ref failureCode);
             AppendBitCheck(source, $"IsPow2UInt64({literal})",
                 BitOperations.IsPow2(value) ? "true" : "false", ref failureCode);
-            foreach (int count in counts)
+            foreach (var count in counts)
             {
                 var countLiteral = count.ToString(CultureInfo.InvariantCulture);
                 AppendBitCheck(source, $"RotateLeftUInt64({literal}, {countLiteral})",
@@ -1105,7 +1233,7 @@ public sealed class WideCandidateTests
         }
 
         uint[] round32 = [0, 1, 2, 3, 5, 0x40000000, 0x40000001, 0x7FFFFFFF, 0x80000000, 0x80000001, uint.MaxValue];
-        foreach (uint value in round32)
+        foreach (var value in round32)
         {
             var expected = BitOperations.RoundUpToPowerOf2(value);
             AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt32", Hex(value), Hex(expected),
@@ -1114,7 +1242,7 @@ public sealed class WideCandidateTests
 
         ulong[] round64 = [0, 1, 2, 3, 5, 0x4000000000000000, 0x4000000000000001,
             0x7FFFFFFFFFFFFFFF, 0x8000000000000000, 0x8000000000000001, ulong.MaxValue];
-        foreach (ulong value in round64)
+        foreach (var value in round64)
         {
             var expected = BitOperations.RoundUpToPowerOf2(value);
             AppendRoundUpCheck(source, "TryRoundUpToPowerOfTwoUInt64", Hex(value), Hex(expected),
@@ -1124,7 +1252,7 @@ public sealed class WideCandidateTests
         AppendBitCheck(source, "ReverseBitsUInt32(0x01234567)", "0xE6A2C480", ref failureCode);
         AppendBitCheck(source, "ReverseBitsUInt64(0x0123456789ABCDEF)", "0xF7B3D591E6A2C480",
             ref failureCode);
-        source.AppendLine("return 42;").AppendLine("}");
+        _ = source.AppendLine("return 42;").AppendLine("}");
         return source.ToString();
     }
 
@@ -1134,7 +1262,7 @@ public sealed class WideCandidateTests
         var failureCode = 1;
         int[] values32 = [int.MinValue, int.MinValue + 1, -17, -1, 0, 1, 17, int.MaxValue];
         long[] values64 = [long.MinValue, long.MinValue + 1, -17, -1, 0, 1, 17, long.MaxValue];
-        foreach (int value in values32)
+        foreach (var value in values32)
         {
             var literal = SignedLiteral(value);
             if (value != int.MinValue)
@@ -1146,9 +1274,9 @@ public sealed class WideCandidateTests
             AppendBitCheck(source, $"SignInt32({literal})", Math.Sign(value).ToString(CultureInfo.InvariantCulture),
                 ref failureCode);
         }
-        foreach (int left in values32)
+        foreach (var left in values32)
         {
-            foreach (int right in values32)
+            foreach (var right in values32)
             {
                 var leftLiteral = SignedLiteral(left);
                 var rightLiteral = SignedLiteral(right);
@@ -1163,13 +1291,13 @@ public sealed class WideCandidateTests
             }
         }
 
-        foreach (int value in values32)
+        foreach (var value in values32)
         {
             AppendBitCheck(source, $"ClampInt32({SignedLiteral(value)}, -5, 5)",
                 SignedLiteral(Math.Clamp(value, -5, 5)), ref failureCode);
         }
 
-        foreach (long value in values64)
+        foreach (var value in values64)
         {
             var literal = SignedLiteral(value);
             if (value != long.MinValue)
@@ -1181,9 +1309,9 @@ public sealed class WideCandidateTests
             AppendBitCheck(source, $"SignInt64({literal})", Math.Sign(value).ToString(CultureInfo.InvariantCulture),
                 ref failureCode);
         }
-        foreach (long left in values64)
+        foreach (var left in values64)
         {
-            foreach (long right in values64)
+            foreach (var right in values64)
             {
                 var leftLiteral = SignedLiteral(left);
                 var rightLiteral = SignedLiteral(right);
@@ -1196,13 +1324,13 @@ public sealed class WideCandidateTests
             }
         }
 
-        foreach (long value in values64)
+        foreach (var value in values64)
         {
             AppendBitCheck(source, $"ClampInt64({SignedLiteral(value)}, -5, 5)",
                 SignedLiteral(Math.Clamp(value, -5, 5)), ref failureCode);
         }
 
-        source.AppendLine("return 42;").AppendLine("}");
+        _ = source.AppendLine("return 42;").AppendLine("}");
         return source.ToString();
     }
 
@@ -1269,13 +1397,13 @@ public sealed class WideCandidateTests
             ref failureCode);
 
         float[] values = [-123.5f, -2.25f, -1.0f, 0.125f, 2.25f, 123.5f];
-        foreach (float value in values)
+        foreach (var value in values)
         {
             var literal = FloatLiteral(value);
             AppendBitCheck(source, $"AbsFloat32({literal})", FloatLiteral(MathF.Abs(value)), ref failureCode);
             AppendBitCheck(source, $"ClampFloat32({literal}, -2.25, 2.25)",
                 FloatLiteral(Math.Clamp(value, -2.25f, 2.25f)), ref failureCode);
-            foreach (float other in values)
+            foreach (var other in values)
             {
                 var otherLiteral = FloatLiteral(other);
                 AppendBitCheck(source, $"MinFloat32({literal}, {otherLiteral})",
@@ -1285,7 +1413,7 @@ public sealed class WideCandidateTests
             }
         }
 
-        source.AppendLine("return 42;").AppendLine("}");
+        _ = source.AppendLine("return 42;").AppendLine("}");
         return source.ToString();
     }
 
@@ -1352,13 +1480,13 @@ public sealed class WideCandidateTests
             ref failureCode);
 
         double[] values = [-123.5, -2.25, -1.0, 0.125, 2.25, 123.5];
-        foreach (double value in values)
+        foreach (var value in values)
         {
             var literal = DoubleLiteral(value);
             AppendBitCheck(source, $"AbsFloat64({literal})", DoubleLiteral(Math.Abs(value)), ref failureCode);
             AppendBitCheck(source, $"ClampFloat64({literal}, -2.25, 2.25)",
                 DoubleLiteral(Math.Clamp(value, -2.25, 2.25)), ref failureCode);
-            foreach (double other in values)
+            foreach (var other in values)
             {
                 var otherLiteral = DoubleLiteral(other);
                 AppendBitCheck(source, $"MinFloat64({literal}, {otherLiteral})",
@@ -1368,14 +1496,14 @@ public sealed class WideCandidateTests
             }
         }
 
-        source.AppendLine("return 42;").AppendLine("}");
+        _ = source.AppendLine("return 42;").AppendLine("}");
         return source.ToString();
     }
 
     private static void AppendBitCheck(StringBuilder source, string expression, string expected,
         ref int failureCode)
     {
-        source.Append("if (").Append(expression).Append(" != ").Append(expected)
+        _ = source.Append("if (").Append(expression).Append(" != ").Append(expected)
             .Append(") { return ").Append(failureCode++).AppendLine("; }");
     }
 
@@ -1387,13 +1515,13 @@ public sealed class WideCandidateTests
         var call = $"{method}({value}, init var {output})";
         if (!succeeds)
         {
-            source.Append("if (").Append(call).Append(") { return ").Append(code).AppendLine("; }");
-            source.Append("require ").Append(method).Append("(1, init ").Append(output).AppendLine(");");
+            _ = source.Append("if (").Append(call).Append(") { return ").Append(code).AppendLine("; }");
+            _ = source.Append("require ").Append(method).Append("(1, init ").Append(output).AppendLine(");");
             AppendBitCheck(source, output, "1", ref failureCode);
             return;
         }
 
-        source.Append("require ").Append(call).AppendLine(";");
+        _ = source.Append("require ").Append(call).AppendLine(";");
         AppendBitCheck(source, output, expected, ref failureCode);
     }
 
@@ -1405,13 +1533,13 @@ public sealed class WideCandidateTests
         var call = $"{method}({value}, init var {output})";
         if (!succeeds)
         {
-            source.Append("if (").Append(call).Append(") { return ").Append(code).AppendLine("; }");
-            source.Append("require ").Append(method).Append("(1, init ").Append(output).AppendLine(");");
+            _ = source.Append("if (").Append(call).Append(") { return ").Append(code).AppendLine("; }");
+            _ = source.Append("require ").Append(method).Append("(1, init ").Append(output).AppendLine(");");
             AppendBitCheck(source, output, "1", ref failureCode);
             return;
         }
 
-        source.Append("require ").Append(call).AppendLine(";");
+        _ = source.Append("require ").Append(call).AppendLine(";");
         AppendBitCheck(source, output, expected, ref failureCode);
     }
 
@@ -1429,9 +1557,9 @@ public sealed class WideCandidateTests
     private static string SignedLiteral(long value) =>
         value == long.MinValue ? "int64.MinValue" : value.ToString(CultureInfo.InvariantCulture);
 
-    private static uint Magnitude(int value) => value < 0 ? (uint)-((long)value) : (uint)value;
+    private static uint Magnitude(int value) => value < 0 ? (uint)-(long)value : (uint)value;
 
-    private static ulong Magnitude(long value) => value < 0 ? (ulong)(-(value + 1)) + 1 : (ulong)value;
+    private static ulong Magnitude(long value) => value < 0 ? (ulong)-(value + 1) + 1 : (ulong)value;
 
     private static uint GreatestCommonDivisor(uint left, uint right)
     {

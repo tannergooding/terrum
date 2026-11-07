@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
@@ -14,6 +15,13 @@ namespace Terrum.CodeAnalysis.Tests.Cli;
 
 internal sealed partial class CliTests
 {
+    private static readonly string[] s_nativeCoreEnumSections = [
+        "callingConventions", "resolutionModes", "resolutionPolicies",
+    ];
+    private static readonly string[] s_nativeCoreSchemaSections = [
+        "nativeImport", "nativeCallable", "nativeCallConv",
+    ];
+
     private const string NativeCoreImportSource = """
         [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId",
             CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
@@ -215,6 +223,232 @@ internal sealed partial class CliTests
             AssertInputDiagnosticCode(originOutput, "TRM2001");
             Assert.That(await File.ReadAllBytesAsync(sentinelPath)
                 .ConfigureAwait(true), Is.EqualTo(sentinel));
+
+            async Task AssertRejectedCompositionAsync(string name,
+                string nativeManifest)
+            {
+                var path = Path.Combine(directory, name + ".json");
+                await File.WriteAllTextAsync(path, nativeManifest)
+                    .ConfigureAwait(true);
+                var (exit, output, error) = await RunAsync(source,
+                    "build-native-import", "-",
+                    "--layout-core-manifest", layoutPath,
+                    "--native-core-manifest", path,
+                    "-o", sentinelPath, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(true);
+                Assert.That(exit, Is.EqualTo(2), output + error);
+                AssertInputDiagnosticCode(output, "TRM2001");
+                Assert.That(await File.ReadAllBytesAsync(sentinelPath)
+                    .ConfigureAwait(true), Is.EqualTo(sentinel), name);
+            }
+
+            string SharedNativeManifest()
+            {
+                return CreateNativeCoreManifest(
+                    providerIdentity: "sample.layout-core",
+                    revisionIdentity: "revision-1",
+                    providerSchemaIdentity: "layout-registration");
+            }
+
+            var targetMismatch = JsonNode.Parse(SharedNativeManifest())!
+                .AsObject();
+            targetMismatch["providers"]!.AsArray()[0]!.AsObject()[
+                "targetRequirement"] = 1;
+            await AssertRejectedCompositionAsync("target-mismatch",
+                targetMismatch.ToJsonString()).ConfigureAwait(true);
+
+            var runtimeMismatch = JsonNode.Parse(SharedNativeManifest())!
+                .AsObject();
+            runtimeMismatch["providers"]!.AsArray()[0]!.AsObject()[
+                "runtimePolicy"] = 1;
+            await AssertRejectedCompositionAsync("runtime-mismatch",
+                runtimeMismatch.ToJsonString()).ConfigureAwait(true);
+
+            var schemaIdentityMismatch = JsonNode.Parse(SharedNativeManifest())!
+                .AsObject();
+            schemaIdentityMismatch["providers"]!.AsArray()[0]!["schema"]![
+                "identity"] = "another-registration";
+            await AssertRejectedCompositionAsync("schema-identity-mismatch",
+                schemaIdentityMismatch.ToJsonString()).ConfigureAwait(true);
+
+            var schemaRevisionMismatch = JsonNode.Parse(SharedNativeManifest())!
+                .AsObject();
+            schemaRevisionMismatch["providers"]!.AsArray()[0]!["schema"]![
+                "revision"] = 2;
+            await AssertRejectedCompositionAsync("schema-revision-mismatch",
+                schemaRevisionMismatch.ToJsonString()).ConfigureAwait(true);
+
+            await AssertRejectedCompositionAsync("authority-mismatch",
+                CreateNativeCoreManifest(
+                    coreAuthorityIdentity: "another-authority",
+                    providerIdentity: "sample.layout-core",
+                    revisionIdentity: "revision-1",
+                    providerSchemaIdentity: "layout-registration"))
+                .ConfigureAwait(true);
+
+            var exportCollision = JsonNode.Parse(SharedNativeManifest())!
+                .AsObject();
+            exportCollision["nativeImport"]!["identity"]!["exportKey"]
+                = "LayoutKind";
+            await AssertRejectedCompositionAsync("export-collision",
+                exportCollision.ToJsonString()).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task NativeCoreManifestAdmitsSixDistinctSelectedProvidersAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-native-core-manifest-split-providers-");
+        var manifestPath = Path.Combine(directory, "native.json");
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath,
+                CreateSplitNativeCoreManifest()).ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(NativeCoreImportSource), "analyze", "-",
+                "--native-core-manifest", manifestPath, "--json")
+                .ConfigureAwait(true);
+
+            Assert.That(exit, Is.Zero, output + error);
+            Assert.That(error, Is.Empty);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task NativeCoreManifestRejectsMalformedDefinitionsAndProviderClosureAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-native-core-manifest-closure-");
+        var manifestPath = Path.Combine(directory, "native.json");
+        var outputPath = Path.Combine(directory, "sentinel.exe");
+        var source = Encoding.UTF8.GetBytes("int32 Main() { return 0; }");
+        var sentinel = Encoding.ASCII.GetBytes("prior-output");
+        try
+        {
+            await File.WriteAllBytesAsync(outputPath, sentinel)
+                .ConfigureAwait(true);
+
+            var manifestText = CreateNativeCoreManifest();
+            var invalidManifests = new List<(string Name, byte[] Contents)> {
+                ("nested escaped duplicate property", Encoding.UTF8.GetBytes(
+                    manifestText.Replace(
+                        "\"kind\":\"declaration-name\"",
+                        "\"kind\":\"declaration-name\",\"\\u006bind\":\"declaration-name\"",
+                        StringComparison.Ordinal))),
+                ("unpaired surrogate", Encoding.UTF8.GetBytes(
+                    manifestText.Replace(
+                        "\"native-provider-revision-1\"", "\"\\uD800\"",
+                        StringComparison.Ordinal))),
+                ("comment", Encoding.UTF8.GetBytes("// comment\n" + manifestText)),
+                ("trailing comma", Encoding.UTF8.GetBytes(manifestText.Replace(
+                    "\"isRepeatable\":false",
+                    "\"isRepeatable\":false,", StringComparison.Ordinal))),
+                ("trailing JSON", Encoding.UTF8.GetBytes(manifestText + "{}")),
+                ("non-object root", Encoding.UTF8.GetBytes("[]")),
+            };
+
+            void AddMutationCase(string name, Action<JsonObject> mutate)
+            {
+                var root = JsonNode.Parse(manifestText)!.AsObject();
+                mutate(root);
+                invalidManifests.Add((name,
+                    Encoding.UTF8.GetBytes(root.ToJsonString())));
+            }
+
+            AddMutationCase("NUL in text", static root =>
+                root["coreAuthorityIdentity"] = "authority\0value");
+            AddMutationCase("whitespace-only text", static root =>
+                root["coreAuthorityIdentity"] = " \t");
+            AddMutationCase("numeric string", static root =>
+                root["callingConventions"]!["genericArity"] = "0");
+            AddMutationCase("negative unsigned integer", static root =>
+                root["callingConventions"]!["genericArity"] = JsonNode.Parse("-1"));
+            AddMutationCase("fractional unsigned integer", static root =>
+                root["callingConventions"]!["genericArity"] = JsonNode.Parse("0.0"));
+            AddMutationCase("exponent unsigned integer", static root =>
+                root["callingConventions"]!["genericArity"] = JsonNode.Parse("0e0"));
+            AddMutationCase("unsigned integer overflow", static root =>
+                root["callingConventions"]!["genericArity"] =
+                    JsonNode.Parse("4294967296"));
+            AddMutationCase("signed integer overflow", static root =>
+                root["callingConventions"]!["members"]![0]!["value"] =
+                    JsonNode.Parse("2147483648"));
+            AddMutationCase("signed integer underflow", static root =>
+                root["callingConventions"]!["members"]![0]!["value"] =
+                    JsonNode.Parse("-2147483649"));
+            AddMutationCase("empty provider closure", static root =>
+                root["providers"]!.AsArray().Clear());
+            AddMutationCase("too many providers", static root =>
+            {
+                var providers = root["providers"]!.AsArray();
+                for (var index = 0; index < 6; index++)
+                {
+                    providers.Add(providers[0]!.DeepClone());
+                }
+            });
+            AddMutationCase("duplicate provider", static root =>
+            {
+                var providers = root["providers"]!.AsArray();
+                providers.Add(providers[0]!.DeepClone());
+            });
+            AddMutationCase("unused provider", static root =>
+            {
+                var providers = root["providers"]!.AsArray();
+                var unused = providers[0]!.DeepClone().AsObject();
+                unused["moduleIdentity"] = "unused.provider";
+                unused["revisionIdentity"] = "unused-revision";
+                providers.Add(unused);
+            });
+            AddMutationCase("missing selected provider", static root =>
+                root["providers"]!.AsArray()[0]!.AsObject()["moduleIdentity"]
+                    = "other.provider");
+            AddMutationCase("provider equals using Module", static root =>
+                root["usingModuleIdentity"] = "sample.native-core");
+            AddMutationCase("unsupported semantic edition", static root =>
+                root["providers"]!.AsArray()[0]!.AsObject()[
+                    "governingSemanticEdition"] = 2);
+            AddMutationCase("unsupported target requirement", static root =>
+                root["providers"]!.AsArray()[0]!.AsObject()[
+                    "targetRequirement"] = 2);
+            AddMutationCase("unsupported runtime policy", static root =>
+                root["providers"]!.AsArray()[0]!.AsObject()[
+                    "runtimePolicy"] = 2);
+            AddMutationCase("zero provider schema revision", static root =>
+                root["providers"]!.AsArray()[0]!["schema"]!["revision"] = 0);
+            AddMutationCase("colliding provider export keys", static root =>
+                root["nativeImport"]!["identity"]!["exportKey"]
+                    = root["callingConventions"]!["identity"]!["exportKey"]!
+                        .DeepClone());
+            AddMutationCase("member from another provider", static root =>
+                root["callingConventions"]!["members"]![0]!["identity"]![
+                    "providerIdentity"] = "other.provider");
+            AddMutationCase("member with wrong enum owner", static root =>
+                root["callingConventions"]!["members"]![0]!["declaringEnum"]![
+                    "exportKey"] = "other.enum");
+
+            foreach (var (name, contents) in invalidManifests)
+            {
+                await File.WriteAllBytesAsync(manifestPath, contents)
+                    .ConfigureAwait(true);
+                var (exit, output, error) = await RunAsync(source, "build", "-",
+                    "--native-core-manifest", manifestPath, "-o", outputPath,
+                    "--runtime", "fail-fast", "--json").ConfigureAwait(true);
+                Assert.That(exit, Is.EqualTo(2), $"{name}: {output}{error}");
+                AssertInputDiagnosticCode(output, "TRM2001");
+                Assert.That(await File.ReadAllBytesAsync(outputPath)
+                    .ConfigureAwait(true), Is.EqualTo(sentinel), name);
+            }
         }
         finally
         {
@@ -535,6 +769,96 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task NativeCoreManifestOptionIsRejectedByEveryExcludedCommandAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-native-core-manifest-excluded-");
+        var manifestPath = Path.Combine(directory, "native.json");
+        var malformedSource = new byte[] { 0xFF };
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath,
+                CreateNativeCoreManifest()).ConfigureAwait(true);
+            string[] output = ["-o", Path.Combine(directory, "output.bin")];
+            string[] runtime = ["--runtime", "fail-fast"];
+            string[] manifest = ["--native-core-manifest", manifestPath,
+                "--json"];
+            string[][] excludedCommands = [
+                ["check", "-", .. manifest],
+                ["tokens", "-", .. manifest],
+                ["tree", "-", .. manifest],
+                ["scan-component", "-", "-", .. runtime, .. manifest],
+                ["build-component", "-", "-", .. output, .. runtime,
+                    .. manifest],
+                ["frontend-component", "-", "-", .. runtime, .. manifest],
+                ["frontend-build-library", "-", "-", .. output, .. runtime,
+                    .. manifest],
+                ["frontend-build", "-", "-", .. output, .. runtime,
+                    .. manifest],
+                ["frontend-run", "-", "-", .. runtime, .. manifest],
+                ["validate-trrm-structure", "missing.trrm", .. manifest],
+                ["validate-trrm-compact-linear", "missing.trrm", .. manifest],
+                ["validate-trrm-compact-indexed", "missing.trrm", .. manifest],
+                ["validate-trrm-compact", "missing.trrm", .. manifest],
+                ["build-trrm", "missing.trrm", .. output, .. runtime,
+                    .. manifest],
+                ["build-trrm-library", "missing.trrm", "--export", "Run",
+                    .. output, .. runtime, .. manifest],
+                ["run-trrm", "missing.trrm", .. runtime, .. manifest],
+                ["compile-module", "producer", "-", "Run", .. output,
+                    .. manifest],
+                ["compile-module", "consumer", "-", "missing.trm", .. output,
+                    .. manifest],
+                ["link-module", "missing-consumer.trm", "missing-provider.trm",
+                    .. output, .. runtime, .. manifest],
+                ["run-module", "missing-consumer.trm", "missing-provider.trm",
+                    .. runtime, .. manifest],
+                ["compile-native", "producer", "-", "native.provider",
+                    "--export", "Run", .. output, .. runtime, .. manifest],
+                ["compile-native", "consumer", "-", "missing-provider.trmn",
+                    .. output, .. runtime, .. manifest],
+                ["validate-native", "missing-consumer.trmn",
+                    "missing-provider.trmn", .. manifest],
+                ["run-native", "missing-consumer.trmn", "missing-provider.trmn",
+                    .. runtime, .. manifest],
+                ["compile-native-set", "-", "--provider", "missing.trmn",
+                    .. output, .. runtime, .. manifest],
+                ["validate-native-set", "missing.tnset", "--provider",
+                    "missing.trmn", .. manifest],
+                ["run-native-set", "missing.tnset", "--provider",
+                    "missing.trmn", .. runtime, .. manifest],
+                ["compile-native-graph", "producer", "-", "native.provider",
+                    "--provider", "missing.trmn", "--export", "Run",
+                    .. output, .. runtime, .. manifest],
+                ["compile-native-graph", "consumer", "-", "--provider",
+                    "missing.trmn", .. output, .. runtime, .. manifest],
+                ["validate-native-graph", "missing.trng", "--provider",
+                    "missing.trmn", .. manifest],
+                ["resolve-native-graph", "missing.trng", "--candidate",
+                    "missing.trmn", .. manifest],
+                ["run-native-graph", "missing.trng", "--provider",
+                    "missing.trmn", .. runtime, .. manifest],
+                ["run-native-graph-jit", "missing.trng", "--provider",
+                    "missing.trmn", .. runtime, .. manifest],
+            ];
+
+            foreach (var arguments in excludedCommands)
+            {
+                var (exit, result, error) = await RunAsync(malformedSource,
+                    arguments).ConfigureAwait(true);
+                Assert.That(exit, Is.EqualTo(2),
+                    $"{string.Join(' ', arguments)}: {result}{error}");
+                AssertInputDiagnosticCode(result, "TRM2000");
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
     internal static string CreateNativeCoreManifest(
         string usingModuleIdentity = "sample.consumer",
         string coreAuthorityIdentity = "test-layout-authority",
@@ -702,5 +1026,83 @@ internal sealed partial class CliTests
                 "immediate-fnptr-type-use", nativeCallConvArguments,
                 ["fnptr-type-use"]),
         });
+    }
+
+    private static string CreateSplitNativeCoreManifest()
+    {
+        var root = JsonNode.Parse(CreateNativeCoreManifest())!.AsObject();
+        var providers = root["providers"]!.AsArray();
+        var originTemplate = providers[0]!.DeepClone().AsObject();
+        providers.Clear();
+
+        var enumProviders = new[] {
+            "sample.calling-conventions",
+            "sample.resolution-modes",
+            "sample.resolution-policies",
+        };
+        var schemaProviders = new[] {
+            "sample.native-import",
+            "sample.native-callable",
+            "sample.native-callconv",
+        };
+        foreach (var providerIdentity in enumProviders.Concat(schemaProviders))
+        {
+            var origin = originTemplate.DeepClone().AsObject();
+            origin["moduleIdentity"] = providerIdentity;
+            origin["revisionIdentity"] = providerIdentity + "-revision";
+            origin["schema"]!.AsObject()["identity"] =
+                providerIdentity + "-schema";
+            providers.Add(origin);
+        }
+
+        for (var index = 0; index < enumProviders.Length; index++)
+        {
+            SetProviderIdentities(root[s_nativeCoreEnumSections[index]],
+                enumProviders[index]);
+        }
+
+        for (var index = 0; index < schemaProviders.Length; index++)
+        {
+            root[s_nativeCoreSchemaSections[index]]!["identity"]![
+                "providerIdentity"] =
+                schemaProviders[index];
+        }
+
+        SetProviderIdentities(root["nativeImport"]!["arguments"]![2],
+            enumProviders[1]);
+        SetProviderIdentities(root["nativeImport"]!["arguments"]![3],
+            enumProviders[2]);
+        SetProviderIdentities(root["nativeImport"]!["arguments"]![4],
+            enumProviders[0]);
+        SetProviderIdentities(root["nativeCallable"]!["arguments"]![0],
+            enumProviders[0]);
+        SetProviderIdentities(root["nativeCallConv"]!["arguments"]![0],
+            enumProviders[0]);
+
+        return root.ToJsonString();
+    }
+
+    private static void SetProviderIdentities(JsonNode? node,
+        string providerIdentity)
+    {
+        if (node is JsonObject objectNode)
+        {
+            if (objectNode.ContainsKey("providerIdentity"))
+            {
+                objectNode["providerIdentity"] = providerIdentity;
+            }
+            foreach (var child in objectNode.Select(static property =>
+                property.Value).ToArray())
+            {
+                SetProviderIdentities(child, providerIdentity);
+            }
+        }
+        else if (node is JsonArray array)
+        {
+            foreach (var child in array)
+            {
+                SetProviderIdentities(child, providerIdentity);
+            }
+        }
     }
 }

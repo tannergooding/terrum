@@ -17,7 +17,7 @@ public static class IdentifierName
         "interface", "enum", "union", "alias", "type", "partial", "extension",
         "extern", "static", "operator", "get", "set", "init", "field", "this",
         "where", "const", "void", "var", "unique", "own", "move", "mut", "ref",
-        "write", "pin", "implicit", "params", "if", "else", "switch", "default",
+        "write", "gc", "pin", "implicit", "params", "if", "else", "switch", "default",
         "when", "is", "some", "and", "or", "not", "while", "do", "for", "in",
         "break", "continue", "return", "yield", "async", "await", "require",
         "ensure", "try", "catch", "finally", "throw", "defer", "unsafe", "policy",

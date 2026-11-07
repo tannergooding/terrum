@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int OperatorUnary(int value);
@@ -38,31 +38,34 @@ public sealed partial class CliTests
                 {
                     var arguments = command == "jit"
                         ? new[] { command, "-", "--runtime", policy, "--json" }
-                        : new[] { command, frontend, "-", "--runtime", policy, "--json" };
-                    var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
+                        : [command, frontend, "-", "--runtime", policy, "--json"];
+                    var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments).ConfigureAwait(false);
                     Assert.That(exit, Is.EqualTo(42));
                     Assert.That(output, Is.Empty);
                     Assert.That(error, Is.Empty);
                 }
                 foreach (var arguments in new[] {
                     new[] { "build", "-", "-o", hosted, "--runtime", policy, "--json" },
-                    new[] { "build-component", scanner, "-", "-o", component, "--runtime", policy, "--json" },
-                    new[] { "frontend-build", frontend, "-", "-o", native, "--runtime", policy, "--json" },
+                    ["build-component", scanner, "-", "-o", component, "--runtime", policy, "--json"],
+                    ["frontend-build", frontend, "-", "-o", native, "--runtime", policy, "--json"],
                 })
                 {
-                    var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
+                    var input = Encoding.UTF8.GetBytes(source);
+                    var (exit, _, error) = arguments[0] == "build-component"
+                        ? await RunScannerCommandWithLayoutAsync(input, arguments).ConfigureAwait(false)
+                        : await RunAsync(input, arguments).ConfigureAwait(false);
                     Assert.That(exit, Is.EqualTo(0));
                     Assert.That(error, Is.Empty);
                 }
-                Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(42));
-                Assert.That(await ExecuteNativeImageAsync(component), Is.EqualTo(42));
-                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(42));
-                Assert.That(await File.ReadAllBytesAsync(component), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
-                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await ExecuteNativeImageAsync(hosted).ConfigureAwait(false), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(component).ConfigureAwait(false), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(native).ConfigureAwait(false), Is.EqualTo(42));
+                Assert.That(await File.ReadAllBytesAsync(component).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
+                Assert.That(await File.ReadAllBytesAsync(native).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(hosted).ConfigureAwait(false)));
             }
             foreach (var (command, path) in new[] { ("build-component", component), ("frontend-build", native) })
             {
-                var original = await File.ReadAllBytesAsync(path);
+                var original = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
                 foreach (var invalid in new[] {
                     "int32 Main() { return 20+22; }",
                     "int32 Main() { return 84 >>1; }",
@@ -74,12 +77,18 @@ public sealed partial class CliTests
                     "int32 Main() =>42;",
                 })
                 {
-                    var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(invalid), command,
+                    var input = Encoding.UTF8.GetBytes(invalid);
+                    var arguments = new[] {
+                        command,
                         command == "build-component" ? scanner : frontend,
-                        "-", "-o", path, "--runtime", policy, "--json");
+                        "-", "-o", path, "--runtime", policy, "--json",
+                    };
+                    var (exit, _, error) = command == "build-component"
+                        ? await RunScannerCommandWithLayoutAsync(input, arguments).ConfigureAwait(false)
+                        : await RunAsync(input, arguments).ConfigureAwait(false);
                     Assert.That(exit, Is.EqualTo(1));
                     Assert.That(error, Is.Empty);
-                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
+                    Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(original));
                 }
             }
         }
@@ -107,15 +116,14 @@ public sealed partial class CliTests
                 "public int32 Value(int32 @await) { mut int32 x = @await - 3; x += 1; return x++ + ++x; }",
             })
             {
-                var (hostedExit, _, hostedError) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "build-library", "-", "--export", "Value", "-o", hosted, "--runtime", policy, "--json");
-                var (nativeExit, _, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build-library", frontend, "-", "-o", native, "--runtime", policy, "--json");
-                Assert.That(hostedExit, Is.EqualTo(0));
-                Assert.That(nativeExit, Is.EqualTo(0));
-                Assert.That(hostedError, Is.Empty);
-                Assert.That(nativeError, Is.Empty);
-                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                var compiled = await AssertFrontendBuildLibraryParityAsync(
+                    Encoding.UTF8.GetBytes(source), frontend, "Value", policy,
+                    native, hosted).ConfigureAwait(false);
+                if (!compiled)
+                {
+                    continue;
+                }
+
                 var handle = NativeLibrary.Load(native);
                 try
                 {

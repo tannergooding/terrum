@@ -5,19 +5,20 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Lexing;
 
-public sealed class StringLiteralEncodingModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class StringLiteralEncodingModuleTests
 {
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
@@ -189,12 +190,14 @@ public sealed class StringLiteralEncodingModuleTests
         }
         trees[^1] = SyntaxTree.Parse(VerificationSource, "string-literal-encoding-module.terrum");
 
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(policy);
         var producerCompilation = Compilation.Create(trees,
         [
             new HostBuffer("Source", PrimitiveType.Char16, [0, 0, 34, 34], false) {
                 IsInvocationScoped = true,
             },
-        ], policy);
+        ], options);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] {
@@ -209,7 +212,11 @@ public sealed class StringLiteralEncodingModuleTests
             "VerifyMaximumAsciiLiteral",
             "VerifyMaximumUtf8Literal",
         };
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
@@ -217,10 +224,15 @@ public sealed class StringLiteralEncodingModuleTests
             var consumerTree = SyntaxTree.Parse(
                 $"namespace Terrum.CodeAnalysis; int32 Main() {{ return {exports[index]}(); }}",
                 "string-literal-encoding-consumer.terrum");
-            var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
+            var consumerCompilation = Compilation.Create(consumerTree,
+                ModuleCompiler.CreateReference(producer), options);
             Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+                ((global::System.Func<BoundProgram>)(() => {
+                    var __nunitActual1 = consumerCompilation.Program;
+                    Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+                    return (BoundProgram)__nunitActual1!;
+                }))(), producer);
             consumers[index] = ModuleCompiler.Link(consumer, producer);
         }
 
@@ -254,14 +266,14 @@ public sealed class StringLiteralEncodingModuleTests
             Assert.That(Lexer.Lex(SourceText.From(spelling)).Diagnostics, Is.Empty);
 
             var expected = new int[]?[] {
-                strictUtf8.GetBytes(text).Select(static value => (int)value).ToArray(),
-                text.Select(static unit => (int)unit).ToArray(),
-                strictUtf16Le.GetBytes(text).Select(static value => (int)value).ToArray(),
-                strictUtf16Be.GetBytes(text).Select(static value => (int)value).ToArray(),
+                [.. strictUtf8.GetBytes(text).Select(static value => (int)value)],
+                [.. text.Select(static unit => (int)unit)],
+                [.. strictUtf16Le.GetBytes(text).Select(static value => (int)value)],
+                [.. strictUtf16Be.GetBytes(text).Select(static value => (int)value)],
                 TryEncode(strictAscii, text),
                 TryEncode(strictLatin1, text),
-                strictUtf32Le.GetBytes(text).Select(static value => (int)value).ToArray(),
-                strictUtf32Be.GetBytes(text).Select(static value => (int)value).ToArray(),
+                [.. strictUtf32Le.GetBytes(text).Select(static value => (int)value)],
+                [.. strictUtf32Be.GetBytes(text).Select(static value => (int)value)],
             };
 
             for (var encoding = 0; encoding < expected.Length; encoding++)
@@ -290,12 +302,12 @@ public sealed class StringLiteralEncodingModuleTests
             var textBuilder = new StringBuilder(scalarCount * 2);
             for (var index = 0; index < scalarCount; index++)
             {
-                textBuilder.Append(new Rune(scalarStart + index).ToString());
+                _ = textBuilder.Append(new Rune(scalarStart + index));
             }
 
             var text = textBuilder.ToString();
             var spelling = $"\"{text}\"";
-            Assert.That(scalarCount * 6 + 4 <= 16_384, Is.True);
+            Assert.That((scalarCount * 6) + 4 <= 16_384, Is.True);
             VerifyFixture(text, spelling, $"supplementary scalar batch starting at U+{scalarStart:X}");
         }
 
@@ -308,10 +320,10 @@ public sealed class StringLiteralEncodingModuleTests
         {
             var text = bmpTextBuilder.ToString();
             var spelling = $"\"{bmpSpellingBuilder}\"";
-            Assert.That(bmpScalarCount * 10 + 4 <= 16_384, Is.True);
+            Assert.That((bmpScalarCount * 10) + 4 <= 16_384, Is.True);
             VerifyFixture(text, spelling, $"BMP scalar batch starting at U+{scalarStart:X4}");
-            bmpTextBuilder.Clear();
-            bmpSpellingBuilder.Clear();
+            _ = bmpTextBuilder.Clear();
+            _ = bmpSpellingBuilder.Clear();
             bmpScalarCount = 0;
         }
 
@@ -326,8 +338,8 @@ public sealed class StringLiteralEncodingModuleTests
             {
                 bmpBatchStart = codeUnit;
             }
-            bmpTextBuilder.Append((char)codeUnit);
-            bmpSpellingBuilder.Append("\\u").Append(codeUnit.ToString("X4", CultureInfo.InvariantCulture));
+            _ = bmpTextBuilder.Append((char)codeUnit);
+            _ = bmpSpellingBuilder.Append("\\u").Append(codeUnit.ToString("X4", CultureInfo.InvariantCulture));
             bmpScalarCount++;
             if (bmpScalarCount == maximumBmpScalarsPerBatch
                 || codeUnit == 0x7F || codeUnit == 0xFF)
@@ -361,7 +373,7 @@ public sealed class StringLiteralEncodingModuleTests
     {
         try
         {
-            return encoding.GetBytes(value).Select(static item => (int)item).ToArray();
+            return [.. encoding.GetBytes(value).Select(static item => (int)item)];
         }
         catch (EncoderFallbackException)
         {

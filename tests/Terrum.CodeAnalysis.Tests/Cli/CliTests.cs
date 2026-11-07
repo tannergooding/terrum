@@ -15,19 +15,18 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Text;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
 [FixtureLifeCycle(LifeCycle.InstancePerTestCase)]
 [Parallelizable(ParallelScope.Children)]
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Utf16ScalarDecoderExport(ushort first, ushort second);
@@ -207,27 +206,35 @@ public sealed partial class CliTests
             List<string> arguments = ["build-library", "-", "--export", "Value", "-o", outputPath, "--runtime", "fail-fast"];
             if (multipleSources)
             {
-                await File.WriteAllTextAsync(helperPath, Helper);
+                await File.WriteAllTextAsync(helperPath, Helper).ConfigureAwait(false);
                 arguments.AddRange(["--source", helperPath]);
             }
             arguments.Add("--json");
             var input = multipleSources ? Entry : Entry + Helper;
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(input), [.. arguments]);
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(input), [.. arguments]).ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(0));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(multipleSources ? 2 : 1));
             Assert.That(document.RootElement.GetProperty("artifact").GetProperty("kind").GetString(), Is.EqualTo("dynamic-library"));
-            var bytes = await File.ReadAllBytesAsync(outputPath);
+            var bytes = await File.ReadAllBytesAsync(outputPath).ConfigureAwait(false);
             var compilation = multipleSources
                 ? Compilation.CreateLibrary([SyntaxTree.Parse(Entry, "<stdin>"), SyntaxTree.Parse(Helper, helperPath)])
                 : Compilation.CreateLibrary(SyntaxTree.Parse(input, "<stdin>"));
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.That(bytes, Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            Assert.That(bytes, Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))(),
                 ["Value"], NativeRuntimePolicy.FailFast)));
             using var stream = new MemoryStream(bytes);
             using var reader = new PEReader(stream);
-            var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual1 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual1, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual1!; }))();
+            var header = ((global::System.Func<PEHeader>)(() => {
+                var __nunitActual1 = reader.PEHeaders.PEHeader;
+                Assert.That(__nunitActual1, Is.TypeOf<PEHeader>());
+                return (PEHeader)__nunitActual1!;
+            }))();
             Assert.That(header.AddressOfEntryPoint, Is.EqualTo(0));
             Assert.That(reader.PEHeaders.IsDll, Is.True);
             Assert.That(header.ExportTableDirectory.Size, Is.Not.EqualTo(0));
@@ -275,7 +282,7 @@ public sealed partial class CliTests
                 return false;
             }
 
-            var result = new BigInteger(value) * radix + digit;
+            var result = (new BigInteger(value) * radix) + digit;
             if (result > new BigInteger(maximum))
             {
                 expected = 0;
@@ -372,12 +379,17 @@ public sealed partial class CliTests
         Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32(), Is.EqualTo(8));
         Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32(), Is.EqualTo(16));
 
-        SignedInt64BinaryExport GetSignedBinary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<SignedInt64BinaryExport>(
+        SignedInt64BinaryExport GetSignedBinary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<SignedInt64BinaryExport>(
                 NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UnsignedUInt64BinaryExport GetUnsignedBinary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UnsignedUInt64BinaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UnsignedUInt64BinaryExport GetUnsignedBinary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UnsignedUInt64BinaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
 
         var signedOperations = new (string Name, SignedInt64BinaryExport Function)[] {
             ("TryAddInt64", GetSignedBinary("TryAddInt64")),
@@ -447,7 +459,7 @@ public sealed partial class CliTests
                     throw new ArgumentOutOfRangeException(nameof(operation));
             }
 
-            if (result < long.MinValue || result > long.MaxValue)
+            if (result < (BigInteger)long.MinValue || result > (BigInteger)long.MaxValue)
             {
                 expected = 0;
                 return false;
@@ -594,15 +606,23 @@ public sealed partial class CliTests
         Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Value)).ToInt32(), Is.EqualTo(4));
         Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.After)).ToInt32(), Is.EqualTo(8));
 
-        Int32CheckedBinaryExport GetSignedBinary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32CheckedBinaryExport>(
+        Int32CheckedBinaryExport GetSignedBinary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32CheckedBinaryExport>(
                 NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt32CheckedBinaryExport GetUnsignedBinary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt32CheckedBinaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int32CheckedUnaryExport GetSignedUnary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32CheckedUnaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt32CheckedBinaryExport GetUnsignedBinary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt32CheckedBinaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int32CheckedUnaryExport GetSignedUnary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32CheckedUnaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
 
         var signedOperations = new (string Name, Int32CheckedBinaryExport Function)[] {
             ("TryAddInt32", GetSignedBinary("TryAddInt32")),
@@ -667,7 +687,7 @@ public sealed partial class CliTests
                     throw new ArgumentOutOfRangeException(nameof(operation));
             }
 
-            if (result < int.MinValue || result > int.MaxValue)
+            if (result < (BigInteger)int.MinValue || result > (BigInteger)int.MaxValue)
             {
                 expected = 0;
                 return false;
@@ -814,36 +834,65 @@ public sealed partial class CliTests
         Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Value)).ToInt32(), Is.EqualTo(8));
         Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.After)).ToInt32(), Is.EqualTo(16));
 
-        UInt32IntUnaryExport GetUInt32Int(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt32IntUnaryExport>(
+        UInt32IntUnaryExport GetUInt32Int(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt32IntUnaryExport>(
                 NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt32UnaryExport GetUInt32(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt32UnaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt32BinaryExport GetUInt32Binary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt32BinaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt32PredicateExport GetUInt32Predicate(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt32PredicateExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt32RoundUpExport GetUInt32RoundUp(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt32RoundUpExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt64IntUnaryExport GetUInt64Int(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt64IntUnaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt64UnaryExport GetUInt64(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt64UnaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt64BinaryExport GetUInt64Binary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt64BinaryExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt64PredicateExport GetUInt64Predicate(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt64PredicateExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        UInt64RoundUpExport GetUInt64RoundUp(string name) =>
-            Marshal.GetDelegateForFunctionPointer<UInt64RoundUpExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt32UnaryExport GetUInt32(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt32UnaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt32BinaryExport GetUInt32Binary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt32BinaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt32PredicateExport GetUInt32Predicate(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt32PredicateExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt32RoundUpExport GetUInt32RoundUp(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt32RoundUpExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt64IntUnaryExport GetUInt64Int(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt64IntUnaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt64UnaryExport GetUInt64(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt64UnaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt64BinaryExport GetUInt64Binary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt64BinaryExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt64PredicateExport GetUInt64Predicate(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt64PredicateExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        UInt64RoundUpExport GetUInt64RoundUp(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<UInt64RoundUpExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
 
         var leadingZeroCount32 = GetUInt32Int("LeadingZeroCountUInt32");
         var trailingZeroCount32 = GetUInt32Int("TrailingZeroCountUInt32");
@@ -1002,42 +1051,77 @@ public sealed partial class CliTests
         Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32(), Is.EqualTo(8));
         Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32(), Is.EqualTo(16));
 
-        Int32UnaryMathExport GetInt32Unary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32UnaryMathExport>(
+        Int32UnaryMathExport GetInt32Unary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32UnaryMathExport>(
                 NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int32TryAbsMathExport GetInt32TryAbs(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32TryAbsMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int32BinaryMathExport GetInt32Binary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32BinaryMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int32ClampMathExport GetInt32Clamp(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32ClampMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int32ProductMathExport GetInt32Product(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32ProductMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int32GcdMathExport GetInt32Gcd(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int32GcdMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int64UnaryMathExport GetInt64Unary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int64UnaryMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int64SignMathExport GetInt64Sign(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int64SignMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int64TryAbsMathExport GetInt64TryAbs(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int64TryAbsMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int64BinaryMathExport GetInt64Binary(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int64BinaryMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int64ClampMathExport GetInt64Clamp(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int64ClampMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
-        Int64GcdMathExport GetInt64Gcd(string name) =>
-            Marshal.GetDelegateForFunctionPointer<Int64GcdMathExport>(
-                NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int32TryAbsMathExport GetInt32TryAbs(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32TryAbsMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int32BinaryMathExport GetInt32Binary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32BinaryMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int32ClampMathExport GetInt32Clamp(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32ClampMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int32ProductMathExport GetInt32Product(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32ProductMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int32GcdMathExport GetInt32Gcd(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int32GcdMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int64UnaryMathExport GetInt64Unary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int64UnaryMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int64SignMathExport GetInt64Sign(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int64SignMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int64TryAbsMathExport GetInt64TryAbs(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int64TryAbsMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int64BinaryMathExport GetInt64Binary(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int64BinaryMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int64ClampMathExport GetInt64Clamp(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int64ClampMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
+
+        Int64GcdMathExport GetInt64Gcd(string name)
+        {
+            return Marshal.GetDelegateForFunctionPointer<Int64GcdMathExport>(
+                        NativeLibrary.GetExport(handle, ExportPrefix + name));
+        }
 
         var abs32 = GetInt32Unary("AbsInt32");
         var tryAbs32 = GetInt32TryAbs("TryAbsInt32");
@@ -1164,17 +1248,17 @@ public sealed partial class CliTests
         try
         {
             var (exit, _, _) = await RunAsync(Encoding.UTF8.GetBytes(Source), "build-library", "-", "--export", "Value",
-                "-o", path, "--runtime", "fail-fast", "--json");
+                "-o", path, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(0));
-            var original = await File.ReadAllBytesAsync(path);
+            var original = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
             var (failed, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "build-library", "-", "--export", export,
-                "-o", path, "--runtime", "fail-fast", "--json");
+                "-o", path, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(failed, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM4002"));
             Assert.That(document.RootElement.TryGetProperty("artifact", out _), Is.False);
-            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
+            Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(original));
         }
         finally
         {
@@ -1191,9 +1275,12 @@ public sealed partial class CliTests
         var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-set-{Guid.NewGuid():N}");
         var library = prefix + ".terrum";
         var image = prefix + ".exe";
+        var manifest = prefix + ".layout.json";
         try
         {
-            await File.WriteAllTextAsync(library, Library);
+            await File.WriteAllTextAsync(library, Library).ConfigureAwait(false);
+            await File.WriteAllTextAsync(manifest,
+                CreateLayoutCoreManifest()).ConfigureAwait(false);
             List<string> arguments = [command, "-", "--source", library];
             if (command == "build")
             {
@@ -1203,8 +1290,8 @@ public sealed partial class CliTests
             {
                 arguments.AddRange(["--runtime", "fail-fast"]);
             }
-            arguments.Add("--json");
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Entry), [.. arguments]);
+            arguments.AddRange(["--layout-core-manifest", manifest, "--json"]);
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Entry), [.. arguments]).ConfigureAwait(false);
             Assert.That(error, Is.Empty);
             Assert.That(exit, Is.EqualTo(command == "jit" ? 42 : 0));
             if (command == "jit")
@@ -1226,18 +1313,18 @@ public sealed partial class CliTests
             Assert.That(json.RootElement.TryGetProperty("contentId", out _), Is.False);
             if (command == "build")
             {
-                var bytes = await File.ReadAllBytesAsync(image);
+                var bytes = await File.ReadAllBytesAsync(image).ConfigureAwait(false);
                 Assert.That(json.RootElement.GetProperty("artifact").GetProperty("sha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(bytes))));
                 using var process = Process.Start(new ProcessStartInfo(image) { UseShellExecute = false, CreateNoWindow = true })
                     ?? throw new InvalidOperationException("Could not start source-set artifact.");
                 try
                 {
-                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
                 }
                 catch (TimeoutException)
                 {
                     process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync();
+                    await process.WaitForExitAsync().ConfigureAwait(false);
                     throw;
                 }
                 Assert.That(process.ExitCode, Is.EqualTo(42));
@@ -1246,6 +1333,7 @@ public sealed partial class CliTests
         finally
         {
             File.Delete(library);
+            File.Delete(manifest);
             await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
@@ -1262,8 +1350,8 @@ public sealed partial class CliTests
         byte[] original = [1, 2, 3];
         try
         {
-            await File.WriteAllTextAsync(helper, Invalid);
-            await File.WriteAllBytesAsync(image, original);
+            await File.WriteAllTextAsync(helper, Invalid).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(image, original).ConfigureAwait(false);
             List<string> arguments = [command, "-", "--source", helper];
             if (command == "build")
             {
@@ -1277,9 +1365,9 @@ public sealed partial class CliTests
             {
                 arguments.Add("--json");
             }
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return Helper(); }"), [.. arguments]);
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return Helper(); }"), [.. arguments]).ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(1));
-            Assert.That(await File.ReadAllBytesAsync(image), Is.EqualTo(original));
+            Assert.That(await File.ReadAllBytesAsync(image).ConfigureAwait(false), Is.EqualTo(original));
             if (json)
             {
                 Assert.That(error, Is.Empty);
@@ -1315,12 +1403,12 @@ public sealed partial class CliTests
         var second = prefix + "-second.terrum";
         try
         {
-            await File.WriteAllTextAsync(entry, "int32 Main() { return missingEntry; }");
-            await File.WriteAllTextAsync(first, "int32 First() { return missingFirst; }");
-            await File.WriteAllTextAsync(second, "int32 Second() { return missingSecond; }");
+            await File.WriteAllTextAsync(entry, "int32 Main() { return missingEntry; }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(first, "int32 First() { return missingFirst; }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(second, "int32 Second() { return missingSecond; }").ConfigureAwait(false);
 
             var (exit, output, error) = await RunAsync([], "analyze", entry,
-                "--source", first, "--source", second, "--json");
+                "--source", first, "--source", second, "--json").ConfigureAwait(false);
 
             Assert.That(exit, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
@@ -1348,22 +1436,22 @@ public sealed partial class CliTests
         const string Helper = "int32 Helper() { return 42; }";
         try
         {
-            await File.WriteAllTextAsync(entry, "int32 Main() { return Helper(); }");
-            await File.WriteAllTextAsync(helper, Helper);
+            await File.WriteAllTextAsync(entry, "int32 Main() { return Helper(); }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(helper, Helper).ConfigureAwait(false);
             List<string> arguments = [command, entry, "--source", helper, "-o", helper, "--runtime", "fail-fast"];
             if (command == "build-library")
             {
                 arguments.AddRange(["--export", "Helper"]);
             }
             arguments.Add("--json");
-            var (exit, output, _) = await RunAsync([], [.. arguments]);
+            var (exit, output, _) = await RunAsync([], [.. arguments]).ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(2));
-            Assert.That(await File.ReadAllTextAsync(helper), Is.EqualTo(Helper));
+            Assert.That(await File.ReadAllTextAsync(helper).ConfigureAwait(false), Is.EqualTo(Helper));
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
 
             var alias = Path.Combine(Path.GetDirectoryName(entry) ?? throw new InvalidOperationException(), ".", Path.GetFileName(entry));
-            var (duplicate, duplicateOutput, _) = await RunAsync([], "analyze", entry, "--source", alias, "--json");
+            var (duplicate, duplicateOutput, _) = await RunAsync([], "analyze", entry, "--source", alias, "--json").ConfigureAwait(false);
             Assert.That(duplicate, Is.EqualTo(2));
             using var duplicateDocument = JsonDocument.Parse(duplicateOutput);
             Assert.That(duplicateDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
@@ -1390,7 +1478,7 @@ public sealed partial class CliTests
     public async Task SourceSetCommandsRejectMalformedOptionsBeforeReadingInputsAsync(string arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        var (exit, output, error) = await RunAsync([], arguments.Split(' '));
+        var (exit, output, error) = await RunAsync([], arguments.Split(' ')).ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(2));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -1406,7 +1494,7 @@ public sealed partial class CliTests
             arguments.AddRange(["--source", $"missing-{index}.terrum"]);
         }
         arguments.Add("--json");
-        var (exit, output, _) = await RunAsync([], [.. arguments]);
+        var (exit, output, _) = await RunAsync([], [.. arguments]).ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(2));
         using var document = JsonDocument.Parse(output);
         Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
@@ -1417,8 +1505,8 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "0 9223372036854775808 18446744073709551615 18446744073709551616 256 1.0 2e3 3.0";
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
-            TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunScannerCommandWithLayoutAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
+            TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -1449,8 +1537,8 @@ public sealed partial class CliTests
     public async Task ScannerWorkerPublishesCompiledTokenRecordsAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("\u03B12 + 42 \U00010400 \U0001F600"),
-            "scan-component", TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", "fail-fast", "--json");
+        var (exit, output, error) = await RunScannerCommandWithLayoutAsync(Encoding.UTF8.GetBytes("\u03B12 + 42 \U00010400 \U0001F600"),
+            "scan-component", TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", "fail-fast", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
@@ -1481,49 +1569,59 @@ public sealed partial class CliTests
 
         try
         {
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { require true; return 23; }"),
-                arguments);
+            var input = Encoding.UTF8.GetBytes(
+                "int32 Main() { require true; return 23; }");
+            var (exit, output, error) = nativeScanner
+                ? await RunScannerCommandWithLayoutAsync(input, arguments).ConfigureAwait(false)
+                : await RunAsync(input, arguments).ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(0));
             Assert.That(error, Is.EqualTo(""));
             using var document = JsonDocument.Parse(output);
             var artifact = document.RootElement.GetProperty("artifact");
             Assert.That(artifact.GetProperty("target").GetString(), Is.EqualTo("windows-x64"));
             Assert.That(artifact.GetProperty("runtimePolicy").GetString(), Is.EqualTo("fail-fast"));
-            var original = await File.ReadAllBytesAsync(path);
+            var original = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
             Assert.That(artifact.GetProperty("length").GetInt32(), Is.EqualTo(original.Length));
             Assert.That(artifact.GetProperty("sha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(original))));
 
-            var (failure, failedOutput, _) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return unknown; }"),
-                arguments);
+            var failureSource = Encoding.UTF8.GetBytes(
+                "int32 Main() { return unknown; }");
+            var (failure, failedOutput, _) = nativeScanner
+                ? await RunScannerCommandWithLayoutAsync(failureSource,
+                    arguments).ConfigureAwait(false)
+                : await RunAsync(failureSource, arguments).ConfigureAwait(false);
             Assert.That(failure, Is.EqualTo(1));
             using var failedDocument = JsonDocument.Parse(failedOutput);
             Assert.That(failedDocument.RootElement.GetProperty("success").GetBoolean(), Is.False);
             Assert.That(failedDocument.RootElement.TryGetProperty("artifact", out _), Is.False);
-            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
+            Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(original));
 
             var oversized = "int32 Main() {" + string.Concat(Enumerable.Range(0, 257)
                 .Select(static index => FormattableString.Invariant($"int32 v{index} = 0;"))) + "return 0;}";
-            var (limitExit, limitOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(oversized),
-                arguments);
+            var oversizedSource = Encoding.UTF8.GetBytes(oversized);
+            var (limitExit, limitOutput, _) = nativeScanner
+                ? await RunScannerCommandWithLayoutAsync(oversizedSource,
+                    arguments).ConfigureAwait(false)
+                : await RunAsync(oversizedSource, arguments).ConfigureAwait(false);
             Assert.That(limitExit, Is.EqualTo(1));
             using var limitDocument = JsonDocument.Parse(limitOutput);
             Assert.That(limitDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM3016"));
             Assert.That(limitDocument.RootElement.TryGetProperty("artifact", out _), Is.False);
-            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
+            Assert.That(await File.ReadAllBytesAsync(path).ConfigureAwait(false), Is.EqualTo(original));
 
             using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true })
                 ?? throw new InvalidOperationException("Could not start native artifact.");
 
             try
             {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
                 if (!process.HasExited)
                 {
                     process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync();
+                    await process.WaitForExitAsync().ConfigureAwait(false);
                 }
 
                 throw;
@@ -1557,18 +1655,18 @@ public sealed partial class CliTests
         {
             var bytes = Encoding.UTF8.GetBytes(source);
             var (hostExit, hostOutput, hostError) = await RunAsync(bytes, "build", "-", "-o", original,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(hostExit, Is.EqualTo(0));
             Assert.That(hostError, Is.Empty);
-            var (nativeExit, nativeOutput, nativeError) = await RunAsync(bytes, "build-component",
-                TerrumProjectPaths.SourceDirectory(root), "-", "-o", scanned, "--runtime", "fail-fast", "--json");
+            var (nativeExit, nativeOutput, nativeError) = await RunScannerCommandWithLayoutAsync(bytes, "build-component",
+                TerrumProjectPaths.SourceDirectory(root), "-", "-o", scanned, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(nativeExit, Is.EqualTo(0));
             Assert.That(nativeError, Is.Empty);
             using var host = JsonDocument.Parse(hostOutput);
             using var native = JsonDocument.Parse(nativeOutput);
             Assert.That(native.RootElement.GetProperty("contentId").GetString(), Is.EqualTo(host.RootElement.GetProperty("contentId").GetString()));
             Assert.That(native.RootElement.GetProperty("command").GetString(), Is.EqualTo("build-component"));
-            Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(original)));
+            Assert.That(await File.ReadAllBytesAsync(scanned).ConfigureAwait(false), Is.EqualTo(await File.ReadAllBytesAsync(original).ConfigureAwait(false)));
         }
         finally
         {
@@ -1587,15 +1685,15 @@ public sealed partial class CliTests
         byte[] previous = [1, 2, 3, 4];
         try
         {
-            await File.WriteAllBytesAsync(artifact, previous);
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "build-component",
-                TerrumProjectPaths.SourceDirectory(root), "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+            await File.WriteAllBytesAsync(artifact, previous).ConfigureAwait(false);
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync(Encoding.UTF8.GetBytes(source), "build-component",
+                TerrumProjectPaths.SourceDirectory(root), "-", "-o", artifact, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
             Assert.That(global::System.Linq.Enumerable.Any(document.RootElement.GetProperty("diagnostics").EnumerateArray(),diagnostic => diagnostic.GetProperty("code").GetString() == code),Is.True);
-            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(previous));
+            Assert.That(await File.ReadAllBytesAsync(artifact).ConfigureAwait(false), Is.EqualTo(previous));
         }
         finally
         {
@@ -1621,7 +1719,7 @@ public sealed partial class CliTests
         ];
         try
         {
-            Directory.CreateDirectory(bundle);
+            _ = Directory.CreateDirectory(bundle);
             foreach (var (sourcePath, outputName) in components)
             {
                 var source = await File.ReadAllTextAsync(
@@ -1640,8 +1738,10 @@ public sealed partial class CliTests
             {
                 arguments = [.. arguments, "--json"];
             }
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
-                arguments);
+            var input = Encoding.UTF8.GetBytes(
+                "int32 Main() { return 42; }");
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync(
+                input, arguments).ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(1));
             if (json)
             {
@@ -1994,11 +2094,11 @@ public sealed partial class CliTests
             for (var value = 0; value <= ushort.MaxValue; value++)
             {
                 var character = (ushort)value;
-                Assert.That(isAsciiDigit(character), Is.EqualTo(value >= 48 && value <= 57 ? 1 : 0));
-                var expectedLineBreak = value == 10 || value == 13 || value == 133
-                    || value == 8232 || value == 8233;
+                Assert.That(isAsciiDigit(character), Is.EqualTo(value is >= 48 and <= 57 ? 1 : 0));
+                var expectedLineBreak = value is 10 or 13 or 133
+                    or 8232 or 8233;
                 Assert.That(isLineBreak(character), Is.EqualTo(expectedLineBreak ? 1 : 0));
-                if (value >= 48 && value <= 57)
+                if (value is >= 48 and <= 57)
                 {
                     Assert.That(getDecimalDigit(character), Is.EqualTo(value - 48));
                 }
@@ -2154,10 +2254,10 @@ public sealed partial class CliTests
         byte[] previous = [1, 2, 3, 4];
         try
         {
-            await File.WriteAllTextAsync(component, scanner);
-            await File.WriteAllBytesAsync(artifact, previous);
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
-                "build-component", component, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+            await File.WriteAllTextAsync(component, scanner).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(artifact, previous).ConfigureAwait(false);
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                "build-component", component, "-", "-o", artifact, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(expected));
             Assert.That(error, Is.Empty);
             if (exit == 1)
@@ -2165,7 +2265,7 @@ public sealed partial class CliTests
                 using var document = JsonDocument.Parse(output);
                 Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
             }
-            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(previous));
+            Assert.That(await File.ReadAllBytesAsync(artifact).ConfigureAwait(false), Is.EqualTo(previous));
         }
         finally
         {
@@ -2184,16 +2284,16 @@ public sealed partial class CliTests
         const string Source = "int32 Main() { return 42; }";
         try
         {
-            await File.WriteAllTextAsync(scanner, Scanner);
-            await File.WriteAllTextAsync(input, Source);
-            var (exit, output, error) = await RunAsync([], "build-component", scanner, input,
-                "-o", scannerIsDestination ? scanner : input, "--runtime", "fail-fast", "--json");
+            await File.WriteAllTextAsync(scanner, Scanner).ConfigureAwait(false);
+            await File.WriteAllTextAsync(input, Source).ConfigureAwait(false);
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync([], "build-component", scanner, input,
+                "-o", scannerIsDestination ? scanner : input, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(2));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
-            Assert.That(await File.ReadAllTextAsync(scanner), Is.EqualTo(Scanner));
-            Assert.That(await File.ReadAllTextAsync(input), Is.EqualTo(Source));
+            Assert.That(await File.ReadAllTextAsync(scanner).ConfigureAwait(false), Is.EqualTo(Scanner));
+            Assert.That(await File.ReadAllTextAsync(input).ConfigureAwait(false), Is.EqualTo(Source));
         }
         finally
         {
@@ -2209,7 +2309,7 @@ public sealed partial class CliTests
     [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null argument arrays.")]
     public async Task BuildRequiresExplicitRuntimePolicyAsync(params string[] arguments)
     {
-        var (exit, output, _) = await RunAsync([], arguments);
+        var (exit, output, _) = await RunAsync([], arguments).ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(2));
         using var document = JsonDocument.Parse(output);
         Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
@@ -2219,9 +2319,9 @@ public sealed partial class CliTests
     public async Task AnalyzeRunsBindingRatherThanOnlyParsingAsync()
     {
         var source = Encoding.UTF8.GetBytes("int32 Main() { var x = 1; return x; }");
-        var (syntaxExit, _, _) = await RunAsync(source, "check", "-", "--json");
+        var (syntaxExit, _, _) = await RunAsync(source, "check", "-", "--json").ConfigureAwait(false);
         Assert.That(syntaxExit, Is.EqualTo(0));
-        var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
+        var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json").ConfigureAwait(false);
         Assert.That(semanticExit, Is.EqualTo(1));
         using var document = JsonDocument.Parse(output);
         Assert.That(document.RootElement.GetProperty("profile").GetString(), Is.EqualTo("native-10"));
@@ -2240,7 +2340,7 @@ public sealed partial class CliTests
                 return value;
             }
             """;
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -2255,7 +2355,7 @@ public sealed partial class CliTests
     public async Task RepeatedOptionalReportsPreciseStructuredDiagnosticAsync(string command)
     {
         const string Source = "void F(T? /* gap */\n? value) {}";
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), command, "-", "--json");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), command, "-", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
@@ -2279,7 +2379,7 @@ public sealed partial class CliTests
     [TestCase("\"<tag> \u03B1 \U0001F600\"")]
     public async Task HumanTokensPreserveJsonEscapingAsync(string source)
     {
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "tokens", "-");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "tokens", "-").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.EqualTo(""));
         Assert.That(output, Does.Contain(JsonSerializer.Serialize(source)));
@@ -2291,7 +2391,7 @@ public sealed partial class CliTests
     [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null source strings.")]
     public async Task EmitsStructuredResultsWithExpectedExitAsync(string command, string source, int exitCode)
     {
-        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json");
+        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(exitCode));
         Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
@@ -2311,14 +2411,18 @@ public sealed partial class CliTests
         if (command == "tree")
         {
             Assert.That(root.GetProperty("nodes")[0].GetProperty("kind").GetString(), Is.EqualTo("CompilationUnit"));
-            Assert.That(((global::System.Func<string>)(() => { var __nunitActual2 = root.GetProperty("contentId").GetString(); Assert.That(__nunitActual2, Is.TypeOf<string>()); return (string)__nunitActual2!; }))().Length, Is.EqualTo(64));
+            Assert.That(((global::System.Func<string>)(() => {
+                var __nunitActual2 = root.GetProperty("contentId").GetString();
+                Assert.That(__nunitActual2, Is.TypeOf<string>());
+                return (string)__nunitActual2!;
+            }))().Length, Is.EqualTo(64));
         }
     }
     [TestCase("void Main() {\nreturn 1\n}","<stdin>(3,1): error TRM1001")]
     [TestCase("void F(T? /* gap */\n? value) {}","<stdin>(2,1): error TRM1005")]
     public async Task HumanErrorsUseOneBasedLocationsAndStderrAsync(string source, string diagnostic)
     {
-        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), "check", "-");
+        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), "check", "-").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(output, Is.EqualTo(""));
         Assert.That(error, Does.Contain(diagnostic));
@@ -2329,7 +2433,7 @@ public sealed partial class CliTests
     {
         foreach (var arguments in new[] { new[] { "bad", "-", "--json" }, ["check", Path.Combine(TestArtifactPaths.DirectoryPath, Guid.NewGuid() + ".terrum"), "--json"] })
         {
-            (var exit, var output, var error) = await RunAsync([], arguments);
+            (var exit, var output, var error) = await RunAsync([], arguments).ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(2));
             Assert.That(error, Is.EqualTo(""));
             using var document = JsonDocument.Parse(output);
@@ -2341,11 +2445,11 @@ public sealed partial class CliTests
     [Test]
     public async Task StrictUtf8RejectsInvalidBytesAndAcceptsAnOptionalBomAsync()
     {
-        (var exit, var output, _) = await RunAsync([0xFF, 0xFE, 0x00, 0xD8], "check", "-", "--json");
+        (var exit, var output, _) = await RunAsync([0xFF, 0xFE, 0x00, 0xD8], "check", "-", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(2));
         using var document = JsonDocument.Parse(output);
         Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
-        (var validExit, _, _) = await RunAsync([0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("void Main() {}")], "check", "-");
+        (var validExit, _, _) = await RunAsync([0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("void Main() {}")], "check", "-").ConfigureAwait(false);
         Assert.That(validExit, Is.EqualTo(0));
     }
 
@@ -2353,7 +2457,7 @@ public sealed partial class CliTests
     public async Task FlatTreeProtocolPreservesReferencesAndDeepTreesAsync()
     {
         var source = "void F() { return " + string.Join(" + ", Enumerable.Repeat("1", 500)) + "; }";
-        (var exit, var output, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
+        (var exit, var output, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(0));
         using var document = JsonDocument.Parse(output);
         var nodes = document.RootElement.GetProperty("nodes");
@@ -2377,9 +2481,21 @@ public sealed partial class CliTests
         }
 
         Assert.That(nodeReferences[0], Is.EqualTo(0));
-        {var __nunitItems0 = nodeReferences.Skip(1);        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems0) { Assert.That(__nunitItem3, Is.EqualTo(1)); } });}
-        {var __nunitItems1 = tokenReferences;        Assert.Multiple(() => { foreach (var __nunitItem4 in __nunitItems1) { Assert.That(__nunitItem4, Is.EqualTo(1)); } });}
-        (var secondExit, var secondOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
+        {
+            var __nunitItems0 = nodeReferences.Skip(1);
+            Assert.Multiple(() => {
+    foreach (var __nunitItem3 in __nunitItems0)
+    {
+        Assert.That(__nunitItem3, Is.EqualTo(1)); } });
+        }
+        {
+            var __nunitItems1 = tokenReferences;
+            Assert.Multiple(() => {
+    foreach (var __nunitItem4 in __nunitItems1)
+    {
+        Assert.That(__nunitItem4, Is.EqualTo(1)); } });
+        }
+        (var secondExit, var secondOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json").ConfigureAwait(false);
         Assert.That(secondExit, Is.EqualTo(exit));
         Assert.That(secondOutput, Is.EqualTo(output));
     }
@@ -2392,14 +2508,14 @@ public sealed partial class CliTests
         }) ?? throw new InvalidOperationException("Could not start native executable.");
         try
         {
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync();
+                await process.WaitForExitAsync().ConfigureAwait(false);
             }
             throw;
         }
@@ -2409,6 +2525,129 @@ public sealed partial class CliTests
 
     private static Task<(int ExitCode, string Output, string Error)> RunAsync(byte[] input, params string[] arguments) =>
         RunAsync(input, arguments, workingDirectory: null);
+
+    private static Task<(int ExitCode, string Output, string Error)>
+        RunFrontendComponentAsync(byte[] input, params string[] arguments)
+    {
+        var root = RepositoryRoot();
+        var manifest = Path.Combine(root, "tests", "Fixtures", "LayoutCore",
+            "build-layout-core-manifest.json");
+        var invocationArguments = new List<string>(arguments.Length + 3) {
+            "frontend-component",
+        };
+        var hasJson = arguments.Length != 0 && arguments[^1] == "--json";
+        var optionCount = hasJson ? arguments.Length - 1 : arguments.Length;
+        for (var index = 0; index < optionCount; index++)
+        {
+            invocationArguments.Add(arguments[index]);
+        }
+        invocationArguments.Add("--layout-core-manifest");
+        invocationArguments.Add(manifest);
+        if (hasJson)
+        {
+            invocationArguments.Add("--json");
+        }
+        return RunAsync(input, [.. invocationArguments]);
+    }
+
+    private static async Task<bool> AssertFrontendBuildLibraryParityAsync(
+        byte[] input, string sourceDirectory, string exportName,
+        string policy, string frontendPath, string hostedPath)
+        => await AssertFrontendBuildLibraryParityAsync(input, sourceDirectory,
+            [exportName], policy, frontendPath, hostedPath)
+            .ConfigureAwait(false);
+
+    private static async Task<bool> AssertFrontendBuildLibraryParityAsync(
+        byte[] input, string sourceDirectory, string[] exportNames,
+        string policy, string frontendPath, string hostedPath)
+    {
+        ArgumentNullException.ThrowIfNull(exportNames);
+        var previousFrontendImage = File.Exists(frontendPath)
+            ? await File.ReadAllBytesAsync(frontendPath).ConfigureAwait(false)
+            : null;
+        var previousHostedImage = File.Exists(hostedPath)
+            ? await File.ReadAllBytesAsync(hostedPath).ConfigureAwait(false)
+            : null;
+        var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+            "frontend-build-library", sourceDirectory, "-", "-o",
+            frontendPath, "--runtime", policy, "--json").ConfigureAwait(false);
+        var hostedArguments = new List<string> { "build-library", "-" };
+        foreach (var exportName in exportNames)
+        {
+            hostedArguments.Add("--export");
+            hostedArguments.Add(exportName);
+        }
+        hostedArguments.Add("-o");
+        hostedArguments.Add(hostedPath);
+        hostedArguments.Add("--runtime");
+        hostedArguments.Add(policy);
+        hostedArguments.Add("--json");
+        var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+            [.. hostedArguments]).ConfigureAwait(false);
+        var context = $"frontend={frontendExit}: {frontendOutput}{frontendError}; "
+            + $"hosted={hostedExit}: {hostedOutput}{hostedError}";
+        Assert.That(frontendExit, Is.EqualTo(hostedExit), context);
+        Assert.That(frontendError, Is.Empty, context);
+        Assert.That(hostedError, Is.Empty, context);
+
+        using var frontendDocument = JsonDocument.Parse(frontendOutput);
+        using var hostedDocument = JsonDocument.Parse(hostedOutput);
+        var frontendResult = frontendDocument.RootElement;
+        var hostedResult = hostedDocument.RootElement;
+        Assert.That(frontendResult.GetProperty("success").GetBoolean(),
+            Is.EqualTo(hostedResult.GetProperty("success").GetBoolean()),
+            context);
+        if (frontendExit == 0)
+        {
+            var frontendImage = await File.ReadAllBytesAsync(frontendPath)
+                .ConfigureAwait(false);
+            var hostedImage = await File.ReadAllBytesAsync(hostedPath)
+                .ConfigureAwait(false);
+            Assert.That(frontendImage, Is.EqualTo(hostedImage), context);
+            return true;
+        }
+
+        Assert.That(policy, Is.EqualTo("checked-exceptions"), context);
+        Assert.That(frontendExit, Is.EqualTo(1), context);
+        var frontendDiagnostics = frontendResult.GetProperty("diagnostics");
+        var hostedDiagnostics = hostedResult.GetProperty("diagnostics");
+        Assert.That(frontendDiagnostics.GetArrayLength(), Is.GreaterThan(0),
+            context);
+        Assert.That(frontendDiagnostics.GetArrayLength(),
+            Is.EqualTo(hostedDiagnostics.GetArrayLength()), context);
+        for (var index = 0;
+            index < frontendDiagnostics.GetArrayLength(); index++)
+        {
+            var frontendCode = frontendDiagnostics[index]
+                .GetProperty("code").GetString();
+            var hostedCode = hostedDiagnostics[index]
+                .GetProperty("code").GetString();
+            Assert.That(frontendCode, Is.EqualTo(hostedCode), context);
+            Assert.That(frontendCode, Is.EqualTo("TRM4002"), context);
+        }
+
+        if (previousFrontendImage is null)
+        {
+            Assert.That(File.Exists(frontendPath), Is.False, context);
+        }
+        else
+        {
+            Assert.That(await File.ReadAllBytesAsync(frontendPath)
+                    .ConfigureAwait(false),
+                Is.EqualTo(previousFrontendImage), context);
+        }
+        if (previousHostedImage is null)
+        {
+            Assert.That(File.Exists(hostedPath), Is.False, context);
+        }
+        else
+        {
+            Assert.That(await File.ReadAllBytesAsync(hostedPath)
+                    .ConfigureAwait(false),
+                Is.EqualTo(previousHostedImage), context);
+        }
+        return false;
+    }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunAsync(byte[] input, string[] arguments,
         string? workingDirectory)

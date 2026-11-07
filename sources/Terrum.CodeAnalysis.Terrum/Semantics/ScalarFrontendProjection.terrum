@@ -12,8 +12,9 @@ namespace Terrum.CodeAnalysis;
 // a switch selector local.
 // Words 332..391 hold twelve ordered statements
 // (kind, slot, root, span start/length). Header flags in word 2 are public,
-// NoThrow, DoesNotReturn, and caller-unsafe; words 16/17 hold out/init-ref masks
-// in the tree layout. Kinds 38/39 identify source-audited switch headers/arms.
+// DoesNotReturn, and caller-unsafe; retired NoThrow bit 2 must be zero.
+// Words 16/17 hold out/init-ref masks in the tree layout. Kinds 38/39 identify
+// source-audited switch headers/arms.
 // Kind 40 carries a cross-arm transfer: slot is its enclosing switch header,
 // root is a constant target expression or -1 for the unguarded wildcard.
 // Calls retain source-order roots and packed formal maps.

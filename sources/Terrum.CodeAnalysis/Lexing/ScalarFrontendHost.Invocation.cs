@@ -70,10 +70,10 @@ public static partial class ScalarFrontendHost
         var program = buffers[ProgramBufferIndex];
         if (frontend.Name != "Frontend" || frontend.ElementType != PrimitiveType.Int32 || !frontend.IsWritable
             || program.Name != "FrontendProgram" || program.ElementType != PrimitiveType.Int32 || !program.IsWritable
-            || !buffers.All(static buffer => buffer.Values.IsEmpty)
+            || (!buffers.All(static buffer => buffer.Values.IsEmpty)
                 && (frontend.Values.Length != WordCount || program.Values.Length != ProgramWordCount
                     || frontend.Values.AsSpan().IndexOfAnyExcept(0) >= 0
-                    || program.Values.AsSpan().IndexOfAnyExcept(0) >= 0))
+                    || program.Values.AsSpan().IndexOfAnyExcept(0) >= 0)))
         {
             return false;
         }
@@ -144,7 +144,7 @@ public static partial class ScalarFrontendHost
                 expected[entry + word] = BinaryPrimitives.ReadInt32LittleEndian(
                     programBytes.Slice((frame + word) * sizeof(int), sizeof(int)));
             }
-            var flags = (function.IsPublic ? 1 : 0) | (function.IsNoThrow ? 2 : 0)
+            var flags = (function.IsPublic ? 1 : 0)
                 | (function.DoesNotReturn ? 4 : 0) | (function.RequiresUnsafeCaller ? 8 : 0);
             expected[entry + 4] = function.ReturnType | (function.FirstType << 4)
                 | (function.SecondType << 8) | (function.ThirdType << 12) | (function.FourthType << 16)
@@ -175,6 +175,9 @@ public static partial class ScalarFrontendHost
         return new ScalarFrontendInvocationResult(scanner, frontend, summary.MoveToImmutable());
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Globalization", "CA1308:Normalize strings to uppercase",
+        Justification = "Invocation profile identities use lowercase hexadecimal as their canonical serialized spelling.")]
     private static string CreateInvocationProfileIdentity(string profileName, int maximumTokens)
     {
         using var stream = new MemoryStream();

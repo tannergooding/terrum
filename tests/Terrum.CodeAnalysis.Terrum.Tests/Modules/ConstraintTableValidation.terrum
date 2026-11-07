@@ -19,6 +19,17 @@ public static bool TryValidateConstraintTable(int32 recordCount,
         return false;
     }
 
+    if (Host.AssociatedRelations.Length > 201326580)
+    {
+        return false;
+    }
+
+    int32 associatedRelationCount = Host.AssociatedRelations.Length / 12;
+    if (associatedRelationCount * 12 != Host.AssociatedRelations.Length)
+    {
+        return false;
+    }
+
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
         int32 rowStart = (row - 1) * 12;
@@ -33,6 +44,21 @@ public static bool TryValidateConstraintTable(int32 recordCount,
             || (kind != 1 && kind != 2 && kind != 3))
         {
             return false;
+        }
+
+        if (kind == 3)
+        {
+            if (owner == 0 || owner > uint32(genericParamCount))
+            {
+                return false;
+            }
+
+            int32 formalOffset = (int32(owner) - 1) * 32;
+            if (Host.GenericParams[formalOffset + 20] != 1
+                || payload > uint32(associatedRelationCount))
+            {
+                return false;
+            }
         }
     }
 

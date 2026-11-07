@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase(false)]
     [TestCase(true)]
@@ -22,22 +22,22 @@ public sealed partial class CliTests
         var executable = prefix + ".exe";
         try
         {
-            byte[] body = indexed ? TrRmCallAuditTests.IndexedCallBody()
+            var body = indexed ? TrRmCallAuditTests.IndexedCallBody()
                 : [4, 1, 1, 0, 0, 0, 2, 1, 1, 1, 41, 0x12, 2, 2, 1, 1, 0x83, 2];
             var bytes = TrRmExecutionAuditTests.LocalCallArtifact(body, TrRmCallAuditTests.IdentityBody());
-            await File.WriteAllBytesAsync(artifact, bytes);
+            await File.WriteAllBytesAsync(artifact, bytes).ConfigureAwait(false);
             var (ran, output, error) = await RunAsync([], "run-trrm", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(ran == 41, Is.True, $"Exit {ran}: {output}{Environment.NewLine}{error}");
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
-                "-o", executable, "--runtime", "fail-fast", "--json");
+                "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"Exit {built}: {buildOutput}{Environment.NewLine}{buildError}");
             Assert.That(buildError, Is.Empty);
-            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast)));
-            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(41));
-            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(bytes));
+            Assert.That(await File.ReadAllBytesAsync(executable).ConfigureAwait(false), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast)));
+            Assert.That(await ExecuteTrRmImageAsync(executable).ConfigureAwait(false), Is.EqualTo(41));
+            Assert.That(await File.ReadAllBytesAsync(artifact).ConfigureAwait(false), Is.EqualTo(bytes));
         }
         finally
         {
@@ -57,14 +57,14 @@ public sealed partial class CliTests
             var body = TrRmCallAuditTests.IndexedCallBody();
             body[33] = 3;
             await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.LocalCallArtifact(
-                body, TrRmCallAuditTests.IdentityBody()));
+                body, TrRmCallAuditTests.IdentityBody())).ConfigureAwait(false);
             byte[] retained = [0xDE, 0xAD, 0xBE, 0xEF];
-            await File.WriteAllBytesAsync(executable, retained);
+            await File.WriteAllBytesAsync(executable, retained).ConfigureAwait(false);
             var (built, output, error) = await RunAsync([], "build-trrm", artifact,
-                "-o", executable, "--runtime", "fail-fast", "--json");
+                "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 1, Is.True, $"Exit {built}: {output}{Environment.NewLine}{error}");
             Assert.That(output.Length != 0 || error.Length != 0, Is.True);
-            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(retained));
+            Assert.That(await File.ReadAllBytesAsync(executable).ConfigureAwait(false), Is.EqualTo(retained));
         }
         finally
         {

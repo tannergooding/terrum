@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -20,8 +20,8 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/// line\n//* block *// /** ordinary **/ int32 Main() { return 42; }";
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
-            TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", policy, "--json");
+        var (exit, output, error) = await RunScannerCommandWithLayoutAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
+            TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", policy, "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -38,7 +38,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/// heading\nint32 Main() { //** doc **// /** ordinary **/ return 42; }";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
-            "frontend-run", TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", policy, "--json");
+            "frontend-run", TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", policy, "--json").ConfigureAwait(false);
         Assert.That(exit, Is.EqualTo(42));
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
@@ -51,10 +51,10 @@ public sealed partial class CliTests
         var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"comment-fences-worker-valid-{Guid.NewGuid():N}.exe");
         try
         {
-            var (exit, output, error) = await RunAsync(
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync(
                 Encoding.UTF8.GetBytes("/// heading\nint32 Main() { //** block **// return 42; }"),
                 "build-component", TerrumProjectPaths.SourceDirectory(root), "-",
-                "-o", image, "--runtime", policy, "--json");
+                "-o", image, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(0));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
@@ -74,10 +74,10 @@ public sealed partial class CliTests
         var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"comment-fences-worker-invalid-{Guid.NewGuid():N}.exe");
         try
         {
-            var (exit, output, error) = await RunAsync(
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { /* **/ */ return 42; }"),
                 "build-component", TerrumProjectPaths.SourceDirectory(root), "-",
-                "-o", image, "--runtime", policy, "--json");
+                "-o", image, "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);

@@ -387,7 +387,6 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
     mut int32 segmentStart = openingStart + openingLength;
     mut int32 declarationDepth = 0;
     mut int32 childCount = 0;
-    mut bool segmentHasAlias = false;
     while (cursor < eof)
     {
         int32 offset = cursor * 3;
@@ -421,10 +420,6 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
         }
         if (declarationDepth == 0 && kind == 6)
         {
-            if (segmentHasAlias)
-            {
-                return false;
-            }
             if (functionSourceStart >= segmentStart
                 && functionSourceStart < tokenStart)
             {
@@ -447,10 +442,6 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
             subtreeHasAlias = subtreeHasAlias || childHasAlias;
             functionInBlock = functionInBlock || childFunctionInBlock;
             childCount = childCount + 1;
-            if (childCount > 1 && subtreeHasAlias)
-            {
-                return false;
-            }
             int32 childClose = childNext - 1;
             int32 childCloseOffset = childClose * 3;
             int32 childCloseStart = Host.Tokens[childCloseOffset + 1];
@@ -469,8 +460,6 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
         }
         if (kind == 102)
         {
-            if (childCount != 0) { return false; }
-            segmentHasAlias = true;
             subtreeHasAlias = true;
         }
         if (kind == 48 || kind == 49)
@@ -866,6 +855,8 @@ bool ScalarProgramReaderValidateFrame(int32 function,
     {
         return false;
     }
+    mut bool hasInitializationLocal = false;
+    mut bool hasConstantLocal = false;
     for (mut int32 local = 0; local < localCount; local = local + 1)
     {
         int32 offset = body + 300 + local * 4;
@@ -886,6 +877,34 @@ bool ScalarProgramReaderValidateFrame(int32 function,
         {
             return false;
         }
+        if (flags == 2 || flags == 3)
+        {
+            hasInitializationLocal = true;
+        }
+        if (flags == 4)
+        {
+            hasConstantLocal = true;
+        }
+    }
+
+    mut bool hasVacantDeclaration = false;
+    mut bool hasConstantDeclaration = false;
+    for (mut int32 statement = 0; statement < statementCount; statement = statement + 1)
+    {
+        int32 kind = Host.FrontendProgram[body + 332 + statement * 5];
+        if (kind == 25 || kind == 26)
+        {
+            hasVacantDeclaration = true;
+        }
+        if (kind == 27 || kind == 28)
+        {
+            hasConstantDeclaration = true;
+        }
+    }
+    if (hasInitializationLocal != hasVacantDeclaration
+        || hasConstantLocal != hasConstantDeclaration)
+    {
+        return false;
     }
 
     for (mut int32 node = 0; node < nodeCount; node = node + 1)

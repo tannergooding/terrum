@@ -2,7 +2,6 @@
 [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
 [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
 [Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
-[NoThrow]
 extern unsafe int32 MessageBoxW(ptr<void> owner, ptr<char16> text,
     ptr<char16> caption, uint32 flags);
 

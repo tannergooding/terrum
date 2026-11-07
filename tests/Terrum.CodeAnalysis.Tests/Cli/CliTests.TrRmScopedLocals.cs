@@ -5,15 +5,14 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ScopedChoose(int input);
@@ -41,20 +40,20 @@ public sealed partial class CliTests
         {
             var (compiled, compileOutput, compileError) = await RunAsync(
                 Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
-                "scoped-cli", "-o", artifact, "--runtime", "fail-fast", "--json");
+                "scoped-cli", "-o", artifact, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(compiled == 0, Is.True, $"{compileOutput}{Environment.NewLine}{compileError}");
             var (oldProfile, _, _) = await RunAsync([], "validate-trrm-compact-linear",
-                artifact, "--json");
+                artifact, "--json").ConfigureAwait(false);
             Assert.That(oldProfile, Is.EqualTo(1));
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(ran == 14, Is.True, $"{runOutput}{Environment.NewLine}{runError}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
-                "-o", executable, "--runtime", "fail-fast", "--json");
+                "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"{buildOutput}{Environment.NewLine}{buildError}");
-            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(await File.ReadAllBytesAsync(artifact)),
+            Assert.That(await File.ReadAllBytesAsync(executable).ConfigureAwait(false), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(await File.ReadAllBytesAsync(artifact).ConfigureAwait(false)),
                 NativeRuntimePolicy.FailFast)));
-            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(14));
+            Assert.That(await ExecuteTrRmImageAsync(executable).ConfigureAwait(false), Is.EqualTo(14));
         }
         finally
         {
@@ -81,10 +80,10 @@ public sealed partial class CliTests
         {
             var (compiled, compileOutput, compileError) = await RunAsync(
                 Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
-                "scoped-export", "-o", artifact, "--runtime", "fail-fast", "--library", "--json");
+                "scoped-export", "-o", artifact, "--runtime", "fail-fast", "--library", "--json").ConfigureAwait(false);
             Assert.That(compiled == 0, Is.True, $"{compileOutput}{Environment.NewLine}{compileError}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm-library",
-                artifact, "--export", "Choose", "-o", library, "--runtime", "fail-fast", "--json");
+                artifact, "--export", "Choose", "-o", library, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"{buildOutput}{Environment.NewLine}{buildError}");
             var handle = NativeLibrary.Load(library);
             try
@@ -117,15 +116,15 @@ public sealed partial class CliTests
         {
             var (compiled, compileOutput, compileError) = await RunAsync(
                 Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
-                "scoped-failure", "-o", artifact, "--runtime", "fail-fast", "--json");
+                "scoped-failure", "-o", artifact, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(compiled == 0, Is.True, $"{compileOutput}{Environment.NewLine}{compileError}");
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(ran == status, Is.True, $"{runOutput}{Environment.NewLine}{runError}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm",
-                artifact, "-o", executable, "--runtime", "fail-fast", "--json");
+                artifact, "-o", executable, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"{buildOutput}{Environment.NewLine}{buildError}");
-            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(status));
+            Assert.That(await ExecuteTrRmImageAsync(executable).ConfigureAwait(false), Is.EqualTo(status));
         }
         finally
         {

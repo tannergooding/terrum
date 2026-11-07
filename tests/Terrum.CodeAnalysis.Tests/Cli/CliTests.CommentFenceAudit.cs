@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("/**/",new[] { "TRM0003" },new[] { 0 },new[] { 4 })]
     [TestCase("/** ***/",new[] { "TRM0010", "TRM0003" },new[] { 4, 0 },new[] { 4, 8 })]
@@ -27,9 +27,9 @@ public sealed partial class CliTests
     {
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            var (exit, output, error) = await RunScannerCommandWithLayoutAsync(Encoding.UTF8.GetBytes(source),
                 "scan-component", TerrumProjectPaths.SourceDirectory(RepositoryRoot()),
-                "-", "--runtime", policy, "--json");
+                "-", "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(codes.Length == 0 ? 0 : 1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
@@ -49,16 +49,16 @@ public sealed partial class CliTests
             var (built, buildOutput, buildError) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { /** /* */ text **/ return 42; }"),
                 "frontend-build", TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-", "-o", image,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(built == 0, Is.True, $"{buildOutput}{buildError}");
-            Assert.That(await ExecuteNativeImageAsync(image), Is.EqualTo(42));
-            var original = await File.ReadAllBytesAsync(image);
+            Assert.That(await ExecuteNativeImageAsync(image).ConfigureAwait(false), Is.EqualTo(42));
+            var original = await File.ReadAllBytesAsync(image).ConfigureAwait(false);
             var (rejected, output, error) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { /** ***/ return 42; }"),
                 "frontend-build", TerrumProjectPaths.SourceDirectory(RepositoryRoot()), "-", "-o", image,
-                "--runtime", policy, "--json");
+                "--runtime", policy, "--json").ConfigureAwait(false);
             Assert.That(rejected == 1, Is.True, $"{output}{error}");
-            Assert.That(await File.ReadAllBytesAsync(image), Is.EqualTo(original));
+            Assert.That(await File.ReadAllBytesAsync(image).ConfigureAwait(false), Is.EqualTo(original));
         }
         finally
         {

@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [Test]
     public async Task GraphCatalogCliReportsOnlyUniqueSnapshotSelectionAsync()
@@ -29,25 +29,25 @@ public sealed partial class CliTests
         var root = Path.Combine(directory, "root.trng");
         try
         {
-            await File.WriteAllTextAsync(source, "public int32 Leaf() { return 40; }");
-            await File.WriteAllTextAsync(middleSource, "public int32 Middle() { return Leaf() + 1; }");
-            await File.WriteAllTextAsync(rootSource, "int32 Main() { return Middle() + 1; }");
+            await File.WriteAllTextAsync(source, "public int32 Leaf() { return 40; }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(middleSource, "public int32 Middle() { return Leaf() + 1; }").ConfigureAwait(false);
+            await File.WriteAllTextAsync(rootSource, "int32 Main() { return Middle() + 1; }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", source, "NodeB",
-                "--export", "Leaf", "-o", oldLeaf, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--export", "Leaf", "-o", oldLeaf, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "producer", middleSource, "NodeA",
-                "--provider", oldLeaf, "--export", "Middle", "-o", middle, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--provider", oldLeaf, "--export", "Middle", "-o", middle, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,
-                "--provider", middle, "-o", root, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
-            await File.WriteAllTextAsync(source, "public int32 Leaf() { return 42; }");
+                "--provider", middle, "-o", root, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            await File.WriteAllTextAsync(source, "public int32 Leaf() { return 42; }").ConfigureAwait(false);
             Assert.That((await RunAsync([], "compile-native", "producer", source, "NodeB",
-                "--export", "Leaf", "-o", replacement, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+                "--export", "Leaf", "-o", replacement, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native", "producer", source, "Other",
-                "--export", "Leaf", "-o", unrelated, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
-            var savedRoot = await File.ReadAllBytesAsync(root);
-            var savedMiddle = await File.ReadAllBytesAsync(middle);
+                "--export", "Leaf", "-o", unrelated, "--runtime", "fail-fast").ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            var savedRoot = await File.ReadAllBytesAsync(root).ConfigureAwait(false);
+            var savedMiddle = await File.ReadAllBytesAsync(middle).ConfigureAwait(false);
 
             var (exit, output, _) = await RunAsync([], "resolve-native-graph", root,
-                "--candidate", unrelated, "--candidate", replacement, "--candidate", middle, "--json");
+                "--candidate", unrelated, "--candidate", replacement, "--candidate", middle, "--json").ConfigureAwait(false);
             Assert.That(exit, Is.EqualTo(0));
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement;
@@ -66,13 +66,13 @@ public sealed partial class CliTests
             Assert.That(selected[1].GetProperty("path").GetString(), Is.EqualTo(Path.GetFullPath(replacement)));
 
             var (ambiguous, ambiguousJson, _) = await RunAsync([], "resolve-native-graph", root,
-                "--candidate", oldLeaf, "--candidate", replacement, "--candidate", middle, "--json");
+                "--candidate", oldLeaf, "--candidate", replacement, "--candidate", middle, "--json").ConfigureAwait(false);
             Assert.That(ambiguous, Is.EqualTo(1));
             using var error = JsonDocument.Parse(ambiguousJson);
             Assert.That(error.RootElement.GetProperty("diagnostics")[0]
                 .GetProperty("code").GetString(), Is.EqualTo("TRM5002"));
-            Assert.That(await File.ReadAllBytesAsync(root), Is.EqualTo(savedRoot));
-            Assert.That(await File.ReadAllBytesAsync(middle), Is.EqualTo(savedMiddle));
+            Assert.That(await File.ReadAllBytesAsync(root).ConfigureAwait(false), Is.EqualTo(savedRoot));
+            Assert.That(await File.ReadAllBytesAsync(middle).ConfigureAwait(false), Is.EqualTo(savedMiddle));
         }
         finally
         {

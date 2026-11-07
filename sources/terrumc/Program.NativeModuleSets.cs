@@ -33,7 +33,7 @@ internal static partial class Program
         var providers = new List<string>();
         string? output = null;
         NativeRuntimePolicy? policy = null;
-        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development;
+        var sourceArithmeticProfile = SourceArithmeticProfile.Development;
         var hasArithmeticProfile = false;
         for (var i = 2; i < count - 1; i += 2)
         {

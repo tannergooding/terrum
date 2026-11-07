@@ -4,16 +4,16 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     private static readonly Lazy<string> s_compilerPrimitivesTestLibrary = new(CreateCompilerPrimitivesTestLibrary);
 
@@ -51,7 +51,12 @@ public sealed partial class CliTests
             .Concat(adapterNames
                 .Select(name => SyntaxTree.Parse(File.ReadAllText(TerrumProjectPaths.TestFile(root,
                     Path.Combine("TestHelpers", "Abi", name + ".terrum"))))));
-        var compilation = Compilation.CreateLibrary([.. trees], BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.CreateLibrary([.. trees],
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected the test primitives library.");

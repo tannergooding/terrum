@@ -7,20 +7,21 @@ using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using NUnit.Framework;
-
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Utilities.Numerics;
 
-public sealed class IntegerParsingRadixModuleTests
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class IntegerParsingRadixModuleTests
 {
     private const int MaximumSourceCodeUnits = 16_384;
     private const string SourceIntegerParsingNamespace = "Terrum.CodeAnalysis.Numerics64.";
+    private static readonly int[] s_invalidRadices = [0, 1, 37];
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task IntegerParsingRadixModuleMatchesHostOracleAcrossFreshSourceGrantsAsync(
@@ -120,7 +121,11 @@ public sealed class IntegerParsingRadixModuleTests
             },
         ], policy);
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = producerCompilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(),
             ["Terrum.CodeAnalysis.Numerics64.VerifyBatch"]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -129,7 +134,11 @@ public sealed class IntegerParsingRadixModuleTests
             """, "integer-parsing-radix-consumer.terrum");
         var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual1 = consumerCompilation.Program;
+            Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual1!;
+        }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         foreach (var radix in Enumerable.Range(2, 35))
@@ -139,7 +148,7 @@ public sealed class IntegerParsingRadixModuleTests
         }
 
         var invalidRadixFixtures = (
-            from radix in new[] { 0, 1, 37 }
+            from radix in s_invalidRadices
             from api in Enum.GetValues<ParserApi>()
             select new ParseFixture(api, radix, "1")).ToArray();
         ExecuteBatch(invalidRadixFixtures, linked, policy, "invalid radices");
@@ -210,7 +219,9 @@ public sealed class IntegerParsingRadixModuleTests
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
             program, exports, (NativeRuntimePolicy)policy);
         Assert.That(artifact.Exports.Length, Is.EqualTo(Enum.GetValues<ParserApi>().Length * 2));
-        {var __nunitItems0 = artifact.Exports;        Assert.Multiple(() => {
+        {
+            var __nunitItems0 = artifact.Exports;
+            Assert.Multiple(() => {
             foreach (var __nunitItem3 in __nunitItems0)
             {
                 {
@@ -224,7 +235,8 @@ public sealed class IntegerParsingRadixModuleTests
                     Assert.That(__nunitItem3.ReturnType, Is.EqualTo(isStatus ? PrimitiveType.Bool : ResultType(api)));
                 }
             }
-        });}
+        });
+        }
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-integer-parsing-{Guid.NewGuid():N}.dll");
         try
@@ -266,11 +278,11 @@ public sealed class IntegerParsingRadixModuleTests
 
                     if (policy == BoundRuntimePolicy.CheckedExceptions)
                     {
-                        Assert.Throws<TargetInvocationException>(() =>
+                        _ = Assert.Throws<TargetInvocationException>(() =>
                             InvokeParsedValue(bindings, api, ['?'], 0, 1, 10));
-                        Assert.Throws<TargetInvocationException>(() =>
+                        _ = Assert.Throws<TargetInvocationException>(() =>
                             InvokeParsedValue(bindings, api, source, -1, 1, 10));
-                        Assert.Throws<TargetInvocationException>(() =>
+                        _ = Assert.Throws<TargetInvocationException>(() =>
                             InvokeParsedValue(bindings, api, source, 0, 1, 1));
                     }
                 }
@@ -299,7 +311,7 @@ public sealed class IntegerParsingRadixModuleTests
                         MaximumSourceCodeUnits, (uint)radix), Is.False);
                 }
 
-                Assert.Throws<ArgumentOutOfRangeException>(() =>
+                _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
                     InvokeCanParse(bindings, ParserApi.UInt64, new char[MaximumSourceCodeUnits + 1],
                         0, 1, 10));
             }
@@ -337,7 +349,11 @@ public sealed class IntegerParsingRadixModuleTests
             [new HostBuffer("Source", PrimitiveType.Char16, [(int)'?'], false)],
             BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual4 = compilation.Program;
+            Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual4!;
+        }))();
 
         var pathToExecutable = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-source-integer-parsing-fail-fast-{Guid.NewGuid():N}.exe");
@@ -515,7 +531,7 @@ public sealed class IntegerParsingRadixModuleTests
 
         var text = fixture.Text;
         var start = 0;
-        var negative = text.StartsWith("-", StringComparison.Ordinal);
+        var negative = text.StartsWith('-', System.StringComparison.Ordinal);
         if (negative)
         {
             if (fixture.Api is not (ParserApi.Int64 or ParserApi.Int32))
@@ -565,7 +581,7 @@ public sealed class IntegerParsingRadixModuleTests
                 return null;
             }
             hasDigit = true;
-            value = value * fixture.Radix + digit;
+            value = (value * fixture.Radix) + digit;
         }
 
         if (!hasDigit)

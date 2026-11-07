@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
-public sealed partial class CliTests
+internal sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
@@ -30,21 +30,21 @@ public sealed partial class CliTests
         {
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(fixtures, "writable-view-leaf-original.terrum"), "NodeB",
-                "--export", "Leaf", "-o", original, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Leaf", "-o", original, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(fixtures, "scoped-view-leaf-replacement.terrum"), "NodeB",
-                "--export", "Leaf", "-o", readonlyReplacement, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Leaf", "-o", readonlyReplacement, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native", "producer",
                 Path.Combine(fixtures, "writable-view-leaf.terrum"), "NodeB",
-                "--export", "Leaf", "-o", writableReplacement, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Leaf", "-o", writableReplacement, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "producer",
                 Path.Combine(fixtures, "middle.terrum"), "NodeA", "--provider", original,
-                "--export", "Middle", "-o", middle, "--runtime", policy)).ExitCode, Is.EqualTo(0));
+                "--export", "Middle", "-o", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native-graph", "consumer",
                 Path.Combine(fixtures, "consumer.terrum"), "--provider", middle,
-                "-o", root, "--runtime", policy)).ExitCode, Is.EqualTo(0));
-            var persistedMiddle = await File.ReadAllBytesAsync(middle);
-            var persistedRoot = await File.ReadAllBytesAsync(root);
+                "-o", root, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
+            var persistedMiddle = await File.ReadAllBytesAsync(middle).ConfigureAwait(false);
+            var persistedRoot = await File.ReadAllBytesAsync(root).ConfigureAwait(false);
 
             foreach (var (provider, expected) in new[] {
                 (original, 42),
@@ -53,19 +53,19 @@ public sealed partial class CliTests
             })
             {
                 Assert.That((await RunAsync([], "validate-native-graph", root,
-                    "--provider", middle, "--provider", provider)).ExitCode, Is.EqualTo(0));
+                    "--provider", middle, "--provider", provider).ConfigureAwait(false)).ExitCode, Is.EqualTo(0));
                 Assert.That((await RunAsync([], "run-native-graph", root,
-                    "--provider", middle, "--provider", provider, "--runtime", policy)).ExitCode, Is.EqualTo(expected));
+                    "--provider", middle, "--provider", provider, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(expected));
                 Assert.That((await RunAsync([], "run-native-graph-jit", root,
-                    "--provider", provider, "--provider", middle, "--runtime", policy)).ExitCode, Is.EqualTo(expected));
+                    "--provider", provider, "--provider", middle, "--runtime", policy).ConfigureAwait(false)).ExitCode, Is.EqualTo(expected));
                 var (apphostExit, apphostError) = await RunGraphJitApphostAsync(
                     "run-native-graph-jit", root, "--provider", middle, "--provider", provider,
-                    "--runtime", policy);
+                    "--runtime", policy).ConfigureAwait(false);
                 Assert.That(apphostExit, Is.EqualTo(expected));
                 Assert.That(apphostError, Is.Empty);
             }
-            Assert.That(await File.ReadAllBytesAsync(root), Is.EqualTo(persistedRoot));
-            Assert.That(await File.ReadAllBytesAsync(middle), Is.EqualTo(persistedMiddle));
+            Assert.That(await File.ReadAllBytesAsync(root).ConfigureAwait(false), Is.EqualTo(persistedRoot));
+            Assert.That(await File.ReadAllBytesAsync(middle).ConfigureAwait(false), Is.EqualTo(persistedMiddle));
         }
         finally
         {

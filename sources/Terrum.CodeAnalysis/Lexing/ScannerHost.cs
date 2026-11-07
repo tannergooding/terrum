@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -34,9 +35,9 @@ public static class ScannerHost
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
     private static readonly ImmutableArray<int> s_xidStart =
-        ImmutableArray.CreateRange(UnicodeIdentifierProfile.StartRanges.ToArray());
+        [.. UnicodeIdentifierProfile.StartRanges.ToArray()];
     private static readonly ImmutableArray<int> s_xidContinue =
-        ImmutableArray.CreateRange(UnicodeIdentifierProfile.ContinueRanges.ToArray());
+        [.. UnicodeIdentifierProfile.ContinueRanges.ToArray()];
     private static readonly ImmutableArray<int> s_keywords = CreateKeywords();
     private static readonly ImmutableArray<int> s_escapeKeywords = CreateEscapeKeywords();
     private static readonly ImmutableArray<int> s_operators = CreateOperators();
@@ -131,11 +132,11 @@ public static class ScannerHost
             && buffers[1].Values.AsSpan().SequenceEqual(s_xidStart.AsSpan())
             && buffers[2].Values.AsSpan().SequenceEqual(s_xidContinue.AsSpan())
             && buffers[3].Values.Length == (sourceLength + 1) * 3
-            && buffers[4].Values.Length == 1 + sourceLength * 3
-            && buffers[5].Values.Length == 1 + sourceLength * 4
+            && buffers[4].Values.Length == 1 + (sourceLength * 3)
+            && buffers[5].Values.Length == 1 + (sourceLength * 4)
             && buffers[6].Values.AsSpan().SequenceEqual(s_keywords.AsSpan())
             && buffers[7].Values.AsSpan().SequenceEqual(s_operators.AsSpan())
-            && buffers[8].Values.Length == 1 + sourceLength * 5
+            && buffers[8].Values.Length == 1 + (sourceLength * 5)
             && buffers[9].Values.AsSpan().SequenceEqual(s_escapeKeywords.AsSpan())
             && buffers[3].Values.AsSpan().IndexOfAnyExcept(0) < 0
             && buffers[4].Values.AsSpan().IndexOfAnyExcept(0) < 0
@@ -203,7 +204,7 @@ public static class ScannerHost
         WriteEnum<TriviaKind>(writer);
         WriteEnum<ScannerIntegerStatus>(writer);
         WriteEnum<ScannerIntegerTag>(writer);
-        return $"{ComponentName}:{Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant()}";
+        return $"{ComponentName}:{Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToUpperInvariant()}";
     }
 
     private static void WriteValues(BinaryWriter writer, ImmutableArray<int> values)
@@ -219,7 +220,7 @@ public static class ScannerHost
     {
         foreach (var value in Enum.GetValues<TEnum>())
         {
-            writer.Write(Convert.ToInt32(value));
+            writer.Write(Convert.ToInt32(value, CultureInfo.InvariantCulture));
             writer.Write(value.ToString());
         }
     }
@@ -759,7 +760,7 @@ public static class ScannerHost
             if (diagnostic.Code is PunctuationRun.InvalidCode or PunctuationRun.UnsupportedCode)
             {
                 punctuationDiagnostics ??= [];
-                punctuationDiagnostics.Add((diagnostic.Code, diagnostic.Span));
+                _ = punctuationDiagnostics.Add((diagnostic.Code, diagnostic.Span));
             }
         }
         for (var index = 0; index < result.Tokens.Length - 1; index++)
@@ -818,7 +819,7 @@ public static class ScannerHost
         HashSet<TextSpan>? escapeDiagnostics = null;
         foreach (var token in result.Tokens)
         {
-            if (!token.Text.StartsWith('@'))
+            if (!token.Text.StartsWith('@', StringComparison.Ordinal))
             {
                 continue;
             }
@@ -840,7 +841,7 @@ public static class ScannerHost
                 {
                     if (diagnostic.Code == "TRM0001")
                     {
-                        escapeDiagnostics.Add(diagnostic.Span);
+                        _ = escapeDiagnostics.Add(diagnostic.Span);
                     }
                 }
             }
@@ -892,11 +893,31 @@ public static class ScannerHost
             {
                 diagnosticIndex++;
             }
+            var framedKind = cursor.ReadValidationToken(out var framedEnd);
+            var isRawInterpolationToken = token.Kind is TokenKind.InterpolatedRawTextStart
+                or TokenKind.InterpolatedRawTextSegment
+                or TokenKind.InterpolationHoleStart
+                or TokenKind.InterpolationHoleEnd
+                or TokenKind.InterpolatedRawTextEnd;
+            var isFramedRawInterpolationToken = framedKind is TokenKind.InterpolatedRawTextStart
+                or TokenKind.InterpolatedRawTextSegment
+                or TokenKind.InterpolationHoleStart
+                or TokenKind.InterpolationHoleEnd
+                or TokenKind.InterpolatedRawTextEnd;
+            if (isRawInterpolationToken || isFramedRawInterpolationToken)
+            {
+                if (token.Kind != framedKind || framedEnd != token.Span.End)
+                {
+                    throw new ArgumentException("Scanner records contradict source token framing.", nameof(result));
+                }
+            }
             if (token.Kind != TokenKind.EndOfFile && !PunctuationRun.IsGlyph(result.Source[token.Span.Start]))
             {
                 // Audit framing, not caller-owned classifications; a long fabricated span must not hide punctuation.
-                if (cursor.ReadValidationTokenEnd(token.Span.Start) != token.Span.End
-                    || (token.Kind == TokenKind.StringLiteral) != (result.Source[token.Span.Start] == '"'))
+                var tokenIsStringLiteral = token.Kind == TokenKind.StringLiteral;
+                var framedIsStringLiteral = framedKind == TokenKind.StringLiteral;
+                if (framedEnd != token.Span.End
+                    || tokenIsStringLiteral != framedIsStringLiteral)
                 {
                     throw new ArgumentException("Scanner records contradict source token framing.", nameof(result));
                 }

@@ -6,7 +6,7 @@ unique struct Ticket {
         Id = id;
     }
 
-    [NoThrow] [Cleanup] public void Close() {
+     [Cleanup] public void Close() {
     }
 }
 
