@@ -316,7 +316,7 @@ internal sealed partial class CliTests
     [Test]
     public async Task NativeDoRetainsThreeParameterAbiAsync()
     {
-        const string source = "public int32 Value(int32 a, int32 b, int32 c) { do { return a + b + c; } while (false); }";
+        const string source = "public int32 Value(int32 a, int32 b, int32 c) { do { if (a == 1 && b == 2 && c == 39) { return 42; } return 0; } while (false); }";
         var root = RepositoryRoot();
         var output = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.dll");
         try

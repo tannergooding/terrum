@@ -170,8 +170,8 @@ internal sealed partial class CliTests
     }
     [TestCase("int32","","if (false) { return 0; } else if (true) { return 42; } return 1;",0)]
     [TestCase("int32","int32 a","if (false) { return 0; } else if (a == 42) { return a; } return 1;",1)]
-    [TestCase("int32","int32 a, int32 b","if (false) { return 0; } else if (a + b == 42) { return a + b; } return 1;",2)]
-    [TestCase("int32","int32 a, int32 b, int32 c","if (false) { return 0; } else if (a + b + c == 42) { return a + b + c; } return 1;",3)]
+    [TestCase("int32","int32 a, int32 b","if (false) { return 0; } else if (a == 20 && b == 22) { return 42; } return 1;",2)]
+    [TestCase("int32","int32 a, int32 b, int32 c","if (false) { return 0; } else if (a == 10 && b == 20 && c == 12) { return 42; } return 1;",3)]
     [TestCase("void","","if (false) {} else if (true) { require true; }",0)]
     public async Task NativeElseIfPreservesParameterAbiAndVoidExportAsync(string type, string parameters, string body, int count)
     {

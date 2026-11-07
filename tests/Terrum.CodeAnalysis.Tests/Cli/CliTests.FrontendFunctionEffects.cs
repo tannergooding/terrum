@@ -256,8 +256,33 @@ internal sealed partial class CliTests
                     Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
                 }
 
+                var sentinel = "sentinel"u8.ToArray();
+                if (runtimeName == "checked-exceptions")
+                {
+                    await File.WriteAllBytesAsync(native, sentinel).ConfigureAwait(false);
+                    await File.WriteAllBytesAsync(hosted, sentinel).ConfigureAwait(false);
+                }
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
                     "frontend-build-library", frontend, "-", "-o", native, "--runtime", runtimeName, "--json").ConfigureAwait(false);
+                if (runtimeName == "checked-exceptions")
+                {
+                    Assert.That(buildExit, Is.EqualTo(1), $"{buildOutput}{buildError}");
+                    Assert.That(buildError, Is.Empty);
+                    AssertInputDiagnosticCode(buildOutput, "TRM4002");
+                    var (checkedHostExit, checkedHostOutput, checkedHostError) = await RunAsync(
+                        Encoding.UTF8.GetBytes(text), "build-library", "-",
+                        "--export", "Stop", "-o", hosted, "--runtime",
+                        runtimeName, "--json").ConfigureAwait(false);
+                    Assert.That(checkedHostExit, Is.EqualTo(1),
+                        $"{checkedHostOutput}{checkedHostError}");
+                    Assert.That(checkedHostError, Is.Empty);
+                    AssertInputDiagnosticCode(checkedHostOutput, "TRM4002");
+                    Assert.That(await File.ReadAllBytesAsync(native)
+                        .ConfigureAwait(false), Is.EqualTo(sentinel));
+                    Assert.That(await File.ReadAllBytesAsync(hosted)
+                        .ConfigureAwait(false), Is.EqualTo(sentinel));
+                    continue;
+                }
                 Assert.That(buildExit == 0, Is.True, $"{runtimeName}: {buildOutput}{buildError}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(Encoding.UTF8.GetBytes(text),
                     "build-library", "-", "--export", "Stop", "-o", hosted, "--runtime", runtimeName, "--json").ConfigureAwait(false);
