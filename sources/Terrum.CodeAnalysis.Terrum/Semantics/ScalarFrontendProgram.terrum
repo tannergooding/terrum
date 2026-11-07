@@ -309,8 +309,17 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
         }
         if (keyword.Kind == 6)
         {
+            var aliasError = BuildScalarAliasTableForNamespaceParts(
+                tokenView, count, at, 0);
+            if (aliasError.Length != 0)
+            {
+                error = aliasError;
+                return true;
+            }
+            int32 blockAliasCount
+                = Host.FrontendProgram[Host.FrontendProgram.Length - 1];
             if (!TryInventoryScalarProgramNamespaceTree(tokenView, count, at, 1,
-                    functions, hasFour, firstNamespace, aliasCount,
+                    functions, hasFour, firstNamespace, blockAliasCount, true,
                     init var updatedFunctions, init var updatedHasFour,
                     init var updatedFirstNamespace, init var updatedAliasCount,
                     init var next, init var namespaceError, init var namespaceErrorCode))
@@ -323,15 +332,14 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
                 errorCode = namespaceErrorCode;
                 return true;
             }
-            if (updatedAliasCount > 0 && (hasNamespace || next != count - 1))
-            {
-                error = updatedFirstNamespace;
-                return true;
-            }
             functions = updatedFunctions;
             hasFour = updatedHasFour;
             firstNamespace = updatedFirstNamespace;
-            aliasCount = updatedAliasCount;
+            if (updatedAliasCount > aliasCount)
+            {
+                aliasCount = updatedAliasCount;
+            }
+            RestoreScalarAliasTable(0);
             hasNamespace = true;
             at = next;
             continue;
@@ -370,7 +378,7 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
             return true;
         }
         var aliasError = BuildScalarAliasTable(tokenView, count, at,
-            scopeEnd, init var rootAliasCount);
+            scopeEnd, 0, true, init var rootAliasCount);
         if (aliasError.Length != 0)
         {
             error = aliasError;
@@ -418,6 +426,162 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
     return true;
 }
 
+SourceRange BuildScalarAliasTableForNamespaceParts(Span<Token> tokenView,
+    int32 count, int32 namespaceStart, int32 initialAliasCount)
+{
+    require SourceRange.TryCreate(0, 0, init var empty);
+    require TryGetScalarWindowToken(tokenView, 0, count, false,
+        namespaceStart, init var targetKeyword);
+    if (targetKeyword.Kind != 6)
+    {
+        return targetKeyword.Range;
+    }
+
+    int32 targetNameStart = namespaceStart + 1;
+    mut int32 targetNameEnd = targetNameStart + 1;
+    while (targetNameEnd < count - 1
+        && TryGetScalarWindowToken(tokenView, 0, count, false,
+            targetNameEnd, init var targetSeparator)
+        && targetSeparator.Kind == 54)
+    {
+        targetNameEnd = targetNameEnd + 2;
+    }
+    if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+            targetNameEnd, init var targetOpening)
+        || targetOpening.Kind != 48)
+    {
+        return targetKeyword.Range;
+    }
+
+    mut int32 scan = 0;
+    mut int32 currentAliasCount = initialAliasCount;
+    while (scan < count - 1)
+    {
+        require TryGetScalarWindowToken(tokenView, 0, count, false,
+            scan, init var token);
+        if (token.Kind == 6)
+        {
+            mut int32 cursor = scan + 1;
+            if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                    cursor, init var firstName)
+                || firstName.Kind != 2)
+            {
+                return token.Range;
+            }
+            cursor = cursor + 1;
+            while (cursor < count - 1
+                && TryGetScalarWindowToken(tokenView, 0, count, false,
+                    cursor, init var separator)
+                && separator.Kind == 54)
+            {
+                cursor = cursor + 1;
+                if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                        cursor, init var segment)
+                    || segment.Kind != 2)
+                {
+                    return separator.Range;
+                }
+                cursor = cursor + 1;
+            }
+            if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                    cursor, init var opening)
+                || opening.Kind != 48)
+            {
+                return token.Range;
+            }
+
+            int32 bodyStart = cursor + 1;
+            mut int32 blockEnd = bodyStart;
+            mut int32 depth = 1;
+            while (blockEnd < count - 1 && depth != 0)
+            {
+                require TryGetScalarWindowToken(tokenView, 0, count,
+                    false, blockEnd, init var blockToken);
+                if (blockToken.Kind == 48) { depth = depth + 1; }
+                if (blockToken.Kind == 49) { depth = depth - 1; }
+                blockEnd = blockEnd + 1;
+            }
+            if (depth != 0)
+            {
+                return opening.Range;
+            }
+
+            if (SameScalarNamespacePath(tokenView, count,
+                    targetNameStart, targetNameEnd, scan + 1, cursor))
+            {
+                var buildError = BuildScalarAliasTable(tokenView, count,
+                    bodyStart, blockEnd - 1, currentAliasCount, false,
+                    init var updatedAliasCount);
+                if (buildError.Length != 0)
+                {
+                    return buildError;
+                }
+                currentAliasCount = updatedAliasCount;
+            }
+            scan = blockEnd;
+            continue;
+        }
+
+        mut int32 scopeEnd = scan;
+        mut int32 scopeDepth = 0;
+        while (scopeEnd < count - 1)
+        {
+            require TryGetScalarWindowToken(tokenView, 0, count,
+                false, scopeEnd, init var scopeToken);
+            if (scopeDepth == 0 && scopeToken.Kind == 6)
+            {
+                break;
+            }
+            if (scopeToken.Kind == 48) { scopeDepth = scopeDepth + 1; }
+            if (scopeToken.Kind == 49)
+            {
+                if (scopeDepth == 0)
+                {
+                    return scopeToken.Range;
+                }
+                scopeDepth = scopeDepth - 1;
+            }
+            scopeEnd = scopeEnd + 1;
+        }
+        if (scopeDepth != 0)
+        {
+            return token.Range;
+        }
+        if (scopeEnd == scan)
+        {
+            return token.Range;
+        }
+        scan = scopeEnd;
+    }
+
+    Host.FrontendProgram[Host.FrontendProgram.Length - 1]
+        = currentAliasCount;
+    return ResolveScalarAliases(currentAliasCount);
+}
+
+bool SameScalarNamespacePath(Span<Token> tokenView, int32 count,
+    int32 leftStart, int32 leftEnd, int32 rightStart, int32 rightEnd)
+{
+    if (leftEnd - leftStart != rightEnd - rightStart)
+    {
+        return false;
+    }
+    for (mut int32 offset = 0; offset < leftEnd - leftStart;
+        offset = offset + 1)
+    {
+        if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                leftStart + offset, init var left)
+            || !TryGetScalarWindowToken(tokenView, 0, count, false,
+                rightStart + offset, init var right)
+            || left.Kind != right.Kind
+            || (left.Kind == 2 && !SameTokenSpelling(left, right)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool TryInventoryScalarProgramNamespaceSegment(Span<Token> tokenView, int32 count,
     int32 declarationStart, int32 declarationEnd, SourceRange currentNamespace,
     int32 initialFunctionCount, bool initialHasFourParameterFunction,
@@ -434,15 +598,8 @@ bool TryInventoryScalarProgramNamespaceSegment(Span<Token> tokenView, int32 coun
     error = empty;
     errorCode = 1;
     if (declarationStart >= declarationEnd) { return true; }
-    var aliasError = BuildScalarAliasTable(tokenView, count, declarationStart,
-        declarationEnd, init var currentAliasCount);
-    if (aliasError.Length != 0)
-    {
-        error = aliasError;
-        return true;
-    }
     if (!TryInventoryScalarProgramScope(tokenView, count, declarationStart,
-            declarationEnd, currentNamespace, true, currentAliasCount,
+            declarationEnd, currentNamespace, true, initialAliasCount,
             initialFunctionCount, initialHasFourParameterFunction,
             init var updatedFunctions, init var updatedHasFour,
             init var useLegacy, init var inventoryError,
@@ -465,14 +622,15 @@ bool TryInventoryScalarProgramNamespaceSegment(Span<Token> tokenView, int32 coun
     hasFourParameterFunction = updatedHasFour;
     namespaceName = initialNamespaceName.Length == 0
         ? currentNamespace : initialNamespaceName;
-    aliasCount = initialAliasCount + currentAliasCount;
+    aliasCount = initialAliasCount;
     return true;
 }
 
 bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
     int32 at, int32 nestingDepth, int32 initialFunctionCount,
     bool initialHasFourParameterFunction, SourceRange initialNamespaceName,
-    int32 initialAliasCount, init ref<int32> functionCount,
+    int32 initialAliasCount, bool currentNamespaceAliasesPrebuilt,
+    init ref<int32> functionCount,
     init ref<bool> hasFourParameterFunction, init ref<SourceRange> namespaceName,
     init ref<int32> aliasCount, init ref<int32> next, init ref<SourceRange> error,
     init ref<int32> errorCode)
@@ -522,15 +680,45 @@ bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
         return true;
     }
     int32 bodyStart = cursor + 1;
+    mut int32 namespaceEnd = bodyStart;
+    mut int32 namespaceBraceDepth = 1;
+    while (namespaceEnd < count - 1 && namespaceBraceDepth != 0)
+    {
+        require TryGetScalarWindowToken(tokenView, 0, count, false,
+            namespaceEnd, init var namespaceToken);
+        if (namespaceToken.Kind == 48) { namespaceBraceDepth = namespaceBraceDepth + 1; }
+        if (namespaceToken.Kind == 49) { namespaceBraceDepth = namespaceBraceDepth - 1; }
+        namespaceEnd = namespaceEnd + 1;
+    }
+    if (namespaceBraceDepth != 0)
+    {
+        error = opening.Range;
+        return true;
+    }
+    mut int32 activeAliasCount = initialAliasCount;
+    if (!currentNamespaceAliasesPrebuilt)
+    {
+        if (!currentNamespaceAliasesPrebuilt)
+        {
+            var aliasError = BuildScalarAliasTable(tokenView, count, bodyStart,
+                namespaceEnd - 1, initialAliasCount, true,
+                init var updatedAliasCount);
+            if (aliasError.Length != 0)
+            {
+                error = aliasError;
+                return true;
+            }
+            activeAliasCount = updatedAliasCount;
+        }
+    }
     mut int32 scan = bodyStart;
     mut int32 segmentStart = bodyStart;
     mut int32 depth = 0;
     mut int32 functions = initialFunctionCount;
     mut bool hasFour = initialHasFourParameterFunction;
     mut SourceRange firstNamespace = initialNamespaceName;
-    mut int32 aliases = initialAliasCount;
-    mut int32 parentAliases = 0;
-    mut int32 childCount = 0;
+    mut int32 aliases = activeAliasCount;
+    mut int32 subtreeAliases = activeAliasCount;
     while (scan < count - 1)
     {
         require TryGetScalarWindowToken(tokenView, 0, count, false, scan, init var token);
@@ -553,31 +741,20 @@ bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
                     errorCode = segmentErrorCode;
                     return true;
                 }
-                parentAliases = parentAliases + updatedAliases - aliases;
                 functions = updatedFunctions;
                 hasFour = updatedHasFour;
                 firstNamespace = updatedNamespace;
                 aliases = updatedAliases;
             }
-            if (childCount > 0 && parentAliases > 0)
-            {
-                error = currentNamespace;
-                return true;
-            }
             functionCount = functions;
             hasFourParameterFunction = hasFour;
             namespaceName = firstNamespace;
-            aliasCount = aliases;
+            aliasCount = subtreeAliases;
             next = scan + 1;
             return true;
         }
         if (depth == 0 && token.Kind == 6)
         {
-            if (parentAliases > 0)
-            {
-                error = currentNamespace;
-                return true;
-            }
             if (segmentStart < scan)
             {
                 if (!TryInventoryScalarProgramNamespaceSegment(tokenView, count,
@@ -595,19 +772,14 @@ bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
                     errorCode = segmentErrorCode;
                     return true;
                 }
-                parentAliases = parentAliases + updatedAliases - aliases;
                 functions = updatedFunctions;
                 hasFour = updatedHasFour;
                 firstNamespace = updatedNamespace;
                 aliases = updatedAliases;
-                if (parentAliases > 0)
-                {
-                    error = currentNamespace;
-                    return true;
-                }
             }
             if (!TryInventoryScalarProgramNamespaceTree(tokenView, count, scan,
                     nestingDepth + 1, functions, hasFour, firstNamespace, aliases,
+                    false,
                     init var childFunctions, init var childHasFour,
                     init var childNamespace, init var childAliases,
                     init var childNext, init var childError, init var childErrorCode))
@@ -623,13 +795,11 @@ bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
             functions = childFunctions;
             hasFour = childHasFour;
             firstNamespace = childNamespace;
-            aliases = childAliases;
-            childCount = childCount + 1;
-            if (childCount > 1 && aliases > initialAliasCount)
+            if (childAliases > subtreeAliases)
             {
-                error = currentNamespace;
-                return true;
+                subtreeAliases = childAliases;
             }
+            RestoreScalarAliasTable(aliases);
             scan = childNext;
             segmentStart = childNext;
             continue;
@@ -641,6 +811,131 @@ bool TryInventoryScalarProgramNamespaceTree(Span<Token> tokenView, int32 count,
     error = opening.Range;
     return true;
 }
+
+bool TryBuildScalarAliasTableForFunction(Span<Token> tokenView, int32 count,
+    int32 scopeStart, int32 scopeEnd, int32 targetTokenStart,
+    int32 initialAliasCount, bool namespaceAliasesPrebuilt,
+    bool fileScope, init ref<bool> found,
+    init ref<SourceRange> error)
+{
+    require SourceRange.TryCreate(0, 0, init var empty);
+    found = false;
+    error = empty;
+    mut int32 activeAliasCount = initialAliasCount;
+    if (!namespaceAliasesPrebuilt)
+    {
+        var aliasError = BuildScalarAliasTable(tokenView, count,
+            scopeStart, scopeEnd, initialAliasCount, true,
+            init var updatedAliasCount);
+        if (aliasError.Length != 0)
+        {
+            error = aliasError;
+            return true;
+        }
+        activeAliasCount = updatedAliasCount;
+    }
+
+    mut int32 scan = scopeStart;
+    mut int32 depth = 0;
+    while (scan < scopeEnd)
+    {
+        require TryGetScalarWindowToken(tokenView, 0, count, false,
+            scan, init var token);
+        if (depth == 0 && token.Kind == 6)
+        {
+            mut int32 cursor = scan + 1;
+            if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                    cursor, init var firstName) || firstName.Kind != 2)
+            {
+                error = token.Range;
+                return true;
+            }
+            cursor = cursor + 1;
+            while (cursor < scopeEnd
+                && TryGetScalarWindowToken(tokenView, 0, count, false,
+                    cursor, init var separator)
+                && separator.Kind == 54)
+            {
+                cursor = cursor + 1;
+                if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                        cursor, init var segment) || segment.Kind != 2)
+                {
+                    error = separator.Range;
+                    return true;
+                }
+                cursor = cursor + 1;
+            }
+            if (!TryGetScalarWindowToken(tokenView, 0, count, false,
+                    cursor, init var opening) || opening.Kind != 48)
+            {
+                error = token.Range;
+                return true;
+            }
+            int32 bodyStart = cursor + 1;
+            mut int32 childEnd = bodyStart;
+            mut int32 childDepth = 1;
+            while (childEnd < scopeEnd && childDepth != 0)
+            {
+                require TryGetScalarWindowToken(tokenView, 0, count, false,
+                    childEnd, init var childToken);
+                if (childToken.Kind == 48) { childDepth = childDepth + 1; }
+                if (childToken.Kind == 49) { childDepth = childDepth - 1; }
+                childEnd = childEnd + 1;
+            }
+            if (childDepth != 0)
+            {
+                error = opening.Range;
+                return true;
+            }
+            if (targetTokenStart >= scan && targetTokenStart < childEnd)
+            {
+                mut int32 childAliasCount = activeAliasCount;
+                mut bool childAliasesPrebuilt = false;
+                if (fileScope)
+                {
+                    var namespaceAliasError
+                        = BuildScalarAliasTableForNamespaceParts(
+                            tokenView, count, scan, activeAliasCount);
+                    if (namespaceAliasError.Length != 0)
+                    {
+                        error = namespaceAliasError;
+                        return true;
+                    }
+                    childAliasCount = Host.FrontendProgram[
+                        Host.FrontendProgram.Length - 1];
+                    childAliasesPrebuilt = true;
+                }
+                if (!TryBuildScalarAliasTableForFunction(tokenView, count,
+                        bodyStart, childEnd - 1, targetTokenStart,
+                        childAliasCount, childAliasesPrebuilt, false,
+                        init var childFound,
+                        init var childError))
+                {
+                    return false;
+                }
+                found = childFound;
+                error = childError;
+                if (!found && error.Length == 0)
+                {
+                    RestoreScalarAliasTable(initialAliasCount);
+                }
+                return true;
+            }
+            scan = childEnd;
+            continue;
+        }
+        if (token.Kind == 48) { depth = depth + 1; }
+        if (token.Kind == 49) { depth = depth - 1; }
+        scan = scan + 1;
+    }
+    found = targetTokenStart >= scopeStart && targetTokenStart < scopeEnd;
+    if (!found)
+    {
+        RestoreScalarAliasTable(initialAliasCount);
+    }
+    return true;
+}
+
 int32 CacheScalarProgramFunctionName(int32 ordinal, SourceRange name)
 {
     mut int32 spellingStart = name.Start;
@@ -690,7 +985,7 @@ bool ScalarProgramDefersCompletion()
     {
         int32 header = 8 + index * 780;
         int32 flags = Host.FrontendProgram[header + 2];
-        if ((flags & 8) != 0 || Host.FrontendProgram[header + 16] != 0
+        if ((flags & 10) != 0 || Host.FrontendProgram[header + 16] != 0
             || Host.FrontendProgram[header + 17] != 0)
         {
             return false;
@@ -727,15 +1022,29 @@ void ClearScalarAliasTable(int32 count)
     }
 }
 
+void RestoreScalarAliasTable(int32 count)
+{
+    for (mut int32 aliasIndex = count; aliasIndex < 12; aliasIndex = aliasIndex + 1)
+    {
+        int32 entry = Host.FrontendProgram.Length - 1 - (aliasIndex + 1) * 5;
+        for (mut int32 word = 0; word < 5; word = word + 1)
+        {
+            Host.FrontendProgram[entry + word] = 0;
+        }
+    }
+    Host.FrontendProgram[Host.FrontendProgram.Length - 1] = count;
+}
+
 // Alias scratch follows all 32 function frames, so aliases cannot overwrite a
 // final call-target slot when the complete source exceeds the former token bound.
 // An empty returned span means the alias table was built successfully.
 SourceRange BuildScalarAliasTable(Span<Token> tokenView, int32 count, int32 programDeclarationStart,
-    int32 programDeclarationEnd,
+    int32 programDeclarationEnd, int32 initialAliasCount, bool resolveAliases,
     init ref<int32> aliasCount)
 {
-    aliasCount = 0;
-    Host.FrontendProgram[Host.FrontendProgram.Length - 1] = 0;
+    require SourceRange.TryCreate(0, 0, init var empty);
+    aliasCount = initialAliasCount;
+    Host.FrontendProgram[Host.FrontendProgram.Length - 1] = initialAliasCount;
     mut int32 at = programDeclarationStart;
     while (at < programDeclarationEnd)
     {
@@ -871,7 +1180,7 @@ SourceRange BuildScalarAliasTable(Span<Token> tokenView, int32 count, int32 prog
     }
 
     Host.FrontendProgram[Host.FrontendProgram.Length - 1] = aliasCount;
-    return ResolveScalarAliases(aliasCount);
+    return resolveAliases ? ResolveScalarAliases(aliasCount) : empty;
 }
 
 SourceRange ResolveScalarAliases(int32 aliasCount)
@@ -982,8 +1291,9 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
     mut int32 aliasCount = 0;
     mut int32 functions = 0;
     mut bool hasFourParameterFunction = false;
-    if (CountScalarProgramNamespaces(tokenView, count) > 0
-        && !ScalarProgramHasFileScopedNamespace(tokenView, count))
+    bool hasBlockNamespace = CountScalarProgramNamespaces(tokenView, count) > 0
+        && !ScalarProgramHasFileScopedNamespace(tokenView, count);
+    if (hasBlockNamespace)
     {
         if (!TryInventoryRepeatedScalarProgramNamespaceBlocks(tokenView, count,
                 init var repeatedFunctions, init var repeatedHasFourParameterFunction,
@@ -1014,7 +1324,7 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         hasNamespace = singleHasNamespace;
         namespaceName = singleNamespaceName;
         var aliasError = BuildScalarAliasTable(tokenView, count, declarationStart,
-            declarationEnd, init var singleAliasCount);
+            declarationEnd, 0, true, init var singleAliasCount);
         if (aliasError.Length != 0)
         {
             return ScalarProgramError(1, aliasError, init handled);
@@ -1148,6 +1458,27 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         for (mut int32 word = 0; word < Host.Frontend.Length; word = word + 1) { Host.Frontend[word] = 0; }
         int32 tokenStart = Host.FrontendProgram[frame];
         int32 tokenEnd = Host.FrontendProgram[frame + 1];
+        if (aliasCount != 0 && hasBlockNamespace)
+        {
+            RestoreScalarAliasTable(0);
+            if (!TryBuildScalarAliasTableForFunction(tokenView, count, 0,
+                    count - 1, tokenStart, 0, false, true,
+                    init var foundAliasScope,
+                    init var aliasScopeError))
+            {
+                return false;
+            }
+            if (aliasScopeError.Length != 0)
+            {
+                return ScalarProgramError(1, aliasScopeError, init handled);
+            }
+            if (!foundAliasScope)
+            {
+                require TryGetScalarWindowToken(tokenView, 0, count, false,
+                    tokenStart, init var functionToken);
+                return ScalarProgramError(1, functionToken.Range, init handled);
+            }
+        }
         if (!ScalarFrontendState.TryCreate(tokenStart, tokenEnd, true, empty, out var tree)
             || !tree.TryParseTree(init var treeResult, tokenView))
         {
@@ -1184,6 +1515,10 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         for (mut int32 word = 0; word < 712; word = word + 1)
         {
             Host.FrontendProgram[frame + 4 + word] = Host.Frontend[word];
+        }
+        if (aliasCount != 0 && hasBlockNamespace)
+        {
+            RestoreScalarAliasTable(0);
         }
     }
     for (mut int32 word = 0; word < Host.Frontend.Length; word = word + 1) { Host.Frontend[word] = 0; }

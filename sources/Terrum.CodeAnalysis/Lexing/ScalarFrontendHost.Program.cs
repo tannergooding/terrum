@@ -11,25 +11,36 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Lexing;
 
-public readonly record struct ScalarFrontendReadResult(ScalarFrontendResult Projection, BoundProgram? Program);
+/// <summary>Combines the scalar projection with its validated complete program, when available.</summary>
+/// <param name="Projection">The bounded scalar projection of the source.</param>
+/// <param name="Program">The reconstructed and verified program, or null when unavailable.</param>
+public readonly record struct ScalarFrontendReadResult(
+    ScalarFrontendResult Projection, BoundProgram? Program);
 
 public static partial class ScalarFrontendHost
 {
     private const int BooleanTypeCode = 5;
 
+    /// <summary>Index of the complete-program frontend buffer.</summary>
     public const int ProgramBufferIndex = BufferIndex + 1;
     internal const int ProgramBodyWordCount = 712;
+    /// <summary>Number of 32-bit words in one complete-program function frame.</summary>
     public const int ProgramFrameWordCount = 4 + ProgramBodyWordCount + MaximumNodeCount;
+    /// <summary>Maximum number of functions in a complete-program projection.</summary>
     public const int MaximumFunctions = 32;
+    /// <summary>Maximum number of alias declarations in a complete-program projection.</summary>
     public const int MaximumAliases = 12;
+    /// <summary>Number of words reserved for complete-program alias data.</summary>
     public const int ProgramAliasScratchWordCount = 1 + (MaximumAliases * 5);
+    /// <summary>Number of 32-bit words in the complete-program projection buffer.</summary>
     public const int ProgramWordCount = 4 + (MaximumFunctions * ProgramFrameWordCount)
         + ProgramAliasScratchWordCount;
 
     private sealed record ProgramDeclaration(string Name, string QualifiedName, TextSpan NamespaceNameSpan,
         int ReturnType, int Effects, int OutParameterMask, int InitRefParameterMask,
         ImmutableArray<int> ParameterTypes, ImmutableArray<string> ParameterNames,
-        int TokenStart, int TokenEnd, TextSpan Span, TextSpan BodySpan);
+        int TokenStart, int TokenEnd, TextSpan Span, TextSpan BodySpan,
+        ScalarAliasEnvironment Aliases);
 
     private sealed record ProgramScope(string NamespaceName, TextSpan NamespaceNameSpan,
         int TokenStart, int TokenEnd);
@@ -48,8 +59,7 @@ public static partial class ScalarFrontendHost
         }
     }
 
-    private sealed record ProgramInventory(ImmutableArray<ProgramDeclaration> Declarations,
-        ScalarAliasEnvironment Aliases);
+    private sealed record ProgramInventory(ImmutableArray<ProgramDeclaration> Declarations);
 
     private sealed record AliasDeclaration(string Name, string Target);
 
@@ -153,7 +163,7 @@ public static partial class ScalarFrontendHost
                 targets.Add(target);
             }
             var context = new ProgramReadContext(declarations, targets.MoveToImmutable(),
-                inventory.Aliases);
+                declaration.Aliases);
             var functionSource = FunctionSource(source, declaration.Span);
             functionSources.Add(functionSource);
             var function = ReadResultCore(functionSource, payload, policy, context,
@@ -162,23 +172,23 @@ public static partial class ScalarFrontendHost
                 || function.ParameterCount != declaration.ParameterTypes.Length
                 || function.OutParameterMask != declaration.OutParameterMask
                 || function.InitRefParameterMask != declaration.InitRefParameterMask
-                || function.IsNoThrow != ((declaration.Effects & 2) != 0)
+                || (declaration.Effects & 2) != 0
                 || function.DoesNotReturn != ((declaration.Effects & 4) != 0)
                 || function.RequiresUnsafeCaller != ((declaration.Effects & 8) != 0)
                 || function.NamespaceNameSpan != declaration.NamespaceNameSpan
                 || SourceName(source, function.Name) != declaration.Name
-                || declaration.ParameterTypes.Length > 0
+                || (declaration.ParameterTypes.Length > 0
                     && (function.FirstType != declaration.ParameterTypes[0]
-                        || SourceName(source, function.FirstName) != declaration.ParameterNames[0])
-                || declaration.ParameterTypes.Length > 1
+                        || SourceName(source, function.FirstName) != declaration.ParameterNames[0]))
+                || (declaration.ParameterTypes.Length > 1
                     && (function.SecondType != declaration.ParameterTypes[1]
-                        || SourceName(source, function.SecondName) != declaration.ParameterNames[1])
-                || declaration.ParameterTypes.Length > 2
+                        || SourceName(source, function.SecondName) != declaration.ParameterNames[1]))
+                || (declaration.ParameterTypes.Length > 2
                     && (function.ThirdType != declaration.ParameterTypes[2]
-                        || SourceName(source, function.ThirdName) != declaration.ParameterNames[2])
-                || declaration.ParameterTypes.Length > 3
+                        || SourceName(source, function.ThirdName) != declaration.ParameterNames[2]))
+                || (declaration.ParameterTypes.Length > 3
                     && (function.FourthType != declaration.ParameterTypes[3]
-                        || SourceName(source, function.FourthName) != declaration.ParameterNames[3]))
+                        || SourceName(source, function.FourthName) != declaration.ParameterNames[3])))
             {
                 throw InvalidResult();
             }
@@ -187,12 +197,34 @@ public static partial class ScalarFrontendHost
         var results = functions.MoveToImmutable();
         if (results.Any(static function => function.Statements.Any(
             static statement => statement.Kind == 38))
-            && SyntaxTree.Parse(MaskSwitchStatements(source, results)).HasErrors)
+            && SyntaxTree.Parse(source).HasErrors)
         {
             throw InvalidResult();
         }
         var program = BindProgramCore(results, declarations, functionSources.MoveToImmutable(), policy,
             sourceArithmeticProfile);
+        if (!SemanticVerifier.TryVerifySource(program, out var functionIndex,
+            out var span, out _, out var invalidEffect))
+        {
+            if (System.Environment.GetEnvironmentVariable(
+                    "TERRUM_DEBUG_SCALAR_FRONTEND") == "1")
+            {
+                System.Console.Error.WriteLine(invalidEffect);
+            }
+            var invalidIndex = (uint)functionIndex < (uint)results.Length ? functionIndex : 0;
+            var invalidFunctions = results.SetItem(invalidIndex, results[invalidIndex] with {
+                IsValid = false,
+                ErrorCode = 1,
+                ErrorSpan = span,
+            });
+            var projection = invalidFunctions[0] with {
+                IsValid = false,
+                ErrorCode = 1,
+                ErrorSpan = span,
+                Functions = invalidFunctions,
+            };
+            return new ScalarFrontendReadResult(projection, null);
+        }
         return new ScalarFrontendReadResult(results[0] with { Functions = results }, program);
     }
 
@@ -252,7 +284,6 @@ public static partial class ScalarFrontendHost
             });
         }
         var program = new BoundProgram(functions.MoveToImmutable(), -1) { RuntimePolicy = policy };
-        SemanticVerifier.VerifyLibrary(program);
         return program;
     }
 
@@ -266,46 +297,6 @@ public static partial class ScalarFrontendHost
             destination.Fill(' ');
             state.Source.Text.AsSpan(state.Span.Start, state.Span.Length)
                 .CopyTo(destination[state.Span.Start..]);
-        });
-        return SourceText.From(text);
-    }
-
-    private static SourceText MaskSwitchStatements(SourceText source,
-        ImmutableArray<ScalarFrontendResult> functions)
-    {
-        var spans = new List<TextSpan>();
-        foreach (var function in functions)
-        {
-            foreach (var statement in function.Statements)
-            {
-                if (statement.Kind == 38)
-                {
-                    spans.Add(statement.Span);
-                }
-            }
-        }
-        spans.Sort(static (left, right) => left.Start != right.Start
-            ? left.Start.CompareTo(right.Start) : right.Length.CompareTo(left.Length));
-
-        var text = string.Create(source.Length, (Source: source, Spans: spans), static (destination, state) =>
-        {
-            state.Source.Text.AsSpan().CopyTo(destination);
-            var maskedUntil = -1;
-            foreach (var span in state.Spans)
-            {
-                if (span.Start < maskedUntil)
-                {
-                    continue;
-                }
-                if (span.Length < 2 || span.End > destination.Length)
-                {
-                    throw InvalidResult();
-                }
-                destination.Slice(span.Start, span.Length).Fill(' ');
-                destination[span.Start] = '{';
-                destination[span.Start + 1] = '}';
-                maskedUntil = span.End;
-            }
         });
         return SourceText.From(text);
     }
@@ -418,10 +409,7 @@ public static partial class ScalarFrontendHost
         {
             throw InvalidResult();
         }
-        if (tokens.Any(static token => token.Kind == TokenKind.UsingKeyword)
-            || (scopes.Count > 1 && scopes.Any(scope =>
-                tokens.Skip(scope.TokenStart).Take(scope.TokenEnd - scope.TokenStart)
-                    .Any(static token => token.Kind == TokenKind.AliasKeyword))))
+        if (tokens.Any(static token => token.Kind == TokenKind.UsingKeyword))
         {
             throw InvalidResult();
         }
@@ -431,13 +419,12 @@ public static partial class ScalarFrontendHost
         }
         var declarations = ImmutableArray.CreateBuilder<ProgramDeclaration>();
         var names = new HashSet<string>(StringComparer.Ordinal);
-        var aliases = scopes.Count > 1
-            ? new ScalarAliasEnvironment([])
-            : InventoryScalarAliases(tokens, scopes[0].TokenStart, scopes[0].TokenEnd);
+        var aliases = new ScalarAliasEnvironment([]);
         var at = 0;
         var scopeEnd = 0;
         foreach (var scope in scopes)
         {
+            aliases = InventoryScalarAliasesForScope(tokens, scopes, scope);
             at = scope.TokenStart;
             scopeEnd = scope.TokenEnd;
             while (at < scopeEnd)
@@ -455,7 +442,6 @@ public static partial class ScalarFrontendHost
                         throw InvalidResult();
                     }
                     var effect = tokens[at].Text switch {
-                        "NoThrow" => 2,
                         "DoesNotReturn" => 4,
                         _ => 0,
                     };
@@ -513,21 +499,27 @@ public static partial class ScalarFrontendHost
                 var initRefParameterMask = 0;
                 while (at < scopeEnd && tokens[at].Kind != TokenKind.CloseParen)
                 {
-                    if (parameterTypes.Count == 4 || parameterTypes.Count != 0 && !Take(TokenKind.Comma))
+                    if (parameterTypes.Count == 4 || (parameterTypes.Count != 0 && !Take(TokenKind.Comma)))
                     {
                         throw InvalidResult();
                     }
                     var isOut = tokens[at].Kind == TokenKind.OutKeyword;
                     var isInitRef = tokens[at].Kind == TokenKind.Identifier
                         && tokens[at].Name == "init" && tokens[at].Span.Length == 4;
-                    if (isOut) { at++; }
+                    if (isOut)
+                    {
+                        at++;
+                    }
                     if (isInitRef
                         && (!Take(TokenKind.Identifier) || tokens[at - 1].Name != "init"
                             || !Take(TokenKind.RefKeyword) || !Take(TokenKind.Less)))
                     {
                         throw InvalidResult();
                     }
-                    if (at >= scopeEnd) { throw InvalidResult(); }
+                    if (at >= scopeEnd)
+                    {
+                        throw InvalidResult();
+                    }
                     var type = ScalarCode(tokens[at].Name, allowVoid: false, aliases);
                     if (!Take(TokenKind.Identifier)
                         || (isInitRef && !Take(TokenKind.Greater))
@@ -538,7 +530,10 @@ public static partial class ScalarFrontendHost
                     }
                     parameterNameList.Add(tokens[at].Name);
                     at++;
-                    if (isOut) { outParameterMask |= 1 << parameterTypes.Count; }
+                    if (isOut)
+                    {
+                        outParameterMask |= 1 << parameterTypes.Count;
+                    }
                     if (isInitRef)
                     {
                         initRefParameterMask |= 1 << parameterTypes.Count;
@@ -557,7 +552,10 @@ public static partial class ScalarFrontendHost
                     {
                         at++;
                     }
-                    if (!Take(TokenKind.Semicolon)) { throw InvalidResult(); }
+                    if (!Take(TokenKind.Semicolon))
+                    {
+                        throw InvalidResult();
+                    }
                     bodySpan = new TextSpan(bodyStart, tokens[at - 1].Span.End - bodyStart);
                 }
                 else if (Take(TokenKind.OpenBrace))
@@ -566,23 +564,36 @@ public static partial class ScalarFrontendHost
                     var depth = 1;
                     while (at < scopeEnd && depth != 0)
                     {
-                        if (tokens[at].Kind == TokenKind.OpenBrace) { depth++; }
-                        if (tokens[at].Kind == TokenKind.CloseBrace) { depth--; }
+                        if (tokens[at].Kind == TokenKind.OpenBrace)
+                        {
+                            depth++;
+                        }
+                        if (tokens[at].Kind == TokenKind.CloseBrace)
+                        {
+                            depth--;
+                        }
                         at++;
                     }
-                    if (depth != 0) { throw InvalidResult(); }
+                    if (depth != 0)
+                    {
+                        throw InvalidResult();
+                    }
                     bodySpan = new TextSpan(bodyStart, tokens[at - 1].Span.End - bodyStart);
                 }
                 else
                 {
                     throw InvalidResult();
                 }
-                if (declarations.Count == MaximumFunctions) { throw InvalidResult(); }
+                if (declarations.Count == MaximumFunctions)
+                {
+                    throw InvalidResult();
+                }
                 declarations.Add(new ProgramDeclaration(name.Name, qualifiedName, scope.NamespaceNameSpan,
                     returnType, effects, outParameterMask, initRefParameterMask,
                     parameterTypes.ToImmutable(), parameterNameList.ToImmutable(),
                     start, at, new TextSpan(tokens[start].Span.Start,
-                        tokens[at - 1].Span.End - tokens[start].Span.Start), bodySpan));
+                        tokens[at - 1].Span.End - tokens[start].Span.Start), bodySpan,
+                    aliases));
             }
             if (at != scopeEnd)
             {
@@ -593,7 +604,7 @@ public static partial class ScalarFrontendHost
         {
             throw InvalidResult();
         }
-        return new ProgramInventory(declarations.ToImmutable(), aliases);
+        return new ProgramInventory(declarations.ToImmutable());
 
         bool Take(TokenKind kind)
         {
@@ -698,26 +709,7 @@ public static partial class ScalarFrontendHost
         }
         var namespaceNameSpan = new TextSpan(firstName.Span.Start,
             lastName.Span.End - firstName.Span.Start);
-        var opening = tokens[cursor];
-        var header = new TextSpan(tokens[namespaceKeywordIndex].Span.Start,
-            opening.Span.End - tokens[namespaceKeywordIndex].Span.Start);
-        return (cursor, namespaceNameSpan, header);
-    }
-
-    private static SourceText MaskNamespaceWrappers(SourceText source,
-        List<(TextSpan Header, TextSpan Close)> wrappers)
-    {
-        var text = string.Create(source.Length, (Source: source, Wrappers: wrappers),
-            static (destination, state) =>
-            {
-                state.Source.Text.AsSpan().CopyTo(destination);
-                foreach (var wrapper in state.Wrappers)
-                {
-                    destination.Slice(wrapper.Header.Start, wrapper.Header.Length).Fill(' ');
-                    destination.Slice(wrapper.Close.Start, wrapper.Close.Length).Fill(' ');
-                }
-            });
-        return SourceText.From(text);
+        return (cursor, namespaceNameSpan);
     }
 
     private static bool TrySkipAlias(ImmutableArray<SyntaxToken> tokens, ref int at, int end)
@@ -744,8 +736,49 @@ public static partial class ScalarFrontendHost
         return true;
     }
 
-    private static ScalarAliasEnvironment InventoryScalarAliases(ImmutableArray<SyntaxToken> tokens,
+    private static ScalarAliasEnvironment InventoryScalarAliasesForScope(
+        ImmutableArray<SyntaxToken> tokens, List<ProgramScope> scopes,
+        ProgramScope target)
+    {
+        var declarations = new Dictionary<string, AliasDeclaration>(
+            StringComparer.Ordinal);
+        foreach (var scope in scopes)
+        {
+            if (!IsNamespaceAncestor(scope.NamespaceName,
+                target.NamespaceName))
+            {
+                continue;
+            }
+            foreach (var (name, declaration) in
+                InventoryScalarAliasDeclarations(tokens, scope.TokenStart,
+                    scope.TokenEnd))
+            {
+                if (declarations.Count == MaximumAliases
+                    || !declarations.TryAdd(name, declaration))
+                {
+                    throw InvalidResult();
+                }
+            }
+        }
+        return ResolveScalarAliases(declarations);
+
+        static bool IsNamespaceAncestor(string ancestor, string current)
+        {
+            return ancestor.Length == 0
+                || string.Equals(ancestor, current, StringComparison.Ordinal)
+                || current.StartsWith(ancestor + ".", StringComparison.Ordinal);
+        }
+    }
+
+    private static ScalarAliasEnvironment InventoryScalarAliases(
+        ImmutableArray<SyntaxToken> tokens,
         int initialTokenIndex = 0, int endTokenIndex = -1)
+        => ResolveScalarAliases(InventoryScalarAliasDeclarations(tokens,
+            initialTokenIndex, endTokenIndex));
+
+    private static Dictionary<string, AliasDeclaration>
+        InventoryScalarAliasDeclarations(ImmutableArray<SyntaxToken> tokens,
+            int initialTokenIndex = 0, int endTokenIndex = -1)
     {
         var declarations = new Dictionary<string, AliasDeclaration>(StringComparer.Ordinal);
         var end = endTokenIndex < 0 ? tokens.Length - 1 : endTokenIndex;
@@ -826,8 +859,14 @@ public static partial class ScalarFrontendHost
                 at = bodyStart + 1;
                 while (at < end && depth != 0)
                 {
-                    if (tokens[at].Kind == TokenKind.OpenBrace) { depth++; }
-                    if (tokens[at].Kind == TokenKind.CloseBrace) { depth--; }
+                    if (tokens[at].Kind == TokenKind.OpenBrace)
+                    {
+                        depth++;
+                    }
+                    if (tokens[at].Kind == TokenKind.CloseBrace)
+                    {
+                        depth--;
+                    }
                     at++;
                 }
                 if (depth != 0)
@@ -837,6 +876,12 @@ public static partial class ScalarFrontendHost
             }
         }
 
+        return declarations;
+    }
+
+    private static ScalarAliasEnvironment ResolveScalarAliases(
+        Dictionary<string, AliasDeclaration> declarations)
+    {
         var resolved = new Dictionary<string, int>(StringComparer.Ordinal);
         while (resolved.Count != declarations.Count)
         {
