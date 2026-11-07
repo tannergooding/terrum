@@ -81,7 +81,6 @@ public unique struct SourceLineIndex
         return true;
     }
 
-    [NoThrow]
     public int32 GetLineCount()
     {
         return _lineCount;

@@ -26,8 +26,8 @@ mut class ManagedTokenChain {
 
     public int32 GetCount() { return _count; }
     public int32 GetVersion() { return _version; }
-    public int32 Count { [NoThrow] get { return _count; } }
-    public int32 Version { [NoThrow] get { return _version; } }
+    public int32 Count { get { return _count; } }
+    public int32 Version { get { return _version; } }
 
     public mut bool TryAppend(int32 kind, int32 sourceOffset, int32 sourceLength) {
         // Bound per-chain heap use and linear indexed reads to 64 links.
@@ -107,7 +107,7 @@ mut class ManagedTokenCursor {
         _version = version;
     }
 
-    public bool IsCurrent { [NoThrow] get { return _owner.Version == _version; } }
+    public bool IsCurrent { get { return _owner.Version == _version; } }
 
     public mut bool TryPeek(init ref<Token> token) {
         return TryPeekAhead(0, init token);

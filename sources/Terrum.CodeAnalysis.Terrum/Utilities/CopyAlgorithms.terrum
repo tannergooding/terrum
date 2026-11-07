@@ -1,6 +1,6 @@
 namespace Terrum;
 
-[NoThrow] T SelectCopy<T>(bool takeFirst, T first, T second) where T : [Copy]
+T SelectCopy<T>(bool takeFirst, T first, T second) where T : [Copy]
 {
     if (takeFirst)
     {
@@ -10,7 +10,7 @@ namespace Terrum;
     return second;
 }
 
-[NoThrow] bool TrySelectCopyInit<T>(int32 index, T first, T second, init ref<T> result)
+bool TrySelectCopyInit<T>(int32 index, T first, T second, init ref<T> result)
     where T : [Copy]
 {
     if (index == 0)
@@ -27,7 +27,7 @@ namespace Terrum;
     return false;
 }
 
-[NoThrow] bool TrySelectCopy<T>(int32 index, T first, T second, out T result) where T : [Copy]
+bool TrySelectCopy<T>(int32 index, T first, T second, out T result) where T : [Copy]
 {
     if (!TrySelectCopyInit(index, first, second, init var selected))
     {
