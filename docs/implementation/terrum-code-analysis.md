@@ -263,7 +263,8 @@ are not explicit conversion-call targets. Aliases from enclosing namespace
 scopes are visible to nested functions; sibling namespace scopes keep
 independent alias environments. Repeated top-level blocks of one namespace
 identity share their alias declarations across parts, including forward alias
-chains; duplicate aliases reject. Nested repeated namespace identities, root
+chains; nested repeated identities share aliases across namespace parts,
+including dotted/nested-equivalent paths. Duplicate aliases reject. Root
 aliases alongside block namespaces, imports, overloads, non-function
 declarations in mixed namespace blocks, and broader call forms remain outside
 this frontend.

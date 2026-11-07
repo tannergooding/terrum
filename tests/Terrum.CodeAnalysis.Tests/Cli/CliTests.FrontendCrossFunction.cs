@@ -875,6 +875,58 @@ internal sealed partial class CliTests
         }
     }
 
+    [Test]
+    public async Task ScalarFrontendSharesAliasesAcrossRepeatedNestedNamespacePartsAsync()
+    {
+        const string source = "namespace Demo { namespace Tools { "
+            + "Scalar Main() => 42; } } "
+            + "namespace Demo.Tools { alias Scalar = Word; } "
+            + "namespace Demo { namespace Tools { alias Word = int32; } }";
+        var input = Encoding.UTF8.GetBytes(source);
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (componentExit, componentOutput, componentError)
+                = await RunFrontendComponentAsync(input, directory, "-",
+                    "--runtime", policy, "--json").ConfigureAwait(false);
+            Assert.That(componentExit, Is.EqualTo(0), componentOutput);
+            Assert.That(componentError, Is.Empty);
+
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(
+                input, "frontend-run", directory, "-", "--runtime", policy,
+                "--json").ConfigureAwait(false);
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                input, "jit", "-", "--runtime", policy, "--json")
+                .ConfigureAwait(false);
+            Assert.That(frontendExit, Is.EqualTo(42));
+            Assert.That(hostedExit, Is.EqualTo(frontendExit));
+            Assert.That(frontendOutput, Is.Empty);
+            Assert.That(hostedOutput, Is.Empty);
+            Assert.That(frontendError, Is.Empty);
+            Assert.That(hostedError, Is.Empty);
+        }
+    }
+
+    [Test]
+    public async Task ScalarFrontendRejectsDuplicateAliasesAcrossRepeatedNestedNamespacePartsAsync()
+    {
+        const string source = "namespace Demo { namespace Tools { "
+            + "alias Scalar = int32; int32 Main() => 42; } } "
+            + "namespace Demo.Tools { alias Scalar = int32; }";
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunFrontendComponentAsync(
+                Encoding.UTF8.GetBytes(source), directory, "-", "--runtime",
+                policy, "--json").ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.False);
+        }
+    }
+
     [TestCase("void Main() {} void Other() {}",0)]
     [TestCase("void Main() => require true; void Other() {}",0)]
     [TestCase("int32 Main() { { return 42; } } int32 Unused() { return 0; }",42)]

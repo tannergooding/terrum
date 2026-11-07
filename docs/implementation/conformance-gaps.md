@@ -2240,10 +2240,10 @@ Nested namespace functions inherit aliases from enclosing scopes, and sibling
 namespace scopes retain independent alias environments; duplicate visible
 aliases reject. The combined namespace and source-free call-frame selection
 passes 105/105 with no skips. Alias sharing across repeated namespace
-identities is implemented for repeated top-level namespace parts, including
-forward alias chains; duplicate aliases across those parts reject. The focused
-Debug selection passes 9/9 with no skips. Nested
-repeated namespace identities, root aliases alongside block namespaces, and
+identities is implemented for top-level and nested parts, including forward
+chains and dotted/nested-equivalent paths; duplicate aliases across those
+parts reject. The focused Debug selection passes 11/11 with no skips after the
+analyzer-enabled build. Root aliases alongside block namespaces and
 non-function declarations in mixed namespace blocks remain outside this
 frontend. The
 source-free reader also accepts discarded scalar call results
