@@ -14707,6 +14707,9 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 secondaryIntermediateIdentity, schemaIdentity, 1),
             [("ReadAux", leafIdentity, "ReadAux")],
             reuseModuleRefs: false, duplicateSecondMethodName: false);
+        var coLocatedIntermediateArtifact
+            = CombinePopulatedNativeAddressModules(intermediateArtifact,
+                secondaryArtifact, requireFunctionPointerAnchors: false);
 
         byte[] CreateStandaloneOutputProvider(string moduleIdentity,
             string methodName, string access)
@@ -14731,6 +14734,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             intermediateArtifact);
         var secondaryInput = new TrRmStandardArtifactInput(schemaIdentity,
             secondaryArtifact);
+        var coLocatedIntermediateInput = new TrRmStandardArtifactInput(
+            schemaIdentity, coLocatedIntermediateArtifact);
         var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
             CreateStandaloneOutputProvider(leafIdentity, "ReadAux",
                 "NonZero"));
@@ -14758,11 +14763,23 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             static function => function.Name == "ReadOther")
             .ModuleImport!.ProducerIdentity,
             Is.EqualTo(secondaryIntermediateIdentity));
+        var coLocatedLoaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [coLocatedIntermediateInput, leafInput]);
+        Assert.That(coLocatedLoaded.Functions.Single(
+            static function => function.Name == "ReadOther")
+            .ModuleImport!.ProducerIdentity,
+            Is.EqualTo(secondaryIntermediateIdentity));
         var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
             rootIdentity, [intermediateInput, secondaryInput, leafInput],
             NativeRuntimePolicy.FailFast);
         Assert.That(image[0], Is.EqualTo((byte)'M'));
         Assert.That(image[1], Is.EqualTo((byte)'Z'));
+        var coLocatedImage = NativeModuleCompiler.EmitStandardExecutable(
+            rootInput, rootIdentity,
+            [coLocatedIntermediateInput, leafInput],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(coLocatedImage[0], Is.EqualTo((byte)'M'));
+        Assert.That(coLocatedImage[1], Is.EqualTo((byte)'Z'));
 
         var changedLeaf = new TrRmStandardArtifactInput(schemaIdentity,
             CreateStandaloneOutputProvider(leafIdentity, "ReadAux",
@@ -17170,7 +17187,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     internal static byte[] CombinePopulatedNativeAddressModules(
         byte[] firstArtifact, byte[] secondArtifact,
         TrRmArtifactSchema schema
-            = TrRmArtifactSchema.ForeignInvocationDraft)
+            = TrRmArtifactSchema.ForeignInvocationDraft,
+        bool requireFunctionPointerAnchors = true)
     {
         var usesScalarFrozenValues = schema
             == TrRmArtifactSchema
@@ -17258,8 +17276,16 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
         }
 
-        Assert.That(firstAnchorCount, Is.EqualTo(firstTables.Modules.Count));
-        Assert.That(secondAnchorCount, Is.EqualTo(1));
+        if (requireFunctionPointerAnchors)
+        {
+            Assert.That(firstAnchorCount, Is.EqualTo(firstTables.Modules.Count));
+            Assert.That(secondAnchorCount, Is.EqualTo(1));
+        }
+        else
+        {
+            Assert.That(firstAnchorCount, Is.Zero);
+            Assert.That(secondAnchorCount, Is.Zero);
+        }
         Assert.That(firstTables.TypeDefs.Count, Is.Zero);
         Assert.That(secondTables.TypeDefs.Count, Is.Zero);
         Assert.That(firstTables.Fields.Count, Is.Zero);
@@ -17826,6 +17852,118 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
         }
 
+        var predicateGraphs = new List<TrRmPredicateGraphRow>(
+            firstTables.PredicateGraphs.Count
+                + secondTables.PredicateGraphs.Count);
+        var predicateFootprints = new List<TrRmPredicateReadFootprintRow>(
+            firstTables.PredicateReadFootprints.Count
+                + secondTables.PredicateReadFootprints.Count);
+        var predicateRoots = new List<TrRmPredicateReadRootRow>(
+            firstTables.PredicateReadRoots.Count
+                + secondTables.PredicateReadRoots.Count);
+        var predicateNodes = new List<TrRmPredicateNodeRow>(
+            firstTables.PredicateNodes.Count
+                + secondTables.PredicateNodes.Count);
+        var predicateOperands
+            = new List<TrRmPredicateNodeOperandRow>(
+                firstTables.PredicateNodeOperands.Count
+                    + secondTables.PredicateNodeOperands.Count);
+        var firstGraphCount = firstTables.PredicateGraphs.Count;
+        var firstFootprintCount
+            = firstTables.PredicateReadFootprints.Count;
+        var firstRootCount = firstTables.PredicateReadRoots.Count;
+        var firstNodeCount = firstTables.PredicateNodes.Count;
+        var firstOperandCount
+            = firstTables.PredicateNodeOperands.Count;
+        void AppendPredicateTables(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            bool isSecond)
+        {
+            var footprintOffset = isSecond
+                ? firstFootprintCount : 0;
+            var rootOffset = isSecond
+                ? firstRootCount : 0;
+            var nodeOffset = isSecond
+                ? firstNodeCount : 0;
+            var operandOffset = isSecond
+                ? firstOperandCount : 0;
+            Assert.That(tables.PredicateReadDependencies.Count, Is.Zero);
+            for (var footprint = 1;
+                footprint <= tables.PredicateReadFootprints.Count;
+                footprint++)
+            {
+                var rootStart = tables.PredicateReadFootprints
+                    .GetRootFirstRow(footprint);
+                var rootCount = tables.PredicateReadFootprints
+                    .GetRootRowCount(footprint);
+                Assert.That(tables.PredicateReadFootprints
+                    .GetDependencyRowCount(footprint), Is.Zero);
+                predicateFootprints.Add(
+                    new TrRmPredicateReadFootprintRow(
+                        rootCount == 0 ? 0
+                            : checked(rootOffset + rootStart),
+                        rootCount, 0, 0));
+            }
+
+            for (var root = 1;
+                root <= tables.PredicateReadRoots.Count; root++)
+            {
+                predicateRoots.Add(new TrRmPredicateReadRootRow(
+                    tables.PredicateReadRoots.GetRootKind(root),
+                    tables.PredicateReadRoots.GetRootIdentity(root)));
+            }
+
+            for (var operand = 1;
+                operand <= tables.PredicateNodeOperands.Count; operand++)
+            {
+                var operandKind = tables.PredicateNodeOperands
+                    .GetOperandKind(operand);
+                Assert.That(operandKind, Is.EqualTo((byte)1));
+                var operandRef = tables.PredicateNodeOperands
+                    .GetOperandRef(operand);
+                if (isSecond)
+                {
+                    operandRef = checked(operandRef + (uint)rootOffset);
+                }
+
+                predicateOperands.Add(new TrRmPredicateNodeOperandRow(
+                    operandKind, operandRef));
+            }
+
+            for (var node = 1; node <= tables.PredicateNodes.Count; node++)
+            {
+                var operandFirst = tables.PredicateNodes
+                    .GetOperandFirstRow(node);
+                var operandCount = tables.PredicateNodes.GetOperandCount(node);
+                var resultType = tables.PredicateNodes
+                    .GetResultTypeSpecRef(node);
+                if (isSecond)
+                {
+                    resultType = RemapTypeSpecRowReference(resultType);
+                }
+
+                predicateNodes.Add(new TrRmPredicateNodeRow(
+                    tables.PredicateNodes.GetNodeKind(node), resultType,
+                    operandCount == 0 ? 0
+                        : checked(operandFirst + (uint)operandOffset),
+                    operandCount));
+            }
+
+            for (var graph = 1;
+                graph <= tables.PredicateGraphs.Count; graph++)
+            {
+                predicateGraphs.Add(new TrRmPredicateGraphRow(
+                    checked(tables.PredicateGraphs.GetRootNodeRow(graph)
+                        + nodeOffset),
+                    checked(tables.PredicateGraphs
+                        .GetReadFootprintRow(graph)
+                        + footprintOffset)));
+            }
+        }
+
+        AppendPredicateTables(firstTables, isSecond: false);
+        AppendPredicateTables(secondTables, isSecond: true);
+
         var contractRows = new List<TrRmContractRow>(contractCount);
         for (var artifact = 0; artifact < 2; artifact++)
         {
@@ -17838,26 +17976,47 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             {
                 var sourceRow = source.GetRow(row);
                 var owner = BinaryPrimitives.ReadUInt32LittleEndian(sourceRow);
+                var kind = BinaryPrimitives.ReadUInt16LittleEndian(
+                    sourceRow[4..]);
+                var payload = sourceRow[8..].ToArray();
                 if (artifact != 0)
                 {
                     Assert.That(owner >> 24, Is.EqualTo(0x16));
                     owner = (owner & 0xFF00_0000u)
                         | ((owner & 0x00FF_FFFFu) + (uint)methodOffset);
+                    if (kind == 2)
+                    {
+                        var graph = BinaryPrimitives.ReadUInt32LittleEndian(
+                            payload.AsSpan(4));
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            payload.AsSpan(4),
+                            checked(graph
+                                + (uint)firstGraphCount));
+                    }
+                    else if (kind == 0x0B)
+                    {
+                        var graph = BinaryPrimitives.ReadUInt32LittleEndian(
+                            payload.AsSpan(8));
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            payload.AsSpan(8),
+                            checked(graph
+                                + (uint)firstGraphCount));
+                    }
                 }
 
                 contractRows.Add(new TrRmContractRow(owner,
-                    BinaryPrimitives.ReadUInt16LittleEndian(sourceRow[4..]),
-                    sourceRow[8..].ToArray()));
+                    kind, payload));
             }
         }
 
         var contractBytes = TrRmContractTableWriter
             .EncodeForeignInvocationDraft(contractRows, typeDefs, methods,
                 signatures, parameters, typeSpecs, features, modules,
-                predicateGraphCount: 0, schema: schema);
+                predicateGraphCount: predicateGraphs.Count, schema: schema);
         var contracts = new TrRmContractTableReader(contractBytes,
             contractRows.Count, typeDefs, methods, signatures, parameters,
-            typeSpecs, 0, features, modules, schema);
+            typeSpecs, 0, features, modules, schema,
+            predicateGraphs.Count);
 
         var bodyRows = new List<ReadOnlyMemory<byte>>(bodyCount);
         for (var artifact = 0; artifact < 2; artifact++)
@@ -17983,6 +18142,21 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             : TrRmNativeImportTableWriter.Encode(nativeImportRows, strings,
                 methods, default, typeDefs, imports, modules, signatures,
                 parameters, typeSpecs, contracts, layouts);
+        var predicateGraphBytes = TrRmPredicateGraphTableWriter.Encode(
+            predicateGraphs, predicateNodes.Count,
+            predicateFootprints.Count);
+        var predicateFootprintBytes
+            = TrRmPredicateReadFootprintTableWriter.Encode(
+                predicateFootprints, predicateRoots.Count, 0);
+        var predicateRootBytes = TrRmPredicateReadRootTableWriter.Encode(
+            predicateRoots, 0, 0, schema);
+        var predicateNodeBytes = TrRmPredicateNodeTableWriter.Encode(
+            predicateNodes, predicateOperands.Count, typeSpecs, schema);
+        var predicateCounts = new TrRmPredicateTableRowCounts(
+            predicateRoots.Count, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var predicateOperandBytes
+            = TrRmPredicateNodeOperandTableWriter.Encode(predicateOperands,
+                predicateCounts, schema);
         var sections = new List<TrRmSection>
         {
             new TrRmSection(0x0001, 0, (uint)moduleRows.Count, moduleBytes),
@@ -18044,6 +18218,20 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         {
             sections.Add(new TrRmSection(0x0021, 0,
                 (uint)nativeImportRows.Count, nativeImportBytes));
+        }
+        if (predicateGraphs.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0037, 0,
+                (uint)predicateGraphs.Count, predicateGraphBytes));
+            sections.Add(new TrRmSection(0x0038, 0,
+                (uint)predicateFootprints.Count,
+                predicateFootprintBytes));
+            sections.Add(new TrRmSection(0x0039, 0,
+                (uint)predicateRoots.Count, predicateRootBytes));
+            sections.Add(new TrRmSection(0x003B, 0,
+                (uint)predicateNodes.Count, predicateNodeBytes));
+            sections.Add(new TrRmSection(0x003C, 0,
+                (uint)predicateOperands.Count, predicateOperandBytes));
         }
         if (ConstantSourceCount != 0)
         {
