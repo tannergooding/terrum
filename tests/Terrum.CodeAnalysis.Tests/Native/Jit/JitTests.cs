@@ -103,7 +103,7 @@ internal sealed partial class JitTests
     [TestCase("int32 Main() { for (mut int32 i = 0; i < 1; i = i / 0) { } return 0; }",unchecked((int)0xE0540002))]
     [TestCase("int32 Main() { for (mut int32 i = int32.MaxValue; i > 0; i = i + 1) { } return 0; }",unchecked((int)0xE0540001))]
     [TestCase("struct S { public int32 Value; public S() { Value = 1; this.Value = 42; } } int32 Main() { S value = new S(); return value.Value; }",42)]
-    [TestCase("struct Inner { public mut int32 Value; public Inner() { Value = 1; } } struct Outer { public Inner Value; public Outer() { Value = new Inner(); Value.Value = 42; } } int32 Main() { Outer value = new Outer(); return value.Value.Value; }",42)]
+    [TestCase("struct Inner { public mut int32 Value; public Inner() { Value = 1; } } struct Outer { public mut Inner Value; public Outer() { Value = new Inner(); Value.Value = 42; } } int32 Main() { Outer value = new Outer(); return value.Value.Value; }",42)]
     [TestCase("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { mut S value = new S(1); S copy = value; value = new S(41); return value.Value + copy.Value; }",42)]
     [TestCase("int32 Main() { mut int32 x = 1; try { x = 42; } finally { x = 43; } return x; }",43)]
     [TestCase("int32 Main() { mut int32 x = 42; try { return x; } finally { x = 0; } }",42)]
