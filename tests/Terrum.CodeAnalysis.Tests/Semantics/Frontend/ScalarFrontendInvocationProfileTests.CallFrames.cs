@@ -40,6 +40,12 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             + " alias Scalar = int32; Scalar Main() => Next(); "
             + "Scalar Next() => 42; Scalar Other() => 43;"
             + string.Concat(Enumerable.Repeat(" }", nestedNamespaceNames.Length));
+        var nestedNamespaceBranchSource = string.Join(' ',
+                Enumerable.Range(0, 7)
+                    .Select(static index => $"namespace Scope{index} {{"))
+            + "namespace LeafA { int32 Main() => Next(); int32 Next() => 42; } "
+            + "namespace LeafB { int32 Other() => 43; }"
+            + string.Concat(Enumerable.Repeat(" }", 7));
         foreach (var text in new[] {
             "int32 Main() => Next(); int32 Next() => 42; int32 Other() => 43;",
             "namespace Demo.Tools; int32 Main() => Next(); "
@@ -72,6 +78,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 + "namespace Inner { int32 Child() => 0; } int32 After() => 0; } "
                 + "int32 Tail() => 0; }",
             nestedNamespaceSource,
+            nestedNamespaceBranchSource,
             "int32 Main() => Next(Id(41)); int32 Next(int32 value) => value; "
                 + "int32 Id(int32 value) => value;",
         })
