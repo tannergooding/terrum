@@ -386,14 +386,7 @@ public static partial class ScalarFrontendHost
                     opening.Span.End - namespaceKeyword.Span.Start);
                 cursor = ReadNamespaceBody(tokens, cursor, endToken, currentNamespace,
                     currentNameSpan, header, scopes, namespaceWrappers, out var resolvedNamespace);
-                if (namespaceIdentity is null)
-                {
-                    namespaceIdentity = resolvedNamespace;
-                }
-                else if (!string.Equals(namespaceIdentity, resolvedNamespace, StringComparison.Ordinal))
-                {
-                    throw InvalidResult();
-                }
+                namespaceIdentity ??= resolvedNamespace;
                 if (cursor < endToken && tokens[cursor].Kind != TokenKind.NamespaceKeyword)
                 {
                     throw InvalidResult();

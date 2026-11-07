@@ -146,16 +146,6 @@ int32 CountScalarProgramNamespaces(Span<Token> tokenView, int32 count)
     return namespaces;
 }
 
-bool SameScalarProgramNamespace(SourceRange first, SourceRange second)
-{
-    if (first.Length != second.Length) { return false; }
-    for (mut int32 index = 0; index < first.Length; index = index + 1)
-    {
-        if (Host.Source[first.Start + index] != Host.Source[second.Start + index]) { return false; }
-    }
-    return true;
-}
-
 bool TryReadScalarProgramNamespaceBlock(Span<Token> tokenView, int32 count, int32 at,
     init ref<int32> declarationStart, init ref<int32> declarationEnd,
     init ref<int32> next, init ref<SourceRange> namespaceName,
@@ -566,11 +556,6 @@ bool TryInventoryRepeatedScalarProgramNamespaceBlocks(Span<Token> tokenView, int
         {
             firstNamespace = currentNamespace;
             hasNamespace = true;
-        }
-        else if (!SameScalarProgramNamespace(firstNamespace, currentNamespace))
-        {
-            error = currentNamespace;
-            return true;
         }
         if (!TryInventoryScalarProgramScope(tokenView, count, declarationStart,
                 declarationEnd, currentNamespace, true, 0, functions, hasFour,
