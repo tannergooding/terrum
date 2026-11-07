@@ -89,7 +89,9 @@ public sealed partial class NativeSourceImportTests
             }
             """;
 
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            Terrum.CodeAnalysis.Tests.Semantics.NativeCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");

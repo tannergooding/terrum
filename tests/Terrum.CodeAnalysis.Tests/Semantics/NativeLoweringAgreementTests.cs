@@ -91,12 +91,74 @@ public sealed class NativeLoweringAgreementTests
             Is.EqualTo(42));
     }
 
+    [Test]
+    public void RootlessReferenceAgreementForwardsScalarNativeImportsThroughJit()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && System.Runtime.InteropServices.RuntimeInformation
+                .ProcessArchitecture
+                == System.Runtime.InteropServices.Architecture.X64);
+        const string agreement
+            = CompilationOptions.WindowsX64RootlessReferencesAgreement;
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions() with {
+                NativeLoweringAgreement = agreement,
+            };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+            extern unsafe uint32 CurrentThreadId();
+            int32 Main() {
+                unsafe {
+                    if (CurrentThreadId() == uint32(0)) { return 0; }
+                    return 42;
+                }
+            }
+            """), options);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        Assert.That(NativeJit.Execute(program,
+            NativeRuntimePolicy.FailFast,
+            nativeLoweringAgreement: agreement), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void RootlessReferenceAgreementExecutesOptionalDescriptorValues()
+    {
+        const string agreement
+            = CompilationOptions.WindowsX64RootlessReferencesAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 value = 41;
+                mut ref<int32>? selected = ref value;
+                if (selected is some present) { return *present; }
+                return 0;
+            }
+            """), new CompilationOptions {
+                NativeLoweringAgreement = agreement,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        Assert.That(NativeJit.Execute(program,
+            NativeRuntimePolicy.FailFast,
+            nativeLoweringAgreement: agreement), Is.EqualTo(41));
+    }
+
     [TestCase("")]
     [TestCase("terrum.experimental.windows-x64.Normal-backing")]
+    [TestCase("terrum.experimental.windows-x64.Rootless-references")]
+    [TestCase(" terrum.experimental.windows-x64.rootless-references")]
     [TestCase("terrum.experimental.windows-x64.other")]
     public void RejectsUnrecognizedAgreements(string agreement)
     {
-        Assert.Throws<System.ArgumentException>(() => Compilation.Create(
+        _ = Assert.Throws<System.ArgumentException>(() => Compilation.Create(
             SyntaxTree.Parse(Source),
             new CompilationOptions { NativeLoweringAgreement = agreement }));
     }
