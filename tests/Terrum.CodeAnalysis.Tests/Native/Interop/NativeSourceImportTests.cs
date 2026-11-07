@@ -13,6 +13,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
@@ -46,7 +47,8 @@ internal sealed partial class NativeSourceImportTests
             extern uint32 CurrentThreadId();
             void Main() {}
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3003"),Is.True);
     }
@@ -98,7 +100,8 @@ internal sealed partial class NativeSourceImportTests
 
         foreach (var source in sources)
         {
-            var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            var compilation = Compilation.Create(SyntaxTree.Parse(source),
+                NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
             Assert.That(compilation.Program, Is.Null);
             Assert.That(compilation.Diagnostics, Is.Not.Empty);
         }
@@ -113,7 +116,8 @@ internal sealed partial class NativeSourceImportTests
             }
             """;
         var addressCompilation = Compilation.Create(
-            SyntaxTree.Parse(addressSource), BoundRuntimePolicy.FailFast);
+            SyntaxTree.Parse(addressSource),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(addressCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, addressCompilation.Diagnostics));
 
@@ -145,7 +149,8 @@ internal sealed partial class NativeSourceImportTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual4 = compilation.Program;
@@ -190,7 +195,8 @@ internal sealed partial class NativeSourceImportTests
 
             int32 Helper() { return 7; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual5 = compilation.Program;
@@ -276,7 +282,7 @@ internal sealed partial class NativeSourceImportTests
             """), [
                 new HostBuffer("ReadOnly", PrimitiveType.Int32, [0x12345678, 0x23456789], false),
                 new HostBuffer("Writable", PrimitiveType.Int32, [0x3456789A], true),
-            ], BoundRuntimePolicy.FailFast);
+            ], NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -324,7 +330,8 @@ internal sealed partial class NativeSourceImportTests
                 }
                 return 0;
             }
-            """), (BoundRuntimePolicy)policy);
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                (BoundRuntimePolicy)policy));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var image = NativeEmitter.EmitWithNativeImports(compilation.Program!, policy);

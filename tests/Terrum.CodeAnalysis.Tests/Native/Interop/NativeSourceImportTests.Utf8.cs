@@ -33,7 +33,8 @@ internal sealed partial class NativeSourceImportTests
         {
             var source = $"{declaration}\nint32 Main() {{ unsafe {{ return NativeFfiUtf8Z({firstArgument}, 1, 2, "
                 + "utf8z(\"second\"), 3, utf8z(\"third\")); } }";
-            var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+            var compilation = Compilation.Create(SyntaxTree.Parse(source),
+                NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
             Assert.That(compilation.Program, Is.Null);
             Assert.That(compilation.Diagnostics, Is.Not.Empty);
         }
@@ -47,14 +48,16 @@ internal sealed partial class NativeSourceImportTests
             var malformedDeclaration = declaration.Replace("ptr<void> first", $"{malformedType} first",
                 StringComparison.Ordinal);
             var malformedCompilation = Compilation.Create(
-                SyntaxTree.Parse(malformedDeclaration + "\nvoid Main() {}"), BoundRuntimePolicy.FailFast);
+                SyntaxTree.Parse(malformedDeclaration + "\nvoid Main() {}"),
+                NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
             Assert.That(malformedCompilation.Program, Is.Null);
             Assert.That(malformedCompilation.Diagnostics, Is.Not.Empty);
         }
 
         var storedLiteral = declaration
             + "\nint32 Main() { ptr<void> value = utf8z(\"first\"); return 0; }";
-        var storedCompilation = Compilation.Create(SyntaxTree.Parse(storedLiteral), BoundRuntimePolicy.FailFast);
+        var storedCompilation = Compilation.Create(SyntaxTree.Parse(storedLiteral),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(storedCompilation.Program, Is.Null);
         Assert.That(storedCompilation.Diagnostics, Is.Not.Empty);
 
@@ -136,13 +139,15 @@ internal sealed partial class NativeSourceImportTests
         var exactLimitLiteral = new string('u', (NativeStringZPoolContract.MaximumStorageBytes / sizeof(char)) - 2);
         var exactSource = string.Concat(declaration, "\nvoid Main() { unsafe { NativeFfiMixedZ(utf16z(\"",
             exactLimitLiteral, "\"), utf8z(\"x\")); } }");
-        var exactCompilation = Compilation.Create(SyntaxTree.Parse(exactSource), BoundRuntimePolicy.FailFast);
+        var exactCompilation = Compilation.Create(SyntaxTree.Parse(exactSource),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(exactCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, exactCompilation.Diagnostics));
 
         var overLimitLiteral = new string('u', (NativeStringZPoolContract.MaximumStorageBytes / sizeof(char)) - 1);
         var overLimitSource = string.Concat(declaration, "\nvoid Main() { unsafe { NativeFfiMixedZ(utf16z(\"",
             overLimitLiteral, "\"), utf8z(\"x\")); } }");
-        var overLimitCompilation = Compilation.Create(SyntaxTree.Parse(overLimitSource), BoundRuntimePolicy.FailFast);
+        var overLimitCompilation = Compilation.Create(SyntaxTree.Parse(overLimitSource),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(overLimitCompilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(overLimitCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3013"),Is.True);
     }
@@ -165,7 +170,8 @@ internal sealed partial class NativeSourceImportTests
                 }
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;
