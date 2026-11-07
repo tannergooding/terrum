@@ -707,7 +707,7 @@ public static partial class TrRmExecutableCompiler
                     var source0 = (arithmeticPayload >> 8) & 0x0F;
                     var source1 = arithmeticPayload >> 12;
                     var isUnaryArithmetic
-                        = instruction[1] is 0x04 or 0x08;
+                        = instruction[1] is 0x04 or 0x08 or 0x25;
                     var rightOperandIsValid = false;
                     if (isUnaryArithmetic)
                     {
@@ -726,7 +726,8 @@ public static partial class TrRmExecutableCompiler
                         || pendingComparison
                         || instruction[1] is not (0x01 or 0x02 or 0x03
                             or 0x04 or 0x05 or 0x06 or 0x07 or 0x08
-                            or 0x0C or 0x0D)
+                            or 0x0C or 0x0D or 0x20 or 0x21 or 0x22
+                            or 0x23 or 0x24 or 0x25)
                         || destination != 0 || result1 != 15
                         || source0 != 0
                         || !rightOperandIsValid)
@@ -1211,7 +1212,8 @@ public static partial class TrRmExecutableCompiler
                             BoundIntegerOverflowBehavior.Checked,
                         0x05 or 0x06 or 0x07 or 0x08 =>
                             BoundIntegerOverflowBehavior.Wrapping,
-                        0x0C or 0x0D =>
+                        0x0C or 0x0D or 0x20 or 0x21 or 0x22
+                            or 0x23 or 0x24 or 0x25 =>
                             BoundIntegerOverflowBehavior.Checked,
                         _ => throw Invalid(
                             "A direct NativeOutput local has an unsupported arithmetic control."),
@@ -1226,6 +1228,24 @@ public static partial class TrRmExecutableCompiler
                         {
                             throw Invalid(
                                 "A direct NativeOutput unary local initializer is malformed.");
+                        }
+
+                        initializer = new BoundUnary(TokenKind.Minus,
+                            initializer, type, default) {
+                                OverflowBehavior = overflowBehavior,
+                            };
+                    }
+                    else if (arithmeticControl == 0x25)
+                    {
+                        if (type is not (PrimitiveType.Float32
+                                or PrimitiveType.Float64)
+                            || backingRightHomeByHome.ContainsKey(homeIndex)
+                            || !backingRightRegisterByHome.TryGetValue(
+                                homeIndex, out var floatUnarySourceRegister)
+                            || floatUnarySourceRegister != 15)
+                        {
+                            throw Invalid(
+                                "A direct NativeOutput floating unary initializer is malformed.");
                         }
 
                         initializer = new BoundUnary(TokenKind.Minus,
@@ -1264,7 +1284,9 @@ public static partial class TrRmExecutableCompiler
                         else if (backingRightRegisterByHome.TryGetValue(
                                 homeIndex, out var rightRegister))
                         {
-                            if (!PrimitiveTypeFacts.IsIntegerOrWide(type)
+                            if (!(PrimitiveTypeFacts.IsIntegerOrWide(type)
+                                    || type is PrimitiveType.Float32
+                                        or PrimitiveType.Float64)
                                 || rightRegister is not (14 or 15))
                             {
                                 throw Invalid(
@@ -1288,11 +1310,12 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         var operation = arithmeticControl switch {
-                            0x01 or 0x05 => TokenKind.Plus,
-                            0x02 or 0x06 => TokenKind.Minus,
-                            0x03 or 0x07 => TokenKind.Star,
+                            0x01 or 0x05 or 0x20 => TokenKind.Plus,
+                            0x02 or 0x06 or 0x21 => TokenKind.Minus,
+                            0x03 or 0x07 or 0x22 => TokenKind.Star,
                             0x0C => TokenKind.Slash,
-                            0x0D => TokenKind.Percent,
+                            0x0D or 0x24 => TokenKind.Percent,
+                            0x23 => TokenKind.Slash,
                             _ => throw Invalid(
                                 "A direct NativeOutput local has an unsupported arithmetic control."),
                         };

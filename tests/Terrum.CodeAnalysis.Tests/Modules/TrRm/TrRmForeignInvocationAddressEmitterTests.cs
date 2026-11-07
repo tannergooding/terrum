@@ -2213,32 +2213,69 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
 
     [TestCase(SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, 0x01, TokenKind.Plus,
-        "left + right")]
+        "int32", "left + right")]
     [TestCase(SourceArithmeticProfile.Release,
         BoundIntegerOverflowBehavior.Wrapping, 0x05, TokenKind.Plus,
-        "left + right")]
+        "int32", "left + right")]
     [TestCase(SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, 0x03, TokenKind.Star,
-        "left * right")]
+        "int32", "left * right")]
     [TestCase(SourceArithmeticProfile.Release,
         BoundIntegerOverflowBehavior.Wrapping, 0x07, TokenKind.Star,
-        "left * right")]
+        "int32", "left * right")]
     [TestCase(SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, 0x0C, TokenKind.Slash,
-        "left / right")]
+        "int32", "left / right")]
     [TestCase(SourceArithmeticProfile.Release,
         BoundIntegerOverflowBehavior.Checked, 0x0C, TokenKind.Slash,
-        "left / right")]
+        "int32", "left / right")]
     [TestCase(SourceArithmeticProfile.Development,
         BoundIntegerOverflowBehavior.Checked, 0x0D, TokenKind.Percent,
-        "left % right")]
+        "int32", "left % right")]
     [TestCase(SourceArithmeticProfile.Release,
         BoundIntegerOverflowBehavior.Checked, 0x0D, TokenKind.Percent,
-        "left % right")]
+        "int32", "left % right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x20, TokenKind.Plus,
+        "float32", "left + right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x20, TokenKind.Plus,
+        "float32", "left + right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x20, TokenKind.Plus,
+        "float64", "left + right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x20, TokenKind.Plus,
+        "float64", "left + right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x21, TokenKind.Minus,
+        "float32", "left - right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x21, TokenKind.Minus,
+        "float32", "left - right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x22, TokenKind.Star,
+        "float32", "left * right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x22, TokenKind.Star,
+        "float32", "left * right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x23, TokenKind.Slash,
+        "float32", "left / right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x23, TokenKind.Slash,
+        "float32", "left / right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x24, TokenKind.Percent,
+        "float32", "left % right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x24, TokenKind.Percent,
+        "float32", "left % right")]
     public void StandardDirectNativeOutputCallsRoundTripBinaryLocalInputHome(
         SourceArithmeticProfile profile,
         BoundIntegerOverflowBehavior overflowBehavior,
-        byte arithmeticControl, TokenKind operation, string expression)
+        byte arithmeticControl, TokenKind operation, string type,
+        string expression)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-contracts-1";
@@ -2249,11 +2286,11 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 [Terrum.Interop.NativeOutput(
                     When: Terrum.Interop.NativeOutputCondition.NonZero)]
                 write ptr<uint32> value,
-                int32 selector);
+                {{type}} selector);
 
-            internal void Probe(int32 left, int32 right) {
+            internal void Probe({{type}} left, {{type}} right) {
                 init mut uint32 value;
-                int32 adjusted = {{expression}};
+                {{type}} adjusted = {{expression}};
                 unsafe { Observe(&init value, adjusted); }
             }
             """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions()
@@ -2321,28 +2358,36 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [TestCase(SourceArithmeticProfile.Development,
-        BoundIntegerOverflowBehavior.Checked, 0x04)]
+        BoundIntegerOverflowBehavior.Checked, 0x04, "int32")]
     [TestCase(SourceArithmeticProfile.Release,
-        BoundIntegerOverflowBehavior.Wrapping, 0x08)]
+        BoundIntegerOverflowBehavior.Wrapping, 0x08, "int32")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x25, "float32")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x25, "float32")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x25, "float64")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x25, "float64")]
     public void StandardDirectNativeOutputCallsRoundTripUnaryLocalInputHome(
         SourceArithmeticProfile profile,
         BoundIntegerOverflowBehavior overflowBehavior,
-        byte arithmeticControl)
+        byte arithmeticControl, string type)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-contracts-1";
         const string moduleIdentity = "native-output-unary-local-input";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Terrum.Interop.NativeImport("example.dll", "Observe")]
             internal extern int32 Observe(
                 [Terrum.Interop.NativeOutput(
                     When: Terrum.Interop.NativeOutputCondition.NonZero)]
                 write ptr<uint32> value,
-                int32 selector);
+                {{type}} selector);
 
-            internal void Probe(int32 selector) {
+            internal void Probe({{type}} selector) {
                 init mut uint32 value;
-                int32 adjusted = -selector;
+                {{type}} adjusted = -selector;
                 unsafe { Observe(&init value, adjusted); }
             }
             """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions()

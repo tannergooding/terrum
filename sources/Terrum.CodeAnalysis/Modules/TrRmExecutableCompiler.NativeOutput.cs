@@ -1730,13 +1730,28 @@ public static partial class TrRmExecutableCompiler
                 Operand: BoundRead operand,
             } unary
             && unary.Type == operand.Type
-            && PrimitiveTypeFacts.IsIntegerOrWide(unary.Type))
+            && (PrimitiveTypeFacts.IsIntegerOrWide(unary.Type)
+                || unary.Type is PrimitiveType.Float32
+                    or PrimitiveType.Float64))
         {
-            arithmeticControl = unary.OverflowBehavior switch {
-                BoundIntegerOverflowBehavior.Checked => (byte)0x04,
-                BoundIntegerOverflowBehavior.Wrapping => (byte)0x08,
-                _ => (byte)0,
-            };
+            if (unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+            {
+                if (unary.OverflowBehavior
+                    != BoundIntegerOverflowBehavior.Checked)
+                {
+                    return false;
+                }
+
+                arithmeticControl = 0x25;
+            }
+            else
+            {
+                arithmeticControl = unary.OverflowBehavior switch {
+                    BoundIntegerOverflowBehavior.Checked => (byte)0x04,
+                    BoundIntegerOverflowBehavior.Wrapping => (byte)0x08,
+                    _ => (byte)0,
+                };
+            }
             if (arithmeticControl == 0)
             {
                 return false;
@@ -1750,22 +1765,45 @@ public static partial class TrRmExecutableCompiler
                 Left: BoundRead left,
             } binary
             || binary.Type != left.Type
-            || !PrimitiveTypeFacts.IsIntegerOrWide(binary.Type))
+            || (!PrimitiveTypeFacts.IsIntegerOrWide(binary.Type)
+                && binary.Type is not (PrimitiveType.Float32
+                    or PrimitiveType.Float64)))
         {
             return false;
         }
 
-        arithmeticControl = (binary.Operator, binary.OverflowBehavior) switch {
-            (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
-            (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
-            (TokenKind.Star, BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
-            (TokenKind.Slash, BoundIntegerOverflowBehavior.Checked) => (byte)0x0C,
-            (TokenKind.Percent, BoundIntegerOverflowBehavior.Checked) => (byte)0x0D,
-            (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
-            (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
-            (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x07,
-            _ => (byte)0,
-        };
+        var isFloating = binary.Type is PrimitiveType.Float32
+            or PrimitiveType.Float64;
+        if (isFloating)
+        {
+            arithmeticControl = (binary.Operator, binary.OverflowBehavior) switch {
+                (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) =>
+                    (byte)0x20,
+                (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) =>
+                    (byte)0x21,
+                (TokenKind.Star, BoundIntegerOverflowBehavior.Checked) =>
+                    (byte)0x22,
+                (TokenKind.Slash, BoundIntegerOverflowBehavior.Checked) =>
+                    (byte)0x23,
+                (TokenKind.Percent, BoundIntegerOverflowBehavior.Checked) =>
+                    (byte)0x24,
+                _ => (byte)0,
+            };
+        }
+        else
+        {
+            arithmeticControl = (binary.Operator, binary.OverflowBehavior) switch {
+                (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
+                (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
+                (TokenKind.Star, BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
+                (TokenKind.Slash, BoundIntegerOverflowBehavior.Checked) => (byte)0x0C,
+                (TokenKind.Percent, BoundIntegerOverflowBehavior.Checked) => (byte)0x0D,
+                (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
+                (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
+                (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x07,
+                _ => (byte)0,
+            };
+        }
         if (arithmeticControl == 0)
         {
             return false;

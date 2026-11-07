@@ -2920,9 +2920,41 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (opcode == 0xC0 && operand == 0x25)
+        {
+            var payload = ReadUInt16(body, instruction, 2);
+            var destination = payload & 0x0F;
+            var result1 = (payload >> 4) & 0x0F;
+            var source0 = (payload >> 8) & 0x0F;
+            var source1 = payload >> 12;
+            if (destination >= 14 || result1 != 15
+                || source0 >= 14 || source1 != 15)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = GetRegisterTypeState(
+                body, registerTypes, source0);
+            if (sourceState.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceType = GetRegisterTypeSpecRef(body, sourceState);
+            if (!IsRegisterArithmeticType(typeSpecs, sourceType,
+                    isFloating: true))
+            {
+                throw InvalidMap();
+            }
+
+            SetRegisterTypeState(body, registerTypes, destination,
+                sourceState);
+            return;
+        }
+
         if (opcode == 0xC0
             && operand is 0x01 or 0x02 or 0x03 or 0x05 or 0x06 or 0x07
-                or 0x0C or 0x0D)
+                or 0x0C or 0x0D or (>= 0x20 and <= 0x24))
         {
             var payload = ReadUInt16(body, instruction, 2);
             var destination = payload & 0x0F;
@@ -2942,8 +2974,9 @@ internal static class TrRmRegisterBodyMapValidator
             }
 
             var sourceType = GetRegisterTypeSpecRef(body, sourceState);
+            var isFloating = operand is >= 0x20 and <= 0x24;
             if (!IsRegisterArithmeticType(typeSpecs, sourceType,
-                    isFloating: false))
+                    isFloating))
             {
                 throw InvalidMap();
             }
