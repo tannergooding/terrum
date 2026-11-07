@@ -1573,14 +1573,17 @@ public static partial class TrRmExecutableCompiler
                 condition = unsafeExpression.Expression;
             }
 
-            if (condition is BoundRead read
-                && read.Type == PrimitiveType.Bool
+            if (TryGetDirectNativeOutputBooleanHomeCondition(condition,
+                    out var read,
+                    out var negateBooleanRead)
+                && read is not null
                 && homeByVariable.TryGetValue(read.Variable,
                     out var conditionHome))
             {
                 AppendLoadHome(0, conditionHome);
             }
             else if (condition is BoundBinary binary
+                && !negateBooleanRead
                 && binary.Type == PrimitiveType.Bool
                 && binary.Operator is TokenKind.BangEquals
                     or TokenKind.EqualsEquals
@@ -1641,9 +1644,12 @@ public static partial class TrRmExecutableCompiler
                     "A direct NativeOutput conditional requires a Boolean Home or a selected zero comparison.");
             }
 
+            var edgeTrueBlock = negateBooleanRead ? falseBlock : trueBlock;
+            var edgeFalseBlock = negateBooleanRead ? trueBlock : falseBlock;
             var edgeRecordIndex = checked((ushort)records.Count);
             records.Add(TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(
-                checked((ushort)trueBlock), checked((ushort)falseBlock)));
+                checked((ushort)edgeTrueBlock),
+                checked((ushort)edgeFalseBlock)));
             currentCode.Add(0xE4);
             currentCode.Add(0);
             currentCode.Add((byte)edgeRecordIndex);
@@ -1760,8 +1766,22 @@ public static partial class TrRmExecutableCompiler
                     var thenTerminates = AlwaysTerminates(branch.Then);
                     var elseTerminates = branch.Else is not null
                         && AlwaysTerminates(branch.Else);
-                    var thenBlock = CreateBlock();
-                    var elseBlock = CreateBlock();
+                    var reverseBlockOrder
+                        = TryGetDirectNativeOutputBooleanHomeCondition(
+                        branch.Condition, out _, out var negate)
+                        && negate;
+                    int thenBlock;
+                    int elseBlock;
+                    if (reverseBlockOrder)
+                    {
+                        elseBlock = CreateBlock();
+                        thenBlock = CreateBlock();
+                    }
+                    else
+                    {
+                        thenBlock = CreateBlock();
+                        elseBlock = CreateBlock();
+                    }
                     var joinBlock = thenTerminates && elseTerminates
                         ? -1 : CreateBlock();
                     AppendConditionalFlow(branch.Condition, thenBlock,
@@ -1981,6 +2001,41 @@ public static partial class TrRmExecutableCompiler
             return function.IsPrivate ? 0u
                 : function.IsInternal ? 1u : 2u;
         }
+    }
+
+    private static bool TryGetDirectNativeOutputBooleanHomeCondition(
+        BoundExpression expression, out BoundRead? read, out bool negate)
+    {
+        negate = false;
+        while (true)
+        {
+            if (expression is BoundUnsafeExpression unsafeExpression)
+            {
+                expression = unsafeExpression.Expression;
+            }
+            else if (expression is BoundUnary {
+                Operator: TokenKind.Bang,
+                Type: PrimitiveType.Bool,
+            } negation && negation.Operand.Type == PrimitiveType.Bool)
+            {
+                negate = !negate;
+                expression = negation.Operand;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (expression is BoundRead booleanRead
+            && booleanRead.Type == PrimitiveType.Bool)
+        {
+            read = booleanRead;
+            return true;
+        }
+
+        read = null;
+        return false;
     }
 
     private static bool SemanticVerifierIsValidNativeOutputTarget(
@@ -2253,14 +2308,22 @@ public static partial class TrRmExecutableCompiler
             bool insideUnsafe)
         {
             var conditionIsUnsafe = false;
-            while (expression is BoundUnsafeExpression unsafeExpression)
+            while (true)
             {
-                conditionIsUnsafe = true;
-                expression = unsafeExpression.Expression;
+                if (expression is BoundUnsafeExpression unsafeExpression)
+                {
+                    conditionIsUnsafe = true;
+                    expression = unsafeExpression.Expression;
+                }
+                else
+                {
+                    break;
+                }
             }
 
-            if (expression is BoundRead booleanRead
-                && booleanRead.Type == PrimitiveType.Bool)
+            if (TryGetDirectNativeOutputBooleanHomeCondition(expression,
+                    out var booleanRead, out _)
+                && booleanRead is not null)
             {
                 if ((uint)booleanRead.Variable
                         >= (uint)caller.Variables.Length

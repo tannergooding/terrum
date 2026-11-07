@@ -1785,6 +1785,74 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Is.GreaterThan(0));
     }
 
+    [TestCase("trrm/1-draft-foreign-invocation-contracts-1")]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1")]
+    public void StandardDirectNativeOutputCallsRoundTripNegatedBooleanCondition(
+        string schemaIdentity)
+    {
+        const string moduleIdentity = "native-output-negated-boolean-condition";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Observe")]
+            internal extern int32 Observe(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<uint32> value);
+
+            public void Probe(bool invoke) {
+                init mut uint32 value;
+                if (!invoke) {
+                    unsafe { Observe(&init value); }
+                }
+            }
+            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var index = StringComparer.Ordinal.Equals(schemaIdentity,
+                "trrm/1-draft-foreign-invocation-contracts-1")
+            ? TrRmArtifactIndex.ForForeignInvocationDraft(artifact)
+            : TrRmArtifactIndex
+                .ForForeignInvocationStorageAddressDraft(artifact);
+        var tables = StringComparer.Ordinal.Equals(schemaIdentity,
+                "trrm/1-draft-foreign-invocation-contracts-1")
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationDraftAndGetExecutionTables(index)
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index);
+        var callerRow = 0;
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            if (tables.Methods.GetName(method) == "Probe")
+            {
+                callerRow = method;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xD5, 0, 1, 0,
+                0xE4, 0, 3, 0,
+            }));
+        Assert.That(body.GetBlockCode(1).ToArray(),
+            Is.EqualTo(new byte[] { 0xE3, 0, 3, 0 }));
+        Assert.That(body.GetBlockCode(2).ToArray(),
+            Is.EqualTo(new byte[] { 0xDF, 0, 2, 0, 0xE0, 0, 1, 0,
+                0xE3, 0, 3, 0 }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(artifact));
+    }
+
     [Test]
     [TestCase("trrm/1-draft-foreign-invocation-contracts-1", false)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1", true)]
