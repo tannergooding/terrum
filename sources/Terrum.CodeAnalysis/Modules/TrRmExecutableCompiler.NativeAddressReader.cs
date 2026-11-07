@@ -725,7 +725,8 @@ public static partial class TrRmExecutableCompiler
                         || pendingBackingArithmeticControl is not null
                         || pendingComparison
                         || instruction[1] is not (0x01 or 0x02 or 0x03
-                            or 0x04 or 0x05 or 0x06 or 0x07 or 0x08)
+                            or 0x04 or 0x05 or 0x06 or 0x07 or 0x08
+                            or 0x0C or 0x0D)
                         || destination != 0 || result1 != 15
                         || source0 != 0
                         || !rightOperandIsValid)
@@ -1210,6 +1211,8 @@ public static partial class TrRmExecutableCompiler
                             BoundIntegerOverflowBehavior.Checked,
                         0x05 or 0x06 or 0x07 or 0x08 =>
                             BoundIntegerOverflowBehavior.Wrapping,
+                        0x0C or 0x0D =>
+                            BoundIntegerOverflowBehavior.Checked,
                         _ => throw Invalid(
                             "A direct NativeOutput local has an unsupported arithmetic control."),
                     };
@@ -1288,6 +1291,8 @@ public static partial class TrRmExecutableCompiler
                             0x01 or 0x05 => TokenKind.Plus,
                             0x02 or 0x06 => TokenKind.Minus,
                             0x03 or 0x07 => TokenKind.Star,
+                            0x0C => TokenKind.Slash,
+                            0x0D => TokenKind.Percent,
                             _ => throw Invalid(
                                 "A direct NativeOutput local has an unsupported arithmetic control."),
                         };

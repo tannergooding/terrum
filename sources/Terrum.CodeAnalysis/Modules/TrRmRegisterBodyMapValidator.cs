@@ -2921,7 +2921,8 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         if (opcode == 0xC0
-            && operand is 0x01 or 0x02 or 0x03 or 0x05 or 0x06 or 0x07)
+            && operand is 0x01 or 0x02 or 0x03 or 0x05 or 0x06 or 0x07
+                or 0x0C or 0x0D)
         {
             var payload = ReadUInt16(body, instruction, 2);
             var destination = payload & 0x0F;

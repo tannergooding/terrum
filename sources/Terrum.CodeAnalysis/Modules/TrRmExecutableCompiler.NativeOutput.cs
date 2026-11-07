@@ -1759,6 +1759,8 @@ public static partial class TrRmExecutableCompiler
             (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) => (byte)0x01,
             (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) => (byte)0x02,
             (TokenKind.Star, BoundIntegerOverflowBehavior.Checked) => (byte)0x03,
+            (TokenKind.Slash, BoundIntegerOverflowBehavior.Checked) => (byte)0x0C,
+            (TokenKind.Percent, BoundIntegerOverflowBehavior.Checked) => (byte)0x0D,
             (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x05,
             (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x06,
             (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping) => (byte)0x07,

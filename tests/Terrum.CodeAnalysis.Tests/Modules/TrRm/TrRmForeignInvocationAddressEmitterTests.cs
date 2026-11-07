@@ -2223,6 +2223,18 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(SourceArithmeticProfile.Release,
         BoundIntegerOverflowBehavior.Wrapping, 0x07, TokenKind.Star,
         "left * right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x0C, TokenKind.Slash,
+        "left / right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x0C, TokenKind.Slash,
+        "left / right")]
+    [TestCase(SourceArithmeticProfile.Development,
+        BoundIntegerOverflowBehavior.Checked, 0x0D, TokenKind.Percent,
+        "left % right")]
+    [TestCase(SourceArithmeticProfile.Release,
+        BoundIntegerOverflowBehavior.Checked, 0x0D, TokenKind.Percent,
+        "left % right")]
     public void StandardDirectNativeOutputCallsRoundTripBinaryLocalInputHome(
         SourceArithmeticProfile profile,
         BoundIntegerOverflowBehavior overflowBehavior,
