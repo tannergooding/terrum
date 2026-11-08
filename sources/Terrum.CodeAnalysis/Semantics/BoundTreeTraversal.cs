@@ -966,6 +966,22 @@ internal static class BoundTreeTraversal
     {
         var type = rewriteType(expression.Type);
         return expression switch {
+            BoundPrivateReferenceForm formation => formation with {
+                Place = RewritePrivatePlaceTypes(formation.Place,
+                    rewriteType),
+                Type = type,
+            },
+            BoundPrivatePlaceRead read => read with {
+                Place = RewritePrivatePlaceTypes(read.Place, rewriteType),
+                Type = type,
+            },
+            BoundPrivatePlaceIsInitialized test => test with {
+                Place = RewritePrivatePlaceTypes(test.Place, rewriteType),
+            },
+            BoundPrivateCheckedStore store => store with {
+                Destination = RewritePrivatePlaceTypes(
+                    store.Destination, rewriteType),
+            },
             BoundNativeStorageAddress address => address with {
                 Type = type,
                 CarrierType = rewriteType(address.CarrierType),
@@ -1012,6 +1028,42 @@ internal static class BoundTreeTraversal
             _ => expression with { Type = type },
         };
     }
+
+    private static BoundPrivatePlace RewritePrivatePlaceTypes(
+        BoundPrivatePlace place,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+        => place switch {
+            BoundPrivateLocalPlace local => local with {
+                Type = rewriteType(local.Type),
+            },
+            BoundPrivateInlineFieldPlace field => field with {
+                OwnerType = rewriteType(field.OwnerType),
+                Receiver = RewritePrivatePlaceTypes(field.Receiver,
+                    rewriteType),
+                Type = rewriteType(field.Type),
+            },
+            BoundPrivateObjectFieldPlace field => field with {
+                OwnerType = rewriteType(field.OwnerType),
+                Type = rewriteType(field.Type),
+            },
+            BoundPrivateReferentPlace referent => referent with {
+                Type = rewriteType(referent.Type),
+            },
+            BoundPrivateFixedArrayElementPlace element => element with {
+                ArrayType = rewriteType(element.ArrayType),
+                ArrayPlace = RewritePrivatePlaceTypes(element.ArrayPlace,
+                    rewriteType),
+                Type = rewriteType(element.Type),
+            },
+            BoundPrivateInvocationBufferElementPlace buffer => buffer with {
+                Type = rewriteType(buffer.Type),
+            },
+            BoundPrivateLexicalViewElementPlace view => view with {
+                Type = rewriteType(view.Type),
+            },
+            _ => throw new InvalidOperationException(
+                "Unknown private place kind."),
+        };
 
     private static BoundNativeFixedArrayLayout RewriteLayout(
         BoundNativeFixedArrayLayout layout, Func<PrimitiveType, PrimitiveType> rewriteType) =>

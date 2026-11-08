@@ -932,6 +932,7 @@ public static partial class ModuleCompiler
         var requiredFunctionPointerTypes = new HashSet<int>();
         var requiredFixedArrayTypes = new HashSet<int>();
         var requiredCheckedReferenceTypes = new HashSet<int>();
+        var requiredCheckedReferenceTypeOrder = new List<int>();
         var requiredEnumTypes = new HashSet<int>();
         PopulateRequiredStructures(functions, structures,
             classes.IsDefault ? [] : classes, null, requiredStructures,
@@ -945,7 +946,9 @@ public static partial class ModuleCompiler
             nativeFixedArrayTypes: nativeFixedArrayTypes,
             checkedReferenceTypes: checkedReferenceTypes,
             enumDefinitions: enumDefinitions,
-            additionalTypes: additionalTypes);
+            additionalTypes: additionalTypes,
+            requiredCheckedReferenceTypeOrder:
+                requiredCheckedReferenceTypeOrder);
 
         var functionPointerMapping = CreateMapping(nativeFunctionPointerSignatures.Length,
             requiredFunctionPointerTypes, NativeFunctionPointerTypes.Type);
@@ -953,11 +956,16 @@ public static partial class ModuleCompiler
             requiredPointerTypes, NativePointerTypes.Type);
         var fixedArrayMapping = CreateMapping(nativeFixedArrayTypes.Length,
             requiredFixedArrayTypes, NativeFixedArrayTypes.Type);
-        var checkedReferenceMapping
-            = CreateIndexMapping(checkedReferenceTypes.Length,
-                requiredCheckedReferenceTypes);
         var checkedReferenceMappingArray
-            = checkedReferenceMapping.ToArray();
+            = new int[checkedReferenceTypes.Length];
+        Array.Fill(checkedReferenceMappingArray, -1);
+        var canonicalCheckedReferenceTypes
+            = ImmutableArray.CreateBuilder<
+                CheckedReferenceTypeDefinition>();
+        var canonicalCheckedReferenceIndexes
+            = new Dictionary<CheckedReferenceTypeDefinition, int>();
+        var checkedReferenceStates
+            = new byte[checkedReferenceTypes.Length];
         var enumMapping = CreateMapping(enumDefinitions.Length,
             requiredEnumTypes, BoundEnumTypes.Type);
         ImmutableArray<int> enumIndexMapping = [.. enumMapping.Select(type =>
@@ -978,6 +986,19 @@ public static partial class ModuleCompiler
         var selectedEnumDefinitions
             = enumDefinitionsBuilder.MoveToImmutable();
         var selectedStructures = SelectStructures(structures, requiredStructures);
+        foreach (var referenceIndex in requiredCheckedReferenceTypeOrder)
+        {
+            _ = MapCheckedReferenceType(referenceIndex);
+        }
+        if (requiredCheckedReferenceTypes.Any(index =>
+                (uint)index >= (uint)checkedReferenceMappingArray.Length
+                || checkedReferenceMappingArray[index] < 0))
+        {
+            throw new ModuleContractException(
+                "A required checked-reference type has no canonical destination row.");
+        }
+        var checkedReferenceMapping
+            = ImmutableArray.CreateRange(checkedReferenceMappingArray);
         var fixedArrayTypeDefinitions =
             ImmutableArray.CreateBuilder<BoundNativeFixedArrayType>(
                 requiredFixedArrayTypes.Count);
@@ -1038,27 +1059,8 @@ public static partial class ModuleCompiler
             });
         }
 
-        var projectedCheckedReferenceTypes
-            = ImmutableArray.CreateBuilder<
-                CheckedReferenceTypeDefinition>(
-                    requiredCheckedReferenceTypes.Count);
-        for (var index = 0; index < checkedReferenceTypes.Length; index++)
-        {
-            if (checkedReferenceMapping[index] < 0)
-            {
-                continue;
-            }
-            var referenceType = checkedReferenceTypes[index];
-            var referentType = RemapProjectedType(
-                referenceType.ReferentType);
-            referentType = RemapCheckedReferenceType(referentType,
-                checkedReferenceMappingArray);
-            projectedCheckedReferenceTypes.Add(referenceType with {
-                ReferentType = referentType,
-            });
-        }
         var selectedCheckedReferenceTypes
-            = projectedCheckedReferenceTypes.MoveToImmutable();
+            = canonicalCheckedReferenceTypes.ToImmutable();
         if (!CheckedReferenceTypeContract.IsValidTable(
                 selectedCheckedReferenceTypes))
         {
@@ -1084,6 +1086,73 @@ public static partial class ModuleCompiler
             return RemapEnumType(type, enumIndexMapping);
         }
 
+        int MapCheckedReferenceType(int sourceIndex)
+        {
+            if ((uint)sourceIndex >= (uint)checkedReferenceTypes.Length)
+            {
+                throw new ModuleContractException(
+                    "A checked-reference type has no source row.");
+            }
+            if (checkedReferenceStates[sourceIndex] == 2)
+            {
+                return checkedReferenceMappingArray[sourceIndex];
+            }
+            if (checkedReferenceStates[sourceIndex] == 1)
+            {
+                throw new ModuleContractException(
+                    "Checked-reference type closure contains a cycle.");
+            }
+
+            checkedReferenceStates[sourceIndex] = 1;
+            var referenceType = checkedReferenceTypes[sourceIndex];
+            if (referenceType.IsOptional)
+            {
+                var requiredIndex = checkedReferenceTypes.IndexOf(
+                    referenceType with { IsOptional = false });
+                if (requiredIndex < 0)
+                {
+                    throw new ModuleContractException(
+                        "Optional checked-reference type lacks its required complete reference row.");
+                }
+                _ = MapCheckedReferenceType(requiredIndex);
+            }
+
+            var referentType = RemapType(referenceType.ReferentType,
+                structures, selectedStructures);
+            referentType = RemapNativeFixedArrayType(referentType,
+                fixedArrayMapping);
+            referentType = RemapNativeFunctionPointerType(referentType,
+                functionPointerMapping);
+            referentType = RemapNativePointerType(referentType,
+                pointerMapping);
+            if (CheckedReferenceTypes.IsType(referentType))
+            {
+                var innerIndex = CheckedReferenceTypes.Index(referentType);
+                referentType = CheckedReferenceTypes.Type(
+                    MapCheckedReferenceType(innerIndex));
+            }
+            else
+            {
+                referentType = RemapEnumType(referentType,
+                    enumIndexMapping);
+            }
+
+            var normalized = referenceType with {
+                ReferentType = referentType,
+            };
+            if (!canonicalCheckedReferenceIndexes.TryGetValue(normalized,
+                out var mappedIndex))
+            {
+                mappedIndex = canonicalCheckedReferenceTypes.Count;
+                canonicalCheckedReferenceTypes.Add(normalized);
+                canonicalCheckedReferenceIndexes.Add(normalized,
+                    mappedIndex);
+            }
+            checkedReferenceMappingArray[sourceIndex] = mappedIndex;
+            checkedReferenceStates[sourceIndex] = 2;
+            return mappedIndex;
+        }
+
         static ImmutableArray<PrimitiveType> CreateMapping(int count, HashSet<int> required,
             Func<int, PrimitiveType> createType)
         {
@@ -1096,17 +1165,6 @@ public static partial class ModuleCompiler
             return mapping.MoveToImmutable();
         }
 
-        static ImmutableArray<int> CreateIndexMapping(int count,
-            HashSet<int> required)
-        {
-            var mapping = ImmutableArray.CreateBuilder<int>(count);
-            var nextIndex = 0;
-            for (var index = 0; index < count; index++)
-            {
-                mapping.Add(required.Contains(index) ? nextIndex++ : -1);
-            }
-            return mapping.MoveToImmutable();
-        }
     }
 
     private static void PopulateRequiredStructures(IEnumerable<BoundFunction> functions,
@@ -1122,7 +1180,8 @@ public static partial class ModuleCompiler
         ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default,
         ImmutableArray<CheckedReferenceTypeDefinition> checkedReferenceTypes = default,
         ImmutableArray<BoundEnumDefinition> enumDefinitions = default,
-        IEnumerable<PrimitiveType>? additionalTypes = null)
+        IEnumerable<PrimitiveType>? additionalTypes = null,
+        List<int>? requiredCheckedReferenceTypeOrder = null)
     {
         result.Clear();
         pending.Clear();
@@ -1283,10 +1342,25 @@ public static partial class ModuleCompiler
                     throw new ModuleFormatException(
                         "Invalid checked-reference type in declaration closure.");
                 }
-                _ = requiredCheckedReferenceTypes?.Add(referenceIndex);
+                if (requiredCheckedReferenceTypes?.Add(referenceIndex) == true)
+                {
+                    requiredCheckedReferenceTypeOrder?.Add(referenceIndex);
+                }
                 if (visitedCheckedReferenceTypes.Add(referenceIndex))
                 {
-                    Add(checkedReferenceTypes[referenceIndex].ReferentType);
+                    var referenceType = checkedReferenceTypes[referenceIndex];
+                    if (referenceType.IsOptional)
+                    {
+                        var requiredIndex = checkedReferenceTypes.IndexOf(
+                            referenceType with { IsOptional = false });
+                        if (requiredIndex < 0)
+                        {
+                            throw new ModuleFormatException(
+                                "Optional checked-reference type lacks its required complete reference row.");
+                        }
+                        Add(CheckedReferenceTypes.Type(requiredIndex));
+                    }
+                    Add(referenceType.ReferentType);
                 }
                 return;
             }
@@ -7693,6 +7767,7 @@ public static partial class ModuleCompiler
         var (canonicalModule, fixedArrayMapping) =
             CanonicalizeNativeFixedArrays(module);
         module = canonicalModule;
+        module = CanonicalizePrivateCheckedReferenceTypes(module);
         var enumMapping = CreatePrivateEnumTypeMapping(
             program.EnumDefinitions, module.EnumDefinitions);
         if (HasUnsupportedArrayDerivedManagedClassFields(module.Classes,

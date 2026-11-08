@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -230,6 +231,361 @@ public static partial class ModuleCompiler
         moduleReader.CheckedReferenceTypes = result;
         moduleReader.HasReadCheckedReferenceTypes = true;
         return result;
+    }
+
+    private static Module CanonicalizePrivateCheckedReferenceTypes(
+        Module module)
+    {
+        var source = module.CheckedReferenceTypes;
+        if (source.IsDefaultOrEmpty)
+        {
+            return module;
+        }
+        if (!CheckedReferenceTypeContract.IsValidTable(source))
+        {
+            throw new ModuleContractException(
+                "The module checked-reference type table is invalid.");
+        }
+
+        var mapping = new int[source.Length];
+        Array.Fill(mapping, -1);
+        var states = new byte[source.Length];
+        var canonicalTypes = ImmutableArray.CreateBuilder<
+            CheckedReferenceTypeDefinition>();
+        var canonicalIndexes = new Dictionary<
+            CheckedReferenceTypeDefinition, int>();
+
+        var typeRoots = new List<PrimitiveType>();
+        typeRoots.AddRange(module.Structures.SelectMany(
+            static structure => structure.Fields.Select(
+                static field => field.Type)));
+        typeRoots.AddRange(module.Classes.SelectMany(
+            static @class => @class.Fields.Select(
+                static field => field.Type)));
+        typeRoots.AddRange(module.NativeFunctionPointerSignatures.SelectMany(
+            static signature => signature.ParameterTypes.Prepend(
+                signature.ReturnType).Concat(
+                signature.NativeParameters.Select(
+                    static parameter => parameter.PointeeType))));
+        typeRoots.AddRange(module.NativePointerTypes.Select(
+            static pointer => pointer.PointeeType));
+        typeRoots.AddRange(module.NativeFixedArrayTypes.Select(
+            static array => array.ElementType));
+        typeRoots.AddRange(module.InvocationBuffers.Select(
+            static buffer => buffer.ElementType));
+        typeRoots.AddRange(module.NominalTypeOrigins.Select(
+            static origin => origin.PrivateType));
+        foreach (var item in module.Functions)
+        {
+            typeRoots.AddRange(item.NativeOutputContracts.Select(
+                static output => output.PointeeType));
+            if (item.ExpectedDirectNativeImport
+                is DirectNativeImport expectedImport)
+            {
+                typeRoots.AddRange(expectedImport.Outputs.Select(
+                    static output => output.PointeeType));
+                typeRoots.AddRange(expectedImport.Parameters.Select(
+                    static parameter => parameter.PointeeType));
+            }
+            if (item.ImportedNativeVTableMethod
+                is NativeVTableMethodDefinition importedMethod)
+            {
+                typeRoots.AddRange(importedMethod.Parameters.Select(
+                    static parameter => parameter.PointeeType));
+                typeRoots.AddRange(importedMethod.Outputs.Select(
+                    static output => output.PointeeType));
+            }
+            if (item.Function is not BoundFunction)
+            {
+                AddContractReferenceRoots(item.Contract, typeRoots);
+            }
+        }
+
+        var requiredTypes = new HashSet<string>(StringComparer.Ordinal);
+        var requiredReferenceIndexes = new HashSet<int>();
+        var referenceRootOrder = new List<int>();
+        PopulateRequiredStructures(
+            module.Functions.Where(static item =>
+                    item.Function is BoundFunction)
+                .Select(static item => item.Function!),
+            module.Structures, module.Classes, null, requiredTypes,
+            new Queue<PrimitiveType>(), module.NativePointerTypes,
+            module.NativeFunctionPointerSignatures,
+            includeAllInteropTypes: false,
+            requiredFixedArrayTypes: null,
+            requiredCheckedReferenceTypes: requiredReferenceIndexes,
+            nativeFixedArrayTypes: module.NativeFixedArrayTypes,
+            checkedReferenceTypes: source,
+            enumDefinitions: module.EnumDefinitions,
+            additionalTypes: typeRoots,
+            requiredCheckedReferenceTypeOrder: referenceRootOrder);
+
+        int MapReferenceType(int sourceIndex)
+        {
+            if ((uint)sourceIndex >= (uint)source.Length)
+            {
+                throw new ModuleContractException(
+                    "The module checked-reference type table has an invalid row reference.");
+            }
+            if (states[sourceIndex] == 2)
+            {
+                return mapping[sourceIndex];
+            }
+            if (states[sourceIndex] == 1)
+            {
+                throw new ModuleContractException(
+                    "The module checked-reference type table contains a cycle.");
+            }
+
+            states[sourceIndex] = 1;
+            var referenceType = source[sourceIndex];
+            if (referenceType.IsOptional)
+            {
+                var requiredIndex = source.IndexOf(
+                    referenceType with { IsOptional = false });
+                if (requiredIndex < 0)
+                {
+                    throw new ModuleContractException(
+                        "Optional checked-reference type lacks its required complete reference row.");
+                }
+                _ = MapReferenceType(requiredIndex);
+            }
+
+            var referentType = referenceType.ReferentType;
+            if (CheckedReferenceTypes.IsType(referentType))
+            {
+                referentType = CheckedReferenceTypes.Type(
+                    MapReferenceType(
+                        CheckedReferenceTypes.Index(referentType)));
+            }
+
+            var canonical = referenceType with {
+                ReferentType = referentType,
+            };
+            if (!canonicalIndexes.TryGetValue(canonical,
+                out var destinationIndex))
+            {
+                destinationIndex = canonicalTypes.Count;
+                canonicalTypes.Add(canonical);
+                canonicalIndexes.Add(canonical, destinationIndex);
+            }
+            mapping[sourceIndex] = destinationIndex;
+            states[sourceIndex] = 2;
+            return destinationIndex;
+        }
+
+        foreach (var index in referenceRootOrder)
+        {
+            _ = MapReferenceType(index);
+        }
+        if (requiredReferenceIndexes.Any(index =>
+                (uint)index >= (uint)mapping.Length
+                || mapping[index] < 0))
+        {
+            throw new ModuleContractException(
+                "A required checked-reference type has no canonical row.");
+        }
+
+        var selectedTypes = canonicalTypes.ToImmutable();
+        if (mapping.Select((destination, sourceIndex) =>
+                destination == sourceIndex)
+            .All(static isIdentity => isIdentity)
+            && selectedTypes.SequenceEqual(source))
+        {
+            return module;
+        }
+
+        PrimitiveType RemapType(PrimitiveType type)
+            => RemapCheckedReferenceType(type, mapping);
+
+        var structures = ImmutableArray.CreateRange(module.Structures.Select(
+            structure => BoundTreeTraversal.RewriteTypes(structure,
+                RemapType)));
+        var classes = ImmutableArray.CreateRange(module.Classes.Select(
+            @class => BoundTreeTraversal.RewriteTypes(@class, RemapType)));
+        var functionPointerSignatures = ImmutableArray.CreateRange(
+            module.NativeFunctionPointerSignatures.Select(signature =>
+                signature with {
+                    ReturnType = RemapType(signature.ReturnType),
+                    ParameterTypes = [.. signature.ParameterTypes.Select(
+                        RemapType)],
+                    NativeParameters = signature.NativeParameters.IsDefault
+                        ? default
+                        : [.. signature.NativeParameters.Select(parameter =>
+                            parameter with {
+                                PointeeType = RemapType(
+                                    parameter.PointeeType),
+                            })],
+                }));
+        var pointerTypes = ImmutableArray.CreateRange(
+            module.NativePointerTypes.Select(pointerType =>
+                pointerType with {
+                    PointeeType = RemapType(pointerType.PointeeType),
+                }));
+        var fixedArrayTypes = ImmutableArray.CreateRange(
+            module.NativeFixedArrayTypes.Select(fixedArray =>
+                fixedArray with {
+                    ElementType = RemapType(fixedArray.ElementType),
+                }));
+        var functions = ImmutableArray.CreateBuilder<ModuleFunction>(
+            module.Functions.Length);
+        foreach (var item in module.Functions)
+        {
+            var function = item.Function is BoundFunction boundFunction
+                ? BoundTreeTraversal.RewriteTypes(
+                    RemapFunction(boundFunction, module.Structures,
+                        module.Structures), RemapType)
+                : null;
+            var expectedImport
+                = item.ExpectedDirectNativeImport is DirectNativeImport import
+                    ? import with {
+                        Outputs = import.Outputs.IsDefault ? default
+                            : [.. import.Outputs.Select(output => output with {
+                                PointeeType = RemapType(output.PointeeType),
+                            })],
+                        Parameters = import.Parameters.IsDefault ? default
+                            : [.. import.Parameters.Select(parameter =>
+                                parameter with {
+                                    PointeeType = RemapType(
+                                        parameter.PointeeType),
+                                })],
+                    }
+                    : null;
+            var importedVTableMethod
+                = item.ImportedNativeVTableMethod
+                    is NativeVTableMethodDefinition method
+                        ? method with {
+                            Parameters = method.Parameters.IsDefault
+                                ? default
+                                : [.. method.Parameters.Select(parameter =>
+                                    parameter with {
+                                        PointeeType = RemapType(
+                                            parameter.PointeeType),
+                                    })],
+                            Outputs = method.Outputs.IsDefault ? default
+                                : [.. method.Outputs.Select(output =>
+                                    output with {
+                                        PointeeType = RemapType(
+                                            output.PointeeType),
+                                    })],
+                        }
+                        : null;
+            functions.Add(item with {
+                Function = function,
+                Contract = function is null
+                    ? RemapPrivateCheckedReferenceContract(item.Contract,
+                        mapping)
+                    : Contract(function, structures,
+                        functionPointerSignatures, pointerTypes,
+                        fixedArrayTypes, private105: true),
+                NativeOutputContracts = item.NativeOutputContracts.IsDefault
+                    ? default
+                    : [.. item.NativeOutputContracts.Select(output =>
+                        output with {
+                            PointeeType = RemapType(output.PointeeType),
+                        })],
+                ExpectedDirectNativeImport = expectedImport,
+                ImportedNativeVTableMethod = importedVTableMethod,
+            });
+        }
+
+        var result = module with {
+            FormatVersion = CheckedReferenceVersion,
+            Structures = structures,
+            Classes = classes,
+            NativeFunctionPointerSignatures = functionPointerSignatures,
+            NativePointerTypes = pointerTypes,
+            NativeFixedArrayTypes = fixedArrayTypes,
+            CheckedReferenceTypes = selectedTypes,
+            InvocationBuffers = [.. module.InvocationBuffers.Select(buffer =>
+                buffer with { ElementType = RemapType(buffer.ElementType) })],
+            Functions = functions.MoveToImmutable(),
+        };
+        if (!CheckedReferenceTypeContract.IsValidTable(
+                result.CheckedReferenceTypes))
+        {
+            throw new ModuleContractException(
+                "Canonical checked-reference type table is invalid.");
+        }
+        return result;
+    }
+
+    private static void AddContractReferenceRoots(string contract,
+        List<PrimitiveType> roots)
+    {
+        const string marker = "ctype#";
+        var markerIndex = contract.IndexOf(marker, StringComparison.Ordinal);
+        while (markerIndex >= 0)
+        {
+            var digitsStart = markerIndex + marker.Length;
+            var digitsEnd = digitsStart;
+            while (digitsEnd < contract.Length
+                && contract[digitsEnd] is >= '0' and <= '9')
+            {
+                digitsEnd++;
+            }
+            if (digitsEnd == digitsStart
+                || !int.TryParse(contract.AsSpan(digitsStart,
+                    digitsEnd - digitsStart),
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var referenceIndex))
+            {
+                throw new ModuleContractException(
+                    "A bodyless private contract has an invalid checked-reference type identity.");
+            }
+
+            roots.Add(CheckedReferenceTypes.Type(referenceIndex));
+            markerIndex = contract.IndexOf(marker, digitsEnd,
+                StringComparison.Ordinal);
+        }
+    }
+
+    private static string RemapPrivateCheckedReferenceContract(
+        string contract, int[] mapping)
+    {
+        const string marker = "ctype#";
+        var markerIndex = contract.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return contract;
+        }
+
+        var builder = new StringBuilder(contract.Length);
+        var offset = 0;
+        while (markerIndex >= 0)
+        {
+            builder.Append(contract.AsSpan(offset,
+                markerIndex - offset));
+            var digitsStart = markerIndex + marker.Length;
+            var digitsEnd = digitsStart;
+            while (digitsEnd < contract.Length
+                && contract[digitsEnd] is >= '0' and <= '9')
+            {
+                digitsEnd++;
+            }
+            if (digitsEnd == digitsStart
+                || !int.TryParse(contract.AsSpan(digitsStart,
+                    digitsEnd - digitsStart),
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var sourceIndex)
+                || (uint)sourceIndex >= (uint)mapping.Length
+                || mapping[sourceIndex] < 0)
+            {
+                throw new ModuleContractException(
+                    "A bodyless private contract has an invalid checked-reference type identity.");
+            }
+
+            builder.Append(marker);
+            builder.Append(mapping[sourceIndex].ToString(
+                System.Globalization.CultureInfo.InvariantCulture));
+            offset = digitsEnd;
+            markerIndex = contract.IndexOf(marker, offset,
+                StringComparison.Ordinal);
+        }
+        builder.Append(contract.AsSpan(offset));
+        return builder.ToString();
     }
 
     private static bool HasNominalCheckedReferenceTypeClosure(

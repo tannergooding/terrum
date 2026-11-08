@@ -104,6 +104,29 @@ internal sealed class CheckedReferenceTypeTests
         malformed = (byte[])producer.Clone();
         typeRowOffset = FindPrivate106CheckedReferenceTypeRowOffset(
             malformed);
+        malformed[typeRowOffset] = 0;
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(malformed));
+
+        malformed = (byte[])producer.Clone();
+        typeRowOffset = FindPrivate106CheckedReferenceTypeRowOffset(
+            malformed);
+        malformed[typeRowOffset + sizeof(byte)] = 0x80;
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(malformed));
+
+        malformed = (byte[])producer.Clone();
+        typeRowOffset = FindPrivate106CheckedReferenceTypeRowOffset(
+            malformed);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            malformed.AsSpan(typeRowOffset + (2 * sizeof(byte)),
+                sizeof(ushort)), 1);
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(malformed));
+
+        malformed = (byte[])producer.Clone();
+        typeRowOffset = FindPrivate106CheckedReferenceTypeRowOffset(
+            malformed);
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(typeRowOffset + 4, sizeof(int)), -5);
         _ = Assert.Throws<ModuleFormatException>(

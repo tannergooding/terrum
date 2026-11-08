@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Linq;
 using System.Text;
 using System.Collections.Immutable;
 using NUnit.Framework;
@@ -83,6 +84,171 @@ internal sealed class PrivateRevision106BodyTests
             (int)PrimitiveType.Bool);
         _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void PrivateOptionalReferenceProjectionRetainsItsRequiredRow()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void AcceptOptional(ref<int32>? value) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var sourceOptionalFunction = global::System.Linq.Enumerable.Single(
+            program.Functions,
+            static function => function.Name == "AcceptOptional");
+        Assert.That(program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(
+                    sourceOptionalFunction.Variables[0].Type)].IsOptional,
+            Is.True);
+
+        var producer = ModuleCompiler.CreateProducer(program,
+            ["AcceptOptional"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var persistedOptionalFunction =
+            global::System.Linq.Enumerable.Single(reference.Functions,
+                static function => function.Name == "AcceptOptional");
+        Assert.That(reference.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(
+                    persistedOptionalFunction.Variables[0].Type)].IsOptional,
+            Is.True);
+        Assert.That(reference.CheckedReferenceTypes, Has.Length.EqualTo(2));
+        Assert.That(reference.CheckedReferenceTypes[0],
+            Is.EqualTo(new CheckedReferenceTypeDefinition(
+                PrimitiveType.Int32, IsWritable: false,
+                IsGarbageCollected: false, IsInitialization: false,
+                IsOptional: false)));
+        Assert.That(reference.CheckedReferenceTypes[1],
+            Is.EqualTo(reference.CheckedReferenceTypes[0] with {
+                IsOptional = true,
+            }));
+        Assert.That(global::System.Linq.Enumerable.Single(
+                reference.Functions,
+                static function => function.Name == "AcceptOptional")
+                .Variables[0].Type,
+            Is.EqualTo(CheckedReferenceTypes.Type(1)));
+    }
+
+    [Test]
+    public void PrivateReferenceProjectionInternsAndOrdersCompleteRows()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void Use(ref<int32> first, ref<int32> duplicate,
+                ref<ref<int32>> nested) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var ordinaryReference = global::System.Linq.Enumerable.Single(
+            program.CheckedReferenceTypes,
+            static referenceType => !referenceType.IsOptional
+                && !CheckedReferenceTypes.IsType(
+                    referenceType.ReferentType));
+        var nestedReference = global::System.Linq.Enumerable.Single(
+            program.CheckedReferenceTypes,
+            static referenceType => CheckedReferenceTypes.IsType(
+                referenceType.ReferentType));
+        var functionIndex = global::System.Linq.Enumerable.Single(
+            global::System.Linq.Enumerable.Select(program.Functions,
+                static (candidate, index) => (candidate, index)),
+            static item => item.candidate.Name == "Use").index;
+        var function = program.Functions[functionIndex];
+        var variables = function.Variables
+            .SetItem(0, function.Variables[0] with {
+                Type = CheckedReferenceTypes.Type(1),
+            })
+            .SetItem(1, function.Variables[1] with {
+                Type = CheckedReferenceTypes.Type(2),
+            })
+            .SetItem(2, function.Variables[2] with {
+                Type = CheckedReferenceTypes.Type(0),
+            });
+        var reorderedProgram = program with {
+            CheckedReferenceTypes = [
+                nestedReference with {
+                    ReferentType = CheckedReferenceTypes.Type(1),
+                },
+                ordinaryReference,
+                ordinaryReference,
+                new CheckedReferenceTypeDefinition(
+                    PrimitiveType.UInt32, IsWritable: false,
+                    IsGarbageCollected: false, IsInitialization: false,
+                    IsOptional: false),
+            ],
+            Functions = program.Functions.SetItem(functionIndex,
+                function with { Variables = variables }),
+        };
+
+        var producer = ModuleCompiler.CreateProducer(reorderedProgram,
+            ["Use"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.That(reference.CheckedReferenceTypes,
+            Is.EqualTo(ImmutableArray.Create(ordinaryReference,
+                nestedReference with {
+                    ReferentType = CheckedReferenceTypes.Type(0),
+                })));
+
+        var persistedFunction = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static candidate => candidate.Name == "Use");
+        Assert.That(global::System.Linq.Enumerable.Select(
+                persistedFunction.Variables,
+                static variable => variable.Type),
+            Is.EqualTo(ImmutableArray.Create(
+                CheckedReferenceTypes.Type(0),
+                CheckedReferenceTypes.Type(0),
+                CheckedReferenceTypes.Type(1))));
+    }
+
+    [Test]
+    public void PrivateReferenceProjectionRebasesBodyTypes()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read(ref<int32> value) { return *value; }
+            public int32 Use() {
+                mut int32 value = int32(42);
+                return Read(ref value);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var referenceType = program.CheckedReferenceTypes[0];
+        var duplicateType = CheckedReferenceTypes.Type(
+            program.CheckedReferenceTypes.Length);
+        var remappedFunctions = ImmutableArray.CreateRange(
+            program.Functions.Select(function =>
+                BoundTreeTraversal.RewriteTypes(function,
+                    type => type == CheckedReferenceTypes.Type(0)
+                        ? duplicateType : type)));
+        var duplicateProgram = program with {
+            Functions = remappedFunctions,
+            CheckedReferenceTypes = [.. program.CheckedReferenceTypes,
+                referenceType],
+        };
+        var producer = ModuleCompiler.CreateProducer(duplicateProgram,
+            ["Read", "Use"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+
+        Assert.That(reference.CheckedReferenceTypes,
+            Is.EqualTo(ImmutableArray.Create(referenceType)));
+        var read = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "Read");
+        Assert.That(read.Variables[0].Type,
+            Is.EqualTo(CheckedReferenceTypes.Type(0)));
+
+        var consumer = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Use(); }"), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        Assert.That(ModuleCompiler.CreateConsumer(
+                consumer.Program!, producer),
+            Is.Not.Empty);
     }
 
     [Test]
@@ -171,8 +337,26 @@ internal sealed class PrivateRevision106BodyTests
         var producer = ModuleCompiler.CreateProducer(program, ["RoundTrip"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
             producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(106));
+        var persistedModule = ModuleCompiler
+            .ReadProviderContractSnapshot(producer).ParsedModule;
+        Assert.That(persistedModule.CheckedReferenceTypes.Any(
+                static reference => reference.IsInitialization),
+            Is.True, string.Join(Environment.NewLine,
+                persistedModule.CheckedReferenceTypes));
+        var persistedInitializationReferenceType
+            = CheckedReferenceTypes.Type(
+                persistedModule.CheckedReferenceTypes
+                    .Select((reference, index) => (reference, index))
+                    .Single(static item =>
+                        item.reference.IsInitialization).index);
+        var persistedOrdinaryReferenceType = CheckedReferenceTypes.Type(
+            persistedModule.CheckedReferenceTypes
+                .Select((reference, index) => (reference, index))
+                .Single(static item =>
+                    !item.reference.IsInitialization
+                    && !item.reference.IsOptional).index);
         Assert.That(FindEnvelopeOffset(producer, 49, 0, 0,
-                initializationReferenceType),
+                persistedInitializationReferenceType),
             Is.GreaterThanOrEqualTo(0));
         Assert.That(FindEnvelopeOffset(producer, 51, 0, 0,
                 PrimitiveType.Bool),
@@ -181,25 +365,24 @@ internal sealed class PrivateRevision106BodyTests
                 PrimitiveType.Void),
             Is.GreaterThanOrEqualTo(0));
         Assert.That(FindEnvelopeOffset(producer, 52, 0, 0,
-                ordinaryReferenceType),
+                persistedOrdinaryReferenceType),
             Is.GreaterThanOrEqualTo(0));
         Assert.That(FindEnvelopeOffset(producer, 54, 0, 0,
-                ordinaryReferenceType),
+                persistedOrdinaryReferenceType),
             Is.GreaterThanOrEqualTo(0));
-        _ = ModuleCompiler.CreateReference(producer);
 
         var malformed = (byte[])producer.Clone();
         var attenuationOffset = FindEnvelopeOffset(malformed, 52, 0, 0,
-            ordinaryReferenceType);
+            persistedOrdinaryReferenceType);
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(attenuationOffset + 1, sizeof(int)),
-            (int)initializationReferenceType);
+            (int)persistedInitializationReferenceType);
         _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(malformed));
 
         malformed = (byte[])producer.Clone();
         var materializeOffset = FindEnvelopeOffset(malformed, 54, 0, 0,
-            ordinaryReferenceType);
+            persistedOrdinaryReferenceType);
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(materializeOffset + 13, sizeof(int)),
             int.MaxValue);
