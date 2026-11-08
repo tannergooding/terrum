@@ -262,6 +262,8 @@ public enum CoreNativeAttributeRole
     NativeCallConv = 3,
     /// <summary>A native export declaration.</summary>
     NativeExport = 4,
+    /// <summary>A registered flat foreign native-interface layout.</summary>
+    ForeignNativeInterface = 5,
 }
 
 /// <summary>The registered source-value kind for one native attribute argument.</summary>
@@ -275,6 +277,8 @@ public enum CoreNativeAttributeArgumentKind
     EntryNameLiteral = 2,
     /// <summary>A value of the exact selected enum type.</summary>
     Enum = 3,
+    /// <summary>A compile-time unsigned 32-bit constant.</summary>
+    UInt32Constant = 4,
 }
 
 /// <summary>The registered default form for a native attribute argument.</summary>
@@ -332,7 +336,8 @@ public readonly record struct CoreNativeAttributeArgument(
                 || (Name is null && AllowsNamed)
                 || Kind is not (CoreNativeAttributeArgumentKind.LibraryNameLiteral
                     or CoreNativeAttributeArgumentKind.EntryNameLiteral
-                    or CoreNativeAttributeArgumentKind.Enum)
+                    or CoreNativeAttributeArgumentKind.Enum
+                    or CoreNativeAttributeArgumentKind.UInt32Constant)
                 || (Kind == CoreNativeAttributeArgumentKind.Enum
                     != (EnumType is CoreDeclarationIdentity enumType
                         && enumType.IsValid
@@ -405,7 +410,8 @@ public sealed record CoreNativeAttributeSchema(
                 || Role is not (CoreNativeAttributeRole.NativeImport
                     or CoreNativeAttributeRole.NativeCallable
                     or CoreNativeAttributeRole.NativeCallConv
-                    or CoreNativeAttributeRole.NativeExport)
+                    or CoreNativeAttributeRole.NativeExport
+                    or CoreNativeAttributeRole.ForeignNativeInterface)
                 || Arguments.IsDefault
                 || !IsValidText(Placement)
                 || Targets is null || Targets.Count == 0
@@ -575,7 +581,8 @@ public sealed class NativeCoreRegistrationSet
         CoreNativeAttributeSchema nativeImport,
         CoreNativeAttributeSchema nativeCallable,
         CoreNativeAttributeSchema nativeCallConv,
-        CoreNativeAttributeSchema? nativeExport)
+        CoreNativeAttributeSchema? nativeExport,
+        CoreNativeAttributeSchema? foreignNativeInterface)
     {
         ModuleBindings = moduleBindings;
         CallingConventions = callingConventions;
@@ -585,6 +592,7 @@ public sealed class NativeCoreRegistrationSet
         NativeCallable = nativeCallable;
         NativeCallConv = nativeCallConv;
         NativeExport = nativeExport;
+        ForeignNativeInterface = foreignNativeInterface;
     }
 
     /// <summary>The using logical Module identity for this registration.</summary>
@@ -618,6 +626,9 @@ public sealed class NativeCoreRegistrationSet
     /// <summary>The selected native-export schema, when that source role is admitted.</summary>
     public CoreNativeAttributeSchema? NativeExport { get; }
 
+    /// <summary>The selected foreign native-interface schema, when that source role is admitted.</summary>
+    public CoreNativeAttributeSchema? ForeignNativeInterface { get; }
+
     internal static bool NameResolvesTo(string sourceName, string qualifiedName,
         string currentNamespace, IEnumerable<string> usings)
     {
@@ -646,12 +657,14 @@ public sealed class NativeCoreRegistrationSet
         CoreNativeAttributeSchema nativeImport,
         CoreNativeAttributeSchema nativeCallable,
         CoreNativeAttributeSchema nativeCallConv,
-        CoreNativeAttributeSchema? nativeExport)
+        CoreNativeAttributeSchema? nativeExport,
+        CoreNativeAttributeSchema? foreignNativeInterface = null)
     {
         ArgumentNullException.ThrowIfNull(moduleBindings);
         var registration = new NativeCoreRegistrationSet(moduleBindings,
             callingConventions, resolutionModes, resolutionPolicies, nativeImport,
-            nativeCallable, nativeCallConv, nativeExport);
+            nativeCallable, nativeCallConv, nativeExport,
+            foreignNativeInterface);
         if (registration.GetInvalidReason() is string reason)
         {
             throw new ArgumentException($"The selected Core native registration is invalid: {reason}.",
@@ -706,6 +719,14 @@ public sealed class NativeCoreRegistrationSet
         {
             return "the NativeExport schema identity or owner is invalid";
         }
+        if (ForeignNativeInterface is CoreNativeAttributeSchema
+                foreignNativeInterface
+            && !IsSchema(foreignNativeInterface,
+                "Terrum.Interop.ForeignNativeInterface",
+                CoreNativeAttributeRole.ForeignNativeInterface))
+        {
+            return "the ForeignNativeInterface schema identity or owner is invalid";
+        }
         if (EnumDefinitions.Any(definition =>
                     !ModuleBindings.ContainsProvider(definition.Identity.ProviderIdentity)
                     || !ModuleBindings.ContainsDeclaration(definition)
@@ -721,7 +742,13 @@ public sealed class NativeCoreRegistrationSet
                     && (!ModuleBindings.ContainsProvider(
                             selectedNativeExport.Identity.ProviderIdentity)
                         || !ModuleBindings.ContainsDeclaration(
-                            selectedNativeExport))))
+                            selectedNativeExport)))
+                || (ForeignNativeInterface is
+                        CoreNativeAttributeSchema selectedForeignNativeInterface
+                    && (!ModuleBindings.ContainsProvider(
+                            selectedForeignNativeInterface.Identity.ProviderIdentity)
+                        || !ModuleBindings.ContainsDeclaration(
+                            selectedForeignNativeInterface))))
         {
             return "a registered declaration has no matching selected provider export snapshot";
         }
@@ -741,7 +768,12 @@ public sealed class NativeCoreRegistrationSet
             || (NativeExport is CoreNativeAttributeSchema exportArguments
                 && (exportArguments.CallingConventionEnum is not null
                     || exportArguments.ResolutionModeEnum is not null
-                    || exportArguments.ResolutionPolicyEnum is not null)))
+                    || exportArguments.ResolutionPolicyEnum is not null))
+            || (ForeignNativeInterface is
+                    CoreNativeAttributeSchema foreignInterfaceArguments
+                && (foreignInterfaceArguments.CallingConventionEnum is not null
+                    || foreignInterfaceArguments.ResolutionModeEnum is not null
+                    || foreignInterfaceArguments.ResolutionPolicyEnum is not null)))
         {
             return "native schema argument types do not refer to the selected enum identities";
         }
@@ -758,6 +790,11 @@ public sealed class NativeCoreRegistrationSet
         if (NativeExport is CoreNativeAttributeSchema selectedExport)
         {
             identities.Add(selectedExport.Identity);
+        }
+        if (ForeignNativeInterface is
+            CoreNativeAttributeSchema foreignInterfaceIdentity)
+        {
+            identities.Add(foreignInterfaceIdentity.Identity);
         }
         identities.AddRange(CallingConventions.Members.Select(static member => member.Identity));
         identities.AddRange(ResolutionModes.Members.Select(static member => member.Identity));
@@ -858,6 +895,11 @@ public sealed class NativeCoreRegistrationSet
                     Targets: Set("static-defined-callable",
                         "static-defined-data"),
                     Arguments: ExpectedNativeExportArguments()),
+            CoreNativeAttributeRole.ForeignNativeInterface =>
+                (Placement: "primary-declaration",
+                    Targets: Set("interface"),
+                    Arguments:
+                        ExpectedForeignNativeInterfaceArguments()),
             _ => default,
         };
         return schema.Placement == placement
@@ -923,6 +965,15 @@ public sealed class NativeCoreRegistrationSet
                 false, true, true, Set("method", "data"),
                 new CoreNativeAttributeDefault(
                     CoreNativeAttributeDefaultKind.DeclarationName, null)),
+        ];
+
+    private static ImmutableArray<CoreNativeAttributeArgument>
+        ExpectedForeignNativeInterfaceArguments()
+        =>
+        [
+            new("VTableByteOffset",
+                CoreNativeAttributeArgumentKind.UInt32Constant, null,
+                true, false, true, Set("interface"), null),
         ];
 
     private static CoreNativeAttributeDefault EnumMemberDefault(

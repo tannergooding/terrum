@@ -383,7 +383,11 @@ internal sealed record BoundInterfaceDefinition(
     internal BoundInterfaceAccessibility Accessibility { get; init; }
     internal ImmutableArray<string> AttributeTokens { get; init; } = [];
     internal BoundModuleImport? ModuleImport { get; init; }
+    internal BoundForeignNativeInterfaceLayout? ForeignNativeInterface { get; init; }
 }
+
+internal sealed record BoundForeignNativeInterfaceLayout(
+    uint VTableByteOffset);
 
 internal enum BoundInterfaceAccessibility : byte
 {

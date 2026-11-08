@@ -51,6 +51,25 @@ internal static class BoundInterfaceContract
                 || definition.Constraints.Length > SemanticVerifier.MaximumAnalysisVisits
                 || definition.Members.IsDefault
                 || definition.Members.Length > SemanticVerifier.MaximumAnalysisVisits
+                || (definition.ForeignNativeInterface
+                    is BoundForeignNativeInterfaceLayout foreignLayout
+                    && (definition.IsPartial || !definition.Formals.IsEmpty
+                        || !definition.Bases.IsEmpty
+                        || !definition.Constraints.IsEmpty
+                        || foreignLayout.VTableByteOffset
+                            % NativeTargetProfile.PointerSize != 0
+                        || definition.Members.IsEmpty
+                        || definition.Members.Any(static member =>
+                            member is null
+                            || member.Kind != BoundInterfaceMemberKind.Callable
+                            || member.Accessibility
+                                != BoundInterfaceAccessibility.Public
+                            || member.IsStatic || member.IsExternal
+                            || member.IsPartial || !member.RequiresUnsafeCaller
+                            || member.IsAsync || member.HasBody
+                            || !member.TypeParameters.IsEmpty
+                            || !member.Constraints.IsEmpty
+                            || !member.Accessors.IsEmpty)))
                 || !definitions.TryAdd(Identity(definition.QualifiedName,
                     definition.Formals.Length, moduleImport), definition))
             {

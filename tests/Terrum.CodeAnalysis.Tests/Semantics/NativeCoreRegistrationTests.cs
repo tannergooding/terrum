@@ -48,6 +48,229 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void RegistrationRetainsOptionalForeignNativeInterfaceSchema()
+    {
+        var standardRegistration = CreateRegistration();
+        Assert.That(standardRegistration.ForeignNativeInterface, Is.Null);
+
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var schema = registration.ForeignNativeInterface
+            ?? throw new AssertionException(
+                "Expected the selected ForeignNativeInterface schema.");
+        var argument = schema.Arguments.Single();
+        Assert.That(registration.IsValid(), Is.True);
+        Assert.That(schema.Role,
+            Is.EqualTo(CoreNativeAttributeRole.ForeignNativeInterface));
+        Assert.That(schema.Placement, Is.EqualTo("primary-declaration"));
+        Assert.That(schema.Targets, Is.EquivalentTo(Contexts("interface")));
+        Assert.That(argument.Name, Is.EqualTo("VTableByteOffset"));
+        Assert.That(argument.Kind,
+            Is.EqualTo(CoreNativeAttributeArgumentKind.UInt32Constant));
+        Assert.That(argument.IsRequired, Is.True);
+        Assert.That(argument.AllowsPositional, Is.False);
+        Assert.That(argument.AllowsNamed, Is.True);
+        Assert.That(argument.Contexts,
+            Is.EquivalentTo(Contexts("interface")));
+        Assert.That(registration.ModuleBindings.Declarations,
+            Does.Contain(CoreProviderDeclarationSnapshot.From(schema)));
+
+        var wrongRoleSchema = schema with {
+            Role = CoreNativeAttributeRole.NativeExport,
+        };
+        var declarations = registration.ModuleBindings.Declarations
+            .Select(declaration => declaration.Identity == schema.Identity
+                ? CoreProviderDeclarationSnapshot.From(wrongRoleSchema)
+                : declaration)
+            .ToImmutableArray();
+        var wrongRoleBindings = CoreProviderModuleBindings.Create(
+            registration.UsingModuleIdentity,
+            registration.ModuleBindings.Providers, declarations);
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeCoreRegistrationSet.Create(wrongRoleBindings,
+                registration.CallingConventions, registration.ResolutionModes,
+                registration.ResolutionPolicies, registration.NativeImport,
+                registration.NativeCallable, registration.NativeCallConv,
+                registration.NativeExport, wrongRoleSchema));
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceBindsOnlyTheRegisteredAlignedOffset()
+    {
+        const string source = """
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(16))]
+            public interface IProbe {
+                public unsafe int32 Read();
+            }
+            """;
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Interfaces.Single()
+            .ForeignNativeInterface!.VTableByteOffset, Is.EqualTo(16u));
+
+        var aliased = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            alias ForeignInterface = Terrum.Interop.ForeignNativeInterface;
+            [ForeignInterface(VTableByteOffset: uint32(8))]
+            public interface IAliasedProbe {
+                public unsafe int32 Read();
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(aliased.HasErrors, Is.False,
+            string.Join(Environment.NewLine, aliased.Diagnostics));
+        Assert.That(aliased.Program!.Interfaces.Single()
+            .ForeignNativeInterface!.VTableByteOffset, Is.EqualTo(8u));
+
+        var methodTarget = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public interface IMethodTarget {
+                [Terrum.Interop.ForeignNativeInterface(
+                    VTableByteOffset: uint32(0))]
+                public unsafe int32 Read();
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(methodTarget.HasErrors, Is.True,
+            string.Join(Environment.NewLine, methodTarget.Diagnostics));
+        Assert.That(methodTarget.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, methodTarget.Diagnostics));
+
+        var unregistered = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source));
+        Assert.That(unregistered.HasErrors, Is.True,
+            string.Join(Environment.NewLine, unregistered.Diagnostics));
+        Assert.That(unregistered.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, unregistered.Diagnostics));
+
+        var unselected = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                NativeCoreRegistration = CreateRegistration(),
+            });
+        Assert.That(unselected.HasErrors, Is.True,
+            string.Join(Environment.NewLine, unselected.Diagnostics));
+        Assert.That(unselected.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, unselected.Diagnostics));
+
+        var misaligned = Compilation.CreateLibrary(SyntaxTree.Parse(source
+            .Replace("uint32(16)", "uint32(4)", StringComparison.Ordinal)),
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(misaligned.HasErrors, Is.True,
+            string.Join(Environment.NewLine, misaligned.Diagnostics));
+        Assert.That(misaligned.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, misaligned.Diagnostics));
+
+        var positional = Compilation.CreateLibrary(SyntaxTree.Parse(source
+            .Replace("VTableByteOffset: ", "", StringComparison.Ordinal)),
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(positional.HasErrors, Is.True,
+            string.Join(Environment.NewLine, positional.Diagnostics));
+        Assert.That(positional.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, positional.Diagnostics));
+
+        var missingArgument = Compilation.CreateLibrary(SyntaxTree.Parse(source
+            .Replace("(VTableByteOffset: uint32(16))", "",
+                StringComparison.Ordinal)),
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(missingArgument.HasErrors, Is.True,
+            string.Join(Environment.NewLine, missingArgument.Diagnostics));
+        Assert.That(missingArgument.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, missingArgument.Diagnostics));
+
+        var wrongType = Compilation.CreateLibrary(SyntaxTree.Parse(source
+            .Replace("uint32(16)", "\"16\"", StringComparison.Ordinal)),
+            new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(wrongType.HasErrors, Is.True,
+            string.Join(Environment.NewLine, wrongType.Diagnostics));
+        Assert.That(wrongType.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, wrongType.Diagnostics));
+
+        var wrongTarget = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public struct NotAnInterface { private int32 Value; }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(wrongTarget.HasErrors, Is.True,
+            string.Join(Environment.NewLine, wrongTarget.Diagnostics));
+    }
+
+    [Test]
+    public void ForeignNativeInterfaceRejectsUnsupportedInterfaceShapes()
+    {
+        var registration = CreateRegistration(
+            includeForeignNativeInterface: true);
+        var sources = new[] {
+            """
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public partial interface IProbe {
+                public unsafe int32 Read();
+            }
+            """,
+            """
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe<T> {
+                public unsafe int32 Read();
+            }
+            """,
+            """
+            public interface IBase { }
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe : IBase {
+                public unsafe int32 Read();
+            }
+            """,
+            """
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public unsafe int32 Read() { return 42; }
+            }
+            """,
+            """
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IProbe {
+                public static unsafe int32 Read();
+            }
+            """,
+        };
+
+        foreach (var source in sources)
+        {
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source), new CompilationOptions {
+                    NativeCoreRegistration = registration,
+                });
+            Assert.That(compilation.HasErrors, Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [Test]
     public void RegistrationCanOmitNativeExportWhenThatRoleIsNotSelected()
     {
         var fullRegistration = CreateRegistration();
@@ -1985,7 +2208,8 @@ internal sealed class NativeCoreRegistrationTests
             Is.Zero);
     }
 
-    internal static NativeCoreRegistrationSet CreateRegistration()
+    internal static NativeCoreRegistrationSet CreateRegistration(
+        bool includeForeignNativeInterface = false)
     {
         var conventions = CreateEnum("NativeCallingConvention",
             "Terrum.Interop.NativeCallingConvention",
@@ -2005,27 +2229,36 @@ internal sealed class NativeCoreRegistrationTests
             CoreNativeAttributeRole.NativeCallConv, conventions.Identity);
         var nativeExport = CreateSchema("NativeExport", "Terrum.Interop.NativeExport",
             CoreNativeAttributeRole.NativeExport);
+        var foreignNativeInterface = includeForeignNativeInterface
+            ? CreateSchema("ForeignNativeInterface",
+                "Terrum.Interop.ForeignNativeInterface",
+                CoreNativeAttributeRole.ForeignNativeInterface)
+            : null;
         var layoutParts
             = LayoutCoreRegistrationTestData.CreateDeclarations("core.native");
 
+        var declarations
+            = ImmutableArray.CreateBuilder<CoreProviderDeclarationSnapshot>();
+        declarations.Add(CoreProviderDeclarationSnapshot.From(conventions));
+        declarations.Add(CoreProviderDeclarationSnapshot.From(resolutionModes));
+        declarations.Add(CoreProviderDeclarationSnapshot.From(resolutionPolicies));
+        declarations.Add(CoreProviderDeclarationSnapshot.From(nativeImport));
+        declarations.Add(CoreProviderDeclarationSnapshot.From(nativeCallable));
+        declarations.Add(CoreProviderDeclarationSnapshot.From(nativeCallConv));
+        declarations.Add(CoreProviderDeclarationSnapshot.From(nativeExport));
+        if (foreignNativeInterface is CoreNativeAttributeSchema schema)
+        {
+            declarations.Add(CoreProviderDeclarationSnapshot.From(schema));
+        }
+        declarations.AddRange(layoutParts.Declarations);
         var providerBindings = CoreProviderModuleBindings.Create("consumer.module", [
             new CoreProviderModuleOrigin("core.native", "test-revision",
                 new CoreProviderSchemaSelection("core.native-registration", 1),
                 1, 0, 0),
-        ],
-        [
-            CoreProviderDeclarationSnapshot.From(conventions),
-            CoreProviderDeclarationSnapshot.From(resolutionModes),
-            CoreProviderDeclarationSnapshot.From(resolutionPolicies),
-            CoreProviderDeclarationSnapshot.From(nativeImport),
-            CoreProviderDeclarationSnapshot.From(nativeCallable),
-            CoreProviderDeclarationSnapshot.From(nativeCallConv),
-            CoreProviderDeclarationSnapshot.From(nativeExport),
-            .. layoutParts.Declarations,
-        ]);
+        ], declarations.ToImmutable());
         return NativeCoreRegistrationSet.Create(providerBindings, conventions,
             resolutionModes, resolutionPolicies, nativeImport, nativeCallable,
-            nativeCallConv, nativeExport);
+            nativeCallConv, nativeExport, foreignNativeInterface);
     }
 
     private static NativeCoreRegistrationSet CreateSplitProviderRegistration()
@@ -2274,6 +2507,16 @@ internal sealed class NativeCoreRegistrationTests
                 placement = "primary-declaration";
                 targets = Contexts("static-defined-callable",
                     "static-defined-data");
+                break;
+
+            case CoreNativeAttributeRole.ForeignNativeInterface:
+                arguments = [
+                    new("VTableByteOffset",
+                        CoreNativeAttributeArgumentKind.UInt32Constant,
+                        null, true, false, true, Contexts("interface"), null),
+                ];
+                placement = "primary-declaration";
+                targets = Contexts("interface");
                 break;
 
             default:

@@ -4850,6 +4850,9 @@ internal sealed partial class Binder
                 || !TrySelect(registration.NativeCallConv)
                 || (registration.NativeExport is CoreNativeAttributeSchema
                     nativeExport && !TrySelect(nativeExport))
+                || (registration.ForeignNativeInterface is
+                        CoreNativeAttributeSchema foreignNativeInterface
+                    && !TrySelect(foreignNativeInterface))
                 || selected is null)
             {
                 return false;
@@ -5094,7 +5097,10 @@ internal sealed partial class Binder
             || !TrySelect(registration.NativeCallable)
             || !TrySelect(registration.NativeCallConv)
             || (registration.NativeExport is CoreNativeAttributeSchema
-                nativeExport && !TrySelect(nativeExport)))
+                nativeExport && !TrySelect(nativeExport))
+            || (registration.ForeignNativeInterface is
+                    CoreNativeAttributeSchema foreignNativeInterface
+                && !TrySelect(foreignNativeInterface)))
         {
             return false;
         }

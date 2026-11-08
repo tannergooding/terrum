@@ -541,6 +541,10 @@ internal sealed partial class CliTests
                     "\"nativeExport\":{},\"nativeCallConv\":{",
                     StringComparison.Ordinal)),
                 Encoding.UTF8.GetBytes(manifestText.Replace(
+                    "\"nativeCallConv\":{",
+                    "\"foreignNativeInterface\":{},\"nativeCallConv\":{",
+                    StringComparison.Ordinal)),
+                Encoding.UTF8.GetBytes(manifestText.Replace(
                     "\"genericArity\":0,",
                     "\"genericArity\":0.0,",
                     StringComparison.Ordinal)),

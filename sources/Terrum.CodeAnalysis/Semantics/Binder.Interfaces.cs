@@ -187,6 +187,10 @@ internal sealed partial class Binder
                     formals, members.Count));
             }
 
+            var boundMembers = members.ToImmutable();
+            var foreignNativeInterface = BindForeignNativeInterfaceLayout(
+                parts, first, formals, bases.Count, constraints.Count,
+                boundMembers);
             if (!HasUniqueInterfaceMembers(members, first.Declaration.Span))
             {
                 continue;
@@ -198,10 +202,11 @@ internal sealed partial class Binder
                 formals,
                 [.. bases.Distinct()],
                 [.. constraints.Distinct()],
-                members.ToImmutable())
+                boundMembers)
             {
                 Accessibility = first.Accessibility,
                 AttributeTokens = first.AttributeTokens,
+                ForeignNativeInterface = foreignNativeInterface,
             });
         }
 
@@ -216,6 +221,97 @@ internal sealed partial class Binder
 
     private bool HasAcyclicInterfaceBases()
         => BoundInterfaceContract.HasAcyclicBases([.. _interfaces]);
+
+    private BoundForeignNativeInterfaceLayout?
+        BindForeignNativeInterfaceLayout(
+            List<InterfaceDeclarationPart> parts,
+            InterfaceDeclarationPart first,
+            ImmutableArray<BoundInterfaceFormal> formals,
+            int baseCount,
+            int constraintCount,
+            ImmutableArray<BoundInterfaceMemberDefinition> members)
+    {
+        var attributes = new List<(InterfaceDeclarationPart Part,
+            SyntaxNode Attribute)>();
+        foreach (var part in parts)
+        {
+            SetContext(part.Tree, part.Declaration);
+            foreach (var attribute in part.Declaration.Children
+                         .OfType<SyntaxNode>()
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute))
+            {
+                if (IsForeignNativeInterfaceAttribute(attribute))
+                {
+                    attributes.Add((part, attribute));
+                }
+            }
+        }
+
+        if (attributes.Count == 0)
+        {
+            return null;
+        }
+
+        var (attributePart, attributeNode) = attributes[0];
+        SetContext(attributePart.Tree, attributePart.Declaration);
+        if (_nativeCoreRegistration?.ForeignNativeInterface is not
+            CoreNativeAttributeSchema registration)
+        {
+            Report("TRM3030",
+                "ForeignNativeInterface requires an explicitly selected Core schema.",
+                attributeNode.Span);
+            return null;
+        }
+
+        if (attributes.Count != 1
+            || !ReferenceEquals(attributePart, first)
+            || parts.Count != 1 || first.IsPartial
+            || !formals.IsEmpty || baseCount != 0 || constraintCount != 0
+            || members.IsDefaultOrEmpty
+            || members.Any(static member =>
+                member.Kind != BoundInterfaceMemberKind.Callable
+                || member.Accessibility != BoundInterfaceAccessibility.Public
+                || member.IsStatic || member.IsExternal || member.IsPartial
+                || !member.RequiresUnsafeCaller || member.IsAsync
+                || member.HasBody || !member.TypeParameters.IsEmpty
+                || !member.Constraints.IsEmpty || !member.Accessors.IsEmpty))
+        {
+            Report("TRM3030",
+                "ForeignNativeInterface requires one closed, nonpartial interface with public unsafe bodyless instance methods and no bases or constraints.",
+                attributeNode.Span);
+            return null;
+        }
+
+        var selectedAttributeName = AttributeName(attributeNode);
+        if (!TryGetRegisteredNativeAttributeSchema(selectedAttributeName,
+                out var selectedSchema)
+            || selectedSchema.Identity != registration.Identity
+            || !TryGetSingleNamedAttributeArgument(attributeNode,
+                "VTableByteOffset", out var offsetExpression)
+            || !TryBindLayoutUInt32(offsetExpression, out var vtableByteOffset)
+            || vtableByteOffset % NativeTargetProfile.PointerSize != 0)
+        {
+            Report("TRM3030",
+                "ForeignNativeInterface requires the selected schema and one aligned uint32 VTableByteOffset.",
+                attributeNode.Span);
+            return null;
+        }
+
+        return new BoundForeignNativeInterfaceLayout(vtableByteOffset);
+    }
+
+    private bool IsForeignNativeInterfaceAttribute(SyntaxNode attribute)
+    {
+        var name = AttributeName(attribute);
+        return (_nativeCoreRegistration?.ForeignNativeInterface is
+                CoreNativeAttributeSchema selectedSchema
+            && TryGetRegisteredNativeAttributeSchema(name,
+                out var resolvedSchema)
+            && resolvedSchema.Identity == selectedSchema.Identity)
+            || IsNativeAttributeSpelling(name,
+                "Terrum.Interop.ForeignNativeInterface");
+    }
 
     private ImmutableArray<InterfaceFormalSyntax> ParseInterfaceFormals(SyntaxNode? parameters)
     {
@@ -977,6 +1073,15 @@ internal sealed partial class Binder
             var operatorToken = memberKind == BoundInterfaceMemberKind.Operator
                 ? InterfaceOperatorToken(declaration) : TokenKind.Bad;
             var name = InterfaceMemberName(declaration, memberKind, typeNode, operatorToken);
+            foreach (var attribute in declaration.Children.OfType<SyntaxNode>()
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute)
+                         .Where(IsForeignNativeInterfaceAttribute))
+            {
+                Report("TRM3030",
+                    "ForeignNativeInterface is only valid on an interface declaration.",
+                    attribute.Span);
+            }
             var attributes = InterfaceDeclarationAttributes(declaration);
             if (attributes.Contains("NoThrow", StringComparer.Ordinal))
             {
@@ -1461,6 +1566,15 @@ internal sealed partial class Binder
             if (kind is not BoundInterfaceAccessorKind accessorKind)
             {
                 continue;
+            }
+            foreach (var attribute in accessor.Children.OfType<SyntaxNode>()
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute)
+                         .Where(IsForeignNativeInterfaceAttribute))
+            {
+                Report("TRM3030",
+                    "ForeignNativeInterface is only valid on an interface declaration.",
+                    attribute.Span);
             }
             var attributes = InterfaceDeclarationAttributes(accessor);
             if (attributes.Contains("NoThrow", StringComparer.Ordinal))
