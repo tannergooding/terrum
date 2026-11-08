@@ -188,6 +188,28 @@ internal sealed class PrivateRevision106BodyTests
         Assert.That(ValueLayout.Alignment(CheckedReferenceTypes.Type(1), [],
                 reference.CheckedReferenceTypes),
             Is.Zero);
+
+        var neutralCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Other() { return int32(1); }"));
+        Assert.That(neutralCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                neutralCompilation.Diagnostics));
+        var neutralProducer = ModuleCompiler.CreateProducer(
+            neutralCompilation.Program!, ["Other"]);
+        var setReference = ModuleCompiler.CreateReferenceSetFromReferences([
+            reference, ModuleCompiler.CreateReference(neutralProducer),
+        ]);
+        Assert.That(setReference.CheckedReferenceTypes,
+            Is.EqualTo(reference.CheckedReferenceTypes));
+
+        var dependencies = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast);
+        var graph = ModuleCompiler.CreateGraphLibrary(optionalProgram,
+            ["AcceptScalar", "AcceptUnit"], dependencies);
+        var graphReference = ModuleCompiler.CreateGraphReference(graph,
+            ["AcceptScalar", "AcceptUnit"]);
+        Assert.That(graphReference.CheckedReferenceTypes,
+            Is.EqualTo(reference.CheckedReferenceTypes));
     }
 
     [Test]
