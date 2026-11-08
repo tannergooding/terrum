@@ -1105,7 +1105,8 @@ public static partial class ModuleCompiler
 
             checkedReferenceStates[sourceIndex] = 1;
             var referenceType = checkedReferenceTypes[sourceIndex];
-            if (referenceType.IsOptional)
+            if (referenceType.IsOptional
+                && !referenceType.IsOptionalValue)
             {
                 var requiredIndex = checkedReferenceTypes.IndexOf(
                     referenceType with { IsOptional = false });
@@ -1349,7 +1350,8 @@ public static partial class ModuleCompiler
                 if (visitedCheckedReferenceTypes.Add(referenceIndex))
                 {
                     var referenceType = checkedReferenceTypes[referenceIndex];
-                    if (referenceType.IsOptional)
+                    if (referenceType.IsOptional
+                        && !referenceType.IsOptionalValue)
                     {
                         var requiredIndex = checkedReferenceTypes.IndexOf(
                             referenceType with { IsOptional = false });

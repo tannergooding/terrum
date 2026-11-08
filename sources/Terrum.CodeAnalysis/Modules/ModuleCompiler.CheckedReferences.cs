@@ -63,7 +63,9 @@ public static partial class ModuleCompiler
         for (var index = 0; index < referenceTypes.Length; index++)
         {
             var referenceType = referenceTypes[index];
-            if (!IsValidPrivateReferenceValueType(
+            if (!(referenceType.IsOptionalValue
+                    && referenceType.ReferentType == PrimitiveType.Void)
+                && !IsValidPrivateReferenceValueType(
                     referenceType.ReferentType, referenceTypes, structures,
                     classes, functionPointerSignatures, pointerTypes,
                     fixedArrayTypes, moduleWriter.EnumDefinitions)
@@ -92,7 +94,13 @@ public static partial class ModuleCompiler
             byte constructorKind;
             byte qualifiers;
             PrimitiveType innerType;
-            if (referenceType.IsOptional)
+            if (referenceType.IsOptionalValue)
+            {
+                constructorKind = 3;
+                qualifiers = 0;
+                innerType = referenceType.ReferentType;
+            }
+            else if (referenceType.IsOptional)
             {
                 var requiredDefinition = referenceType with {
                     IsOptional = false,
@@ -169,7 +177,9 @@ public static partial class ModuleCompiler
             var qualifiers = reader.ReadByte();
             var reserved = reader.ReadUInt16();
             var referentType = (PrimitiveType)reader.ReadInt32();
-            if (reserved != 0 || referentType == PrimitiveType.Void)
+            if (reserved != 0
+                || (referentType == PrimitiveType.Void
+                    && constructorKind != 3))
             {
                 throw new ModuleFormatException(
                     "Private checked-reference type row has invalid reserved or referent data.");
@@ -219,7 +229,9 @@ public static partial class ModuleCompiler
         for (var index = 0; index < result.Length; index++)
         {
             var referenceType = result[index];
-            if (!IsValidPrivateReferenceValueType(
+            if (!(referenceType.IsOptionalValue
+                    && referenceType.ReferentType == PrimitiveType.Void)
+                && !IsValidPrivateReferenceValueType(
                     referenceType.ReferentType, result, structures, classes,
                     functionPointerSignatures, pointerTypes,
                     fixedArrayTypes, allowUnresolvedEnums: true))
@@ -339,7 +351,7 @@ public static partial class ModuleCompiler
 
             states[sourceIndex] = 1;
             var referenceType = source[sourceIndex];
-            if (referenceType.IsOptional)
+            if (referenceType.IsOptional && !referenceType.IsOptionalValue)
             {
                 var requiredIndex = source.IndexOf(
                     referenceType with { IsOptional = false });
@@ -662,18 +674,30 @@ public static partial class ModuleCompiler
         ReadOptionalReferenceRow(PrimitiveType innerType,
             PrivateCheckedReferenceTypeRow[] rows)
     {
-        if (!CheckedReferenceTypes.IsType(innerType))
+        if (ManagedClassTypes.IsManaged(innerType))
         {
             throw new ModuleFormatException(
-                "The current private host type carrier cannot reconstruct an optional non-reference value.");
+                "Private optional rows duplicate an existing managed optional identity.");
+        }
+
+        if (!CheckedReferenceTypes.IsType(innerType))
+        {
+            return new CheckedReferenceTypeDefinition(innerType,
+                IsWritable: false, IsGarbageCollected: false,
+                IsInitialization: false, IsOptional: true,
+                IsOptionalValue: true);
         }
 
         var innerIndex = CheckedReferenceTypes.Index(innerType);
-        if ((uint)innerIndex >= (uint)rows.Length
-            || rows[innerIndex].ConstructorKind is not (1 or 2))
+        if ((uint)innerIndex >= (uint)rows.Length)
         {
             throw new ModuleFormatException(
-                "Private checked-reference type table contains a nested or unresolved optional layer.");
+                "Private optional row names an absent complete inner type.");
+        }
+        if (rows[innerIndex].ConstructorKind is not (1 or 2))
+        {
+            throw new ModuleFormatException(
+                "Private checked-reference type table contains a nested optional layer.");
         }
 
         var inner = rows[innerIndex];

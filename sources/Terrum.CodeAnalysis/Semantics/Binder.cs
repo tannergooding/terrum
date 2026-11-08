@@ -15242,6 +15242,17 @@ internal sealed partial class Binder
                     }
 
                     var referenceType = _checkedReferenceTypes[index];
+                    if (referenceType.IsOptionalValue)
+                    {
+                        AppendTypeNameText(builder, "option<",
+                            ref remainingCharacters);
+                        AppendTypeName(referenceType.ReferentType, builder,
+                            ref remainingCharacters, ref remainingNodes,
+                            depth + 1);
+                        AppendTypeNameText(builder, ">",
+                            ref remainingCharacters);
+                        break;
+                    }
                     if (referenceType.IsWritable)
                     {
                         AppendTypeNameText(builder, "write ", ref remainingCharacters);

@@ -9,7 +9,8 @@ internal sealed record CheckedReferenceTypeDefinition(
     bool IsWritable,
     bool IsGarbageCollected,
     bool IsInitialization,
-    bool IsOptional);
+    bool IsOptional,
+    bool IsOptionalValue = false);
 
 internal static class CheckedReferenceTypes
 {
@@ -31,7 +32,9 @@ internal static class SourceOptionalTypes
         {
             return true;
         }
-        return IsOptionalReference(type, referenceTypes);
+        return CheckedReferenceTypeContract.IsValidCompleteType(
+                type, referenceTypes)
+            && referenceTypes[CheckedReferenceTypes.Index(type)].IsOptional;
     }
 
     internal static bool IsOptionalReference(
@@ -51,6 +54,11 @@ internal static class SourceOptionalTypes
         if (ManagedClassTypes.IsOptional(type))
         {
             return true;
+        }
+        if (CheckedReferenceTypeContract.IsOptionalValueType(
+                type, referenceTypes))
+        {
+            return false;
         }
         if (nativeLoweringAgreement is not (
                 CompilationOptions.WindowsX64NormalBackingAgreement
@@ -77,6 +85,13 @@ internal static class SourceOptionalTypes
         if (ManagedClassTypes.IsOptional(type))
         {
             requiredType = ManagedClassTypes.Required(type);
+            return true;
+        }
+        if (CheckedReferenceTypeContract.IsOptionalValueType(
+                type, referenceTypes))
+        {
+            requiredType = referenceTypes[
+                CheckedReferenceTypes.Index(type)].ReferentType;
             return true;
         }
         if (!IsOptionalReference(type, referenceTypes))
@@ -156,8 +171,20 @@ internal static class CheckedReferenceTypeContract
     internal static bool IsValidType(
         PrimitiveType type,
         IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes) =>
+        IsValidCompleteType(type, referenceTypes)
+        && !referenceTypes[CheckedReferenceTypes.Index(type)].IsOptionalValue;
+
+    internal static bool IsValidCompleteType(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes) =>
         CheckedReferenceTypes.IsType(type)
         && (uint)CheckedReferenceTypes.Index(type) < (uint)referenceTypes.Count;
+
+    internal static bool IsOptionalValueType(
+        PrimitiveType type,
+        IReadOnlyList<CheckedReferenceTypeDefinition> referenceTypes) =>
+        IsValidCompleteType(type, referenceTypes)
+        && referenceTypes[CheckedReferenceTypes.Index(type)].IsOptionalValue;
 
     internal static bool IsImplicitReferenceValueType(
         PrimitiveType type, IReadOnlyList<BoundStruct> structures,
@@ -350,7 +377,18 @@ internal static class CheckedReferenceTypeContract
 
         var referenceType = referenceTypes[index];
         if (referenceType is null || referenceType.ReferentType == PrimitiveType.Void
-            || (referenceType.IsGarbageCollected && referenceType.IsInitialization))
+                && !referenceType.IsOptionalValue
+            || (referenceType.IsGarbageCollected
+                && referenceType.IsInitialization)
+            || (referenceType.IsOptionalValue
+                && (!referenceType.IsOptional
+                    || referenceType.IsWritable
+                    || referenceType.IsGarbageCollected
+                    || referenceType.IsInitialization
+                    || CheckedReferenceTypes.IsType(
+                        referenceType.ReferentType)
+                    || ManagedClassTypes.IsManaged(
+                        referenceType.ReferentType))))
         {
             return false;
         }

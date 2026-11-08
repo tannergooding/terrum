@@ -133,6 +133,44 @@ internal sealed class CheckedReferenceTypeTests
             () => ModuleCompiler.CreateReference(malformed));
     }
 
+    [Test]
+    public void PrivateRevision106RejectsCyclesAcrossPointerAndReferenceRows()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public unsafe void Accept(ref<ptr<int32>> value) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var parameterType = global::System.Linq.Enumerable.Single(
+            program.Functions,
+            static function => function.Name == "Accept").Variables[0].Type;
+        var referenceType = CheckedReferenceTypes.Type(
+            CheckedReferenceTypes.Index(parameterType));
+        var producer = ModuleCompiler.CreateProducer(program, ["Accept"]);
+
+        var malformedProgram = program with {
+            NativePointerTypes = [
+                .. program.NativePointerTypes.SetItem(0,
+                    program.NativePointerTypes[0] with {
+                        PointeeType = referenceType,
+                    }),
+            ],
+        };
+        _ = Assert.Throws<ModuleContractException>(
+            () => ModuleCompiler.CreateProducer(malformedProgram, ["Accept"]));
+
+        var malformed = (byte[])producer.Clone();
+        var pointerTypeRowOffset
+            = FindPrivate106NativePointerTypeRowOffset(malformed);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(pointerTypeRowOffset, sizeof(int)),
+            (int)referenceType);
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(malformed));
+    }
+
     private static int FindPrivate106CheckedReferenceTypeRowOffset(
         byte[] module)
     {
@@ -153,6 +191,25 @@ internal sealed class CheckedReferenceTypeTests
             * (sizeof(int) + sizeof(byte))));
         Assert.That(ReadInt32(module, ref offset), Is.Zero);
         Assert.That(ReadInt32(module, ref offset), Is.EqualTo(6));
+        return offset;
+    }
+
+    private static int FindPrivate106NativePointerTypeRowOffset(
+        byte[] module)
+    {
+        var offset = 2 * sizeof(int);
+        SkipPrivateString(module, ref offset);
+        offset += 3 * sizeof(byte);
+        SkipPrivateString(module, ref offset);
+        Assert.That(ReadInt32(module, ref offset), Is.Zero);
+        offset += sizeof(int);
+
+        for (var tableIndex = 0; tableIndex < 4; tableIndex++)
+        {
+            Assert.That(ReadInt32(module, ref offset), Is.Zero);
+        }
+
+        Assert.That(ReadInt32(module, ref offset), Is.EqualTo(1));
         return offset;
     }
 

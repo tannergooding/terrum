@@ -132,6 +132,65 @@ internal sealed class PrivateRevision106BodyTests
     }
 
     [Test]
+    public void PrivateOptionalValueTypesRoundTripWithoutAssigningLayout()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void AcceptScalar(ref<int32>? value) {}
+            public void AcceptUnit(ref<int32>? value) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var functions = program.Functions.ToBuilder();
+        for (var index = 0; index < functions.Count; index++)
+        {
+            var function = functions[index];
+            var optionalTypeIndex = function.Name switch {
+                "AcceptScalar" => 0,
+                "AcceptUnit" => 1,
+                _ => -1,
+            };
+            if (optionalTypeIndex >= 0)
+            {
+                functions[index] = function with {
+                    Variables = function.Variables.SetItem(0,
+                        function.Variables[0] with {
+                            Type = CheckedReferenceTypes.Type(
+                                optionalTypeIndex),
+                        }),
+                };
+            }
+        }
+
+        var optionalProgram = program with {
+            CheckedReferenceTypes = [
+                new CheckedReferenceTypeDefinition(PrimitiveType.Int32,
+                    IsWritable: false, IsGarbageCollected: false,
+                    IsInitialization: false, IsOptional: true,
+                    IsOptionalValue: true),
+                new CheckedReferenceTypeDefinition(PrimitiveType.Void,
+                    IsWritable: false, IsGarbageCollected: false,
+                    IsInitialization: false, IsOptional: true,
+                    IsOptionalValue: true),
+            ],
+            Functions = functions.ToImmutable(),
+        };
+        var producer = ModuleCompiler.CreateProducer(optionalProgram,
+            ["AcceptScalar", "AcceptUnit"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+
+        Assert.That(reference.CheckedReferenceTypes,
+            Is.EqualTo(optionalProgram.CheckedReferenceTypes));
+        Assert.That(ValueLayout.Size(CheckedReferenceTypes.Type(0), [],
+                reference.CheckedReferenceTypes),
+            Is.Zero);
+        Assert.That(ValueLayout.Alignment(CheckedReferenceTypes.Type(1), [],
+                reference.CheckedReferenceTypes),
+            Is.Zero);
+    }
+
+    [Test]
     public void PrivateReferenceProjectionInternsAndOrdersCompleteRows()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

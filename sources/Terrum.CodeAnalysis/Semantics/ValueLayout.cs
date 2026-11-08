@@ -171,7 +171,8 @@ internal static class ValueLayout
             return 0;
         }
         var referenceType = checkedReferenceTypes[index];
-        return referenceType is not null && !referenceType.IsGarbageCollected
+        return referenceType is not null && !referenceType.IsOptionalValue
+            && !referenceType.IsGarbageCollected
             && !referenceType.IsInitialization
             ? nativeLoweringAgreement
                 == CompilationOptions.WindowsX64NormalBackingAgreement

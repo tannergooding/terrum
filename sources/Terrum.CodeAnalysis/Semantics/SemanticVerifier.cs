@@ -447,7 +447,10 @@ public static partial class SemanticVerifier
         }
         if (!CheckedReferenceTypeContract.IsValidTable(program.CheckedReferenceTypes)
             || program.CheckedReferenceTypes.Any(referenceType =>
-                referenceType is null || !ValidType(referenceType.ReferentType, false, program)))
+                referenceType is null
+                || (referenceType.ReferentType != PrimitiveType.Void
+                    && !ValidType(referenceType.ReferentType, false,
+                        program))))
         {
             throw InvalidEffect(default, "CheckedReference");
         }
@@ -17187,7 +17190,8 @@ public static partial class SemanticVerifier
             || NativePointerTypeContract.IsValidType(type, program.NativePointerTypes)
             || NativeFunctionPointerContract.IsValidType(type, program.NativeFunctionPointerSignatures)
             || BoundGenericNominalTypeContract.IsValidType(type, program)
-            || CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes)
+            || CheckedReferenceTypeContract.IsValidCompleteType(type,
+                program.CheckedReferenceTypes)
             || (ManagedClassTypes.IsManaged(type) && (ManagedClassTypes.Readonly(type) is
                 PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode))
             || ((ManagedClassTypes.IsClass(type) || (ManagedClassTypes.IsOptional(type)

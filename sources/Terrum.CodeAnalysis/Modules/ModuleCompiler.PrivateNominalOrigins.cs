@@ -1384,7 +1384,7 @@ public static partial class ModuleCompiler
                 AddType(module.NativeFixedArrayTypes[index].ElementType);
                 return;
             }
-            if (CheckedReferenceTypeContract.IsValidType(type,
+            if (CheckedReferenceTypeContract.IsValidCompleteType(type,
                     module.CheckedReferenceTypes))
             {
                 AddType(module.CheckedReferenceTypes[
