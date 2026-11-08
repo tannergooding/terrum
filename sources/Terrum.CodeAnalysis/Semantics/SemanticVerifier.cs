@@ -403,7 +403,8 @@ public static partial class SemanticVerifier
         }
         if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes, program.Structures,
                 program.NativeFunctionPointerSignatures,
-                program.NativeFixedArrayTypes)
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes)
             || program.NativePointerTypes.Any(pointer =>
                 BoundEnumTypes.IsType(pointer.PointeeType)
                 && !BoundEnumTypes.IsValidType(pointer.PointeeType,
@@ -614,7 +615,8 @@ public static partial class SemanticVerifier
         if (program.Structures.Any(static structure => structure is not null && structure.BlittableTargetRequirement != 0))
         {
             _ = FixedLayoutStorage.Validate(program.Structures,
-                program.NativeFixedArrayTypes, duplicateNameViewIndexes);
+                program.NativeFixedArrayTypes, duplicateNameViewIndexes,
+                program.CheckedReferenceTypes);
         }
         var structNames = new Dictionary<string, bool>(program.Structures.Length,
             StringComparer.Ordinal);
@@ -671,7 +673,9 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures,
-                    program.CheckedReferenceTypes, program.NativeLoweringAgreement);
+                    program.CheckedReferenceTypes,
+                    program.NativeLoweringAgreement,
+                    program.NativeFixedArrayTypes);
                 if (width > int.MaxValue || field.Offset > int.MaxValue
                     || field.Size > int.MaxValue)
                 {
@@ -820,7 +824,8 @@ public static partial class SemanticVerifier
                     if (!NativeFixedArrayContract.TryGetLayout(field.Type,
                             array.ElementType, array.ElementCount,
                             program.Structures, program.NativeFixedArrayTypes,
-                            out var layout)
+                            out var layout,
+                            program.CheckedReferenceTypes)
                         || layout.Alignment > int.MaxValue
                         || layout.RequiredAlignment > int.MaxValue)
                     {
@@ -835,7 +840,8 @@ public static partial class SemanticVerifier
                 {
                     width = ValueLayout.Size(field.Type, program.Structures,
                         program.CheckedReferenceTypes,
-                        program.NativeLoweringAgreement);
+                        program.NativeLoweringAgreement,
+                        program.NativeFixedArrayTypes);
                     fieldAlignment = nested >= 0 ? alignments[nested]
                         : ValueLayout.Alignment(field.Type,
                             program.Structures, program.CheckedReferenceTypes,
@@ -844,7 +850,9 @@ public static partial class SemanticVerifier
                     fieldRequiredAlignment = nested >= 0
                         ? requiredAlignments[nested]
                         : ValueLayout.RequiredAlignment(field.Type,
-                            program.Structures, program.NativeFixedArrayTypes);
+                            program.Structures,
+                            program.NativeFixedArrayTypes,
+                            program.CheckedReferenceTypes);
                 }
                 var fieldPlacementAlignment = fieldAlignment;
                 if ((structure.IsSequential || structure.IsUnion)
@@ -17354,7 +17362,8 @@ public static partial class SemanticVerifier
                 : throw InvalidEffect(default, "NativeImport")
             : ValueLayout.Size(type, program.Structures,
                 program.CheckedReferenceTypes,
-                program.NativeLoweringAgreement);
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes);
         return size <= (ulong)ValueLayout.MaximumStructureSize;
     }
 
@@ -19421,7 +19430,8 @@ public static partial class SemanticVerifier
                 NativeFixedArrayTypes.Index(type)].ByteExtent
             : ValueLayout.Size(type, program.Structures,
                 program.CheckedReferenceTypes,
-                program.NativeLoweringAgreement);
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes);
         return MaterializedPayloadSize(size);
     }
 

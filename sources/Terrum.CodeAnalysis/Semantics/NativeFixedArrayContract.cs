@@ -28,7 +28,8 @@ internal static class NativeFixedArrayContract
         var fixedArrays = program.NativeFixedArrayTypes;
         if (!SupportsRuntimePolicy(program.RuntimePolicy)
             || fixedArrays.IsDefault
-            || !IsValidTable(program.Structures, fixedArrays))
+            || !IsValidTable(program.Structures, fixedArrays,
+                program.CheckedReferenceTypes))
         {
             return false;
         }
@@ -52,7 +53,9 @@ internal static class NativeFixedArrayContract
 
     internal static bool IsValidTable(
         IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
     {
         if (fixedArrays.Count is > SemanticVerifier.MaximumAnalysisVisits
             or > NativeFixedArrayTypes.MaximumCount)
@@ -69,6 +72,7 @@ internal static class NativeFixedArrayContract
                     definition.ElementCount))
                 || !TryComputeLayout(definition.ElementType,
                     definition.ElementCount, structures, fixedArrays,
+                    checkedReferenceTypes,
                     out var expected)
                 || expected.ElementStride != definition.ElementStride
                 || expected.ByteExtent != definition.ByteExtent
@@ -115,15 +119,19 @@ internal static class NativeFixedArrayContract
 
     internal static bool IsSupportedElementType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
-        => IsSupportedElement(type, structures, fixedArrays, [],
-            allowEnums: true);
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
+        => IsSupportedElement(type, structures, fixedArrays,
+            checkedReferenceTypes, [], allowEnums: true);
 
     internal static bool IsRootlessCopyFieldType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
-        => IsSupportedElement(type, structures, fixedArrays, [],
-            allowEnums: true);
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
+        => IsSupportedElement(type, structures, fixedArrays,
+            checkedReferenceTypes, [], allowEnums: true);
 
     internal static bool IsRootlessCopyAggregateWithFixedArrayFields(
         PrimitiveType type,
@@ -131,10 +139,13 @@ internal static class NativeFixedArrayContract
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
         IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
         IReadOnlyList<NativeFunctionPointerSignatureDefinition>
-            functionPointers)
+            functionPointers,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
         => !NativeFixedArrayTypes.IsType(type)
             && HasInlineFixedArrayFieldStorage(type, structures, fixedArrays)
-            && IsRootlessCopyFieldType(type, structures, fixedArrays)
+            && IsRootlessCopyFieldType(type, structures, fixedArrays,
+                checkedReferenceTypes)
             && !HasUnsupportedFixedArraySignatureType(type, structures,
                 fixedArrays, pointerTypes, functionPointers);
 
@@ -280,30 +291,38 @@ internal static class NativeFixedArrayContract
     internal static bool TryCreateType(PrimitiveType elementType,
         ulong elementCount, IReadOnlyList<BoundStruct> structures,
         List<BoundNativeFixedArrayType> fixedArrays,
-        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout)
+        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
         => TryCreateTypeCore(elementType, elementCount, structures,
-            fixedArrays, null, out arrayType, out layout);
+            fixedArrays, null, out arrayType, out layout,
+            checkedReferenceTypes);
 
     internal static bool TryCreateType(PrimitiveType elementType,
         ulong elementCount, IReadOnlyList<BoundStruct> structures,
         List<BoundNativeFixedArrayType> fixedArrays,
         Dictionary<(PrimitiveType ElementType, ulong ElementCount), int>
             indexes,
-        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout)
+        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
         => TryCreateTypeCore(elementType, elementCount, structures,
-            fixedArrays, indexes, out arrayType, out layout);
+            fixedArrays, indexes, out arrayType, out layout,
+            checkedReferenceTypes);
 
     private static bool TryCreateTypeCore(PrimitiveType elementType,
         ulong elementCount, IReadOnlyList<BoundStruct> structures,
         List<BoundNativeFixedArrayType> fixedArrays,
         Dictionary<(PrimitiveType ElementType, ulong ElementCount), int>?
             indexes,
-        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout)
+        out PrimitiveType arrayType, out BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes)
     {
         arrayType = PrimitiveType.Int32;
         layout = default;
         if (!TryComputeLayout(elementType, elementCount, structures,
-                fixedArrays, out var geometry))
+                fixedArrays, checkedReferenceTypes, out var geometry))
         {
             return false;
         }
@@ -383,7 +402,9 @@ internal static class NativeFixedArrayContract
         PrimitiveType elementType, ulong elementCount,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
-        out BoundNativeFixedArrayLayout layout)
+        out BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
     {
         layout = default;
         if (!NativeFixedArrayTypes.IsType(arrayType))
@@ -401,7 +422,7 @@ internal static class NativeFixedArrayContract
         if (definition.ElementType != elementType
             || definition.ElementCount != elementCount
             || !TryComputeLayout(elementType, elementCount, structures,
-                fixedArrays, out var geometry)
+                fixedArrays, checkedReferenceTypes, out var geometry)
             || definition.ElementStride != geometry.ElementStride
             || definition.ByteExtent != geometry.ByteExtent
             || definition.Alignment != geometry.Alignment
@@ -417,7 +438,9 @@ internal static class NativeFixedArrayContract
     internal static bool TryGetLayout(PrimitiveType arrayType,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
-        out BoundNativeFixedArrayLayout layout)
+        out BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
     {
         layout = default;
         if (!NativeFixedArrayTypes.IsType(arrayType))
@@ -433,36 +456,42 @@ internal static class NativeFixedArrayContract
 
         var definition = fixedArrays[index];
         return TryGetLayout(arrayType, definition.ElementType,
-            definition.ElementCount, structures, fixedArrays, out layout);
+            definition.ElementCount, structures, fixedArrays, out layout,
+            checkedReferenceTypes);
     }
 
     internal static bool MatchesType(PrimitiveType arrayType,
         BoundNativeFixedArrayLayout layout,
         IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
         => arrayType == layout.CarrierType
             && TryGetLayout(arrayType, structures, fixedArrays,
-                out var expected)
+                out var expected, checkedReferenceTypes)
             && expected == layout;
 
     internal static bool MatchesType(PrimitiveType arrayType,
         BoundNativeFixedArrayLayout layout, BoundProgram program)
         => MatchesType(arrayType, layout, program.Structures,
-            program.NativeFixedArrayTypes);
+            program.NativeFixedArrayTypes, program.CheckedReferenceTypes);
 
     internal static bool MatchesLayout(BoundNativeFixedArrayLayout layout,
         IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
         => TryGetLayout(layout.CarrierType, layout.ElementType,
                 layout.ElementCount, structures, fixedArrays,
-                out var expected)
+                out var expected, checkedReferenceTypes)
             && expected == layout;
 
     internal static bool MatchesLayout(BoundNativeFixedArrayLayout layout,
         BoundProgram program)
         => MatchesProgram(program)
             && MatchesLayout(layout, program.Structures,
-                program.NativeFixedArrayTypes);
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes);
 
     internal static bool MatchesPath(PrimitiveType rootType,
         ImmutableArray<BoundNativeFixedArrayProjection> projections,
@@ -837,20 +866,26 @@ internal static class NativeFixedArrayContract
     private static bool TryComputeLayout(PrimitiveType elementType,
         ulong elementCount, IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes,
         out ArrayLayout layout)
     {
         layout = default;
-        if (!IsSupportedElementType(elementType, structures, fixedArrays)
+        if (!IsSupportedElementType(elementType, structures, fixedArrays,
+                checkedReferenceTypes)
             || !TryGetTypeLayout(elementType, structures, fixedArrays,
+                checkedReferenceTypes,
                 out var elementLayout))
         {
             return false;
         }
 
         var alignment = Math.Max(1UL, elementLayout.Alignment);
+        var strideAlignment = Math.Max(alignment,
+            Math.Max(1UL, elementLayout.RequiredAlignment));
         try
         {
-            var stride = RoundUp(elementLayout.Size, alignment);
+            var stride = RoundUp(elementLayout.Size, strideAlignment);
             var extent = checked(elementCount * stride);
             if (extent > GetTargetNuintMaximum())
             {
@@ -870,6 +905,8 @@ internal static class NativeFixedArrayContract
     private static bool IsSupportedElement(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes,
         HashSet<PrimitiveType> visiting, bool allowEnums)
     {
         if (BoundEnumTypes.IsType(type))
@@ -888,6 +925,31 @@ internal static class NativeFixedArrayContract
             return true;
         }
 
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            var index = CheckedReferenceTypes.Index(type);
+            if (checkedReferenceTypes is null
+                || (uint)index >= (uint)checkedReferenceTypes.Count
+                || !CheckedReferenceTypeContract.IsOptionalValueType(type,
+                    checkedReferenceTypes)
+                || !visiting.Add(type))
+            {
+                return false;
+            }
+
+            try
+            {
+                return IsSupportedElement(
+                    checkedReferenceTypes[index].ReferentType, structures,
+                    fixedArrays, checkedReferenceTypes, visiting,
+                    allowEnums);
+            }
+            finally
+            {
+                _ = visiting.Remove(type);
+            }
+        }
+
         if (!visiting.Add(type))
         {
             return false;
@@ -900,7 +962,8 @@ internal static class NativeFixedArrayContract
                 var index = NativeFixedArrayTypes.Index(type);
                 return (uint)index < (uint)fixedArrays.Count
                     && IsSupportedElement(fixedArrays[index].ElementType,
-                        structures, fixedArrays, visiting, allowEnums);
+                        structures, fixedArrays, checkedReferenceTypes,
+                        visiting, allowEnums);
             }
 
             var structureIndex = (int)type - 100;
@@ -924,7 +987,8 @@ internal static class NativeFixedArrayContract
             {
                 if (field.RequiresUnsafeCaller
                     || !IsSupportedElement(field.Type, structures,
-                        fixedArrays, visiting, allowEnums))
+                        fixedArrays, checkedReferenceTypes, visiting,
+                        allowEnums))
                 {
                     return false;
                 }
@@ -941,6 +1005,8 @@ internal static class NativeFixedArrayContract
     private static bool TryGetTypeLayout(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes,
         out TypeLayout layout)
     {
         if (NativeFixedArrayTypes.IsType(type))
@@ -953,6 +1019,25 @@ internal static class NativeFixedArrayContract
                     fixedArray.Alignment, fixedArray.RequiredAlignment);
                 return true;
             }
+        }
+
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            if (checkedReferenceTypes is not null
+                && CheckedReferenceTypeContract.IsOptionalValueType(type,
+                    checkedReferenceTypes)
+                && ValueLayout.TryGetOptionalValueLayout(type, structures,
+                    checkedReferenceTypes, null, fixedArrays,
+                    out var optionalLayout))
+            {
+                layout = new TypeLayout(optionalLayout.Size,
+                    checked((ulong)optionalLayout.Alignment),
+                    checked((ulong)optionalLayout.RequiredAlignment));
+                return true;
+            }
+
+            layout = default;
+            return false;
         }
 
         if (type == PrimitiveType.Void)
@@ -990,7 +1075,8 @@ internal static class NativeFixedArrayContract
             && structureIndex < structures.Count)
         {
             return TryGetStructureLayout(structures[structureIndex],
-                structures, fixedArrays, out layout);
+                structures, fixedArrays, checkedReferenceTypes,
+                out layout);
         }
 
         if (PrimitiveTypeFacts.ScalarWidth(type) > 0)
@@ -1014,6 +1100,8 @@ internal static class NativeFixedArrayContract
     private static bool TryGetStructureLayout(BoundStruct structure,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes,
         out TypeLayout layout)
     {
         layout = default;
@@ -1037,7 +1125,7 @@ internal static class NativeFixedArrayContract
         foreach (var field in structure.Fields)
         {
             if (!TryGetTypeLayout(field.Type, structures, fixedArrays,
-                    out var fieldLayout))
+                    checkedReferenceTypes, out var fieldLayout))
             {
                 return false;
             }

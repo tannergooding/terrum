@@ -132,18 +132,29 @@ internal sealed class PrivateRevision106BodyTests
     }
 
     [Test]
-    public void PrivateOptionalValueTypesRoundTripWithoutAssigningLayout()
+    public void PrivateOptionalValueTypesUseTaggedLayoutInPrivateGraphs()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public void AcceptScalar(int32? value) {}
+            public void AcceptBoolean(bool? value) {}
+            public void AcceptWide(int64? value) {}
             public void AcceptUnit(option<void> value) {}
+            public unsafe void AcceptPointer(ptr<int32>? value) {}
+            public unsafe void AcceptRawPointer(ptr<void>? value) {}
+            public unsafe void AcceptRawPointerConstructor(option<ptr<void>> value) {}
+            public unsafe void AcceptFunctionPointer(option<fnptr<int32, int32>> value) {}
+            public unsafe void AcceptFunctionPointerSuffix(fnptr<int32, int32>? value) {}
+            public void AcceptReference(option<ref<int32>> value) {}
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var program = compilation.Program!;
         var producer = ModuleCompiler.CreateProducer(program,
-            ["AcceptScalar", "AcceptUnit"]);
+            ["AcceptScalar", "AcceptBoolean", "AcceptWide", "AcceptUnit",
+                "AcceptPointer", "AcceptRawPointer",
+                "AcceptRawPointerConstructor", "AcceptFunctionPointer",
+                "AcceptFunctionPointerSuffix", "AcceptReference"]);
         var reference = ModuleCompiler.CreateReference(producer);
 
         var scalarType = global::System.Linq.Enumerable.Single(
@@ -167,11 +178,128 @@ internal sealed class PrivateRevision106BodyTests
 
         Assert.That(ValueLayout.Size(scalarType, [],
                 reference.CheckedReferenceTypes),
-            Is.Zero);
+            Is.EqualTo(8));
+        Assert.That(ValueLayout.Alignment(scalarType, [],
+                reference.CheckedReferenceTypes),
+            Is.EqualTo(4));
+        Assert.That(ValueLayout.RequiredAlignment(scalarType, [],
+                checkedReferenceTypes: reference.CheckedReferenceTypes),
+            Is.EqualTo(1));
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(scalarType, [],
+                reference.CheckedReferenceTypes, null, [],
+                out var scalarLayout),
+            Is.True);
+        Assert.That(scalarLayout.PayloadOffset, Is.EqualTo(4));
+        Assert.That(scalarLayout.UsesNullNiche, Is.False);
+        var booleanType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptBoolean")
+            .Variables[0].Type;
+        Assert.That(ValueLayout.Size(booleanType, [],
+                reference.CheckedReferenceTypes),
+            Is.EqualTo(2));
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(booleanType, [],
+                reference.CheckedReferenceTypes, null, [],
+                out var booleanLayout),
+            Is.True);
+        Assert.That(booleanLayout.PayloadOffset, Is.EqualTo(1));
+        var wideType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptWide")
+            .Variables[0].Type;
+        Assert.That(ValueLayout.Size(wideType, [],
+                reference.CheckedReferenceTypes),
+            Is.EqualTo(16));
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(wideType, [],
+                reference.CheckedReferenceTypes, null, [],
+                out var wideLayout),
+            Is.True);
+        Assert.That(wideLayout.PayloadOffset, Is.EqualTo(8));
         Assert.That(ValueLayout.Alignment(unitType, [],
                 reference.CheckedReferenceTypes),
-            Is.Zero);
-
+            Is.EqualTo(1));
+        Assert.That(ValueLayout.Size(unitType, [],
+                reference.CheckedReferenceTypes),
+            Is.EqualTo(1));
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(unitType, [],
+                reference.CheckedReferenceTypes, null, [],
+                out var unitLayout),
+            Is.True);
+        Assert.That(unitLayout.PayloadOffset, Is.EqualTo(1));
+        Assert.That(unitLayout.Size, Is.EqualTo(1));
+        var pointerType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptPointer")
+            .Variables[0].Type;
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(pointerType, [],
+                reference.CheckedReferenceTypes, null, [],
+                out var pointerLayout),
+            Is.True);
+        Assert.That(pointerLayout.UsesNullNiche, Is.True);
+        Assert.That(pointerLayout.Size,
+            Is.EqualTo((ulong)NativeTargetProfile.PointerSize));
+        var rawPointerType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptRawPointer")
+            .Variables[0].Type;
+        var rawPointerConstructorType
+            = global::System.Linq.Enumerable.Single(reference.Functions,
+                static function => function.Name
+                    == "AcceptRawPointerConstructor")
+                .Variables[0].Type;
+        Assert.That(rawPointerType, Is.EqualTo(rawPointerConstructorType));
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(rawPointerType,
+                reference.Structures, reference.CheckedReferenceTypes, null,
+                reference.NativeFixedArrayTypes, out var rawPointerLayout),
+            Is.True);
+        Assert.That(rawPointerLayout.UsesNullNiche, Is.True);
+        Assert.That(rawPointerLayout.Size,
+            Is.EqualTo((ulong)NativeTargetProfile.PointerSize));
+        var functionPointerType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptFunctionPointer")
+            .Variables[0].Type;
+        Assert.That(CheckedReferenceTypes.IsType(functionPointerType),
+            Is.True, functionPointerType.ToString());
+        var functionPointerDefinition = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(functionPointerType)];
+        Assert.That(functionPointerDefinition.IsOptionalValue,
+            Is.True, functionPointerDefinition.ToString());
+        var functionPointerSuffixType
+            = global::System.Linq.Enumerable.Single(
+                reference.Functions,
+                static function => function.Name
+                    == "AcceptFunctionPointerSuffix")
+                .Variables[0].Type;
+        Assert.That(functionPointerSuffixType,
+            Is.EqualTo(functionPointerType));
+        Assert.That(NativeFunctionPointerTypes.IsType(
+                functionPointerDefinition.ReferentType),
+            Is.True, functionPointerDefinition.ToString());
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(
+                functionPointerType, reference.Structures,
+                reference.CheckedReferenceTypes, null,
+                reference.NativeFixedArrayTypes,
+                out var functionPointerLayout),
+            Is.True);
+        Assert.That(functionPointerLayout.UsesNullNiche, Is.False);
+        Assert.That(functionPointerLayout.PayloadOffset,
+            Is.EqualTo((ulong)NativeTargetProfile.PointerSize));
+        Assert.That(functionPointerLayout.Size,
+            Is.EqualTo(2UL * (ulong)NativeTargetProfile.PointerSize));
+        var optionalReferenceType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptReference")
+            .Variables[0].Type;
+        Assert.That(reference.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(optionalReferenceType)]
+                .IsOptionalValue,
+            Is.False);
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(
+                optionalReferenceType, reference.Structures,
+                reference.CheckedReferenceTypes, null,
+                reference.NativeFixedArrayTypes, out _),
+            Is.False);
         var neutralCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Other() { return int32(1); }"));
         Assert.That(neutralCompilation.HasErrors, Is.False,
@@ -188,11 +316,38 @@ internal sealed class PrivateRevision106BodyTests
         var dependencies = new CompilationReference([], [],
             BoundRuntimePolicy.FailFast);
         var graph = ModuleCompiler.CreateGraphLibrary(program,
-            ["AcceptScalar", "AcceptUnit"], dependencies);
+            ["AcceptScalar", "AcceptBoolean", "AcceptWide", "AcceptUnit",
+                "AcceptPointer", "AcceptRawPointer",
+                "AcceptRawPointerConstructor", "AcceptFunctionPointer",
+                "AcceptFunctionPointerSuffix", "AcceptReference"],
+            dependencies);
         var graphReference = ModuleCompiler.CreateGraphReference(graph,
-            ["AcceptScalar", "AcceptUnit"]);
+            ["AcceptScalar", "AcceptBoolean", "AcceptWide", "AcceptUnit",
+                "AcceptPointer", "AcceptRawPointer",
+                "AcceptRawPointerConstructor", "AcceptFunctionPointer",
+                "AcceptFunctionPointerSuffix", "AcceptReference"]);
         Assert.That(graphReference.CheckedReferenceTypes,
             Is.EqualTo(reference.CheckedReferenceTypes));
+
+        var aggregateCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                struct Pair { int32 First; int32 Second; }
+                void Accept(Pair? value) {}
+                """));
+        Assert.That(aggregateCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                aggregateCompilation.Diagnostics));
+        var aggregateProgram = aggregateCompilation.Program!;
+        var aggregateType = aggregateProgram.Functions.Single().Variables[0]
+            .Type;
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(aggregateType,
+                aggregateProgram.Structures,
+                aggregateProgram.CheckedReferenceTypes, null,
+                aggregateProgram.NativeFixedArrayTypes,
+                out var aggregateLayout),
+            Is.True);
+        Assert.That(aggregateLayout.PayloadOffset, Is.EqualTo(4));
+        Assert.That(aggregateLayout.Size, Is.EqualTo(12));
     }
 
     [Test]

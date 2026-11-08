@@ -1063,7 +1063,8 @@ internal sealed partial class Binder
                     child.Span);
             }
             var width = ValueLayout.Size(type, _structs,
-                [.. _checkedReferenceTypes], _nativeLoweringAgreement);
+                [.. _checkedReferenceTypes], _nativeLoweringAgreement,
+                _nativeFixedArrayTypes);
             var alignment = width == 0 ? 1 : ValueAlignment(type);
             offset = (offset + alignment - 1) & -alignment;
             var maximumFieldSize = _nativeLoweringAgreement

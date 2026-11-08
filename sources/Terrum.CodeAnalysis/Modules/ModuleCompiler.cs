@@ -6312,7 +6312,8 @@ public static partial class ModuleCompiler
             var reference = references[referenceIndex];
             if (!NativePointerTypeContract.IsValidTable(reference.NativePointerTypes, reference.Structures,
                 reference.NativeFunctionPointerSignatures,
-                reference.NativeFixedArrayTypes))
+                reference.NativeFixedArrayTypes,
+                reference.CheckedReferenceTypes))
             {
                 throw new ModuleContractException("Provider native pointer type table is invalid.");
             }
@@ -6912,7 +6913,8 @@ public static partial class ModuleCompiler
             var signatures = reference.NativeFunctionPointerSignatures;
             if (!NativePointerTypeContract.IsValidTable(reference.NativePointerTypes,
                 reference.Structures, signatures,
-                reference.NativeFixedArrayTypes))
+                reference.NativeFixedArrayTypes,
+                reference.CheckedReferenceTypes))
             {
                 throw new ModuleContractException("Provider native interop type tables are invalid.");
             }
@@ -7913,7 +7915,8 @@ public static partial class ModuleCompiler
             || !module.NativePointerTypes.SequenceEqual(expectedNativePointerTypes)
             || !NativePointerTypeContract.IsValidTable(module.NativePointerTypes, module.Structures,
                 module.NativeFunctionPointerSignatures,
-                module.NativeFixedArrayTypes))
+                module.NativeFixedArrayTypes,
+                module.CheckedReferenceTypes))
         {
             throw new ModuleContractException("Module native pointer types do not match its program.");
         }
@@ -8427,7 +8430,7 @@ public static partial class ModuleCompiler
                 nativeFixedArrayTypes, enumDefinitions, reading: true);
             if (!NativePointerTypeContract.IsValidTable(nativePointerTypes,
                     structures, nativeFunctionPointerSignatures,
-                    nativeFixedArrayTypes)
+                    nativeFixedArrayTypes, checkedReferenceTypes)
                 || (reader is ModuleReader { FormatVersion: NativePointerVersion }
                     && nativePointerTypes.IsEmpty))
             {

@@ -21,10 +21,17 @@ internal static class NativePointerTypeContract
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
         ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointers,
-        ImmutableArray<BoundNativeFixedArrayType> fixedArrays = default)
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrays = default,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes = default)
     {
+        var completeReferenceTypes = checkedReferenceTypes.IsDefault
+            ? ImmutableArray<CheckedReferenceTypeDefinition>.Empty
+            : checkedReferenceTypes;
         if (pointerTypes.IsDefault || structures.IsDefault || functionPointers.IsDefault
             || pointerTypes.Length > SemanticVerifier.MaximumAnalysisVisits
+            || !CheckedReferenceTypeContract.IsValidTable(
+                completeReferenceTypes)
             || !NativeFunctionPointerContract.IsValidTable(functionPointers,
                 type => DirectNativeImportContract.IsInputPointee(type,
                     structures))
@@ -32,7 +39,7 @@ internal static class NativePointerTypeContract
                 functionPointers, pointerTypes, structures)
             || (!fixedArrays.IsDefault
                 && !NativeFixedArrayContract.IsValidTable(structures,
-                    fixedArrays)))
+                    fixedArrays, completeReferenceTypes)))
         {
             return false;
         }
@@ -41,11 +48,13 @@ internal static class NativePointerTypeContract
         var functionPointerStates = new byte[functionPointers.Length];
         var arrayStates = fixedArrays.IsDefault
             ? [] : new byte[fixedArrays.Length];
+        var optionalValueStates = new byte[completeReferenceTypes.Length];
         for (var index = 0; index < arrayStates.Length; index++)
         {
             if (!IsValidFixedArray(index, pointerTypes, structures,
                     functionPointers, fixedArrays, pointerStates,
-                    functionPointerStates, arrayStates, 0))
+                    functionPointerStates, arrayStates,
+                    completeReferenceTypes, optionalValueStates, 0))
             {
                 return false;
             }
@@ -54,7 +63,7 @@ internal static class NativePointerTypeContract
         {
             if (!IsValidPointer(index, pointerTypes, structures, functionPointers,
                 fixedArrays, pointerStates, functionPointerStates, arrayStates,
-                0))
+                completeReferenceTypes, optionalValueStates, 0))
             {
                 return false;
             }
@@ -64,7 +73,7 @@ internal static class NativePointerTypeContract
         {
             if (!IsValidFunctionPointer(index, pointerTypes, structures, functionPointers,
                 fixedArrays, pointerStates, functionPointerStates, arrayStates,
-                0))
+                completeReferenceTypes, optionalValueStates, 0))
             {
                 return false;
             }
@@ -84,7 +93,10 @@ internal static class NativePointerTypeContract
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointers,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrays,
         byte[] pointerStates, byte[] functionPointerStates,
-        byte[] arrayStates, int depth)
+        byte[] arrayStates,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        byte[] optionalValueStates, int depth)
     {
         if ((uint)index >= (uint)pointerTypes.Length || depth > SemanticVerifier.MaximumDepth
             || pointerStates[index] == 1)
@@ -108,7 +120,7 @@ internal static class NativePointerTypeContract
         pointerStates[index] = 1;
         if (!IsValidPointee(pointerType.PointeeType, pointerTypes, structures, functionPointers,
             fixedArrays, pointerStates, functionPointerStates, arrayStates,
-            depth + 1))
+            checkedReferenceTypes, optionalValueStates, depth + 1))
         {
             return false;
         }
@@ -122,7 +134,10 @@ internal static class NativePointerTypeContract
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointers,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrays,
         byte[] pointerStates, byte[] functionPointerStates,
-        byte[] arrayStates, int depth)
+        byte[] arrayStates,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        byte[] optionalValueStates, int depth)
     {
         if ((uint)index >= (uint)functionPointers.Length || depth > SemanticVerifier.MaximumDepth
             || functionPointerStates[index] == 1)
@@ -143,7 +158,8 @@ internal static class NativePointerTypeContract
         if (signature.ReturnType != PrimitiveType.Void
             && !IsValidFunctionPointerValue(signature.ReturnType, pointerTypes, structures,
                 functionPointers, fixedArrays, pointerStates,
-                functionPointerStates, arrayStates, depth + 1))
+                functionPointerStates, arrayStates, checkedReferenceTypes,
+                optionalValueStates, depth + 1))
         {
             return false;
         }
@@ -151,7 +167,8 @@ internal static class NativePointerTypeContract
         {
             if (!IsValidFunctionPointerValue(parameterType, pointerTypes, structures, functionPointers,
                 fixedArrays, pointerStates, functionPointerStates,
-                arrayStates, depth + 1))
+                arrayStates, checkedReferenceTypes, optionalValueStates,
+                depth + 1))
             {
                 return false;
             }
@@ -166,7 +183,10 @@ internal static class NativePointerTypeContract
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointers,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrays,
         byte[] pointerStates, byte[] functionPointerStates,
-        byte[] arrayStates, int depth)
+        byte[] arrayStates,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        byte[] optionalValueStates, int depth)
     {
         if (type == PrimitiveType.Void)
         {
@@ -176,19 +196,29 @@ internal static class NativePointerTypeContract
         {
             return IsValidPointer(NativePointerTypes.Index(type), pointerTypes, structures,
                 functionPointers, fixedArrays, pointerStates,
-                functionPointerStates, arrayStates, depth + 1);
+                functionPointerStates, arrayStates, checkedReferenceTypes,
+                optionalValueStates, depth + 1);
         }
         if (NativeFunctionPointerTypes.IsType(type))
         {
             return IsValidFunctionPointer(NativeFunctionPointerTypes.Index(type), pointerTypes,
                 structures, functionPointers, fixedArrays, pointerStates,
-                functionPointerStates, arrayStates, depth + 1);
+                functionPointerStates, arrayStates, checkedReferenceTypes,
+                optionalValueStates, depth + 1);
         }
         if (NativeFixedArrayTypes.IsType(type))
         {
             return IsValidFixedArray(NativeFixedArrayTypes.Index(type),
                 pointerTypes, structures, functionPointers, fixedArrays,
-                pointerStates, functionPointerStates, arrayStates, depth + 1);
+                pointerStates, functionPointerStates, arrayStates,
+                checkedReferenceTypes, optionalValueStates, depth + 1);
+        }
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            return IsValidOptionalValue(CheckedReferenceTypes.Index(type),
+                pointerTypes, structures, functionPointers, fixedArrays,
+                pointerStates, functionPointerStates, arrayStates,
+                checkedReferenceTypes, optionalValueStates, depth + 1);
         }
         if (BoundEnumTypes.IsType(type))
         {
@@ -203,13 +233,65 @@ internal static class NativePointerTypeContract
         return index >= 0 && index < structures.Length;
     }
 
+    private static bool IsValidOptionalValue(int index,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointers,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrays,
+        byte[] pointerStates, byte[] functionPointerStates,
+        byte[] arrayStates,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        byte[] optionalValueStates, int depth)
+    {
+        if ((uint)index >= (uint)checkedReferenceTypes.Length
+            || depth > SemanticVerifier.MaximumDepth
+            || optionalValueStates[index] == 1)
+        {
+            return false;
+        }
+        if (optionalValueStates[index] == 2)
+        {
+            return true;
+        }
+
+        var type = CheckedReferenceTypes.Type(index);
+        if (!CheckedReferenceTypeContract.IsOptionalValueType(type,
+                checkedReferenceTypes)
+            || !ValueLayout.TryGetOptionalValueLayout(type, structures,
+                checkedReferenceTypes, null,
+                fixedArrays.IsDefault
+                    ? ImmutableArray<BoundNativeFixedArrayType>.Empty
+                    : fixedArrays,
+                out _))
+        {
+            return false;
+        }
+
+        optionalValueStates[index] = 1;
+        var payloadType = checkedReferenceTypes[index].ReferentType;
+        if (!IsValidPointee(payloadType, pointerTypes, structures,
+                functionPointers, fixedArrays, pointerStates,
+                functionPointerStates, arrayStates, checkedReferenceTypes,
+                optionalValueStates, depth + 1))
+        {
+            return false;
+        }
+        optionalValueStates[index] = 2;
+        return true;
+    }
+
     private static bool IsValidFixedArray(int index,
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
         ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointers,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrays,
         byte[] pointerStates, byte[] functionPointerStates,
-        byte[] arrayStates, int depth)
+        byte[] arrayStates,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        byte[] optionalValueStates, int depth)
     {
         if (fixedArrays.IsDefault || (uint)index >= (uint)fixedArrays.Length
             || depth > SemanticVerifier.MaximumDepth
@@ -225,7 +307,8 @@ internal static class NativePointerTypeContract
         arrayStates[index] = 1;
         if (!IsValidPointee(fixedArrays[index].ElementType, pointerTypes,
                 structures, functionPointers, fixedArrays, pointerStates,
-                functionPointerStates, arrayStates, depth + 1))
+                functionPointerStates, arrayStates, checkedReferenceTypes,
+                optionalValueStates, depth + 1))
         {
             return false;
         }
@@ -239,19 +322,24 @@ internal static class NativePointerTypeContract
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointers,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrays,
         byte[] pointerStates, byte[] functionPointerStates,
-        byte[] arrayStates, int depth)
+        byte[] arrayStates,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        byte[] optionalValueStates, int depth)
     {
         if (NativePointerTypes.IsType(type))
         {
             return IsValidPointer(NativePointerTypes.Index(type), pointerTypes, structures,
                 functionPointers, fixedArrays, pointerStates,
-                functionPointerStates, arrayStates, depth + 1);
+                functionPointerStates, arrayStates, checkedReferenceTypes,
+                optionalValueStates, depth + 1);
         }
         if (NativeFunctionPointerTypes.IsType(type))
         {
             return IsValidFunctionPointer(NativeFunctionPointerTypes.Index(type), pointerTypes,
                 structures, functionPointers, fixedArrays, pointerStates,
-                functionPointerStates, arrayStates, depth + 1);
+                functionPointerStates, arrayStates, checkedReferenceTypes,
+                optionalValueStates, depth + 1);
         }
         return IsSupportedFunctionPointerScalar(type);
     }

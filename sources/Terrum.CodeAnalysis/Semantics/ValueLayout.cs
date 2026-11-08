@@ -15,7 +15,8 @@ internal static class ValueLayout
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported values have no executable layout.")]
     internal static ulong Size(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
-        string? nativeLoweringAgreement = null)
+        string? nativeLoweringAgreement = null,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null)
     {
         if (BoundGenericNominalTypeTypes.IsType(type))
         {
@@ -39,13 +40,19 @@ internal static class ValueLayout
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
         PrimitiveType.TokenSpan
             => checked((ulong)TokenSpanContract.DescriptorSize),
+        _ when NativeFixedArrayTypes.IsType(type)
+            => TryGetFixedArrayLayout(type, structures, fixedArrayTypes,
+                checkedReferenceTypes,
+                out var fixedArrayLayout)
+                ? fixedArrayLayout.ByteExtent : 0,
         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
                     => checked((ulong)NativeTargetProfile.PointerSize),
                 _ when NativeFunctionPointerTypes.IsType(type)
                     => checked((ulong)NativeTargetProfile.PointerSize),
         _ when CheckedReferenceTypes.IsType(type) => checked((ulong)CheckedReferenceSize(
-            type, checkedReferenceTypes, nativeLoweringAgreement)),
+            type, structures, checkedReferenceTypes, nativeLoweringAgreement,
+            fixedArrayTypes)),
         PrimitiveType.Void => 0,
         _ when BoundEnumTypes.IsType(type) => sizeof(int),
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
@@ -72,8 +79,18 @@ internal static class ValueLayout
         }
         if (CheckedReferenceTypes.IsType(type))
         {
-            var size = CheckedReferenceSize(type, checkedReferenceTypes,
-                nativeLoweringAgreement);
+            if (CheckedReferenceTypeContract.IsOptionalValueType(
+                    type, checkedReferenceTypes ?? []))
+            {
+                return TryGetOptionalValueLayout(type, structures,
+                        checkedReferenceTypes, nativeLoweringAgreement,
+                        fixedArrayTypes, out var optionalLayout)
+                    ? optionalLayout.Alignment : 0;
+            }
+
+            var size = CheckedReferenceSize(type, structures,
+                checkedReferenceTypes, nativeLoweringAgreement,
+                fixedArrayTypes);
             return size == 0 ? 0 : nativeLoweringAgreement is null
                 ? NativeTargetProfile.PointerSize : sizeof(ulong);
         }
@@ -100,7 +117,8 @@ internal static class ValueLayout
         {
             if (fixedArrayTypes is null
                 || !NativeFixedArrayContract.TryGetLayout(type, structures,
-                    fixedArrayTypes, out var arrayLayout)
+                    fixedArrayTypes, out var arrayLayout,
+                    checkedReferenceTypes)
                 || arrayLayout.Alignment > int.MaxValue)
             {
                 throw new NotSupportedException(
@@ -119,13 +137,26 @@ internal static class ValueLayout
 
     internal static int RequiredAlignment(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null)
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null,
+        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null)
     {
+        if (CheckedReferenceTypes.IsType(type)
+            && CheckedReferenceTypeContract.IsOptionalValueType(type,
+                checkedReferenceTypes ?? []))
+        {
+            return checkedReferenceTypes is not null
+                ? RequiredAlignment(
+                    checkedReferenceTypes[CheckedReferenceTypes.Index(type)]
+                        .ReferentType, structures, fixedArrayTypes,
+                    checkedReferenceTypes)
+                : 1;
+        }
         if (NativeFixedArrayTypes.IsType(type))
         {
             if (fixedArrayTypes is null
                 || !NativeFixedArrayContract.TryGetLayout(type, structures,
-                    fixedArrayTypes, out var arrayLayout)
+                    fixedArrayTypes, out var arrayLayout,
+                    checkedReferenceTypes)
                 || arrayLayout.RequiredAlignment > int.MaxValue)
             {
                 throw new NotSupportedException(
@@ -149,17 +180,179 @@ internal static class ValueLayout
             : 1;
     }
 
-    private static int CheckedReferenceSize(PrimitiveType type,
+    internal static bool TryGetOptionalValueLayout(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes,
-        string? nativeLoweringAgreement)
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
+        out OptionalValueLayout layout)
     {
-        if (nativeLoweringAgreement is not
-            (null or CompilationOptions.WindowsX64NormalBackingAgreement
-                or CompilationOptions.WindowsX64RootlessReferencesAgreement))
+        layout = default;
+        if (checkedReferenceTypes is null
+            || !CheckedReferenceTypeContract.IsOptionalValueType(type,
+                checkedReferenceTypes))
+        {
+            return false;
+        }
+
+        var payloadType
+            = checkedReferenceTypes[CheckedReferenceTypes.Index(type)]
+                .ReferentType;
+        if (!IsRootlessCopyPayload(payloadType, structures,
+                checkedReferenceTypes, fixedArrayTypes,
+                new byte[structures.Count], 0))
+        {
+            return false;
+        }
+
+        var payloadSize = Size(payloadType, structures,
+            checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes);
+        var payloadAlignment = Alignment(payloadType, structures,
+            checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes);
+        var requiredAlignment = RequiredAlignment(payloadType, structures,
+            fixedArrayTypes, checkedReferenceTypes);
+
+        var alignment = Math.Max(1, payloadAlignment);
+        var required = Math.Max(1, requiredAlignment);
+        var isNullNiche = payloadType == PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(payloadType);
+        if (isNullNiche)
+        {
+            layout = new OptionalValueLayout(payloadType, 0, payloadSize,
+                alignment, required, UsesNullNiche: true);
+            return payloadSize != 0;
+        }
+
+        var strideAlignment = Math.Max(alignment, required);
+        var payloadOffset = RoundUp(1, strideAlignment);
+        var size = RoundUp(checked(payloadOffset + payloadSize),
+            strideAlignment);
+        layout = new OptionalValueLayout(payloadType, payloadOffset, size,
+            alignment, required, UsesNullNiche: false);
+        return true;
+    }
+
+    private static bool IsRootlessCopyPayload(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition> checkedReferenceTypes,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
+        byte[] structureStates, int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth
+            || type == PrimitiveType.TokenSpan
+            || ManagedClassTypes.IsManaged(type)
+            || BoundGenericNominalTypeTypes.IsType(type))
+        {
+            return false;
+        }
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            return CheckedReferenceTypeContract.IsOptionalValueType(type,
+                    checkedReferenceTypes)
+                && IsRootlessCopyPayload(
+                    checkedReferenceTypes[CheckedReferenceTypes.Index(type)]
+                        .ReferentType,
+                    structures, checkedReferenceTypes, fixedArrayTypes,
+                    structureStates, depth + 1);
+        }
+        if (type == PrimitiveType.Void
+            || PrimitiveTypeFacts.ScalarWidth(type) > 0
+            || type is PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(type)
+            || NativeFunctionPointerTypes.IsType(type)
+            || BoundEnumTypes.IsType(type))
+        {
+            return true;
+        }
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            return TryGetFixedArrayLayout(type, structures, fixedArrayTypes,
+                    checkedReferenceTypes, out _)
+                && fixedArrayTypes is not null
+                && IsRootlessCopyPayload(
+                    fixedArrayTypes[NativeFixedArrayTypes.Index(type)]
+                        .ElementType,
+                    structures, checkedReferenceTypes, fixedArrayTypes,
+                    structureStates,
+                    depth + 1);
+        }
+
+        var structureIndex = (int)type - 100;
+        if (structureIndex < 0
+            || structureIndex >= structures.Count
+            || structureIndex >= BoundEnumTypes.First - 100)
+        {
+            return false;
+        }
+        if (structureStates[structureIndex] == 1)
+        {
+            return false;
+        }
+        if (structureStates[structureIndex] == 2)
+        {
+            return true;
+        }
+
+        var structure = structures[structureIndex];
+        if (structure.IsUnique || structure.CleanupMethod is not null)
+        {
+            return false;
+        }
+
+        structureStates[structureIndex] = 1;
+        foreach (var field in structure.Fields)
+        {
+            if (!IsRootlessCopyPayload(field.Type, structures,
+                    checkedReferenceTypes, fixedArrayTypes,
+                    structureStates, depth + 1))
+            {
+                return false;
+            }
+        }
+        structureStates[structureIndex] = 2;
+        return true;
+    }
+
+    private static bool TryGetFixedArrayLayout(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes,
+        out BoundNativeFixedArrayLayout layout)
+    {
+        if (fixedArrayTypes is not null
+            && NativeFixedArrayTypes.IsType(type)
+            && (uint)NativeFixedArrayTypes.Index(type)
+                < (uint)fixedArrayTypes.Count)
+        {
+            var array = fixedArrayTypes[NativeFixedArrayTypes.Index(type)];
+            return NativeFixedArrayContract.TryGetLayout(type,
+                array.ElementType, array.ElementCount, structures,
+                fixedArrayTypes, out layout, checkedReferenceTypes);
+        }
+
+        layout = default;
+        return false;
+    }
+
+    private static ulong RoundUp(ulong value, int alignment)
+    {
+        if (alignment <= 0 || (alignment & (alignment - 1)) != 0)
         {
             throw new NotSupportedException(
-                "The selected native lowering agreement has no value layout.");
+                "Optional payload alignment is not a supported power of two.");
         }
+
+        var mask = checked((ulong)alignment - 1);
+        return checked(value + mask) & ~mask;
+    }
+
+    private static ulong CheckedReferenceSize(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes,
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes)
+    {
         if (checkedReferenceTypes is null)
         {
             return 0;
@@ -171,12 +364,38 @@ internal static class ValueLayout
             return 0;
         }
         var referenceType = checkedReferenceTypes[index];
-        return referenceType is not null && !referenceType.IsOptionalValue
-            && !referenceType.IsGarbageCollected
+        if (referenceType is null)
+        {
+            return 0;
+        }
+        if (referenceType.IsOptionalValue)
+        {
+            return TryGetOptionalValueLayout(type, structures,
+                checkedReferenceTypes, nativeLoweringAgreement,
+                fixedArrayTypes, out var optionalLayout)
+                    ? optionalLayout.Size : 0;
+        }
+        if (nativeLoweringAgreement is not
+            (null or CompilationOptions.WindowsX64NormalBackingAgreement
+                or CompilationOptions.WindowsX64RootlessReferencesAgreement))
+        {
+            throw new NotSupportedException(
+                "The selected native lowering agreement has no value layout.");
+        }
+        return !referenceType.IsGarbageCollected
             && !referenceType.IsInitialization
             ? nativeLoweringAgreement
                 == CompilationOptions.WindowsX64NormalBackingAgreement
-                    ? 2 * sizeof(ulong) : NativeTargetProfile.PointerSize
+                    ? 2UL * sizeof(ulong)
+                    : checked((ulong)NativeTargetProfile.PointerSize)
             : 0;
     }
 }
+
+internal readonly record struct OptionalValueLayout(
+    PrimitiveType PayloadType,
+    ulong PayloadOffset,
+    ulong Size,
+    int Alignment,
+    int RequiredAlignment,
+    bool UsesNullNiche);

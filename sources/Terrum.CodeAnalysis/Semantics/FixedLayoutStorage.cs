@@ -21,9 +21,11 @@ public static class FixedLayoutStorage
     internal static ImmutableArray<int> Validate(
         ImmutableArray<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
-        IReadOnlySet<int>? duplicateNameViewIndexes = null)
+        IReadOnlySet<int>? duplicateNameViewIndexes = null,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
         => Compute(structures, validateRecordedLayout: true, fixedArrays,
-            duplicateNameViewIndexes).Alignments;
+            duplicateNameViewIndexes, checkedReferenceTypes).Alignments;
 
     internal static ImmutableArray<BoundStruct> Materialize(
         ImmutableArray<BoundStruct> structures)
@@ -40,7 +42,9 @@ public static class FixedLayoutStorage
     private static (ImmutableArray<BoundStruct> Structures, ImmutableArray<int> Alignments)
         Compute(ImmutableArray<BoundStruct> structures, bool validateRecordedLayout,
             IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
-            IReadOnlySet<int>? duplicateNameViewIndexes = null)
+            IReadOnlySet<int>? duplicateNameViewIndexes = null,
+            IReadOnlyList<CheckedReferenceTypeDefinition>?
+                checkedReferenceTypes = null)
     {
         if (structures.IsDefault)
         {
@@ -69,6 +73,60 @@ public static class FixedLayoutStorage
             }
         }
         return ([.. computedStructures], [.. alignments]);
+
+        bool IsBlittablePayload(PrimitiveType type, int depth)
+        {
+            if (depth > SemanticVerifier.MaximumDepth
+                || CheckedReferenceTypes.IsType(type)
+                    && (checkedReferenceTypes is null
+                        || !CheckedReferenceTypeContract.IsOptionalValueType(
+                            type, checkedReferenceTypes)))
+            {
+                return false;
+            }
+            if (CheckedReferenceTypes.IsType(type))
+            {
+                return IsBlittablePayload(
+                    checkedReferenceTypes![
+                        CheckedReferenceTypes.Index(type)].ReferentType,
+                    depth + 1);
+            }
+            if (type == PrimitiveType.Void
+                || PrimitiveTypeFacts.ScalarWidth(type) > 0
+                || type == PrimitiveType.NativeRawPointer
+                || NativePointerTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type))
+            {
+                return true;
+            }
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                var arrayIndex = NativeFixedArrayTypes.Index(type);
+                if ((uint)arrayIndex >= (uint)fixedArrays.Count)
+                {
+                    return false;
+                }
+                var array = fixedArrays[arrayIndex];
+                return IsBlittablePayload(array.ElementType, depth + 1)
+                    && NativeFixedArrayContract.TryGetLayout(type,
+                        array.ElementType, array.ElementCount,
+                        computedStructures, fixedArrays, out _,
+                        checkedReferenceTypes);
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex < 0
+                || structureIndex >= structures.Length
+                || structureIndex >= BoundEnumTypes.First - 100
+                || structures[structureIndex].BlittableTargetRequirement
+                    != WindowsX64TargetRequirement)
+            {
+                return false;
+            }
+
+            Visit(structureIndex, depth + 1);
+            return true;
+        }
 
         void Visit(int index, int depth)
         {
@@ -158,7 +216,8 @@ public static class FixedLayoutStorage
                     var array = fixedArrays[arrayIndex];
                     if (!NativeFixedArrayContract.TryGetLayout(field.Type,
                             array.ElementType, array.ElementCount, structures,
-                            fixedArrays, out var layout)
+                            fixedArrays, out var layout,
+                            checkedReferenceTypes)
                         || layout.Alignment > int.MaxValue
                         || layout.RequiredAlignment > int.MaxValue)
                     {
@@ -168,6 +227,26 @@ public static class FixedLayoutStorage
                     width = layout.ByteExtent;
                     fieldAlignment = (int)layout.Alignment;
                     fieldRequiredAlignment = (int)layout.RequiredAlignment;
+                }
+                else if (CheckedReferenceTypes.IsType(field.Type)
+                    && CheckedReferenceTypeContract.IsOptionalValueType(
+                        field.Type, checkedReferenceTypes ?? []))
+                {
+                    if (!IsBlittablePayload(field.Type, depth + 1)
+                        || !ValueLayout.TryGetOptionalValueLayout(field.Type,
+                            computedStructures, checkedReferenceTypes, null,
+                            fixedArrays, out var optionalLayout)
+                        || optionalLayout.Size > int.MaxValue
+                        || optionalLayout.Alignment > int.MaxValue
+                        || optionalLayout.RequiredAlignment > int.MaxValue)
+                    {
+                        throw Invalid();
+                    }
+
+                    width = optionalLayout.Size;
+                    fieldAlignment = optionalLayout.Alignment;
+                    fieldRequiredAlignment
+                        = optionalLayout.RequiredAlignment;
                 }
                 else if (PrimitiveTypeFacts.ScalarWidth(field.Type) > 0
                     || field.Type is PrimitiveType.NativeUtf16ZPointer
@@ -204,7 +283,8 @@ public static class FixedLayoutStorage
                 }
                 if (structure.IsUnion
                     && !NativeFixedArrayContract.IsRootlessCopyFieldType(
-                        field.Type, structures, fixedArrays))
+                        field.Type, structures, fixedArrays,
+                        checkedReferenceTypes))
                 {
                     throw Invalid();
                 }

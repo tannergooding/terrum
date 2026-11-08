@@ -699,10 +699,15 @@ handle. Neither integer zero nor an uninitialized slot can manufacture a valid
 non-null handle. `null` requires an optional target type; lifting a non-null
 handle does not allocate. Source binding and private revision 106 now preserve
 `option<T>`/`T?` type identities for scalar, unit, pointer and checked-reference
-forms, including closed generic aliases. This is not value-layout or execution
-support: the provisional Windows x64 rootless-Copy tag/payload layout remains
-unimplemented and unapproved, and no new argument/result or wire representation
-follows. Bounded generic functions may use the existing optional source-class/
+forms, including closed generic aliases. Layout queries compute tagged layouts
+for scalar/unit, enums, plain function
+pointers and eligible rootless-Copy aggregates; optional data pointers retain
+the eight-byte null niche. Required alignment carries through fixed-layout
+fields and fixed-array geometry. Source operations and runtime execution are
+not yet supported for general optional values, and broader aggregate/fixed-array
+qualification remains in progress. The provisional Windows x64 rootless-Copy layout remains
+unapproved, and no new argument/result or wire representation follows.
+Bounded generic functions may use the existing optional source-class/
 `ManagedNode` handle forms described in the
 [generic implementation contract](../implementation.md#bounded-generic-functions).
 

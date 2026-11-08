@@ -3316,7 +3316,8 @@ internal sealed partial class Binder
                 var array = _nativeFixedArrayTypes[arrayIndex];
                 if (!NativeFixedArrayContract.TryGetLayout(type,
                         array.ElementType, array.ElementCount, _structs,
-                        _nativeFixedArrayTypes, out var arrayLayout)
+                        _nativeFixedArrayTypes, out var arrayLayout,
+                        _checkedReferenceTypes)
                     || arrayLayout.Alignment > int.MaxValue
                     || arrayLayout.RequiredAlignment > int.MaxValue)
                 {
@@ -3333,7 +3334,8 @@ internal sealed partial class Binder
             else
             {
                 width = ValueLayout.Size(type, _structs,
-                    [.. _checkedReferenceTypes], _nativeLoweringAgreement);
+                    [.. _checkedReferenceTypes], _nativeLoweringAgreement,
+                    _nativeFixedArrayTypes);
                 fieldAlignment = width == 0 ? 0 : ValueAlignment(type);
                 fieldRequiredAlignment = ValueRequiredAlignment(type);
             }
@@ -3933,19 +3935,9 @@ internal sealed partial class Binder
         return alignment;
     }
 
-    private int ValueRequiredAlignment(PrimitiveType type)
-    {
-        if (NativeFixedArrayTypes.IsType(type))
-        {
-            var index = NativeFixedArrayTypes.Index(type);
-            return (uint)index < (uint)_nativeFixedArrayTypes.Count
-                ? checked((int)_nativeFixedArrayTypes[index].RequiredAlignment)
-                : 1;
-        }
-        return IsStruct(type)
-            ? Math.Max(1, _structs[(int)type - 100].RequiredAlignment)
-            : 1;
-    }
+    private int ValueRequiredAlignment(PrimitiveType type) =>
+        ValueLayout.RequiredAlignment(type, _structs,
+            _nativeFixedArrayTypes, [.. _checkedReferenceTypes]);
 
     private static bool TryAlign(ulong size, int alignment,
         out ulong aligned)
@@ -4454,7 +4446,7 @@ internal sealed partial class Binder
             var array = _nativeFixedArrayTypes[arrayIndex];
             return NativeFixedArrayContract.TryGetLayout(type,
                     array.ElementType, array.ElementCount, _structs,
-                    _nativeFixedArrayTypes, out _)
+                    _nativeFixedArrayTypes, out _, _checkedReferenceTypes)
                 && IsBlittableGenericArgumentType(array.ElementType,
                     activeFixedArrays);
         }
@@ -7635,10 +7627,19 @@ internal sealed partial class Binder
     {
         if (node.Kind == SyntaxKind.AttributedTypeName)
         {
-            if (node.Children is not [
-                    SyntaxNode { Kind: SyntaxKind.Attribute } attribute,
-                    SyntaxNode { Kind: SyntaxKind.TypeName } functionPointerTypeNode
-                ] || TypeNameIdentifier(functionPointerTypeNode) != "fnptr")
+            var children = node.Children;
+            if (children.Length is < 2 or > 3
+                || children[0] is not SyntaxNode {
+                    Kind: SyntaxKind.Attribute
+                } attribute
+                || children[1] is not SyntaxNode {
+                    Kind: SyntaxKind.TypeName
+                } functionPointerTypeNode
+                || (children.Length == 3
+                    && children[2] is not SyntaxTokenElement {
+                        Token.Kind: TokenKind.Question
+                    })
+                || TypeNameIdentifier(functionPointerTypeNode) != "fnptr")
             {
                 Report("TRM3005",
                     "NativeCallConv is a type-use attribute that must immediately precede fnptr.",
@@ -7652,8 +7653,31 @@ internal sealed partial class Binder
                 return PrimitiveType.Int32;
             }
 
-            return BindNativeFunctionPointerType(functionPointerTypeNode, callingConvention,
+            var diagnosticCount = DiagnosticCount;
+            var functionPointerType = BindNativeFunctionPointerType(
+                functionPointerTypeNode, callingConvention,
                 pendingConventionExpression: conventionExpression);
+            var hasOptionalSuffix = children.Length == 3
+                || functionPointerTypeNode.Children[^1]
+                    is SyntaxTokenElement {
+                        Token.Kind: TokenKind.Question
+                    };
+            if (DiagnosticCount != diagnosticCount || !hasOptionalSuffix)
+            {
+                return functionPointerType;
+            }
+
+            var optionalFunctionPointerType = TryGetOptionalType(
+                functionPointerType, node.Span);
+            if (optionalFunctionPointerType
+                is not PrimitiveType selectedOptional)
+            {
+                Report("TRM3005",
+                    "This complete type has no selected optional identity.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+            return selectedOptional;
         }
 
         if (node.Kind == SyntaxKind.ReferenceTypeName)
@@ -7682,8 +7706,24 @@ internal sealed partial class Binder
         var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
         if (name == "fnptr")
         {
-            return BindNativeFunctionPointerType(node,
+            var diagnosticCount = DiagnosticCount;
+            var functionPointerType = BindNativeFunctionPointerType(node,
                 NativeCallingConvention.Native);
+            if (DiagnosticCount != diagnosticCount || !optional)
+            {
+                return functionPointerType;
+            }
+
+            var optionalFunctionPointerType = TryGetOptionalType(
+                functionPointerType, node.Span);
+            if (optionalFunctionPointerType is not PrimitiveType selectedOptional)
+            {
+                Report("TRM3005",
+                    "This complete type has no selected optional identity.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+            return selectedOptional;
         }
         if (name == "ptr")
         {
@@ -8297,9 +8337,11 @@ internal sealed partial class Binder
                                 || arrayFieldRoot != element.Variable))
                     || !NativeFixedArrayContract.MatchesType(
                         element.Layout.CarrierType, element.Layout,
-                        _structs, _nativeFixedArrayTypes)
+                        _structs, _nativeFixedArrayTypes,
+                        _checkedReferenceTypes)
                     || !NativeFixedArrayContract.MatchesLayout(element.Layout,
-                        _structs, _nativeFixedArrayTypes)
+                        _structs, _nativeFixedArrayTypes,
+                        _checkedReferenceTypes)
                     || element.Type != element.Layout.ElementType
                     || _constLocals.Contains(element.Variable))
                 {
@@ -10644,7 +10686,7 @@ internal sealed partial class Binder
                     var arrayType = _variables[slot].Type;
                     if (!NativeFixedArrayContract.TryGetLayout(arrayType,
                             _structs, _nativeFixedArrayTypes,
-                            out var arrayLayout))
+                            out var arrayLayout, _checkedReferenceTypes))
                     {
                         Report("TRM3030",
                             "The fixed-array assignment target has no valid layout.",
@@ -11217,7 +11259,8 @@ internal sealed partial class Binder
         {
             if (!IsStruct(ownerType)
                 || !NativeFixedArrayContract.IsRootlessCopyFieldType(
-                    ownerType, _structs, _nativeFixedArrayTypes)
+                    ownerType, _structs, _nativeFixedArrayTypes,
+                    _checkedReferenceTypes)
                 || !TryFindField(ownerType, member.Name, out var field))
             {
                 Report("TRM3008",
@@ -11237,7 +11280,8 @@ internal sealed partial class Binder
         }
 
         if (!NativeFixedArrayContract.IsRootlessCopyFieldType(ownerType,
-                _structs, _nativeFixedArrayTypes))
+                _structs, _nativeFixedArrayTypes,
+                _checkedReferenceTypes))
         {
             Report("TRM3008",
                 "The selected field path must end in an inline Copy value.",
@@ -11368,9 +11412,10 @@ internal sealed partial class Binder
                     != layout.CarrierType
             || !NativeFixedArrayContract.AllowsElementWrites(layout)
             || !NativeFixedArrayContract.MatchesLayout(layout, _structs,
-                _nativeFixedArrayTypes)
+                _nativeFixedArrayTypes, _checkedReferenceTypes)
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(
-                elementType, _structs, _nativeFixedArrayTypes))
+                elementType, _structs, _nativeFixedArrayTypes,
+                _checkedReferenceTypes))
         {
             Report("TRM3008",
                 "A Copy field update requires a mutable fixed-array element place.",
@@ -11399,10 +11444,11 @@ internal sealed partial class Binder
                 || !NativeFixedArrayContract.AllowsElementWrites(
                     projection.Layout)
                 || !NativeFixedArrayContract.MatchesLayout(
-                    projection.Layout, _structs, _nativeFixedArrayTypes)
+                    projection.Layout, _structs, _nativeFixedArrayTypes,
+                    _checkedReferenceTypes)
                 || !NativeFixedArrayContract.IsRootlessCopyFieldType(
                     projection.Layout.ElementType, _structs,
-                    _nativeFixedArrayTypes))
+                    _nativeFixedArrayTypes, _checkedReferenceTypes))
             {
                 Report("TRM3008",
                     "A Copy field update requires a mutable fixed-array element place.",
@@ -14706,13 +14752,13 @@ internal sealed partial class Binder
         }
 
         return NativeFixedArrayContract.MatchesLayout(layout, _structs,
-            _nativeFixedArrayTypes);
+            _nativeFixedArrayTypes, _checkedReferenceTypes);
     }
 
     private bool TryGetNativeFixedArrayLayout(PrimitiveType arrayType,
         out BoundNativeFixedArrayLayout layout)
         => NativeFixedArrayContract.TryGetLayout(arrayType, _structs,
-            _nativeFixedArrayTypes, out layout);
+            _nativeFixedArrayTypes, out layout, _checkedReferenceTypes);
 
     private bool TryGetNativeFixedArrayLayoutForValue(SyntaxNode node,
         out int variable, out BoundNativeFixedArrayLayout layout)
@@ -14846,7 +14892,7 @@ internal sealed partial class Binder
 
         fieldPlace = place;
         return NativeFixedArrayContract.MatchesLayout(layout, _structs,
-            _nativeFixedArrayTypes);
+            _nativeFixedArrayTypes, _checkedReferenceTypes);
     }
 
     private bool TryFindLocalCopyFixedArrayFieldRoot(
@@ -14886,9 +14932,10 @@ internal sealed partial class Binder
 
         var rootStorageType = _variables[rootVariable].Type;
         if (!NativeFixedArrayContract.IsRootlessCopyFieldType(
-                rootStorageType, _structs, _nativeFixedArrayTypes)
+                rootStorageType, _structs, _nativeFixedArrayTypes,
+                _checkedReferenceTypes)
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(ownerType,
-                _structs, _nativeFixedArrayTypes))
+                _structs, _nativeFixedArrayTypes, _checkedReferenceTypes))
         {
             return false;
         }
@@ -14913,7 +14960,8 @@ internal sealed partial class Binder
             ownerType = field.Type;
             if (fields.Count != 0
                 && !NativeFixedArrayContract.IsRootlessCopyFieldType(
-                    ownerType, _structs, _nativeFixedArrayTypes))
+                    ownerType, _structs, _nativeFixedArrayTypes,
+                    _checkedReferenceTypes))
             {
                 return false;
             }
@@ -14924,7 +14972,7 @@ internal sealed partial class Binder
             && NativeFixedArrayContract.IsCarrier(ownerType)
             && NativeFixedArrayContract.IsRootlessCopyFieldType(
                 rootStorageType,
-                _structs, _nativeFixedArrayTypes);
+                _structs, _nativeFixedArrayTypes, _checkedReferenceTypes);
     }
 
     private bool TryGetLocalFixedArrayElementOwner(
@@ -14936,7 +14984,8 @@ internal sealed partial class Binder
         if ((uint)variable < (uint)_localStart
             || (uint)variable >= (uint)_variables.Count
             || !NativeFixedArrayContract.MatchesLayout(element.Layout,
-                _structs, _nativeFixedArrayTypes)
+                _structs, _nativeFixedArrayTypes,
+                _checkedReferenceTypes)
             || !NativeFixedArrayContract.IsIndexType(element.Index.Type)
             || (element.FieldPlace is not null
                 ? element.FieldPlace is not BoundFieldRead fieldPlace
@@ -14987,7 +15036,8 @@ internal sealed partial class Binder
         {
             if (projection.Layout.CarrierType != carrierType
                 || !NativeFixedArrayContract.MatchesLayout(
-                    projection.Layout, _structs, _nativeFixedArrayTypes)
+                    projection.Layout, _structs, _nativeFixedArrayTypes,
+                    _checkedReferenceTypes)
                 || !NativeFixedArrayContract.IsIndexType(
                     projection.Index.Type))
             {

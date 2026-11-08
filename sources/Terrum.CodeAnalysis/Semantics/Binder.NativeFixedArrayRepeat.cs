@@ -54,9 +54,10 @@ internal sealed partial class Binder
         }
         if (!NativeFixedArrayContract.TryGetLayout(arrayType, elementType,
                 elementCount, _structs, _nativeFixedArrayTypes,
-                out var layout)
+                out var layout, _checkedReferenceTypes)
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(
-                elementType, _structs, _nativeFixedArrayTypes))
+                elementType, _structs, _nativeFixedArrayTypes,
+                _checkedReferenceTypes))
         {
             Report("TRM3030",
                 "The fixed-array repeat element requires a valid rootless Copy layout.",

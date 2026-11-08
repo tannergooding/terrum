@@ -685,7 +685,8 @@ internal sealed partial class Binder
                 type => DirectNativeImportContract.IsInputPointee(type,
                     _structs))
             || !NativePointerTypeContract.IsValidTable([.. sourcePointers], [.. _structs],
-                [.. sourceFunctionPointers])
+                [.. sourceFunctionPointers], [.. sourceFixedArrays],
+                [.. sourceReferenceTypes])
             || !CheckedReferenceTypeContract.IsValidTable([.. sourceReferenceTypes]))
         {
             Report("TRM3005", "Native type identities are invalid before convention normalization.",
@@ -949,7 +950,8 @@ internal sealed partial class Binder
                 || !NativeFixedArrayContract.TryCreateType(elementType,
                     source.ElementCount, _structs, normalizedFixedArrays,
                     normalizedFixedArrayTypeIndexes,
-                    out var normalizedType, out var layout)
+                    out var normalizedType, out var layout,
+                    _checkedReferenceTypes)
                 || source.ElementStride != layout.ElementStride
                 || source.ByteExtent != layout.ByteExtent
                 || source.Alignment != layout.Alignment
@@ -1054,7 +1056,8 @@ internal sealed partial class Binder
                 || !NativeFixedArrayContract.TryGetLayout(
                     NativeFixedArrayTypes.Type(index), fixedArray.ElementType,
                     fixedArray.ElementCount, normalizedStructuresImmutable,
-                    rewrittenFixedArrays, out var layout)
+                    rewrittenFixedArrays, out var layout,
+                    normalizedReferenceTypeDefinitions)
                 || fixedArray.ElementStride != layout.ElementStride
                 || fixedArray.ByteExtent != layout.ByteExtent
                 || fixedArray.Alignment != layout.Alignment
@@ -1070,7 +1073,9 @@ internal sealed partial class Binder
                 type => DirectNativeImportContract.IsInputPointee(type,
                     normalizedStructures))
             || !NativePointerTypeContract.IsValidTable([.. normalizedPointerDefinitions],
-                [.. normalizedStructures], [.. normalizedFunctionPointers])
+                [.. normalizedStructures], [.. normalizedFunctionPointers],
+                [.. rewrittenFixedArrays],
+                [.. normalizedReferenceTypeDefinitions])
             || !CheckedReferenceTypeContract.IsValidTable([.. normalizedReferenceTypeDefinitions]))
         {
             Report("TRM3005", "Normalized native type identities are invalid.",

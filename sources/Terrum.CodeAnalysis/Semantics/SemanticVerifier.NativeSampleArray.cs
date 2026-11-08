@@ -1741,7 +1741,8 @@ public static partial class SemanticVerifier
         }
 
         var elementSize = ValueLayout.Size(elementType, program.Structures,
-            program.CheckedReferenceTypes, program.NativeLoweringAgreement);
+            program.CheckedReferenceTypes, program.NativeLoweringAgreement,
+            program.NativeFixedArrayTypes);
         if (!NativeFixedArrayContract.IsRootlessCopyFieldType(
                 ownerType, program.Structures,
                 program.NativeFixedArrayTypes)

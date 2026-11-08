@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
@@ -306,6 +307,15 @@ internal sealed class CheckedReferenceTypeTests
         Assert.That(program.CheckedReferenceTypes[
                 CheckedReferenceTypes.Index(pointerType)].IsOptionalValue,
             Is.True);
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(pointerType,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes, out var pointerOptionalLayout),
+            Is.True);
+        Assert.That(pointerOptionalLayout.UsesNullNiche, Is.True);
+        Assert.That(pointerOptionalLayout.PayloadOffset, Is.Zero);
+        Assert.That(pointerOptionalLayout.Size,
+            Is.EqualTo((ulong)NativeTargetProfile.PointerSize));
         var referenceType = ParameterType("AcceptReference");
         Assert.That(program.CheckedReferenceTypes[
                 CheckedReferenceTypes.Index(referenceType)].IsOptional,
@@ -328,6 +338,216 @@ internal sealed class CheckedReferenceTypeTests
         Assert.That(reference.CheckedReferenceTypes[
                 CheckedReferenceTypes.Index(persistedScalarType)].IsOptionalValue,
             Is.True);
+    }
+
+    [Test]
+    public void OptionalValueLayoutPreservesRequiredAlignmentBeyondNaturalAlignment()
+    {
+        var payloadType = (PrimitiveType)100;
+        var payload = new BoundStruct("Payload", [], 32) {
+            Alignment = 8,
+            RequiredAlignment = 32,
+        };
+        var optionalPayload = new CheckedReferenceTypeDefinition(
+            payloadType, IsWritable: false, IsGarbageCollected: false,
+            IsInitialization: false, IsOptional: true,
+            IsOptionalValue: true);
+        var referenceTypes = ImmutableArray.Create(optionalPayload);
+
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(
+                CheckedReferenceTypes.Type(0), [payload], referenceTypes,
+                null, [], out var layout),
+            Is.True);
+        Assert.That(layout.Alignment, Is.EqualTo(8));
+        Assert.That(layout.RequiredAlignment, Is.EqualTo(32));
+        Assert.That(layout.PayloadOffset, Is.EqualTo(32));
+        Assert.That(layout.Size, Is.EqualTo(64));
+    }
+
+    [Test]
+    public void OptionalIntegerBackedEnumUsesTaggedLayout()
+    {
+        var optionalEnum = new CheckedReferenceTypeDefinition(
+            BoundEnumTypes.Type(0), IsWritable: false,
+            IsGarbageCollected: false, IsInitialization: false,
+            IsOptional: true, IsOptionalValue: true);
+        var referenceTypes = ImmutableArray.Create(optionalEnum);
+
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(
+                CheckedReferenceTypes.Type(0), [], referenceTypes, null, [],
+                out var layout),
+            Is.True);
+        Assert.That(layout.PayloadOffset, Is.EqualTo(4));
+        Assert.That(layout.Size, Is.EqualTo(8));
+        Assert.That(layout.Alignment, Is.EqualTo(4));
+        Assert.That(layout.UsesNullNiche, Is.False);
+    }
+
+    [Test]
+    public void OptionalClassHandlesDoNotUseGeneralTaggedValueLayout()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            class Node {
+                public int32 Value;
+                public Node(int32 value) { Value = value; }
+            }
+            void Accept(Node? value) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var optionalType = program.Functions.Single(
+            static function => function.Name == "Accept")
+            .Variables[0].Type;
+        Assert.That(ManagedClassTypes.IsOptional(optionalType), Is.True);
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(optionalType,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes, out _),
+            Is.False);
+        Assert.That(ValueLayout.Size(optionalType, program.Structures,
+                program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes),
+            Is.EqualTo((ulong)NativeTargetProfile.PointerSize));
+    }
+
+    [Test]
+    public void OptionalValueFieldsUseCompletedTaggedLayouts()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            struct OptionalValues {
+                bool? Flag;
+                int32? Value;
+            }
+            void Accept(OptionalValues values) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var structure = global::System.Linq.Enumerable.Single(
+            compilation.Program!.Structures,
+            static candidate => candidate.Name == "OptionalValues");
+        Assert.That(structure.Fields.Select(static field =>
+                (field.Offset, field.Size)),
+            Is.EqualTo(new[] { (0UL, 2UL), (4UL, 8UL) }));
+        Assert.That(structure.Size, Is.EqualTo(12));
+        Assert.That(structure.Alignment, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void OptionalScalarFieldsCarryTheirBlittableTagLayout()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct OptionalValues {
+                public bool? Flag;
+                public int32? Value;
+            }
+            public void Accept(OptionalValues values) {}
+            """), NativeCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var structure = global::System.Linq.Enumerable.Single(
+            compilation.Program!.Structures,
+            static candidate => candidate.Name == "OptionalValues");
+        Assert.That(structure.BlittableTargetRequirement,
+            Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
+        Assert.That(structure.Fields.Select(static field =>
+                (field.Offset, field.Size)),
+            Is.EqualTo(new[] { (0UL, 2UL), (4UL, 8UL) }));
+        Assert.That(structure.Size, Is.EqualTo(12));
+        Assert.That(structure.Alignment, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void OptionalLayoutsComposeWithAdmittedFixedArrays()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            alias Values = [int32; 2];
+            alias Maybe<T> = T?;
+            public int32 Accept() {
+                init Maybe<Values> values;
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var arrayType = NativeFixedArrayTypes.Type(0);
+        Assert.That(NativeFixedArrayContract.TryGetLayout(
+            arrayType, program.Structures,
+            program.NativeFixedArrayTypes, out var elementArrayLayout,
+            program.CheckedReferenceTypes), Is.True);
+        Assert.That(elementArrayLayout.ElementStride, Is.EqualTo(4));
+        Assert.That(elementArrayLayout.ByteExtent, Is.EqualTo(8));
+
+        var optionalArrayType = global::System.Linq.Enumerable.Single(
+            program.Functions,
+            static function => function.Name == "Accept").Variables.Single(
+            static variable => variable.Name == "values").Type;
+        var optionalArrayDefinition = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(optionalArrayType)];
+        Assert.That(optionalArrayDefinition.IsOptionalValue, Is.True);
+        Assert.That(optionalArrayDefinition.ReferentType,
+            Is.EqualTo(arrayType));
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(optionalArrayType,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes, out var optionalLayout),
+            Is.True);
+        Assert.That(optionalLayout.PayloadOffset, Is.EqualTo(4));
+        Assert.That(optionalLayout.Size, Is.EqualTo(12));
+
+        var elementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            struct OptionalElementArray {
+                [int32?; 2] Values;
+            }
+            void Accept() {}
+            """));
+        Assert.That(elementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                elementCompilation.Diagnostics));
+        var elementProgram = elementCompilation.Program!;
+        var optionalElementType = global::System.Linq.Enumerable.Single(
+            elementProgram.CheckedReferenceTypes,
+            static referenceType => referenceType.IsOptionalValue
+                && referenceType.ReferentType == PrimitiveType.Int32);
+        var optionalElementTypeIndex
+            = elementProgram.CheckedReferenceTypes.IndexOf(
+                optionalElementType);
+        var optionalElementArray = global::System.Linq.Enumerable.Single(
+            elementProgram.NativeFixedArrayTypes,
+            array => array.ElementType == CheckedReferenceTypes.Type(
+                optionalElementTypeIndex));
+        Assert.That(optionalElementArray.ElementStride, Is.EqualTo(8));
+        Assert.That(optionalElementArray.ByteExtent, Is.EqualTo(16));
+        var optionalElementArrayIndex
+            = elementProgram.NativeFixedArrayTypes.IndexOf(
+                optionalElementArray);
+        var optionalElementArrayType
+            = NativeFixedArrayTypes.Type(optionalElementArrayIndex);
+        Assert.That(ValueLayout.Size(optionalElementArrayType,
+                elementProgram.Structures,
+                elementProgram.CheckedReferenceTypes,
+                elementProgram.NativeLoweringAgreement,
+                elementProgram.NativeFixedArrayTypes),
+            Is.EqualTo(16));
+        Assert.That(ValueLayout.Alignment(optionalElementArrayType,
+                elementProgram.Structures,
+                elementProgram.CheckedReferenceTypes,
+                elementProgram.NativeLoweringAgreement,
+                elementProgram.NativeFixedArrayTypes),
+            Is.EqualTo(4));
+        Assert.That(ValueLayout.RequiredAlignment(optionalElementArrayType,
+                elementProgram.Structures,
+                elementProgram.NativeFixedArrayTypes,
+                elementProgram.CheckedReferenceTypes),
+            Is.EqualTo(1));
     }
 
     private static int FindPrivate106CheckedReferenceTypeRowOffset(

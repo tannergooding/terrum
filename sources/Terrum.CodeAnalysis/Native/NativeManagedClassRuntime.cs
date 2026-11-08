@@ -247,7 +247,8 @@ internal sealed partial class PeCompiler
             return supported;
         }
         return ValueLayout.Size(type, program.Structures, program.CheckedReferenceTypes,
-            program.NativeLoweringAgreement) > 0;
+            program.NativeLoweringAgreement,
+            program.NativeFixedArrayTypes) > 0;
     }
 
     private static bool IsNormalBackingRuntimeValue(BoundStruct structure, BoundProgram program,

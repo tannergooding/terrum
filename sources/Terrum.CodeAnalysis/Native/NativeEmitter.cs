@@ -3554,7 +3554,8 @@ internal sealed partial class PeCompiler
         }
 
         return NativeLayoutSize(ValueLayout.Size(type, _program.Structures,
-            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement));
+            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
+            _program.NativeFixedArrayTypes));
     }
 
     private static int NativeLayoutOffset(ulong offset) =>

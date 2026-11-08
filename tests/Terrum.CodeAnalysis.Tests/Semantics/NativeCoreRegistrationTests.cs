@@ -1050,6 +1050,37 @@ internal sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void NativeCallConvOptionalFunctionPointerSuffixMatchesConstructor()
+    {
+        var reference = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            unsafe void AcceptSuffix(
+                [NativeCallConv(NativeCallingConvention.Cdecl)] fnptr<int32>? callback) {}
+            unsafe void AcceptConstructor(
+                option<[NativeCallConv(NativeCallingConvention.Cdecl)] fnptr<int32>> callback) {}
+            """), reference);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var functions = compilation.Program!.Functions;
+        var suffixType = functions.Single(static function =>
+            function.Name == "AcceptSuffix").Variables[0].Type;
+        var constructorType = functions.Single(static function =>
+            function.Name == "AcceptConstructor").Variables[0].Type;
+        Assert.That(CheckedReferenceTypes.IsType(suffixType), Is.True);
+        Assert.That(suffixType, Is.EqualTo(constructorType));
+        var optional = compilation.Program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(suffixType)];
+        Assert.That(optional.IsOptionalValue, Is.True);
+        Assert.That(NativeFunctionPointerTypes.IsType(
+                optional.ReferentType),
+            Is.True);
+    }
+
+    [Test]
     public void BareFunctionPointerUsesTheTerrumDefaultConvention()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

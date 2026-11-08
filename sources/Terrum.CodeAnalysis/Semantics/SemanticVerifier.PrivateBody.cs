@@ -21,7 +21,7 @@ public static partial class SemanticVerifier
         && HasRawUnionReturnCoverageSubject(type, program)
         && ValueLayout.Size(type, structures,
             program.CheckedReferenceTypes,
-            program.NativeLoweringAgreement)
+            program.NativeLoweringAgreement, fixedArrays)
             <= ValueLayout.MaximumStructureSize;
 
     private readonly record struct PrivateBodyPlaceFacts(

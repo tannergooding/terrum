@@ -307,10 +307,10 @@ public static partial class ModuleCompiler
             allTypes, nativePointerMappings, functionPointerMappings,
             fixedArrayMappings, classMappings, enumMappings);
         if (!NativeFixedArrayContract.IsValidTable(allTypes,
-                nativeFixedArrayTypes)
+                nativeFixedArrayTypes, allCheckedReferenceTypes)
             || !NativePointerTypeContract.IsValidTable(nativePointerTypes,
                 allTypes, nativeFunctionPointerSignatures,
-                nativeFixedArrayTypes))
+                nativeFixedArrayTypes, allCheckedReferenceTypes))
         {
             throw new ModuleContractException(
                 "Combined private array and pointer metadata is invalid.");

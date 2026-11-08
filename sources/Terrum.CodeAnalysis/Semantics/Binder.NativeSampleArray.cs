@@ -74,7 +74,8 @@ internal sealed partial class Binder
             || !NativeFixedArrayContract.TryCreateType(resolvedElement,
                 constant.Bits.Low, _structs, _nativeFixedArrayTypes,
                 _nativeFixedArrayTypeIndexes,
-                out var resolvedArrayType, out _))
+                out var resolvedArrayType, out _,
+                _checkedReferenceTypes))
         {
             Report("TRM3030", "A fixed-array extent must be an exact closed uint64 value with a valid layout.",
                 node.Span);
@@ -112,7 +113,7 @@ internal sealed partial class Binder
     {
         if (!NativeFixedArrayContract.TryGetLayout(arrayType, elementType,
                 elementCount, _structs, _nativeFixedArrayTypes,
-                out var layout))
+                out var layout, _checkedReferenceTypes))
         {
             Report("TRM3030", "The fixed-array carrier has no valid layout.", node.Span);
             return ErrorExpression(node.Span);
