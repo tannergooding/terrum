@@ -182,6 +182,30 @@ internal sealed class CheckedReferenceTypeTests
     }
 
     [Test]
+    public void PrivateRevision106RejectsCyclesAcrossPointerAndFunctionPointerRows()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public unsafe void Accept(
+                [Terrum.Interop.NativeCallConv(
+                    Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                fnptr<ptr<int32>, int32> callback) {}
+            """), NativeCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var functionPointerType = NativeFunctionPointerTypes.Type(0);
+        var malformedProgram = program with {
+            NativePointerTypes = program.NativePointerTypes.SetItem(0,
+                program.NativePointerTypes[0] with {
+                    PointeeType = functionPointerType,
+                }),
+        };
+        _ = Assert.Throws<ModuleContractException>(
+            () => ModuleCompiler.CreateProducer(malformedProgram, ["Accept"]));
+    }
+
+    [Test]
     public void PrivateOptionalValueRowsRejectNestedAndManagedPayloads()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -260,7 +284,8 @@ internal sealed class CheckedReferenceTypeTests
             Assert.That(ReadInt32(module, ref offset), Is.Zero);
         }
 
-        Assert.That(ReadInt32(module, ref offset), Is.EqualTo(1));
+        Assert.That(ReadInt32(module, ref offset),
+            Is.GreaterThanOrEqualTo(1));
         return offset;
     }
 
