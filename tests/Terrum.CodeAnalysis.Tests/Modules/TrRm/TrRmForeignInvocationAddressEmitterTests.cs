@@ -1278,6 +1278,104 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task NativeImageExecutesOptionalScalarAndUnitOperations()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            int32? Identity(int32? value) { return value; }
+            int32 Main() {
+                int32? absent = null;
+                int32 zero = 0;
+                int32? present = zero;
+                int32? roundTrip = Identity(present);
+                if (absent is some unreachable) { return 1; }
+                if ((absent ?? 42) != 42) { return 2; }
+                if (!(roundTrip is some payload) || payload != 0) {
+                    return 3;
+                }
+                mut int32? assigned = null;
+                assigned ??= zero;
+                if (!(assigned is some assignedPayload)
+                    || assignedPayload != 0
+                    || (assigned ?? 42) != 0) { return 4; }
+                mut [int32?; 2] values = [null, present];
+                [int32?; 2] copied = values;
+                if (!(copied[1] is some copiedPayload)
+                    || copiedPayload != 0) { return 5; }
+
+                option<void> absentUnit = null;
+                option<void> presentUnit = ();
+                if (!(absentUnit is null) || presentUnit is null) {
+                    return 6;
+                }
+                option<void> selectedUnit = absentUnit ?? presentUnit;
+                if (selectedUnit is null) { return 7; }
+                return 42;
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException(
+                "A successful compilation must contain a bound program.");
+        var image = NativeEmitter.EmitWithNativeImports(program,
+            NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"Optional scalar/unit image input: target=WindowsX64; policy=FailFast; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={typeof(NativeEmitter).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(NativeEmitter).Assembly.Location)))}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}.");
+        await AssertNativeImageExitCodeAsync(image,
+            "native-optional-scalar-unit", 42).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task NativeImageExecutesOptionalPointerAndFunctionPointerOperations()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            int32 Increment(int32 value) { return value + 1; }
+            int32 Main() {
+                unsafe {
+                    int32 value = 41;
+                    ptr<int32> pointer = &value;
+                    ptr<int32>? absent = null;
+                    ptr<int32>? present = pointer;
+                    mut [ptr<int32>?; 2] pointers = [absent, present];
+                    [ptr<int32>?; 2] copy = pointers;
+                    if (!(copy[0] is null)) { return 1; }
+                    if (!(copy[1] is some address)
+                        || *address != 41) { return 2; }
+
+                    fnptr<int32, int32>? callback = &Increment;
+                    if (!(callback is some invoke)
+                        || invoke(41) != 42) { return 3; }
+                }
+                return 42;
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException(
+                "A successful compilation must contain a bound program.");
+        var image = NativeEmitter.EmitWithNativeImports(program,
+            NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"Optional pointer/function-pointer image input: target=WindowsX64; policy=FailFast; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={typeof(NativeEmitter).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(NativeEmitter).Assembly.Location)))}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}.");
+        await AssertNativeImageExitCodeAsync(image,
+            "native-optional-pointer-function-pointer", 42)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
     public async Task AbsentOptionalCopyDoesNotReadGuardedPayload()
     {
         Assume.That(OperatingSystem.IsWindows()

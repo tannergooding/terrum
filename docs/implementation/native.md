@@ -715,7 +715,8 @@ A supervised Windows x64 image executes optional aggregate copy and repeat.
 Supervised guard-page JIT regressions confirm absent optional copies do not
 read their inaccessible payload and present aggregate copies do not read
 trailing padding. Supervised Windows x64 images execute optional aggregate
-copy/repeat and the source-derived `A=8/R=32` composition.
+copy/repeat, scalar/unit operations, raw-pointer and function-pointer forms,
+and the source-derived `A=8/R=32` composition.
 JIT tests also cover internal aggregate call/return, success-conditioned out
 publication and reads/writes through a checked reference to an optional slot
 under both runtime policies. This does not assign a stored reference-descriptor
