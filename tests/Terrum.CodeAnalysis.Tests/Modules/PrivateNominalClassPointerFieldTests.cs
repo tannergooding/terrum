@@ -96,6 +96,32 @@ internal sealed class PrivateNominalClassPointerFieldTests
                 .ExpectedEnumMapping,
             Is.EqualTo([0]));
 
+        var sourceProgram = consumer.Program!;
+        Assert.That(NativeFixedArrayContract.MatchesProgram(sourceProgram),
+            Is.True);
+        var sourceReference = sourceProgram.PrivateClassReferences.Single();
+        var sourceClassType = sourceReference.ClassType;
+        var sourceInputs = PrivateModuleIdentityInputs.Create(
+            sourceProgram, "arrayforwarder", [], [
+                new PrivateNominalImport(sourceClassType,
+                    "types.widget.proxy", "provider", "types.widget"),
+            ]);
+        var sourceProducer = ModuleCompiler.CreateProducer(
+            sourceProgram, ["Read"], sourceInputs);
+        var persistedSource = ModuleCompiler.CreateReference(sourceProducer);
+        var persistedClassReference
+            = persistedSource.PrivateClassReferences.Single(
+                static reference => reference.Origin.LocalDeclarationKey
+                    == "types.widget.proxy");
+        Assert.That(persistedClassReference.Origin.OriginKind,
+            Is.EqualTo(BoundPrivateNominalOriginKind.ImportedExpectation));
+        Assert.That(persistedClassReference.ExpectedSnapshot
+                .NativeFixedArrayTypes.Single().ElementType,
+            Is.EqualTo(BoundEnumTypes.Type(0)));
+        Assert.That(persistedClassReference.ExpectedSnapshot
+                .EnumDefinitions.Single().Members.Single().Value,
+            Is.EqualTo(1));
+
         var changedReference = new CompilationReference(
             program.Structures, [], BoundRuntimePolicy.FailFast,
             nativeFunctionPointerSignatures:
