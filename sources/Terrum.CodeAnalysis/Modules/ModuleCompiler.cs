@@ -999,6 +999,14 @@ public static partial class ModuleCompiler
         }
         var checkedReferenceMapping
             = ImmutableArray.CreateRange(checkedReferenceMappingArray);
+        var selectedCheckedReferenceTypes
+            = canonicalCheckedReferenceTypes.ToImmutable();
+        if (!CheckedReferenceTypeContract.IsValidTable(
+                selectedCheckedReferenceTypes))
+        {
+            throw new ModuleContractException(
+                "Projected checked-reference type closure is invalid.");
+        }
         var fixedArrayTypeDefinitions =
             ImmutableArray.CreateBuilder<BoundNativeFixedArrayType>(
                 requiredFixedArrayTypes.Count);
@@ -1016,6 +1024,8 @@ public static partial class ModuleCompiler
             elementType = RemapNativeFunctionPointerType(elementType,
                 functionPointerMapping);
             elementType = RemapNativePointerType(elementType, pointerMapping);
+            elementType = RemapCheckedReferenceType(elementType,
+                checkedReferenceMappingArray);
             elementType = RemapEnumType(elementType, enumIndexMapping);
             fixedArrayTypeDefinitions.Add(fixedArray with {
                 ElementType = elementType,
@@ -1024,7 +1034,7 @@ public static partial class ModuleCompiler
         var projectedFixedArrayTypes =
             fixedArrayTypeDefinitions.MoveToImmutable();
         if (!NativeFixedArrayContract.IsValidTable(selectedStructures,
-                projectedFixedArrayTypes))
+                projectedFixedArrayTypes, selectedCheckedReferenceTypes))
         {
             throw new ModuleContractException(
                 "Projected fixed-array type closure does not preserve its selected layouts.");
@@ -1057,15 +1067,6 @@ public static partial class ModuleCompiler
             pointerTypeDefinitions.Add(pointerType with {
                 PointeeType = RemapProjectedType(pointerType.PointeeType),
             });
-        }
-
-        var selectedCheckedReferenceTypes
-            = canonicalCheckedReferenceTypes.ToImmutable();
-        if (!CheckedReferenceTypeContract.IsValidTable(
-                selectedCheckedReferenceTypes))
-        {
-            throw new ModuleContractException(
-                "Projected checked-reference type closure is invalid.");
         }
 
         return new NativeContractProjection(requiredStructures, functionPointerSignatures.MoveToImmutable(),
@@ -1852,6 +1853,10 @@ public static partial class ModuleCompiler
         var structures = SelectStructures(program.Structures, required);
         structures = [.. structures.Select(structure =>
             RemapEnumTypes(structure, enumMapping))];
+        var checkedReferenceTypes = RemapCheckedReferenceTypeDefinitions(
+            program.CheckedReferenceTypes, program.Structures, structures);
+        checkedReferenceTypes = RemapEnumTypes(checkedReferenceTypes,
+            enumMapping);
         var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
             program.Structures, structures);
         nativePointerTypes = RemapEnumTypes(nativePointerTypes,
@@ -1863,12 +1868,9 @@ public static partial class ModuleCompiler
         nativeFunctionPointerSignatures = RemapEnumTypes(
             nativeFunctionPointerSignatures, enumMapping);
         var nativeFixedArrayTypes = RemapNativeFixedArrayTypeDefinitions(
-            program.NativeFixedArrayTypes, program.Structures, structures);
+            program.NativeFixedArrayTypes, program.Structures, structures,
+            checkedReferenceTypes: checkedReferenceTypes);
         nativeFixedArrayTypes = RemapEnumTypes(nativeFixedArrayTypes,
-            enumMapping);
-        var checkedReferenceTypes = RemapCheckedReferenceTypeDefinitions(
-            program.CheckedReferenceTypes, program.Structures, structures);
-        checkedReferenceTypes = RemapEnumTypes(checkedReferenceTypes,
             enumMapping);
         var moduleFunctions = ImmutableArray.CreateBuilder<ModuleFunction>(functions.Length);
         foreach (var function in functions)
@@ -2029,7 +2031,11 @@ public static partial class ModuleCompiler
             program.Structures, producer.Structures,
             program.NativePointerTypes, producer.NativePointerTypes,
             program.NativeFixedArrayTypes, producer.NativeFixedArrayTypes,
-            allowUnmatchedSourceSignatures: true);
+            allowUnmatchedSourceSignatures: true,
+            destinationCheckedReferenceTypes:
+                program.CheckedReferenceTypes,
+            sourceCheckedReferenceTypes:
+                producer.CheckedReferenceTypes);
         var declarations = ImmutableArray.CreateBuilder<ModuleFunction>();
         List<int>?[]? functionCalls = null;
         for (var i = 0; i < program.Functions.Length; i++)
@@ -2246,6 +2252,8 @@ public static partial class ModuleCompiler
             checkedReferenceTypes: program.CheckedReferenceTypes,
             additionalTypes: privateNominalRoots);
         var structures = SelectStructures(program.Structures, required);
+        var checkedReferenceTypes = RemapCheckedReferenceTypeDefinitions(
+            program.CheckedReferenceTypes, program.Structures, structures);
         var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
             program.Structures, structures);
         var nativeFunctionPointerSignatures
@@ -2253,9 +2261,8 @@ public static partial class ModuleCompiler
                 program.NativeFunctionPointerSignatures,
                 program.Structures, structures);
         var nativeFixedArrayTypes = RemapNativeFixedArrayTypeDefinitions(
-            program.NativeFixedArrayTypes, program.Structures, structures);
-        var checkedReferenceTypes = RemapCheckedReferenceTypeDefinitions(
-            program.CheckedReferenceTypes, program.Structures, structures);
+            program.NativeFixedArrayTypes, program.Structures, structures,
+            checkedReferenceTypes: checkedReferenceTypes);
         var exportedTypes = RequiredStructures(producer.Functions.Where(static function => function.Import)
             .Select(static function => Declaration(function.Function ?? throw new ModuleFormatException("Missing export."))),
             producer.Structures, nativePointerTypes: producer.NativePointerTypes,
@@ -2412,9 +2419,6 @@ public static partial class ModuleCompiler
         CompilationReference[] contractReferences = [consumerReference, producerReference];
         var enumDefinitions = MergePrivateEnumDefinitions(
             contractReferences, out var enumMappings);
-        var nativeFunctionPointerSignatures = MergeNativeFunctionPointerSignatures(contractReferences,
-            out var functionPointerMappings, out var nativePointerMappings,
-            enumMappings: enumMappings);
         var consumerClassMapping = Enumerable.Range(0,
             consumer.Classes.Length).ToImmutableArray();
         var producerClassMapping = Enumerable.Range(0,
@@ -2424,6 +2428,14 @@ public static partial class ModuleCompiler
         ImmutableArray<ImmutableArray<int>> classMappings = [
             consumerClassMapping, producerClassMapping,
         ];
+        ImmutableArray<BoundClass> classesForMapping = [
+            .. consumer.Classes, .. producer.Classes,
+        ];
+        var nativeFunctionPointerSignatures
+            = MergeNativeFunctionPointerSignatures(contractReferences,
+                out var functionPointerMappings,
+                out var nativePointerMappings, classMappings,
+                classesForMapping, enumMappings);
         var structures = consumer.Structures.ToBuilder();
         structures.AddRange(renamedProducerStructures.Where(structure => !sharedTypes.Contains(structure.Name)));
         var structureSkeletons = structures.ToImmutable();
@@ -2431,16 +2443,13 @@ public static partial class ModuleCompiler
         var nativeFixedArrayTypes = MergeNativeFixedArrayTypeDefinitions(
             contractReferences, structureSkeletons, nativePointerMappings,
             functionPointerMappings, out var fixedArrayMappings,
-            enumMappings);
-        var nativePointerTypes = MergeNativePointerTypeDefinitions(
-            contractReferences, structureSkeletons, nativePointerMappings,
-            functionPointerMappings, fixedArrayMappings,
-            enumMappings: enumMappings);
+            enumMappings, classMappings, classesForMapping);
         var checkedReferenceMappings
             = MergeCheckedReferenceTypeDefinitions(contractReferences,
                 structureSkeletons, destinationTypes, nativePointerMappings,
                 functionPointerMappings, fixedArrayMappings,
-                classMappings, out var checkedReferenceTypes);
+                classMappings, enumMappings,
+                out var checkedReferenceTypes);
         var allStructures = ImmutableArray.CreateBuilder<BoundStruct>(structureSkeletons.Length);
         for (var index = 0; index < consumer.Structures.Length; index++)
         {
@@ -2477,6 +2486,16 @@ public static partial class ModuleCompiler
             }
         }
         var combinedStructures = allStructures.MoveToImmutable();
+        nativeFixedArrayTypes =
+            RemapMergedNativeFixedArrayTypeDefinitions(contractReferences,
+                combinedStructures, destinationTypes, fixedArrayMappings,
+                nativePointerMappings, functionPointerMappings,
+                checkedReferenceMappings, classMappings, enumMappings,
+                checkedReferenceTypes);
+        var nativePointerTypes = MergeNativePointerTypeDefinitions(
+            contractReferences, combinedStructures, nativePointerMappings,
+            functionPointerMappings, fixedArrayMappings, classMappings,
+            enumMappings, checkedReferenceMappings);
         var available = producer.Functions.Where(static function => function.Import)
             .ToDictionary(function => function.Name, StringComparer.Ordinal);
         var names = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
@@ -2736,7 +2755,8 @@ public static partial class ModuleCompiler
             RuntimePolicy = consumer.RuntimePolicy,
         };
         if (!NativeFixedArrayContract.IsValidTable(result.Structures,
-                result.NativeFixedArrayTypes))
+                result.NativeFixedArrayTypes,
+                result.CheckedReferenceTypes))
         {
             throw new ModuleFormatException(
                 "Linked fixed-array identities do not preserve their target layouts.");
@@ -4892,13 +4912,16 @@ public static partial class ModuleCompiler
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes = default,
         ImmutableArray<BoundClass> classes = default,
-        ImmutableArray<int> classMapping = default)
+        ImmutableArray<int> classMapping = default,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes = default,
+        ImmutableArray<int> enumMapping = default)
     {
         var builder = new StringBuilder();
         var byteCount = 0;
         AppendTypeName(builder, ref byteCount, type, structures,
             functionPointerSignatures, nativePointerTypes, fixedArrayTypes,
-            classes, classMapping);
+            classes, classMapping, checkedReferenceTypes, enumMapping);
         return builder.ToString();
     }
 
@@ -4908,14 +4931,47 @@ public static partial class ModuleCompiler
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
         ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes,
         ImmutableArray<BoundClass> classes,
-        ImmutableArray<int> classMapping)
+        ImmutableArray<int> classMapping,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        ImmutableArray<int> enumMapping)
     {
         if (CheckedReferenceTypes.IsType(type))
         {
-            AppendBoundedTypeName(builder, ref byteCount, "ctype#");
+            var checkedReferenceIndex = CheckedReferenceTypes.Index(type);
+            if (checkedReferenceTypes.IsDefault)
+            {
+                AppendBoundedTypeName(builder, ref byteCount, "ctype#");
+                AppendBoundedTypeName(builder, ref byteCount,
+                    checkedReferenceIndex.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture));
+                return;
+            }
+            if ((uint)checkedReferenceIndex
+                    >= (uint)checkedReferenceTypes.Length)
+            {
+                throw new ModuleContractException(
+                    "Native module type identity has an invalid checked-reference row.");
+            }
+
+            var checkedReferenceType
+                = checkedReferenceTypes[checkedReferenceIndex];
+            var qualifiers = (checkedReferenceType.IsWritable ? 1 : 0)
+                | (checkedReferenceType.IsGarbageCollected ? 2 : 0)
+                | (checkedReferenceType.IsInitialization ? 4 : 0)
+                | (checkedReferenceType.IsOptional ? 8 : 0)
+                | (checkedReferenceType.IsOptionalValue ? 16 : 0);
+            AppendBoundedTypeName(builder, ref byteCount, "cref:");
             AppendBoundedTypeName(builder, ref byteCount,
-                CheckedReferenceTypes.Index(type).ToString(
+                qualifiers.ToString(
                     System.Globalization.CultureInfo.InvariantCulture));
+            AppendBoundedTypeName(builder, ref byteCount, "<");
+            AppendTypeName(builder, ref byteCount,
+                checkedReferenceType.ReferentType, structures,
+                functionPointerSignatures, nativePointerTypes,
+                fixedArrayTypes, classes, classMapping,
+                checkedReferenceTypes, enumMapping);
+            AppendBoundedTypeName(builder, ref byteCount, ">");
             return;
         }
         if ((int)type < 0)
@@ -4925,9 +4981,20 @@ public static partial class ModuleCompiler
         }
         if (BoundEnumTypes.IsType(type))
         {
+            var enumIndex = BoundEnumTypes.Index(type);
+            if (!enumMapping.IsDefault)
+            {
+                if ((uint)enumIndex >= (uint)enumMapping.Length
+                    || enumMapping[enumIndex] < 0)
+                {
+                    throw new ModuleContractException(
+                        "A nominal enum type has no canonical identity.");
+                }
+                enumIndex = enumMapping[enumIndex];
+            }
             AppendBoundedTypeName(builder, ref byteCount, "enum#");
             AppendBoundedTypeName(builder, ref byteCount,
-                BoundEnumTypes.Index(type).ToString(
+                enumIndex.ToString(
                     System.Globalization.CultureInfo.InvariantCulture));
             return;
         }
@@ -4943,7 +5010,8 @@ public static partial class ModuleCompiler
                     pointerType.IsWritable ? "write ptr<" : "ptr<");
                 AppendTypeName(builder, ref byteCount, pointerType.PointeeType, structures,
                     functionPointerSignatures, nativePointerTypes,
-                    fixedArrayTypes, classes, classMapping);
+                    fixedArrayTypes, classes, classMapping,
+                    checkedReferenceTypes, enumMapping);
                 AppendBoundedTypeName(builder, ref byteCount, ">");
                 return;
             }
@@ -4966,12 +5034,14 @@ public static partial class ModuleCompiler
                     }
                     AppendTypeName(builder, ref byteCount, signature.ParameterTypes[parameterIndex], structures,
                         functionPointerSignatures, nativePointerTypes,
-                        fixedArrayTypes, classes, classMapping);
+                        fixedArrayTypes, classes, classMapping,
+                        checkedReferenceTypes, enumMapping);
                 }
                 AppendBoundedTypeName(builder, ref byteCount, ")->");
                 AppendTypeName(builder, ref byteCount, signature.ReturnType, structures,
                     functionPointerSignatures, nativePointerTypes,
-                    fixedArrayTypes, classes, classMapping);
+                    fixedArrayTypes, classes, classMapping,
+                    checkedReferenceTypes, enumMapping);
                 if (signature.EffectsMask != 0)
                 {
                     AppendBoundedTypeName(builder, ref byteCount, "|effects:");
@@ -5062,7 +5132,8 @@ public static partial class ModuleCompiler
             AppendBoundedTypeName(builder, ref byteCount, "[");
             AppendTypeName(builder, ref byteCount, fixedArray.ElementType,
                 structures, functionPointerSignatures, nativePointerTypes,
-                fixedArrayTypes, classes, classMapping);
+                fixedArrayTypes, classes, classMapping,
+                checkedReferenceTypes, enumMapping);
             AppendBoundedTypeName(builder, ref byteCount, ";");
             AppendBoundedTypeName(builder, ref byteCount,
                 fixedArray.ElementCount.ToString(
@@ -6265,7 +6336,9 @@ public static partial class ModuleCompiler
         IReadOnlyList<BoundStruct> destinationStructures,
         IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null,
         ImmutableArray<PrimitiveType> functionPointerMapping = default,
-        ImmutableArray<PrimitiveType> pointerMapping = default)
+        ImmutableArray<PrimitiveType> pointerMapping = default,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes = default)
     {
         if (pointerTypes.IsDefaultOrEmpty)
         {
@@ -6318,26 +6391,17 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException("Provider native pointer type table is invalid.");
             }
             var mapping = ImmutableArray.CreateBuilder<PrimitiveType>(reference.NativePointerTypes.Length);
-            var pointerTypes = enumMappings.IsDefault
-                ? reference.NativePointerTypes
-                : RemapEnumTypes(reference.NativePointerTypes,
-                    enumMappings[referenceIndex]);
-            var functionPointerSignatures = enumMappings.IsDefault
-                ? reference.NativeFunctionPointerSignatures
-                : RemapEnumTypes(reference.NativeFunctionPointerSignatures,
-                    enumMappings[referenceIndex]);
-            var fixedArrayTypes = enumMappings.IsDefault
-                ? reference.NativeFixedArrayTypes
-                : RemapEnumTypes(reference.NativeFixedArrayTypes,
-                    enumMappings[referenceIndex]);
             for (var index = 0; index < reference.NativePointerTypes.Length; index++)
             {
                 var key = TypeName(NativePointerTypes.Type(index), reference.Structures,
-                    functionPointerSignatures,
-                    pointerTypes,
-                    fixedArrayTypes, classes,
+                    reference.NativeFunctionPointerSignatures,
+                    reference.NativePointerTypes,
+                    reference.NativeFixedArrayTypes, classes,
                     classMappings.IsDefaultOrEmpty
-                        ? default : classMappings[referenceIndex]);
+                        ? default : classMappings[referenceIndex],
+                    reference.CheckedReferenceTypes,
+                    enumMappings.IsDefault
+                        ? default : enumMappings[referenceIndex]);
                 if (!combined.TryGetValue(key, out var combinedIndex))
                 {
                     combinedIndex = combined.Count;
@@ -6360,7 +6424,8 @@ public static partial class ModuleCompiler
         ImmutableArray<ImmutableArray<PrimitiveType>> functionPointerMappings,
         ImmutableArray<ImmutableArray<PrimitiveType>> fixedArrayMappings = default,
         ImmutableArray<ImmutableArray<int>> classMappings = default,
-        ImmutableArray<ImmutableArray<int>> enumMappings = default)
+        ImmutableArray<ImmutableArray<int>> enumMappings = default,
+        int[][]? checkedReferenceMappings = null)
     {
         var combined = new NativePointerTypeDefinition?[pointerMappings
             .SelectMany(static mapping => mapping)
@@ -6393,6 +6458,14 @@ public static partial class ModuleCompiler
             {
                 mapped = RemapEnumTypes(mapped,
                     enumMappings[referenceIndex]);
+            }
+            if (checkedReferenceMappings is not null)
+            {
+                mapped = [.. mapped.Select(pointer => pointer with {
+                    PointeeType = RemapCheckedReferenceType(
+                        pointer.PointeeType,
+                        checkedReferenceMappings[referenceIndex]),
+                })];
             }
             for (var typeIndex = 0; typeIndex < mapped.Length; typeIndex++)
             {
@@ -6607,7 +6680,9 @@ public static partial class ModuleCompiler
             IReadOnlyList<BoundStruct> destinationStructures,
             IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null,
             ImmutableArray<PrimitiveType> functionPointerMapping = default,
-            ImmutableArray<PrimitiveType> pointerMapping = default)
+            ImmutableArray<PrimitiveType> pointerMapping = default,
+            ImmutableArray<CheckedReferenceTypeDefinition>
+                checkedReferenceTypes = default)
     {
         if (fixedArrays.IsDefaultOrEmpty)
         {
@@ -6631,7 +6706,9 @@ public static partial class ModuleCompiler
         }
         var result = remapped.MoveToImmutable();
         if (!NativeFixedArrayContract.IsValidTable(destinationStructures,
-                result))
+                result, checkedReferenceTypes.IsDefault
+                    ? ImmutableArray<CheckedReferenceTypeDefinition>.Empty
+                    : checkedReferenceTypes))
         {
             throw new ModuleContractException(
                 "Private fixed-array identities do not preserve their target layouts.");
@@ -6646,9 +6723,13 @@ public static partial class ModuleCompiler
             ImmutableArray<ImmutableArray<PrimitiveType>> pointerMappings,
             ImmutableArray<ImmutableArray<PrimitiveType>> functionPointerMappings,
             out ImmutableArray<ImmutableArray<PrimitiveType>> typeMappings,
-            ImmutableArray<ImmutableArray<int>> enumMappings = default)
+            ImmutableArray<ImmutableArray<int>> enumMappings = default,
+            ImmutableArray<ImmutableArray<int>> classMappings = default,
+            ImmutableArray<BoundClass> classes = default)
     {
         var combined = new List<BoundNativeFixedArrayType>();
+        var combinedIdentities = new Dictionary<(string ElementType,
+            ulong ElementCount), int>();
         var mappings = ImmutableArray.CreateBuilder<ImmutableArray<PrimitiveType>>(
             references.Count);
         for (var referenceIndex = 0;
@@ -6658,7 +6739,7 @@ public static partial class ModuleCompiler
             var reference = references[referenceIndex];
             var sourceArrays = reference.NativeFixedArrayTypes;
             if (!NativeFixedArrayContract.IsValidTable(reference.Structures,
-                    sourceArrays))
+                    sourceArrays, reference.CheckedReferenceTypes))
             {
                 throw new ModuleContractException(
                     "Provider native fixed-array type table is invalid.");
@@ -6703,19 +6784,36 @@ public static partial class ModuleCompiler
 
                 states[index] = 1;
                 var source = sourceArrays[index];
+                var enumMapping = enumMappings.IsDefault
+                    ? default : enumMappings[referenceIndex];
+                var classMapping = classMappings.IsDefaultOrEmpty
+                    ? default : classMappings[referenceIndex];
+                var elementTypeName = TypeName(source.ElementType,
+                    reference.Structures,
+                    reference.NativeFunctionPointerSignatures,
+                    reference.NativePointerTypes, sourceArrays, classes,
+                    classMapping, reference.CheckedReferenceTypes,
+                    enumMapping);
                 var definition = source with {
                     ElementType = MapType(source.ElementType),
                 };
-                var combinedIndex = combined.FindIndex(existing =>
-                    existing.ElementType == definition.ElementType
-                    && existing.ElementCount == definition.ElementCount);
-                if (combinedIndex >= 0)
+                var identity = (elementTypeName, source.ElementCount);
+                var combinedIndex = -1;
+                if (combinedIdentities.TryGetValue(identity,
+                        out var existingIndex))
                 {
-                    if (combined[combinedIndex] != definition)
+                    var existingArray = combined[existingIndex];
+                    if (existingArray.ElementStride
+                            != definition.ElementStride
+                        || existingArray.ByteExtent != definition.ByteExtent
+                        || existingArray.Alignment != definition.Alignment
+                        || existingArray.RequiredAlignment
+                            != definition.RequiredAlignment)
                     {
                         throw new ModuleContractException(
                             "Incompatible native fixed-array type identities.");
                     }
+                    combinedIndex = existingIndex;
                 }
                 else
                 {
@@ -6727,6 +6825,7 @@ public static partial class ModuleCompiler
                     }
                     combinedIndex = combined.Count;
                     combined.Add(definition);
+                    combinedIdentities.Add(identity, combinedIndex);
                 }
 
                 var mapped = NativeFixedArrayTypes.Type(combinedIndex);
@@ -6746,6 +6845,89 @@ public static partial class ModuleCompiler
 
         typeMappings = mappings.MoveToImmutable();
         return [.. combined];
+    }
+
+    private static ImmutableArray<BoundNativeFixedArrayType>
+        RemapMergedNativeFixedArrayTypeDefinitions(
+            IReadOnlyList<CompilationReference> references,
+            IReadOnlyList<BoundStruct> structures,
+            IReadOnlyDictionary<string, PrimitiveType>? destinationTypes,
+            ImmutableArray<ImmutableArray<PrimitiveType>> typeMappings,
+            ImmutableArray<ImmutableArray<PrimitiveType>> pointerMappings,
+            ImmutableArray<ImmutableArray<PrimitiveType>>
+                functionPointerMappings,
+            int[][] checkedReferenceMappings,
+            ImmutableArray<ImmutableArray<int>> classMappings,
+            ImmutableArray<ImmutableArray<int>> enumMappings,
+            ImmutableArray<CheckedReferenceTypeDefinition>
+                checkedReferenceTypes)
+    {
+        var count = typeMappings.SelectMany(static mapping => mapping)
+            .Select(NativeFixedArrayTypes.Index)
+            .DefaultIfEmpty(-1)
+            .Max() + 1;
+        var combined = new BoundNativeFixedArrayType?[count];
+        for (var referenceIndex = 0;
+            referenceIndex < references.Count; referenceIndex++)
+        {
+            var reference = references[referenceIndex];
+            for (var index = 0;
+                index < reference.NativeFixedArrayTypes.Length; index++)
+            {
+                var definition = reference.NativeFixedArrayTypes[index];
+                var elementType = RemapType(definition.ElementType,
+                    reference.Structures, structures,
+                    destinationTypes: destinationTypes);
+                elementType = RemapNativeFixedArrayType(elementType,
+                    typeMappings[referenceIndex]);
+                elementType = RemapNativeFunctionPointerType(elementType,
+                    functionPointerMappings[referenceIndex]);
+                elementType = RemapNativePointerType(elementType,
+                    pointerMappings[referenceIndex]);
+                elementType = RemapManagedClassType(elementType,
+                    classMappings[referenceIndex]);
+                elementType = RemapCheckedReferenceType(elementType,
+                    checkedReferenceMappings[referenceIndex]);
+                elementType = RemapEnumType(elementType,
+                    enumMappings[referenceIndex]);
+                var combinedIndex = NativeFixedArrayTypes.Index(
+                    typeMappings[referenceIndex][index]);
+                var mappedDefinition = definition with {
+                    ElementType = elementType,
+                };
+                if (combined[combinedIndex] is BoundNativeFixedArrayType
+                    existing && existing != mappedDefinition)
+                {
+                    throw new ModuleContractException(
+                        "Remapped native fixed-array type identities differ.");
+                }
+                combined[combinedIndex] = mappedDefinition;
+            }
+        }
+
+        if (combined.Any(static definition => definition is null))
+        {
+            throw new ModuleContractException(
+                "Combined native fixed-array type identities are incomplete.");
+        }
+
+        var resultBuilder
+            = ImmutableArray.CreateBuilder<BoundNativeFixedArrayType>(
+                combined.Length);
+        foreach (var definition in combined)
+        {
+            resultBuilder.Add(definition
+                ?? throw new ModuleContractException(
+                    "Combined native fixed-array type identities are incomplete."));
+        }
+        var result = resultBuilder.MoveToImmutable();
+        if (!NativeFixedArrayContract.IsValidTable(structures, result,
+                checkedReferenceTypes))
+        {
+            throw new ModuleContractException(
+                "Remapped fixed-array identities do not preserve their target layouts.");
+        }
+        return result;
     }
 
     private static BoundExpression RemapNativeTypeIdentities(BoundExpression expression,
@@ -7050,7 +7232,11 @@ public static partial class ModuleCompiler
         ImmutableArray<NativePointerTypeDefinition> sourcePointerTypes = default,
         ImmutableArray<BoundNativeFixedArrayType> destinationFixedArrays = default,
         ImmutableArray<BoundNativeFixedArrayType> sourceFixedArrays = default,
-        bool allowUnmatchedSourceSignatures = false)
+        bool allowUnmatchedSourceSignatures = false,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            destinationCheckedReferenceTypes = default,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            sourceCheckedReferenceTypes = default)
     {
         var destinationPointeeValidator
             = destinationStructures.IsDefault ? null
@@ -7069,10 +7255,12 @@ public static partial class ModuleCompiler
             || (!destinationPointerTypes.IsDefault
                 && !NativePointerTypeContract.IsValidTable(destinationPointerTypes,
                     destinationStructures, destination,
-                    destinationFixedArrays))
+                    destinationFixedArrays,
+                    destinationCheckedReferenceTypes))
             || (!sourcePointerTypes.IsDefault
                 && !NativePointerTypeContract.IsValidTable(sourcePointerTypes,
-                    sourceStructures, source, sourceFixedArrays)))
+                    sourceStructures, source, sourceFixedArrays,
+                    sourceCheckedReferenceTypes)))
         {
             throw new ModuleContractException("Native function-pointer signature table is invalid.");
         }
@@ -7080,13 +7268,16 @@ public static partial class ModuleCompiler
         for (var sourceIndex = 0; sourceIndex < source.Length; sourceIndex++)
         {
             var sourceName = TypeName(NativeFunctionPointerTypes.Type(sourceIndex), sourceStructures,
-                source, sourcePointerTypes, sourceFixedArrays);
+                source, sourcePointerTypes, sourceFixedArrays,
+                checkedReferenceTypes: sourceCheckedReferenceTypes);
             var destinationIndex = -1;
             for (var candidate = 0; candidate < destination.Length; candidate++)
             {
                 if (sourceName == TypeName(NativeFunctionPointerTypes.Type(candidate), destinationStructures,
                     destination, destinationPointerTypes,
-                    destinationFixedArrays))
+                    destinationFixedArrays,
+                    checkedReferenceTypes:
+                        destinationCheckedReferenceTypes))
                 {
                     destinationIndex = candidate;
                     break;
@@ -7116,12 +7307,18 @@ public static partial class ModuleCompiler
         ImmutableArray<BoundStruct> sourceStructures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> sourceFunctionPointerSignatures,
         ImmutableArray<BoundNativeFixedArrayType> destinationFixedArrays = default,
-        ImmutableArray<BoundNativeFixedArrayType> sourceFixedArrays = default)
+        ImmutableArray<BoundNativeFixedArrayType> sourceFixedArrays = default,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            destinationCheckedReferenceTypes = default,
+        ImmutableArray<CheckedReferenceTypeDefinition>
+            sourceCheckedReferenceTypes = default)
     {
         if (!NativePointerTypeContract.IsValidTable(destination, destinationStructures,
-                destinationFunctionPointerSignatures, destinationFixedArrays)
+                destinationFunctionPointerSignatures, destinationFixedArrays,
+                destinationCheckedReferenceTypes)
             || !NativePointerTypeContract.IsValidTable(source, sourceStructures,
-                sourceFunctionPointerSignatures, sourceFixedArrays))
+                sourceFunctionPointerSignatures, sourceFixedArrays,
+                sourceCheckedReferenceTypes))
         {
             throw new ModuleContractException("Native pointer type table is invalid.");
         }
@@ -7129,13 +7326,16 @@ public static partial class ModuleCompiler
         for (var sourceIndex = 0; sourceIndex < source.Length; sourceIndex++)
         {
             var sourceName = TypeName(NativePointerTypes.Type(sourceIndex), sourceStructures,
-                sourceFunctionPointerSignatures, source, sourceFixedArrays);
+                sourceFunctionPointerSignatures, source, sourceFixedArrays,
+                checkedReferenceTypes: sourceCheckedReferenceTypes);
             var destinationIndex = -1;
             for (var candidate = 0; candidate < destination.Length; candidate++)
             {
                 if (sourceName == TypeName(NativePointerTypes.Type(candidate), destinationStructures,
                     destinationFunctionPointerSignatures, destination,
-                    destinationFixedArrays))
+                    destinationFixedArrays,
+                    checkedReferenceTypes:
+                        destinationCheckedReferenceTypes))
                 {
                     destinationIndex = candidate;
                     break;
@@ -7763,15 +7963,18 @@ public static partial class ModuleCompiler
 
         if (module.NativeFixedArrayTypes.IsDefault
             || !NativeFixedArrayContract.IsValidTable(module.Structures,
-                module.NativeFixedArrayTypes))
+                module.NativeFixedArrayTypes,
+                module.CheckedReferenceTypes))
         {
             throw new ModuleContractException(
                 "Module fixed-array type identities do not match their retained layouts.");
         }
+        var (canonicalReferenceModule, checkedReferenceMapping)
+            = CanonicalizePrivateCheckedReferenceTypes(module);
+        module = canonicalReferenceModule;
         var (canonicalModule, fixedArrayMapping) =
             CanonicalizeNativeFixedArrays(module);
         module = canonicalModule;
-        module = CanonicalizePrivateCheckedReferenceTypes(module);
         var enumMapping = CreatePrivateEnumTypeMapping(
             program.EnumDefinitions, module.EnumDefinitions);
         if (HasUnsupportedArrayDerivedManagedClassFields(module.Classes,
@@ -7911,6 +8114,11 @@ public static partial class ModuleCompiler
             })];
         expectedNativePointerTypes = RemapEnumTypes(
             expectedNativePointerTypes, enumMapping);
+        expectedNativePointerTypes = [.. expectedNativePointerTypes.Select(
+            pointer => pointer with {
+                PointeeType = RemapCheckedReferenceType(
+                    pointer.PointeeType, checkedReferenceMapping),
+            })];
         if (module.NativePointerTypes.IsDefault
             || !module.NativePointerTypes.SequenceEqual(expectedNativePointerTypes)
             || !NativePointerTypeContract.IsValidTable(module.NativePointerTypes, module.Structures,
@@ -7923,7 +8131,8 @@ public static partial class ModuleCompiler
         if (module.FormatVersion >= NativeFixedArrayVersion
             && (module.NativeFixedArrayTypes.IsDefault
                 || !NativeFixedArrayContract.IsValidTable(module.Structures,
-                    module.NativeFixedArrayTypes)))
+                    module.NativeFixedArrayTypes,
+                    module.CheckedReferenceTypes)))
         {
             throw new ModuleContractException(
                 "Module fixed-array type identities do not match their retained layouts.");
@@ -8086,7 +8295,8 @@ public static partial class ModuleCompiler
         }
         if (module.NativeFixedArrayTypes.IsDefault
             || !NativeFixedArrayContract.IsValidTable(module.Structures,
-                module.NativeFixedArrayTypes))
+                module.NativeFixedArrayTypes,
+                module.CheckedReferenceTypes))
         {
             throw new ModuleContractException(
                 "Module fixed-array type identities do not match their retained layouts.");
@@ -8656,7 +8866,10 @@ public static partial class ModuleCompiler
         }
 
         var result = fixedArrays.MoveToImmutable();
-        if (!NativeFixedArrayContract.IsValidTable(structures, result))
+        if (reader is not ModuleReader {
+                FormatVersion: CheckedReferenceVersion,
+            }
+            && !NativeFixedArrayContract.IsValidTable(structures, result))
         {
             throw new ModuleFormatException(
                 "Module fixed-array type table is invalid.");
@@ -8686,7 +8899,7 @@ public static partial class ModuleCompiler
         if (!NativeFixedArrayContract.TryGetLayout(arrayType,
                 definition.ElementType, definition.ElementCount,
                 moduleReader.Structures, moduleReader.NativeFixedArrayTypes,
-                out var layout))
+                out var layout, moduleReader.CheckedReferenceTypes))
         {
             throw new ModuleFormatException(
                 "Module fixed-array type row has invalid geometry.");
@@ -8713,7 +8926,7 @@ public static partial class ModuleCompiler
         if (!NativeFixedArrayContract.TryGetLayout(arrayType,
                 definition.ElementType, definition.ElementCount,
                 writer.Structures, writer.NativeFixedArrayTypes,
-                out var layout))
+                out var layout, writer.CheckedReferenceTypes))
         {
             throw new ModuleContractException(
                 "Private fixed-array operation has invalid layout geometry.");
@@ -12311,7 +12524,10 @@ public static partial class ModuleCompiler
                 else
                 {
                     var extent = ValueLayout.Size(carrierType,
-                        storageAddressReader.Structures);
+                        storageAddressReader.Structures,
+                        storageAddressReader.CheckedReferenceTypes,
+                        fixedArrayTypes:
+                            storageAddressReader.NativeFixedArrayTypes);
                     if (carrierType != elementType || elementCount != 1
                         || extent <= 0 || elementStride != (ulong)extent
                         || byteExtent != elementStride

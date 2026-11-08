@@ -245,13 +245,14 @@ public static partial class ModuleCompiler
         return result;
     }
 
-    private static Module CanonicalizePrivateCheckedReferenceTypes(
+    private static (Module Module, int[] Mapping)
+        CanonicalizePrivateCheckedReferenceTypes(
         Module module)
     {
         var source = module.CheckedReferenceTypes;
         if (source.IsDefaultOrEmpty)
         {
-            return module;
+            return (module, []);
         }
         if (!CheckedReferenceTypeContract.IsValidTable(source))
         {
@@ -404,7 +405,7 @@ public static partial class ModuleCompiler
             .All(static isIdentity => isIdentity)
             && selectedTypes.SequenceEqual(source))
         {
-            return module;
+            return (module, mapping);
         }
 
         PrimitiveType RemapType(PrimitiveType type)
@@ -519,7 +520,7 @@ public static partial class ModuleCompiler
             throw new ModuleContractException(
                 "Canonical checked-reference type table is invalid.");
         }
-        return result;
+        return (result, mapping);
     }
 
     private static void AddContractReferenceRoots(string contract,

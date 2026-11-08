@@ -74,6 +74,29 @@ public static partial class ModuleCompiler
         var pointerStates = new byte[module.NativePointerTypes.Length];
         var functionPointerStates = new byte[
             module.NativeFunctionPointerSignatures.Length];
+        var checkedReferenceTypes = module.CheckedReferenceTypes.IsDefault
+            ? ImmutableArray<CheckedReferenceTypeDefinition>.Empty
+            : module.CheckedReferenceTypes;
+        if (sourceArrays.Length is > SemanticVerifier.MaximumAnalysisVisits
+            or > NativeFixedArrayTypes.MaximumCount
+            || !CheckedReferenceTypeContract.IsValidTable(
+                checkedReferenceTypes))
+        {
+            throw new ModuleFormatException(
+                "Private fixed-array or checked-reference type table is invalid.");
+        }
+        for (var index = 0; index < sourceArrays.Length; index++)
+        {
+            if (!NativeFixedArrayContract.TryGetLayout(
+                    NativeFixedArrayTypes.Type(index),
+                    module.Structures, sourceArrays, out _,
+                    checkedReferenceTypes))
+            {
+                throw new ModuleFormatException(
+                    "Private fixed-array type row has invalid geometry.");
+            }
+        }
+        var checkedReferenceStates = new byte[checkedReferenceTypes.Length];
         var canonicalArrays = new List<BoundNativeFixedArrayType>();
         var arrayIdentities = new Dictionary<(PrimitiveType ElementType,
             ulong ElementCount), int>();
@@ -90,6 +113,24 @@ public static partial class ModuleCompiler
             if (NativeFixedArrayTypes.IsType(type))
             {
                 _ = VisitArray(NativeFixedArrayTypes.Index(type), depth);
+                return;
+            }
+            if (CheckedReferenceTypes.IsType(type))
+            {
+                var index = CheckedReferenceTypes.Index(type);
+                if ((uint)index >= (uint)checkedReferenceTypes.Length
+                    || checkedReferenceStates[index] == 1)
+                {
+                    throw new ModuleFormatException(
+                        "Invalid or cyclic checked-reference type recipe.");
+                }
+                if (checkedReferenceStates[index] == 0)
+                {
+                    checkedReferenceStates[index] = 1;
+                    VisitType(checkedReferenceTypes[index].ReferentType,
+                        depth + 1);
+                    checkedReferenceStates[index] = 2;
+                }
                 return;
             }
             if (NativePointerTypes.IsType(type))
@@ -342,7 +383,8 @@ public static partial class ModuleCompiler
             Functions = remappedFunctions,
         };
         if (!NativeFixedArrayContract.IsValidTable(result.Structures,
-                result.NativeFixedArrayTypes))
+                result.NativeFixedArrayTypes,
+                result.CheckedReferenceTypes))
         {
             throw new ModuleContractException(
                 "Canonical fixed-array identities do not preserve their layouts.");

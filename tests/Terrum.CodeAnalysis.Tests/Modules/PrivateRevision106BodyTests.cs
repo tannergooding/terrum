@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Collections.Immutable;
@@ -348,6 +349,263 @@ internal sealed class PrivateRevision106BodyTests
             Is.True);
         Assert.That(aggregateLayout.PayloadOffset, Is.EqualTo(4));
         Assert.That(aggregateLayout.Size, Is.EqualTo(12));
+    }
+
+    [Test]
+    public void OptionalRowsInArrayAndPointerClosuresRemapAcrossProviderSets()
+    {
+        static CompilationReference CreateProvider(PrimitiveType first,
+            PrimitiveType second)
+        {
+            var referenceTypes = ImmutableArray.Create(
+                new CheckedReferenceTypeDefinition(first,
+                    IsWritable: false, IsGarbageCollected: false,
+                    IsInitialization: false, IsOptional: true,
+                    IsOptionalValue: true),
+                new CheckedReferenceTypeDefinition(second,
+                    IsWritable: false, IsGarbageCollected: false,
+                    IsInitialization: false, IsOptional: true,
+                    IsOptionalValue: true));
+            var fixedArrays = new List<BoundNativeFixedArrayType>();
+            foreach (var index in Enumerable.Range(0, referenceTypes.Length))
+            {
+                Assert.That(NativeFixedArrayContract.TryCreateType(
+                        CheckedReferenceTypes.Type(index), 2, [],
+                        fixedArrays, out _, out _, referenceTypes),
+                    Is.True);
+            }
+
+            var pointerTypes = ImmutableArray.Create(
+                new NativePointerTypeDefinition(
+                    CheckedReferenceTypes.Type(0), IsWritable: false),
+                new NativePointerTypeDefinition(
+                    CheckedReferenceTypes.Type(1), IsWritable: false));
+            return new CompilationReference([], [],
+                BoundRuntimePolicy.FailFast,
+                nativePointerTypes: pointerTypes,
+                checkedReferenceTypes: referenceTypes,
+                nativeFixedArrayTypes: [.. fixedArrays]);
+        }
+
+        static void AssertMerged(CompilationReference merged)
+        {
+            Assert.That(merged.CheckedReferenceTypes.Select(
+                    static type => type.ReferentType),
+                Is.EquivalentTo(new[] {
+                    PrimitiveType.Bool, PrimitiveType.Char8,
+                }));
+            Assert.That(merged.NativeFixedArrayTypes, Has.Length.EqualTo(2));
+            Assert.That(merged.NativeFixedArrayTypes.Select(array =>
+                    merged.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(array.ElementType)]
+                        .ReferentType),
+                Is.EquivalentTo(new[] {
+                    PrimitiveType.Bool, PrimitiveType.Char8,
+                }));
+            Assert.That(merged.NativeFixedArrayTypes.Select(
+                    static array => (array.ElementStride,
+                        array.ByteExtent)),
+                Is.All.EqualTo((2UL, 4UL)));
+            Assert.That(merged.NativePointerTypes, Has.Length.EqualTo(2));
+            Assert.That(merged.NativePointerTypes.Select(pointer =>
+                    merged.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(pointer.PointeeType)]
+                        .ReferentType),
+                Is.EquivalentTo(new[] {
+                    PrimitiveType.Bool, PrimitiveType.Char8,
+                }));
+            Assert.That(NativePointerTypeContract.IsValidTable(
+                    merged.NativePointerTypes, merged.Structures,
+                    merged.NativeFunctionPointerSignatures,
+                    merged.NativeFixedArrayTypes,
+                    merged.CheckedReferenceTypes),
+                Is.True);
+        }
+
+        var booleanFirst = CreateProvider(PrimitiveType.Bool,
+            PrimitiveType.Char8);
+        var characterFirst = CreateProvider(PrimitiveType.Char8,
+            PrimitiveType.Bool);
+
+        AssertMerged(ModuleCompiler.CreateReferenceSetFromReferences([
+            booleanFirst, characterFirst,
+        ]));
+        AssertMerged(ModuleCompiler.MergeGraphReferences([
+            booleanFirst, characterFirst,
+        ]));
+        AssertMerged(ModuleCompiler.CreateReferenceSetFromReferences([
+            characterFirst, booleanFirst,
+        ]));
+        AssertMerged(ModuleCompiler.MergeGraphReferences([
+            characterFirst, booleanFirst,
+        ]));
+    }
+
+    [Test]
+    public void OptionalEnumRowsInArrayAndPointerClosuresRemapAcrossProviderSets()
+    {
+        static BoundEnumDefinition CreateEnum(string name)
+        {
+            var enumIdentity = new BoundEnumDeclarationIdentity.Core(
+                new CoreDeclarationIdentity("CoreNative", name,
+                    CoreDeclarationKind.EnumType));
+            var memberIdentity = new BoundEnumMemberIdentity.Core(
+                new CoreDeclarationIdentity("CoreNative",
+                    $"{name}.First", CoreDeclarationKind.EnumMember));
+            return new BoundEnumDefinition(enumIdentity, name,
+                PrimitiveType.Int32, [
+                    new BoundEnumMemberDefinition(memberIdentity,
+                        enumIdentity, "First", 1, true,
+                        $"{name.ToLowerInvariant()}.first"),
+                ], true, true, false);
+        }
+
+        static CompilationReference CreateProvider(
+            BoundEnumDefinition enumDefinition)
+        {
+            var referenceTypes = ImmutableArray.Create(
+                new CheckedReferenceTypeDefinition(BoundEnumTypes.Type(0),
+                    IsWritable: false, IsGarbageCollected: false,
+                    IsInitialization: false, IsOptional: true,
+                    IsOptionalValue: true));
+            var fixedArrays = new List<BoundNativeFixedArrayType>();
+            Assert.That(NativeFixedArrayContract.TryCreateType(
+                    CheckedReferenceTypes.Type(0), 2, [], fixedArrays,
+                    out _, out _, referenceTypes),
+                Is.True);
+            return new CompilationReference([], [],
+                BoundRuntimePolicy.FailFast,
+                nativePointerTypes: [
+                    new NativePointerTypeDefinition(
+                        CheckedReferenceTypes.Type(0), IsWritable: false),
+                ],
+                enumDefinitions: [enumDefinition],
+                checkedReferenceTypes: referenceTypes,
+                nativeFixedArrayTypes: [.. fixedArrays]);
+        }
+
+        var merged = ModuleCompiler.CreateReferenceSetFromReferences([
+            CreateProvider(CreateEnum("FlagA")),
+            CreateProvider(CreateEnum("FlagB")),
+        ]);
+        Assert.That(merged.EnumDefinitions, Has.Length.EqualTo(2));
+        Assert.That(merged.CheckedReferenceTypes, Has.Length.EqualTo(2));
+        Assert.That(merged.NativeFixedArrayTypes, Has.Length.EqualTo(2));
+        Assert.That(merged.NativePointerTypes, Has.Length.EqualTo(2));
+        Assert.That(merged.CheckedReferenceTypes.Select(
+                static type => type.ReferentType),
+            Is.EquivalentTo(new[] {
+                BoundEnumTypes.Type(0), BoundEnumTypes.Type(1),
+            }));
+        Assert.That(merged.NativeFixedArrayTypes.Select(array =>
+                merged.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(array.ElementType)]
+                    .ReferentType),
+            Is.EquivalentTo(new[] {
+                BoundEnumTypes.Type(0), BoundEnumTypes.Type(1),
+            }));
+        Assert.That(merged.NativePointerTypes.Select(pointer =>
+                merged.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(pointer.PointeeType)]
+                    .ReferentType),
+            Is.EquivalentTo(new[] {
+                BoundEnumTypes.Type(0), BoundEnumTypes.Type(1),
+            }));
+        var graphMerged = ModuleCompiler.MergeGraphReferences([
+            CreateProvider(CreateEnum("FlagA")),
+            CreateProvider(CreateEnum("FlagB")),
+        ]);
+        Assert.That(graphMerged.NativeFixedArrayTypes, Is.EqualTo(
+            merged.NativeFixedArrayTypes));
+        Assert.That(graphMerged.NativePointerTypes, Is.EqualTo(
+            merged.NativePointerTypes));
+        Assert.That(graphMerged.CheckedReferenceTypes, Is.EqualTo(
+            merged.CheckedReferenceTypes));
+    }
+
+    [Test]
+    public void OptionalElementArraysRoundTripThroughPrivateProducerAndGraph()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct OptionalArray {
+                public [int32?; 2] Values;
+                public ptr<int32?> Pointer;
+            }
+            public void Accept() {}
+            """), Terrum.CodeAnalysis.Tests.Semantics
+                .NativeCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var optionalArray = program.Structures.Single(
+            static structure => structure.Name == "OptionalArray");
+        var optionalArrayType = (PrimitiveType)(100
+            + program.Structures.IndexOf(optionalArray));
+        var identityInputs = PrivateModuleIdentityInputs.Create(program,
+            "provider", [
+                new PrivateNominalDefinition(optionalArrayType,
+                    "types.optional.array", IsExported: true),
+            ], []);
+        var producer = ModuleCompiler.CreateProducer(program, ["Accept"],
+            identityInputs);
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.That(reference.NativeFixedArrayTypes, Has.Length.EqualTo(1));
+        var array = reference.NativeFixedArrayTypes[0];
+        Assert.That(CheckedReferenceTypes.IsType(array.ElementType),
+            Is.True);
+        Assert.That(reference.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(array.ElementType)]
+                .ReferentType,
+            Is.EqualTo(PrimitiveType.Int32));
+        Assert.That((array.ElementStride, array.ByteExtent),
+            Is.EqualTo((8UL, 16UL)));
+        Assert.That(reference.NativePointerTypes, Has.Length.EqualTo(1));
+        var pointerPointee = reference.NativePointerTypes[0].PointeeType;
+        Assert.That(CheckedReferenceTypes.IsType(pointerPointee), Is.True);
+        Assert.That(reference.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(pointerPointee)].ReferentType,
+            Is.EqualTo(PrimitiveType.Int32));
+
+        var dependencies = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast);
+        var graph = ModuleCompiler.CreateGraphLibrary(program, ["Accept"],
+            dependencies, identityInputs);
+        var graphReference = ModuleCompiler.CreateGraphReference(graph,
+            ["Accept"]);
+        Assert.That(graphReference.NativeFixedArrayTypes,
+            Is.EqualTo(reference.NativeFixedArrayTypes));
+        Assert.That(graphReference.CheckedReferenceTypes,
+            Is.EqualTo(reference.CheckedReferenceTypes));
+
+        var neutralCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(
+                "public int32 Other() { return int32(1); }"));
+        Assert.That(neutralCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                neutralCompilation.Diagnostics));
+        var neutralProducer = ModuleCompiler.CreateProducer(
+            neutralCompilation.Program!, ["Other"]);
+        byte[][] providers = [producer, neutralProducer];
+        var providerSet = ModuleCompiler.CreateReferenceSet(providers);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                int32 Main() {
+                    init ptr<int32?> pointer;
+                    return 0;
+                }
+                """), providerSet, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerSet = ModuleCompiler.CreateConsumerSet(
+            consumerCompilation.Program!, providers);
+        Assert.DoesNotThrow(() =>
+            ModuleCompiler.ValidateConsumerSet(consumerSet, providers));
+
     }
 
     [Test]

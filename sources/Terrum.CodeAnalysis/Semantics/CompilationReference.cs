@@ -156,7 +156,10 @@ public sealed class CompilationReference
         }
         if (!nativeFixedArrayTypes.IsDefault
             && !NativeFixedArrayContract.IsValidTable(structures,
-                nativeFixedArrayTypes))
+                nativeFixedArrayTypes,
+                checkedReferenceTypes.IsDefault
+                    ? ImmutableArray<CheckedReferenceTypeDefinition>.Empty
+                    : checkedReferenceTypes))
         {
             throw new ArgumentException("The selected fixed-array types are invalid.",
                 nameof(nativeFixedArrayTypes));
