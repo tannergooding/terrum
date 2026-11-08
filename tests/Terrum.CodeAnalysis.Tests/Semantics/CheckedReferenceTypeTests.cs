@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
@@ -131,6 +132,15 @@ internal sealed class CheckedReferenceTypeTests
             malformed.AsSpan(typeRowOffset + 4, sizeof(int)), -5);
         _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(malformed));
+
+        malformed = (byte[])producer.Clone();
+        typeRowOffset = FindPrivate106CheckedReferenceTypeRowOffset(
+            malformed);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(typeRowOffset + 4, sizeof(int)),
+            (int)CheckedReferenceTypes.Type(0));
+        _ = Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(malformed));
     }
 
     [Test]
@@ -169,6 +179,47 @@ internal sealed class CheckedReferenceTypeTests
             (int)referenceType);
         _ = Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void PrivateOptionalValueRowsRejectNestedAndManagedPayloads()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public void AcceptOptional(ref<int32>? value) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        foreach (var innerType in new[] {
+            CheckedReferenceTypes.Type(0),
+            PrimitiveType.ManagedNode,
+            PrimitiveType.OptionalManagedNode,
+        })
+        {
+            var invalidProgram = program with {
+                CheckedReferenceTypes = [
+                    new CheckedReferenceTypeDefinition(innerType,
+                        IsWritable: false, IsGarbageCollected: false,
+                        IsInitialization: false, IsOptional: true,
+                        IsOptionalValue: true),
+                ],
+                Functions = [
+                    .. program.Functions.Select(function =>
+                        function.Name == "AcceptOptional"
+                            ? function with {
+                                Variables = function.Variables.SetItem(0,
+                                    function.Variables[0] with {
+                                        Type = CheckedReferenceTypes.Type(0),
+                                    }),
+                            }
+                            : function),
+                ],
+            };
+            _ = Assert.Throws<ModuleContractException>(
+                () => ModuleCompiler.CreateProducer(invalidProgram,
+                    ["AcceptOptional"]));
+        }
     }
 
     private static int FindPrivate106CheckedReferenceTypeRowOffset(
