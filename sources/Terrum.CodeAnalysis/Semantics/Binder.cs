@@ -7687,25 +7687,48 @@ internal sealed partial class Binder
         }
         if (name == "ptr")
         {
-            if (typeArgumentNodes.Length != 1 || optional
+            if (typeArgumentNodes.Length != 1
                 || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
             {
-                Report("TRM3005", "A native pointer type requires ptr<T> or write ptr<T>.", node.Span);
+                Report("TRM3005", "A native pointer type requires ptr<T> or write ptr<T> with at most one optional layer.", node.Span);
                 return PrimitiveType.Int32;
             }
+            PrimitiveType pointerType;
             if (TypeNameIdentifier(typeArgumentNodes[0]) == "void"
                 && typeArgumentNodes[0].Children.Length == 1)
             {
-                return writable ? GetNativePointerType(PrimitiveType.Void, isWritable: true, span: node.Span)
+                pointerType = writable
+                    ? GetNativePointerType(PrimitiveType.Void,
+                        isWritable: true, span: node.Span)
                     : PrimitiveType.NativeRawPointer;
             }
-            var diagnosticCount = DiagnosticCount;
-            var pointeeType = BindType(typeArgumentNodes[0], allowVoid: false);
-            if (DiagnosticCount != diagnosticCount)
+            else
             {
+                var diagnosticCount = DiagnosticCount;
+                var pointeeType = BindType(typeArgumentNodes[0],
+                    allowVoid: false);
+                if (DiagnosticCount != diagnosticCount)
+                {
+                    return PrimitiveType.Int32;
+                }
+                pointerType = GetNativePointerType(pointeeType, writable,
+                    node.Span);
+            }
+            if (!optional)
+            {
+                return pointerType;
+            }
+
+            var optionalPointerType = TryGetOptionalType(pointerType,
+                node.Span);
+            if (optionalPointerType is not PrimitiveType optionalPointer)
+            {
+                Report("TRM3005",
+                    "This native pointer has no selected optional identity.",
+                    node.Span);
                 return PrimitiveType.Int32;
             }
-            return GetNativePointerType(pointeeType, writable, node.Span);
+            return optionalPointer;
         }
         if (name is "Span" or "Terrum.Span")
         {
@@ -7733,7 +7756,27 @@ internal sealed partial class Binder
         }
         PrimitiveType? type = null;
         var resolution = DeclaredTypeResolution.Missing;
-        if (TryGetAliasTypeArgument(name, out var aliasType))
+        if (name == "option")
+        {
+            if (typeArgumentNodes.Length != 1)
+            {
+                Report("TRM3005",
+                    "The optional type constructor requires exactly one payload type.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+            var diagnosticCount = DiagnosticCount;
+            var payloadType = BindType(typeArgumentNodes[0],
+                allowVoid: true);
+            if (DiagnosticCount != diagnosticCount)
+            {
+                return PrimitiveType.Int32;
+            }
+            type = payloadType;
+            optional = true;
+            resolution = DeclaredTypeResolution.Unique;
+        }
+        else if (TryGetAliasTypeArgument(name, out var aliasType))
         {
             if (typeArgumentNodes.Length != 0)
             {
@@ -7789,33 +7832,73 @@ internal sealed partial class Binder
                 ? $"Type '{name}' is ambiguous across declared and imported types."
                 : $"Type '{name}' is not supported here.", node.Span);
         }
-        if (type == PrimitiveType.Void && !allowVoid)
+        if (type == PrimitiveType.Void && !allowVoid && !optional)
         {
             Report("TRM3005", $"Type alias '{name}' cannot be used as a value type.", node.Span);
             return PrimitiveType.Int32;
         }
         if (writable && type is PrimitiveType resolvedType)
         {
-            if (resolvedType == PrimitiveType.ManagedNode
-                || (IsClass(resolvedType) && _classes[ManagedClassTypes.ClassIndex(resolvedType)].IsMutable))
+            if (resolvedType is PrimitiveType.ManagedNode
+                    or PrimitiveType.WriteManagedNode
+                    or PrimitiveType.OptionalManagedNode
+                    or PrimitiveType.OptionalWriteManagedNode)
             {
                 type = ManagedClassTypes.Writable(resolvedType);
             }
+            else if (ManagedClassTypes.IsClass(resolvedType)
+                || (ManagedClassTypes.IsOptional(resolvedType)
+                    && resolvedType is not (PrimitiveType.OptionalManagedNode
+                        or PrimitiveType.OptionalWriteManagedNode)))
+            {
+                if (_classes[ManagedClassTypes.ClassIndex(resolvedType)]
+                    .IsMutable)
+                {
+                    type = ManagedClassTypes.Writable(resolvedType);
+                }
+                else
+                {
+                    Report("TRM3005",
+                        "write requires a mutable managed class.",
+                        node.Span);
+                }
+            }
+            else if (CheckedReferenceTypeContract.IsValidType(
+                resolvedType, _checkedReferenceTypes))
+            {
+                var reference = _checkedReferenceTypes[
+                    CheckedReferenceTypes.Index(resolvedType)];
+                type = GetCheckedReferenceType(reference with {
+                    IsWritable = true,
+                }, node.Span);
+            }
+            else if (NativePointerTypes.IsType(resolvedType)
+                && (uint)NativePointerTypes.Index(resolvedType)
+                    < (uint)_nativePointerTypes.Count)
+            {
+                type = GetNativePointerType(
+                    _nativePointerTypes[NativePointerTypes.Index(
+                        resolvedType)].PointeeType,
+                    isWritable: true, span: node.Span);
+            }
             else
             {
-                Report("TRM3005", "write requires a mutable managed class or ManagedNode handle.", node.Span);
+                Report("TRM3005",
+                    "write requires a writable handle, checked reference, or native pointer.",
+                    node.Span);
             }
         }
         if (optional && type is PrimitiveType required)
         {
-            if (!ManagedClassTypes.IsManaged(required) || ManagedClassTypes.IsOptional(required))
+            var optionalType = TryGetOptionalType(required, node.Span);
+            if (optionalType is not PrimitiveType selectedOptional)
             {
-                Report("TRM3005", "Only managed class and ManagedNode handles can be optional.", node.Span);
+                Report("TRM3005",
+                    "This complete type has no selected optional identity.",
+                    node.Span);
+                return PrimitiveType.Int32;
             }
-            else
-            {
-                type = ManagedClassTypes.Optional(required);
-            }
+            type = selectedOptional;
         }
 
         var result = type ?? PrimitiveType.Int32;
@@ -7923,26 +8006,55 @@ internal sealed partial class Binder
 
     private PrimitiveType? TryGetOptionalType(PrimitiveType type, TextSpan span)
     {
+        if (SourceOptionalTypes.IsOptional(type, _checkedReferenceTypes))
+        {
+            return type;
+        }
         if (ManagedClassTypes.IsClass(type))
         {
             return ManagedClassTypes.Optional(type);
         }
-        if (_nativeLoweringAgreement is not (
-                CompilationOptions.WindowsX64NormalBackingAgreement
-                or CompilationOptions.WindowsX64RootlessReferencesAgreement)
-            || !CheckedReferenceTypeContract.IsValidType(type, _checkedReferenceTypes))
+        if (type is PrimitiveType.ManagedNode
+            or PrimitiveType.WriteManagedNode)
+        {
+            return ManagedClassTypes.Optional(type);
+        }
+        if (CheckedReferenceTypeContract.IsValidType(type,
+                _checkedReferenceTypes))
+        {
+            var reference = _checkedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            return GetCheckedReferenceType(reference with {
+                IsOptional = true,
+            }, span);
+        }
+
+        if (type != PrimitiveType.Void
+            && PrimitiveTypeFacts.ScalarWidth(type) == 0
+            && type != PrimitiveType.NativeRawPointer
+            && !(BoundEnumTypes.IsType(type)
+                && (uint)BoundEnumTypes.Index(type)
+                    < (uint)_enumDefinitions.Count)
+            && !(NativePointerTypes.IsType(type)
+                && (uint)NativePointerTypes.Index(type)
+                    < (uint)_nativePointerTypes.Count)
+            && !(NativeFunctionPointerTypes.IsType(type)
+                && (uint)NativeFunctionPointerTypes.Index(type)
+                    < (uint)_nativeFunctionPointerSignatures.Count)
+            && !(NativeFixedArrayTypes.IsType(type)
+                && (uint)NativeFixedArrayTypes.Index(type)
+                    < (uint)_nativeFixedArrayTypes.Count)
+            && !(IsStruct(type)
+                && (uint)((int)type - 100) < (uint)_structs.Count)
+            && type != PrimitiveType.OwnedInt32Buffer)
         {
             return null;
         }
 
-        var reference = _checkedReferenceTypes[CheckedReferenceTypes.Index(type)];
-        if (reference.IsGarbageCollected || reference.IsInitialization || reference.IsOptional
-            || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
-                type, _structs, _classes, _enumDefinitions.Count, [.. _checkedReferenceTypes]))
-        {
-            return null;
-        }
-        return GetCheckedReferenceType(reference with { IsOptional = true }, span);
+        return GetCheckedReferenceType(new CheckedReferenceTypeDefinition(
+            type, IsWritable: false, IsGarbageCollected: false,
+            IsInitialization: false, IsOptional: true,
+            IsOptionalValue: true), span);
     }
 
     private bool IsSupportedNormalReferenceType(PrimitiveType type)

@@ -697,9 +697,13 @@ parameters, results, conditional outputs and class fields. They occupy eight
 bytes: zero is explicit absence, while a present value is an existing non-null
 handle. Neither integer zero nor an uninitialized slot can manufacture a valid
 non-null handle. `null` requires an optional target type; lifting a non-null
-handle does not allocate. Scalar options and general generic optional
-normalization remain outside this profile; bounded generic functions may use
-the existing optional source-class/`ManagedNode` handle forms described in the
+handle does not allocate. Source binding and private revision 106 now preserve
+`option<T>`/`T?` type identities for scalar, unit, pointer and checked-reference
+forms, including closed generic aliases. This is not value-layout or execution
+support: the provisional Windows x64 rootless-Copy tag/payload layout remains
+unimplemented and unapproved, and no new argument/result or wire representation
+follows. Bounded generic functions may use the existing optional source-class/
+`ManagedNode` handle forms described in the
 [generic implementation contract](../implementation.md#bounded-generic-functions).
 
 `value is null` tests absence. `value is some item` snapshots the present
@@ -712,9 +716,11 @@ Descriptors include optional reference slots; tracing ignores zero without
 treating it as uninitialized source storage. The
 [cycle sample](../../samples/LanguageFeatures/ManagedStorage/managed-optional-cycle.terrum) exercises
 source-defined cycles and snapshots across edge clearing and collection.
-Current modules retain optional IR and types inside private source-class state.
-They do not expose an optional or managed-reference ABI. An optional-node-only module remains
-unsupported.
+Optional source-class/`ManagedNode` IR and runtime state remain private and do
+not expose an optional or managed-reference ABI. Private revision 106 carries
+other optional type identities as metadata only; this adds no value layout,
+executable Body support or calling convention. An optional-node-only module
+remains unsupported.
 For a named optional-handle local or parameter, `is var item` and `is var? item`
 first test whether its storage is initialized. The former snapshots only a
 non-null handle; the latter snapshots the complete optional value, including

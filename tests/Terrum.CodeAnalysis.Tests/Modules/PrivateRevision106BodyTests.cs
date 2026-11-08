@@ -135,57 +135,40 @@ internal sealed class PrivateRevision106BodyTests
     public void PrivateOptionalValueTypesRoundTripWithoutAssigningLayout()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public void AcceptScalar(ref<int32>? value) {}
-            public void AcceptUnit(ref<int32>? value) {}
+            public void AcceptScalar(int32? value) {}
+            public void AcceptUnit(option<void> value) {}
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var program = compilation.Program!;
-        var functions = program.Functions.ToBuilder();
-        for (var index = 0; index < functions.Count; index++)
-        {
-            var function = functions[index];
-            var optionalTypeIndex = function.Name switch {
-                "AcceptScalar" => 0,
-                "AcceptUnit" => 1,
-                _ => -1,
-            };
-            if (optionalTypeIndex >= 0)
-            {
-                functions[index] = function with {
-                    Variables = function.Variables.SetItem(0,
-                        function.Variables[0] with {
-                            Type = CheckedReferenceTypes.Type(
-                                optionalTypeIndex),
-                        }),
-                };
-            }
-        }
-
-        var optionalProgram = program with {
-            CheckedReferenceTypes = [
-                new CheckedReferenceTypeDefinition(PrimitiveType.Int32,
-                    IsWritable: false, IsGarbageCollected: false,
-                    IsInitialization: false, IsOptional: true,
-                    IsOptionalValue: true),
-                new CheckedReferenceTypeDefinition(PrimitiveType.Void,
-                    IsWritable: false, IsGarbageCollected: false,
-                    IsInitialization: false, IsOptional: true,
-                    IsOptionalValue: true),
-            ],
-            Functions = functions.ToImmutable(),
-        };
-        var producer = ModuleCompiler.CreateProducer(optionalProgram,
+        var producer = ModuleCompiler.CreateProducer(program,
             ["AcceptScalar", "AcceptUnit"]);
         var reference = ModuleCompiler.CreateReference(producer);
 
-        Assert.That(reference.CheckedReferenceTypes,
-            Is.EqualTo(optionalProgram.CheckedReferenceTypes));
-        Assert.That(ValueLayout.Size(CheckedReferenceTypes.Type(0), [],
+        var scalarType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptScalar")
+            .Variables[0].Type;
+        var scalarDefinition = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(scalarType)];
+        Assert.That(scalarDefinition.IsOptionalValue, Is.True);
+        Assert.That(scalarDefinition.ReferentType,
+            Is.EqualTo(PrimitiveType.Int32));
+        var unitType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptUnit")
+            .Variables[0].Type;
+        var unitDefinition = reference.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(unitType)];
+        Assert.That(unitDefinition.IsOptionalValue, Is.True);
+        Assert.That(unitDefinition.ReferentType,
+            Is.EqualTo(PrimitiveType.Void));
+
+        Assert.That(ValueLayout.Size(scalarType, [],
                 reference.CheckedReferenceTypes),
             Is.Zero);
-        Assert.That(ValueLayout.Alignment(CheckedReferenceTypes.Type(1), [],
+        Assert.That(ValueLayout.Alignment(unitType, [],
                 reference.CheckedReferenceTypes),
             Is.Zero);
 
@@ -204,7 +187,7 @@ internal sealed class PrivateRevision106BodyTests
 
         var dependencies = new CompilationReference([], [],
             BoundRuntimePolicy.FailFast);
-        var graph = ModuleCompiler.CreateGraphLibrary(optionalProgram,
+        var graph = ModuleCompiler.CreateGraphLibrary(program,
             ["AcceptScalar", "AcceptUnit"], dependencies);
         var graphReference = ModuleCompiler.CreateGraphReference(graph,
             ["AcceptScalar", "AcceptUnit"]);

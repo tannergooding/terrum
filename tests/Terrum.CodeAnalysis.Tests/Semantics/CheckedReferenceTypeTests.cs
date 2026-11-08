@@ -246,6 +246,90 @@ internal sealed class CheckedReferenceTypeTests
         }
     }
 
+    [Test]
+    public void BindsAndPersistsNormalizedOptionalValueTypeForms()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            alias Maybe<T> = T?;
+            alias Nested<T> = option<Maybe<T>>;
+            public void AcceptSuffix(int32? value) {}
+            public void AcceptConstructor(option<int32> value) {}
+            public void AcceptNested(option<option<int32>> value) {}
+            public void AcceptAlias(Maybe<int32> value) {}
+            public void AcceptNestedAlias(Nested<int32> value) {}
+            public void AcceptUnit(option<void> value) {}
+            public unsafe void AcceptPointer(ptr<int32>? value) {}
+            public unsafe void AcceptWritablePointer(
+                write option<ptr<int32>> value) {}
+            public unsafe void AcceptWritablePointerPayload(
+                option<write ptr<int32>> value) {}
+            public void AcceptReference(option<ref<int32>> value) {}
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        PrimitiveType ParameterType(string name) =>
+            global::System.Linq.Enumerable.Single(program.Functions,
+                function => function.Name == name).Variables[0].Type;
+
+        var scalarType = ParameterType("AcceptSuffix");
+        Assert.That(ParameterType("AcceptConstructor"), Is.EqualTo(scalarType));
+        Assert.That(ParameterType("AcceptNested"), Is.EqualTo(scalarType));
+        Assert.That(ParameterType("AcceptAlias"), Is.EqualTo(scalarType));
+        Assert.That(ParameterType("AcceptNestedAlias"),
+            Is.EqualTo(scalarType));
+        var writablePointerType = ParameterType("AcceptWritablePointer");
+        Assert.That(ParameterType("AcceptWritablePointerPayload"),
+            Is.EqualTo(writablePointerType));
+        var writablePointerOptional = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(writablePointerType)];
+        Assert.That(writablePointerOptional.IsOptionalValue, Is.True);
+        Assert.That(program.NativePointerTypes[
+                NativePointerTypes.Index(
+                    writablePointerOptional.ReferentType)].IsWritable,
+            Is.True);
+        var scalarDefinition = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(scalarType)];
+        Assert.That(scalarDefinition.IsOptionalValue, Is.True);
+        Assert.That(scalarDefinition.ReferentType,
+            Is.EqualTo(PrimitiveType.Int32));
+
+        var unitType = ParameterType("AcceptUnit");
+        var unitDefinition = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(unitType)];
+        Assert.That(unitDefinition.IsOptionalValue, Is.True);
+        Assert.That(unitDefinition.ReferentType,
+            Is.EqualTo(PrimitiveType.Void));
+
+        var pointerType = ParameterType("AcceptPointer");
+        Assert.That(program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(pointerType)].IsOptionalValue,
+            Is.True);
+        var referenceType = ParameterType("AcceptReference");
+        Assert.That(program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(referenceType)].IsOptional,
+            Is.True);
+        Assert.That(program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(referenceType)].IsOptionalValue,
+            Is.False);
+
+        var producer = ModuleCompiler.CreateProducer(program, [
+            "AcceptSuffix", "AcceptConstructor", "AcceptNested",
+            "AcceptAlias", "AcceptNestedAlias", "AcceptUnit",
+            "AcceptPointer", "AcceptWritablePointer",
+            "AcceptWritablePointerPayload", "AcceptReference",
+        ]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var persistedScalarType = global::System.Linq.Enumerable.Single(
+            reference.Functions,
+            static function => function.Name == "AcceptSuffix")
+            .Variables[0].Type;
+        Assert.That(reference.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(persistedScalarType)].IsOptionalValue,
+            Is.True);
+    }
+
     private static int FindPrivate106CheckedReferenceTypeRowOffset(
         byte[] module)
     {
