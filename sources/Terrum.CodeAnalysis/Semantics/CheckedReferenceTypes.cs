@@ -291,6 +291,21 @@ internal static class CheckedReferenceTypeContract
         return false;
     }
 
+    internal static bool IsSupportedReferenceWriteValueType(
+        PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundClass> classes, int enumDefinitionCount,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes)
+    {
+        return IsOptionalValueType(type, referenceTypes)
+            ? ValueLayout.TryGetOptionalValueLayout(type, structures,
+                referenceTypes, nativeLoweringAgreement, fixedArrayTypes,
+                out _)
+            : IsSupportedReferenceStoreValueType(type, structures, classes,
+                enumDefinitionCount, referenceTypes);
+    }
+
     private static bool IsSupportedWriteValueType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, int enumDefinitionCount,
         ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,

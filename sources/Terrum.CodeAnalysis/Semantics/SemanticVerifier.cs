@@ -13699,9 +13699,12 @@ public static partial class SemanticVerifier
                 if (!writeReference.IsWritable || writeReference.IsGarbageCollected
                     || writeReference.IsInitialization || writeReference.IsOptional
                     || writeReference.ReferentType != referenceWrite.Value.Type
-                    || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                    || !CheckedReferenceTypeContract.IsSupportedReferenceWriteValueType(
                         referenceWrite.Value.Type, program.Structures, program.Classes,
-                        program.EnumDefinitions.Length, program.CheckedReferenceTypes)
+                        program.EnumDefinitions.Length,
+                        program.CheckedReferenceTypes,
+                        program.NativeLoweringAgreement,
+                        program.NativeFixedArrayTypes)
                     || (uniqueStore
                         && referenceWrite.Value is not (BoundMove or BoundFieldMove or BoundCall)))
                 {

@@ -8528,6 +8528,13 @@ internal sealed partial class Binder
             type, _structs, _classes, _enumDefinitions.Count,
             [.. _checkedReferenceTypes]);
 
+    private bool IsSupportedCheckedReferenceWriteValueType(
+        PrimitiveType type) =>
+        CheckedReferenceTypeContract.IsSupportedReferenceWriteValueType(type,
+            _structs, _classes, _enumDefinitions.Count,
+            [.. _checkedReferenceTypes], _nativeLoweringAgreement,
+            _nativeFixedArrayTypes);
+
     private PrimitiveType BindNativeFunctionPointerType(SyntaxNode node,
         NativeCallingConvention callingConvention,
         SyntaxNode? pendingConventionExpression = null)
@@ -10517,7 +10524,8 @@ internal sealed partial class Binder
                         }
                         if (referenceType.IsGarbageCollected || referenceType.IsInitialization
                             || referenceType.IsOptional
-                            || !IsSupportedCheckedReferenceStoreType(referenceType.ReferentType))
+                            || !IsSupportedCheckedReferenceWriteValueType(
+                                referenceType.ReferentType))
                         {
                             Report("TRM3030",
                                 "This checked-reference referent requires a separate store, ownership, or initialization contract.",

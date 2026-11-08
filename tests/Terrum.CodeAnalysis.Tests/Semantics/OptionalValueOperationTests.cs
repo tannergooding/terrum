@@ -143,6 +143,36 @@ internal sealed class OptionalValueOperationTests
 
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void OptionalValuesRetainCheckedReferenceFlow(
+        NativeRuntimePolicy policy)
+    {
+        const string source = """
+            int32 Main() {
+                mut int32? local = null;
+                int32 raw = 42;
+                mut write ref<int32?> current = ref local;
+                if (!(*current is null)) { return 1; }
+                *current = raw;
+                if (!(*current is some value) || value != 42) { return 2; }
+                return 42;
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                (BoundRuntimePolicy)policy));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException(
+                "A successful compilation must contain a bound program.");
+        Assert.That(NativeJit.Execute(program, policy,
+                nativeLoweringAgreement: program.NativeLoweringAgreement),
+            Is.EqualTo(42));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void OptionalFunctionPointerUsesTaggedLayout(NativeRuntimePolicy policy)
     {
         const string source = """

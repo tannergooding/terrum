@@ -716,12 +716,14 @@ Supervised guard-page JIT regressions confirm absent optional copies do not
 read their inaccessible payload and present aggregate copies do not read
 trailing padding. Supervised Windows x64 images execute optional aggregate
 copy/repeat and the source-derived `A=8/R=32` composition.
-JIT tests also cover internal aggregate call/return and success-conditioned
-out publication under both runtime policies; broader call/output/reference
-paths and padding treatment remain in progress. The raw overlapping-layout
-Union payload remains excluded because no active-member copy representation is
-selected. The provisional Windows x64 rootless-Copy layout remains unapproved,
-and no new argument/result or wire representation follows.
+JIT tests also cover internal aggregate call/return, success-conditioned out
+publication and reads/writes through a checked reference to an optional slot
+under both runtime policies. This does not assign a stored reference-descriptor
+layout or new ABI. Broader call/output paths and padding treatment remain in
+progress. The raw overlapping-layout Union payload remains excluded because no
+active-member copy representation is selected. The provisional Windows x64
+rootless-Copy layout remains unapproved, and no new argument/result or wire
+representation follows.
 Bounded generic functions may use the existing optional source-class/
 `ManagedNode` handle forms described in the
 [generic implementation contract](../implementation.md#bounded-generic-functions).

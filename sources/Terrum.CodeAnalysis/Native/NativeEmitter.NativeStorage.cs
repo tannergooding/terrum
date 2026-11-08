@@ -552,7 +552,8 @@ internal sealed partial class PeCompiler
         if (!referenceType.IsWritable || referenceType.IsGarbageCollected
             || referenceType.IsInitialization || referenceType.IsOptional
             || referenceType.ReferentType != write.Value.Type
-            || !IsSupportedCheckedReferenceStoreType(write.Value.Type))
+        || !IsSupportedCheckedReferenceWriteValueType(
+            write.Value.Type))
         {
             throw new InvalidOperationException("The checked-reference store violates its access or value contract.");
         }
@@ -739,10 +740,13 @@ internal sealed partial class PeCompiler
         }
     }
 
-    private bool IsSupportedCheckedReferenceStoreType(PrimitiveType type) =>
-        CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
-            type, _program.Structures, _program.Classes,
-            _program.EnumDefinitions.Length, _program.CheckedReferenceTypes);
+    private bool IsSupportedCheckedReferenceWriteValueType(
+        PrimitiveType type) =>
+        CheckedReferenceTypeContract.IsSupportedReferenceWriteValueType(type,
+            _program.Structures, _program.Classes,
+            _program.EnumDefinitions.Length, _program.CheckedReferenceTypes,
+            _program.NativeLoweringAgreement,
+            _program.NativeFixedArrayTypes);
 
     private void EmitPointerValueWrite(BoundExpression address, BoundExpression value, int spill)
     {
