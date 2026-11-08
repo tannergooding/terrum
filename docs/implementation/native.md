@@ -712,9 +712,10 @@ unit, function-pointer, aggregate, pointer and fixed-array cases under both
 runtime policies; a source-backed over-aligned payload checks natural
 alignment 8, required alignment 32, and optional payload offset/extent 32/64.
 A supervised Windows x64 image executes optional aggregate copy and repeat.
-A supervised guard-page JIT regression confirms copying an absent optional
-does not read its inaccessible payload. Supervised Windows x64 images execute
-optional aggregate copy/repeat and the source-derived `A=8/R=32` composition.
+Supervised guard-page JIT regressions confirm absent optional copies do not
+read their inaccessible payload and present aggregate copies do not read
+trailing padding. Supervised Windows x64 images execute optional aggregate
+copy/repeat and the source-derived `A=8/R=32` composition.
 JIT tests also cover internal aggregate call/return and success-conditioned
 out publication under both runtime policies; broader call/output/reference
 paths and padding treatment remain in progress. The raw overlapping-layout

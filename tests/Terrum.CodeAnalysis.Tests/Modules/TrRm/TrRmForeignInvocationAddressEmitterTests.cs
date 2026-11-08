@@ -1284,10 +1284,30 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         Assume.That(Environment.SystemPageSize, Is.EqualTo(4096));
 
+        await RunSupervisedOptionalGuardProbeAsync("absent",
+            nameof(AbsentOptionalCopyDoesNotReadGuardedPayload))
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task PresentOptionalCopyDoesNotReadTrailingPadding()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assume.That(Environment.SystemPageSize, Is.EqualTo(4096));
+
+        await RunSupervisedOptionalGuardProbeAsync("padding",
+            nameof(PresentOptionalCopyDoesNotReadTrailingPadding))
+            .ConfigureAwait(true);
+    }
+
+    private static async Task RunSupervisedOptionalGuardProbeAsync(
+        string scenario, string testName)
+    {
         if (Environment.GetEnvironmentVariable(
-                OptionalGuardChildEnvironmentVariable) == "1")
+                OptionalGuardChildEnvironmentVariable) == scenario)
         {
-            ExecuteAbsentOptionalGuardProbe();
+            ExecuteOptionalGuardProbe(payloadPresent: scenario == "padding");
             return;
         }
 
@@ -1305,11 +1325,11 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         startInfo.ArgumentList.Add("--filter");
         startInfo.ArgumentList.Add(
             "FullyQualifiedName=Terrum.CodeAnalysis.Tests.Modules.TrRm."
-            + "TrRmForeignInvocationAddressEmitterTests."
-            + "AbsentOptionalCopyDoesNotReadGuardedPayload");
+            + "TrRmForeignInvocationAddressEmitterTests." + testName);
         startInfo.ArgumentList.Add("--logger");
         startInfo.ArgumentList.Add("console;verbosity=quiet");
-        startInfo.Environment[OptionalGuardChildEnvironmentVariable] = "1";
+        startInfo.Environment[OptionalGuardChildEnvironmentVariable]
+            = scenario;
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException(
@@ -1330,8 +1350,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
 
             throw new TimeoutException(
-                $"The supervised optional guard probe exceeded its 60-second deadline. "
-                + $"{await stdout.ConfigureAwait(true)}"
+                $"The supervised optional {scenario} guard probe exceeded its "
+                + $"60-second deadline. {await stdout.ConfigureAwait(true)}"
                 + $"{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
                 exception);
         }
@@ -1339,37 +1359,56 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         var output = await stdout.ConfigureAwait(true);
         var error = await stderr.ConfigureAwait(true);
         Assert.That(process.ExitCode, Is.Zero,
-            $"The supervised optional guard probe failed with "
+            $"The supervised optional {scenario} guard probe failed with "
             + $"0x{process.ExitCode:X8}.{Environment.NewLine}{output}"
             + $"{Environment.NewLine}{error}");
     }
 
-    private static void ExecuteAbsentOptionalGuardProbe()
+    private static void ExecuteOptionalGuardProbe(bool payloadPresent)
     {
-        var source = """
+        var source = payloadPresent ? """
             [Blittable]
-            [Layout(LayoutKind.Sequential, Alignment: 4096)]
-            struct GuardPayload { public int32 Value; }
+            [Layout(LayoutKind.Sequential, Packing: 1, Alignment: 8192)]
+            struct GuardPayload {
+                public [uint8; 4095] Prefix;
+                public uint8 Value;
+            }
 
             unsafe int32 Probe(ptr<GuardPayload?> source) {
                 unsafe {
                     GuardPayload? snapshot = *source;
-                    if (snapshot is null) { return 42; }
+                    if (snapshot is some present) {
+                        if (present.Value == uint8(42)) { return 42; }
+                    }
                     return 1;
                 }
             }
 
-            int32 Main() {
-                mut GuardPayload? local = null;
-                unsafe {
-                    write ptr<GuardPayload?> address = &local;
-                    *address = null;
-                    GuardPayload? snapshot = *address;
-                    if (!(snapshot is null)) { return 1; }
+            int32 Main() { return 0; }
+            """ : """
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Alignment: 4096)]
+                struct GuardPayload { public int32 Value; }
+
+                unsafe int32 Probe(ptr<GuardPayload?> source) {
+                    unsafe {
+                        GuardPayload? snapshot = *source;
+                        if (snapshot is null) { return 42; }
+                        return 1;
+                    }
                 }
-                return 0;
-            }
-            """;
+
+                int32 Main() {
+                    mut GuardPayload? local = null;
+                    unsafe {
+                        write ptr<GuardPayload?> address = &local;
+                        *address = null;
+                        GuardPayload? snapshot = *address;
+                        if (!(snapshot is null)) { return 1; }
+                    }
+                    return 0;
+                }
+                """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 BoundRuntimePolicy.FailFast));
@@ -1394,10 +1433,16 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 program.NativeLoweringAgreement,
                 program.NativeFixedArrayTypes, out var optionalLayout),
             Is.True);
+        var expectedLayout = payloadPresent
+            ? (8192, 8192, 8192, 8192UL, 16384UL)
+            : (4096, 4096, 4096, 4096UL, 8192UL);
         Assert.That((payloadLayout.Size, payloadLayout.Alignment,
             payloadLayout.RequiredAlignment, optionalLayout.PayloadOffset,
-            optionalLayout.Size), Is.EqualTo((4096, 4096, 4096, 4096UL,
-                8192UL)));
+            optionalLayout.Size), Is.EqualTo(expectedLayout));
+        if (payloadPresent)
+        {
+            Assert.That(payloadLayout.Fields[1].Offset, Is.EqualTo(4095));
+        }
 
         var code = NativeEmitter.EmitCode(program,
             NativeRuntimePolicy.FailFast);
@@ -1411,7 +1456,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Is.Zero);
 
         var pageSize = Environment.SystemPageSize;
-        var memory = VirtualAlloc(0, checked((nuint)(2 * pageSize)),
+        var memory = VirtualAlloc(0, checked((nuint)optionalLayout.Size),
             0x3000, 0x04);
         Assert.That(memory, Is.Not.Zero,
             $"VirtualAlloc failed with error {Marshal.GetLastPInvokeError()}.");
@@ -1419,9 +1464,21 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         {
             Assert.That((nuint)memory % (nuint)optionalLayout.RequiredAlignment,
                 Is.EqualTo((nuint)0));
-            Marshal.WriteByte(memory, 0);
-            var payloadAddress = IntPtr.Add(memory, pageSize);
-            Assert.That(VirtualProtect(payloadAddress, (nuint)pageSize,
+            Marshal.WriteByte(memory, payloadPresent ? (byte)1 : (byte)0);
+            var payloadAddress = IntPtr.Add(memory,
+                checked((int)optionalLayout.PayloadOffset));
+            if (payloadPresent)
+            {
+                var payloadBytes = new byte[
+                    checked((int)payloadLayout.Fields[1].Offset + 1)];
+                payloadBytes[^1] = 42;
+                Marshal.Copy(payloadBytes, 0, payloadAddress,
+                    payloadBytes.Length);
+            }
+            var guardAddress = payloadPresent
+                ? IntPtr.Add(payloadAddress, pageSize)
+                : payloadAddress;
+            Assert.That(VirtualProtect(guardAddress, (nuint)pageSize,
                     0x01, out _),
                 Is.True,
                 $"VirtualProtect failed with error "
@@ -1438,6 +1495,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 0x5D,
                 0xC3,
             ];
+            // Pass the guarded slot to Probe using the Windows x64 first-argument register.
             BinaryPrimitives.WriteInt64LittleEndian(
                 wrapper.AsSpan(13, sizeof(long)), memory.ToInt64());
             BinaryPrimitives.WriteInt32LittleEndian(
