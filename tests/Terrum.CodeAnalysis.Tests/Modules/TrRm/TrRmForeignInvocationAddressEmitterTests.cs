@@ -1388,7 +1388,10 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """ : """
                 [Blittable]
                 [Layout(LayoutKind.Sequential, Alignment: 4096)]
-                struct GuardPayload { public int32 Value; }
+                struct GuardPayload {
+                    public int32 Value;
+                    public GuardPayload(int32 value) { Value = value; }
+                }
 
                 unsafe int32 Probe(ptr<GuardPayload?> source) {
                     unsafe {
@@ -1400,11 +1403,13 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
 
                 int32 Main() {
                     mut GuardPayload? local = null;
+                    GuardPayload payload = new GuardPayload(42);
                     unsafe {
                         write ptr<GuardPayload?> address = &local;
-                        *address = null;
+                        *address = payload;
                         GuardPayload? snapshot = *address;
-                        if (!(snapshot is null)) { return 1; }
+                        if (!(snapshot is some present)
+                            || present.Value != 42) { return 1; }
                     }
                     return 0;
                 }

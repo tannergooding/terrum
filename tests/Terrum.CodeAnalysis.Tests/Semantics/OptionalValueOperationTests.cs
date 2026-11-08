@@ -147,13 +147,23 @@ internal sealed class OptionalValueOperationTests
         NativeRuntimePolicy policy)
     {
         const string source = """
+            struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) {
+                    First = first;
+                    Second = second;
+                }
+            }
             int32 Main() {
-                mut int32? local = null;
-                int32 raw = 42;
-                mut write ref<int32?> current = ref local;
+                Pair raw = new Pair(10, 32);
+                mut Pair? local = null;
+                mut write ref<Pair?> current = ref local;
                 if (!(*current is null)) { return 1; }
                 *current = raw;
-                if (!(*current is some value) || value != 42) { return 2; }
+                if (!(*current is some value)
+                    || value.First != 10
+                    || value.Second != 32) { return 2; }
                 return 42;
             }
             """;
