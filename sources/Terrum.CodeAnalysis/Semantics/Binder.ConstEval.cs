@@ -275,7 +275,124 @@ internal sealed partial class Binder
             return false;
         }
 
-        return ResolvePendingNativeCallConvTypes(functions);
+        return ResolvePendingNativeCallConvTypes(functions)
+            && ResolvePendingInterfaceNativeCallableConventions(functions);
+    }
+
+    private bool ResolvePendingInterfaceNativeCallableConventions(
+        ImmutableArray<BoundFunction>.Builder functions)
+    {
+        if (_pendingInterfaceNativeCallableConventions.Count == 0)
+        {
+            return true;
+        }
+        if (_nativeCoreRegistration is not NativeCoreRegistrationSet registration
+            || !TryGetBoundEnumType(registration.CallingConventions,
+                out var conventionType))
+        {
+            SetContext(_trees[0], _trees[0].Root);
+            Report("TRM3030",
+                "NativeCallable.CallConv requires the selected Core convention enum.",
+                _trees[0].Root.Span);
+            return false;
+        }
+
+        var resolved = new List<(
+            PendingInterfaceNativeCallableConvention Pending,
+            NativeCallingConvention Convention)>(
+                _pendingInterfaceNativeCallableConventions.Count);
+        var success = true;
+        foreach (var pending in _pendingInterfaceNativeCallableConventions)
+        {
+            SetContext(pending.Tree, pending.Expression);
+            _variables.Clear();
+            _scopes.Clear();
+            _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+            _unresolvedVacantLocals.Clear();
+            _constLocals.Clear();
+            _constScalarValues.Clear();
+            _localStart = 0;
+            _returnType = PrimitiveType.Void;
+            _currentStruct = null;
+            _constructor = false;
+            _unsafeDepth = 0;
+            _hasReceiver = false;
+            _genericContext = null;
+
+            if (!TryEvaluateNativeEnumValue(pending.Expression, conventionType,
+                    functions, "NativeCallable.CallConv", out var value))
+            {
+                success = false;
+                continue;
+            }
+            if (!TryMapNativeCallingConvention(value,
+                out var convention))
+            {
+                Report("TRM3030",
+                    "NativeCallable.CallConv must evaluate to one of the registered convention members.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+            resolved.Add((pending, convention));
+        }
+        if (!success || DiagnosticCount != 0)
+        {
+            return false;
+        }
+
+        foreach (var (pending, convention) in resolved)
+        {
+            if ((uint)pending.InterfaceIndex >= (uint)_interfaces.Count)
+            {
+                throw new InvalidOperationException(
+                    "A pending interface NativeCallable convention has an invalid owner index.");
+            }
+
+            var definition = _interfaces[pending.InterfaceIndex];
+            var members = definition.Members.ToBuilder();
+            if (pending.MemberOrdinal is int memberOrdinal)
+            {
+                if ((uint)memberOrdinal >= (uint)members.Count
+                    || !pending.InheritedMemberOrdinals.IsEmpty
+                    || members[memberOrdinal].Ordinal != memberOrdinal
+                    || members[memberOrdinal].NativeCallableConvention
+                        != NativeCallingConvention.Native)
+                {
+                    throw new InvalidOperationException(
+                        "A pending method NativeCallable convention does not match its bound method.");
+                }
+                members[memberOrdinal] = members[memberOrdinal] with {
+                    NativeCallableConvention = convention,
+                };
+            }
+            else
+            {
+                foreach (var inheritedMemberOrdinal
+                    in pending.InheritedMemberOrdinals)
+                {
+                    if ((uint)inheritedMemberOrdinal >= (uint)members.Count
+                        || members[inheritedMemberOrdinal].Ordinal
+                            != inheritedMemberOrdinal
+                        || members[inheritedMemberOrdinal].NativeCallableConvention
+                            != NativeCallingConvention.Native)
+                    {
+                        throw new InvalidOperationException(
+                            "A pending interface default does not match its inherited method.");
+                    }
+                    members[inheritedMemberOrdinal] =
+                        members[inheritedMemberOrdinal] with {
+                            NativeCallableConvention = convention,
+                        };
+                }
+            }
+            _interfaces[pending.InterfaceIndex] = definition with {
+                Members = members.ToImmutable(),
+            };
+        }
+
+        _pendingInterfaceNativeCallableConventions.Clear();
+        return true;
     }
 
     private bool ResolvePendingNativeCallConvTypes(

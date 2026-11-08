@@ -98,6 +98,7 @@ internal sealed class NativeCoreRegistrationTests
     public void ForeignNativeInterfaceBindsOnlyTheRegisteredAlignedOffset()
     {
         const string source = """
+            [Terrum.Interop.NativeCallable]
             [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(16))]
             public interface IProbe {
                 public unsafe int32 Read();
@@ -114,9 +115,27 @@ internal sealed class NativeCoreRegistrationTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program!.Interfaces.Single()
             .ForeignNativeInterface!.VTableByteOffset, Is.EqualTo(16u));
+        Assert.That(compilation.Program.Interfaces.Single().Members.Single()
+            .NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Unmanaged));
+
+        var foreignDefinition = compilation.Program.Interfaces.Single();
+        var foreignMember = foreignDefinition.Members.Single();
+        var missingConvention = compilation.Program with {
+            Interfaces = compilation.Program.Interfaces.SetItem(0,
+                foreignDefinition with {
+                    Members = foreignDefinition.Members.SetItem(0,
+                        foreignMember with {
+                            NativeCallableConvention = null,
+                        }),
+                }),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(missingConvention));
 
         var aliased = Compilation.CreateLibrary(SyntaxTree.Parse("""
             alias ForeignInterface = Terrum.Interop.ForeignNativeInterface;
+            [Terrum.Interop.NativeCallable]
             [ForeignInterface(VTableByteOffset: uint32(8))]
             public interface IAliasedProbe {
                 public unsafe int32 Read();
@@ -128,6 +147,35 @@ internal sealed class NativeCoreRegistrationTests
             string.Join(Environment.NewLine, aliased.Diagnostics));
         Assert.That(aliased.Program!.Interfaces.Single()
             .ForeignNativeInterface!.VTableByteOffset, Is.EqualTo(8u));
+
+        var missingCallable = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IMissingCallable {
+                public unsafe int32 Read();
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(missingCallable.HasErrors, Is.True,
+            string.Join(Environment.NewLine, missingCallable.Diagnostics));
+        Assert.That(missingCallable.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, missingCallable.Diagnostics));
+
+        var missingUnsafe = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            [Terrum.Interop.ForeignNativeInterface(VTableByteOffset: uint32(0))]
+            public interface IMissingUnsafe {
+                public int32 Read();
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(missingUnsafe.HasErrors, Is.True,
+            string.Join(Environment.NewLine, missingUnsafe.Diagnostics));
+        Assert.That(missingUnsafe.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, missingUnsafe.Diagnostics));
 
         var methodTarget = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public interface IMethodTarget {
@@ -268,6 +316,130 @@ internal sealed class NativeCoreRegistrationTests
                 diagnostic.Code == "TRM3030"), Is.True,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
         }
+    }
+
+    [Test]
+    public void NativeCallableInterfaceDefaultsApplyAcrossPartialPartsAndOverrides()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+
+            [NativeCallable(CallConv: SelectConvention())]
+            public partial interface IProbe {
+                public int32 InheritedFirst();
+                [NativeCallable(CallConv: NativeCallingConvention.Stdcall)]
+                public int32 MethodOverride();
+            }
+
+            public partial interface IProbe {
+                [NativeCallable]
+                public int32 ExplicitUnmanaged();
+                public int32 InheritedSecond();
+            }
+
+            [ConstEval]
+            internal NativeCallingConvention SelectConvention() {
+                return NativeCallingConvention.Cdecl;
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = CreateRegistration(),
+            });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var members = compilation.Program!.Interfaces.Single().Members;
+        Assert.That(members.Select(static member =>
+            member.NativeCallableConvention), Is.EqualTo(
+            [
+                NativeCallingConvention.Cdecl,
+                NativeCallingConvention.Stdcall,
+                NativeCallingConvention.Unmanaged,
+                NativeCallingConvention.Cdecl,
+            ]));
+        Assert.That(members.All(static member =>
+            member.RequiresUnsafeCaller), Is.True);
+        Assert.That(members[0].DeclaredRequiresUnsafeCaller, Is.False);
+        var invalidConvention = compilation.Program with {
+            Interfaces = compilation.Program.Interfaces.SetItem(0,
+                compilation.Program.Interfaces[0] with {
+                    Members = members.SetItem(0, members[0] with {
+                        NativeCallableConvention = NativeCallingConvention.Native,
+                    }),
+                }),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            SemanticVerifier.VerifyLibrary(invalidConvention));
+
+        var aliased = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            alias Callable = Terrum.Interop.NativeCallable;
+            [Callable(CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
+            public interface IAliasedProbe {
+                public int32 Read();
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = CreateRegistration(),
+            });
+        Assert.That(aliased.HasErrors, Is.False,
+            string.Join(Environment.NewLine, aliased.Diagnostics));
+        Assert.That(aliased.Program!.Interfaces.Single().Members.Single()
+            .NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+    }
+
+    [Test]
+    public void NativeCallableInterfaceDefaultRequiresPrimaryRegistrationAndMethodTargets()
+    {
+        var registration = CreateRegistration();
+        var secondaryDefault = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public partial interface IProbe {
+                    public int32 First();
+                }
+
+                [Terrum.Interop.NativeCallable]
+                public partial interface IProbe {
+                    public int32 Second();
+                }
+                """), new CompilationOptions {
+                    NativeCoreRegistration = registration,
+                });
+        Assert.That(secondaryDefault.HasErrors, Is.True,
+            string.Join(Environment.NewLine, secondaryDefault.Diagnostics));
+        Assert.That(secondaryDefault.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, secondaryDefault.Diagnostics));
+
+        var unregistered = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            public interface IProbe {
+                public int32 Read();
+            }
+            """));
+        Assert.That(unregistered.HasErrors, Is.True,
+            string.Join(Environment.NewLine, unregistered.Diagnostics));
+        Assert.That(unregistered.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, unregistered.Diagnostics));
+
+        var misplaced = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            public interface IProbe {
+                [NativeCallable]
+                public int32 Value { get; }
+                public int32 Read([NativeCallable] int32 value);
+            }
+            [NativeCallable]
+            public struct NativeCallableTypeTarget {
+                private int32 Value;
+            }
+            """), new CompilationOptions {
+                NativeCoreRegistration = registration,
+            });
+        Assert.That(misplaced.HasErrors, Is.True,
+            string.Join(Environment.NewLine, misplaced.Diagnostics));
+        Assert.That(misplaced.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, misplaced.Diagnostics));
     }
 
     [Test]

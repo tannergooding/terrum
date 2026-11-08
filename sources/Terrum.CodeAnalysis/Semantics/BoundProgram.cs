@@ -468,7 +468,11 @@ internal sealed record BoundInterfaceMemberDefinition(
     ImmutableArray<BoundInterfaceAccessor> Accessors,
     BoundInterfaceType? AssociatedDefaultType,
     BoundInterfaceType? AssociatedConstantType,
-    BoundConstant? AssociatedConstantDefault);
+    BoundConstant? AssociatedConstantDefault)
+{
+    internal bool DeclaredRequiresUnsafeCaller { get; init; }
+    internal NativeCallingConvention? NativeCallableConvention { get; init; }
+}
 
 /// <summary>The resolved overflow behavior of a source integer operation.</summary>
 internal enum BoundIntegerOverflowBehavior

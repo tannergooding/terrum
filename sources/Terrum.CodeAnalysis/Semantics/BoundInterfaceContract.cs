@@ -66,6 +66,7 @@ internal static class BoundInterfaceContract
                                 != BoundInterfaceAccessibility.Public
                             || member.IsStatic || member.IsExternal
                             || member.IsPartial || !member.RequiresUnsafeCaller
+                            || member.NativeCallableConvention is null
                             || member.IsAsync || member.HasBody
                             || !member.TypeParameters.IsEmpty
                             || !member.Constraints.IsEmpty
@@ -207,7 +208,18 @@ internal static class BoundInterfaceContract
                 || member.Constraints.IsDefault || member.Parameters.IsDefault
                 || member.Parameters.Length > SemanticVerifier.MaximumArguments
                 || member.Dependencies.IsDefault || member.Accessors.IsDefault
-                || member.Accessors.Length > 3)
+                || member.Accessors.Length > 3
+                || (member.DeclaredRequiresUnsafeCaller
+                    && !member.RequiresUnsafeCaller)
+                || (member.NativeCallableConvention
+                    is NativeCallingConvention convention
+                    && (member.Kind != BoundInterfaceMemberKind.Callable
+                        || !member.RequiresUnsafeCaller
+                        || convention is not (
+                            NativeCallingConvention.Unmanaged
+                            or NativeCallingConvention.Cdecl
+                            or NativeCallingConvention.Stdcall
+                            or NativeCallingConvention.Vectorcall))))
             {
                 return false;
             }

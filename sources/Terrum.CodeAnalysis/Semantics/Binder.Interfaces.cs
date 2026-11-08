@@ -32,6 +32,16 @@ internal sealed partial class Binder
         ImmutableArray<string> AttributeTokens,
         ImmutableArray<InterfaceFormalSyntax> Formals);
 
+    private sealed record PendingInterfaceNativeCallableConvention(
+        int InterfaceIndex,
+        int? MemberOrdinal,
+        ImmutableArray<int> InheritedMemberOrdinals,
+        SyntaxTree Tree,
+        SyntaxNode Expression);
+
+    private readonly List<PendingInterfaceNativeCallableConvention>
+        _pendingInterfaceNativeCallableConventions = [];
+
     private sealed record ResolvedInterfaceType(
         string QualifiedName,
         BoundModuleImport? ModuleImport,
@@ -126,9 +136,11 @@ internal sealed partial class Binder
                 }
                 continue;
             }
+            var mergeAttributeTokens = InterfaceMergeAttributeTokens(first);
             if (parts.Any(part => part.IsPublic != first.IsPublic
                 || part.Accessibility != first.Accessibility
-                || !part.AttributeTokens.SequenceEqual(first.AttributeTokens, StringComparer.Ordinal)
+                || !InterfaceMergeAttributeTokens(part).SequenceEqual(
+                    mergeAttributeTokens, StringComparer.Ordinal)
                 || !InterfaceFormalsMatch(first.Formals, part.Formals)))
             {
                 Report("TRM3003", $"Partial interface declarations for '{qualifiedName}' disagree.",
@@ -136,6 +148,12 @@ internal sealed partial class Binder
                 continue;
             }
 
+            var (nativeCallableDefaultConvention,
+                nativeCallableDefaultExpression) =
+                    BindInterfaceNativeCallableDefault(parts, first);
+            SetContext(first.Tree, first.Declaration);
+            var interfaceIndex = _interfaces.Count;
+            var inheritedNativeCallableMemberOrdinals = new List<int>();
             var typeParameters = first.Formals
                 .Select((formal, ordinal) => (formal, ordinal))
                 .Where(static item => item.formal.Kind == BoundInterfaceFormalKind.Type)
@@ -156,6 +174,15 @@ internal sealed partial class Binder
                 {
                     foreach (var baseType in baseList.Children.OfType<SyntaxNode>())
                     {
+                        foreach (var attribute in baseType.DescendantNodes()
+                                     .Where(static node => node.Kind
+                                         == SyntaxKind.Attribute)
+                                     .Where(IsNativeCallableAttribute))
+                        {
+                            Report("TRM3030",
+                                "NativeCallable is not valid on an interface base type.",
+                                attribute.Span);
+                        }
                         if (BindInterfaceType(baseType, typeParameters, groups,
                             first.Formals.Length,
                             interfaceConstantParameters: constantParameters) is
@@ -184,10 +211,21 @@ internal sealed partial class Binder
                 BindInterfaceConstraints(part.Declaration, typeParameters, groups,
                     constraints, interfaceConstantParameters: constantParameters);
                 members.AddRange(BindInterfaceMembers(part, typeParameters, groups,
-                    formals, members.Count));
+                    formals, members.Count, interfaceIndex,
+                    nativeCallableDefaultConvention,
+                    nativeCallableDefaultExpression,
+                    inheritedNativeCallableMemberOrdinals));
             }
 
             var boundMembers = members.ToImmutable();
+            if (nativeCallableDefaultExpression is SyntaxNode defaultExpression)
+            {
+                _pendingInterfaceNativeCallableConventions.Add(
+                    new PendingInterfaceNativeCallableConvention(
+                        interfaceIndex, null,
+                        [.. inheritedNativeCallableMemberOrdinals],
+                        first.Tree, defaultExpression));
+            }
             var foreignNativeInterface = BindForeignNativeInterfaceLayout(
                 parts, first, formals, bases.Count, constraints.Count,
                 boundMembers);
@@ -273,12 +311,15 @@ internal sealed partial class Binder
                 member.Kind != BoundInterfaceMemberKind.Callable
                 || member.Accessibility != BoundInterfaceAccessibility.Public
                 || member.IsStatic || member.IsExternal || member.IsPartial
-                || !member.RequiresUnsafeCaller || member.IsAsync
+                || !member.DeclaredRequiresUnsafeCaller
+                || !member.RequiresUnsafeCaller
+                || member.NativeCallableConvention is null
+                || member.IsAsync
                 || member.HasBody || !member.TypeParameters.IsEmpty
                 || !member.Constraints.IsEmpty || !member.Accessors.IsEmpty))
         {
             Report("TRM3030",
-                "ForeignNativeInterface requires one closed, nonpartial interface with public unsafe bodyless instance methods and no bases or constraints.",
+                "ForeignNativeInterface requires one closed, nonpartial interface with public unsafe bodyless NativeCallable instance methods and no bases or constraints.",
                 attributeNode.Span);
             return null;
         }
@@ -299,6 +340,64 @@ internal sealed partial class Binder
         }
 
         return new BoundForeignNativeInterfaceLayout(vtableByteOffset);
+    }
+
+    private (NativeCallingConvention? Convention, SyntaxNode? Expression)
+        BindInterfaceNativeCallableDefault(
+            List<InterfaceDeclarationPart> parts,
+            InterfaceDeclarationPart first)
+    {
+        var attributes = new List<(InterfaceDeclarationPart Part,
+            SyntaxNode Attribute)>();
+        foreach (var part in parts)
+        {
+            SetContext(part.Tree, part.Declaration);
+            foreach (var attribute in part.Declaration.Children
+                         .OfType<SyntaxNode>()
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute)
+                         .Where(IsNativeCallableAttribute))
+            {
+                attributes.Add((part, attribute));
+            }
+        }
+
+        if (attributes.Count == 0)
+        {
+            return (null, null);
+        }
+
+        var (attributePart, attributeNode) = attributes[0];
+        SetContext(attributePart.Tree, attributePart.Declaration);
+        if (attributes.Count != 1 || !ReferenceEquals(attributePart, first))
+        {
+            Report("TRM3030",
+                "A NativeCallable interface default must appear once on the primary interface declaration.",
+                attributeNode.Span);
+            return (null, null);
+        }
+        if (!TryBindNativeCallableAttribute(attributeNode,
+            out var convention, out var expression))
+        {
+            return (null, null);
+        }
+
+        // Native is only the sentinel for a convention expression awaiting ConstEval.
+        return expression is null
+            ? (convention, null)
+            : (NativeCallingConvention.Native, expression);
+    }
+
+    private bool IsNativeCallableAttribute(SyntaxNode attribute)
+    {
+        var name = AttributeName(attribute);
+        return (_nativeCoreRegistration?.NativeCallable is
+                CoreNativeAttributeSchema selectedSchema
+            && TryGetRegisteredNativeAttributeSchema(name,
+                out var resolvedSchema)
+            && resolvedSchema.Identity == selectedSchema.Identity)
+            || IsNativeAttributeSpelling(name,
+                "Terrum.Interop.NativeCallable");
     }
 
     private bool IsForeignNativeInterfaceAttribute(SyntaxNode attribute)
@@ -347,6 +446,12 @@ internal sealed partial class Binder
             var group = groups[ordinal];
             var attributes = group.OfType<SyntaxNode>()
                 .Where(static node => node.Kind == SyntaxKind.Attribute).ToImmutableArray();
+            foreach (var attribute in attributes.Where(IsNativeCallableAttribute))
+            {
+                Report("TRM3030",
+                    "NativeCallable is only valid on an interface or ordinary method declaration.",
+                    attribute.Span);
+            }
             var directTokens = group.OfType<SyntaxTokenElement>().ToArray();
             var firstToken = directTokens.FirstOrDefault();
             var isSelf = firstToken?.Token.Text == "this";
@@ -964,7 +1069,11 @@ internal sealed partial class Binder
         IReadOnlyDictionary<string, int> interfaceTypeParameters,
         IReadOnlyDictionary<(string Name, int Arity), List<InterfaceDeclarationPart>> interfaces,
         ImmutableArray<BoundInterfaceFormal> ownerFormals,
-        int firstOrdinal)
+        int firstOrdinal,
+        int interfaceIndex,
+        NativeCallingConvention? interfaceDefaultConvention,
+        SyntaxNode? interfaceDefaultExpression,
+        List<int> inheritedDefaultMemberOrdinals)
     {
         var result = ImmutableArray.CreateBuilder<BoundInterfaceMemberDefinition>();
         var interfaceConstantParameters = InterfaceConstantParameters(ownerFormals,
@@ -986,6 +1095,84 @@ internal sealed partial class Binder
             }
 
             SetContext(part.Tree, declaration);
+            var nativeCallableAttributes = declaration.Children
+                .OfType<SyntaxNode>()
+                .Where(static child => child.Kind == SyntaxKind.Attribute)
+                .Where(IsNativeCallableAttribute)
+                .ToArray();
+            var directNativeCallableAttributes = new HashSet<SyntaxNode>(
+                nativeCallableAttributes, ReferenceEqualityComparer.Instance);
+            foreach (var attribute in declaration.Children
+                         .OfType<SyntaxNode>()
+                         .Where(static child => child.Kind
+                             is SyntaxKind.TypeParameterList
+                                 or SyntaxKind.ConstraintClause)
+                         .SelectMany(static child => child.DescendantNodes())
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute)
+                         .Where(IsNativeCallableAttribute))
+            {
+                _ = directNativeCallableAttributes.Add(attribute);
+            }
+            foreach (var attribute in declaration.DescendantNodes()
+                         .Where(static child => child.Kind
+                             == SyntaxKind.Attribute)
+                         .Where(IsNativeCallableAttribute)
+                         .Where(attribute =>
+                             !directNativeCallableAttributes.Contains(attribute)))
+            {
+                Report("TRM3030",
+                    "NativeCallable is only valid on an interface or ordinary method declaration.",
+                    attribute.Span);
+            }
+
+            NativeCallingConvention? nativeCallableConvention = null;
+            SyntaxNode? nativeCallableConventionExpression = null;
+            if (nativeCallableAttributes.Length != 0)
+            {
+                if (memberKind != BoundInterfaceMemberKind.Callable)
+                {
+                    Report("TRM3030",
+                        "NativeCallable is only valid on an ordinary interface method.",
+                        nativeCallableAttributes[0].Span);
+                }
+                else if (nativeCallableAttributes.Length != 1)
+                {
+                    Report("TRM3030",
+                        "NativeCallable is a nonrepeatable interface method attribute.",
+                        nativeCallableAttributes[1].Span);
+                }
+                else if (TryBindNativeCallableAttribute(
+                    nativeCallableAttributes[0],
+                    out var selectedConvention,
+                    out nativeCallableConventionExpression))
+                {
+                    nativeCallableConvention = nativeCallableConventionExpression
+                        is null
+                        ? selectedConvention
+                        : NativeCallingConvention.Native;
+                }
+            }
+            else if (memberKind == BoundInterfaceMemberKind.Callable)
+            {
+                nativeCallableConvention = interfaceDefaultConvention;
+                if (interfaceDefaultExpression is not null
+                    && nativeCallableConvention is not null)
+                {
+                    nativeCallableConvention = NativeCallingConvention.Native;
+                    inheritedDefaultMemberOrdinals.Add(
+                        firstOrdinal + result.Count);
+                }
+            }
+            if (nativeCallableConventionExpression is SyntaxNode
+                methodConventionExpression)
+            {
+                _pendingInterfaceNativeCallableConventions.Add(
+                    new PendingInterfaceNativeCallableConvention(
+                        interfaceIndex, firstOrdinal + result.Count, [],
+                        part.Tree, methodConventionExpression));
+            }
+
             var typeNode = FirstInterfaceTypeNode(declaration);
             var methodTypeParameterNode = declaration.Children.OfType<SyntaxNode>()
                 .FirstOrDefault(static child => child.Kind == SyntaxKind.TypeParameterList);
@@ -1098,6 +1285,10 @@ internal sealed partial class Binder
             var accessibility = BindInterfaceAccessibility(declaration.Children, declaration.Span);
             var hasBody = declaration.DescendantNodes().Any(static node =>
                 node.Kind is SyntaxKind.Block or SyntaxKind.ExpressionBody);
+            var declaredRequiresUnsafeCaller = declaration.Children
+                .OfType<SyntaxTokenElement>()
+                .Any(static token =>
+                    token.Token.Kind == TokenKind.UnsafeKeyword);
             if (accessibility == BoundInterfaceAccessibility.Private && !hasBody)
             {
                 Report("TRM3001", "A private interface helper must have a complete body.", declaration.Span);
@@ -1114,8 +1305,8 @@ internal sealed partial class Binder
                 declaration.Children.OfType<SyntaxTokenElement>()
                     .Any(static token => token.Token.Kind == TokenKind.Identifier
                         && token.Token.Text == "partial"),
-                declaration.Children.OfType<SyntaxTokenElement>()
-                    .Any(static token => token.Token.Kind == TokenKind.UnsafeKeyword),
+                declaredRequiresUnsafeCaller
+                    || nativeCallableConvention is not null,
                 attributes.Contains("DoesNotReturn", StringComparer.Ordinal),
                 declaration.Children.OfType<SyntaxTokenElement>()
                     .Any(static token => token.Token.Kind == TokenKind.AsyncKeyword),
@@ -1132,7 +1323,11 @@ internal sealed partial class Binder
                 accessors,
                 associatedDefaultType,
                 associatedConstantType,
-                associatedConstantDefault));
+                associatedConstantDefault)
+            {
+                DeclaredRequiresUnsafeCaller = declaredRequiresUnsafeCaller,
+                NativeCallableConvention = nativeCallableConvention,
+            });
         }
         return result.ToImmutable();
     }
@@ -1720,6 +1915,27 @@ internal sealed partial class Binder
             .Select(NormalizeSyntax).Where(static text => text is not null)
             .Select(static text => text!)];
 
+    private ImmutableArray<string> InterfaceMergeAttributeTokens(
+        InterfaceDeclarationPart part)
+    {
+        var previousContext = CaptureContext();
+        SetContext(part.Tree, part.Declaration);
+        try
+        {
+            return [.. part.Declaration.Children.OfType<SyntaxNode>()
+                .Where(static child => child.Kind is SyntaxKind.Attribute
+                    or SyntaxKind.FriendVisibility)
+                .Where(child => child.Kind != SyntaxKind.Attribute
+                    || !IsNativeCallableAttribute(child))
+                .Select(NormalizeSyntax).Where(static text => text is not null)
+                .Select(static text => text!)];
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
+    }
+
     private static TokenKind InterfaceOperatorToken(SyntaxNode declaration)
     {
         for (var index = 0; index + 1 < declaration.Children.Length; index++)
@@ -1859,9 +2075,18 @@ internal sealed partial class Binder
             {
                 if (item.Kind == SyntaxKind.Attribute)
                 {
-                    constraints.Add(new BoundInterfaceConstraint(
-                        formalOrdinal, BoundInterfaceConstraintKind.Attribute, null, AttributeName(item))
-                        { FormalScope = formalScope });
+                    if (IsNativeCallableAttribute(item))
+                    {
+                        Report("TRM3030",
+                            "NativeCallable is not valid on an interface constraint.",
+                            item.Span);
+                    }
+                    else
+                    {
+                        constraints.Add(new BoundInterfaceConstraint(
+                            formalOrdinal, BoundInterfaceConstraintKind.Attribute, null, AttributeName(item))
+                            { FormalScope = formalScope });
+                    }
                 }
                 else if (BindInterfaceType(item, typeParameters, interfaces, int.MaxValue,
                     methodTypeParameters,

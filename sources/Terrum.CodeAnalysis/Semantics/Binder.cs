@@ -633,6 +633,19 @@ internal sealed partial class Binder
         foreach (var (tree, child) in _scopedDeclarations)
         {
             SetContext(tree, child);
+            if (child.Kind is not (SyntaxKind.FunctionDeclaration
+                or SyntaxKind.InterfaceDeclaration))
+            {
+                foreach (var attribute in child.Children.OfType<SyntaxNode>()
+                             .Where(static node => node.Kind
+                                 == SyntaxKind.Attribute)
+                             .Where(IsNativeCallableAttribute))
+                {
+                    Report("TRM3030",
+                        "NativeCallable is only valid on an interface or ordinary method declaration.",
+                        attribute.Span);
+                }
+            }
             if (child.Kind == SyntaxKind.ClassDeclaration)
             {
                 DeclareClassName(tree, child);
