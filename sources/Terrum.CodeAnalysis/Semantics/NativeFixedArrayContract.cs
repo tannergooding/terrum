@@ -503,7 +503,7 @@ internal static class NativeFixedArrayContract
         return MatchesProgram(program)
             && MatchesPath(rootType, projections, program.Structures,
                 program.NativeFixedArrayTypes, out rootLayout,
-                out leafLayout);
+                out leafLayout, program.CheckedReferenceTypes);
     }
 
     internal static bool MatchesPath(PrimitiveType rootType,
@@ -511,15 +511,18 @@ internal static class NativeFixedArrayContract
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
         out BoundNativeFixedArrayLayout rootLayout,
-        out BoundNativeFixedArrayLayout leafLayout)
+        out BoundNativeFixedArrayLayout leafLayout,
+        IReadOnlyList<CheckedReferenceTypeDefinition>?
+            checkedReferenceTypes = null)
     {
         rootLayout = default;
         leafLayout = default;
         if (projections.IsDefaultOrEmpty
             || projections.Length > SemanticVerifier.MaximumDepth
-            || !IsValidTable(structures, fixedArrays)
+            || !IsValidTable(structures, fixedArrays,
+                checkedReferenceTypes)
             || !TryGetLayout(rootType, structures, fixedArrays,
-                out rootLayout)
+                out rootLayout, checkedReferenceTypes)
             || projections[0].Layout != rootLayout)
         {
             return false;
@@ -531,7 +534,7 @@ internal static class NativeFixedArrayContract
             if (projection.Index is null
                 || projection.Layout.CarrierType != expectedCarrier
                 || !MatchesLayout(projection.Layout, structures,
-                    fixedArrays)
+                    fixedArrays, checkedReferenceTypes)
                 || !IsIndexType(projection.Index.Type)
                 || (projection.Index is BoundConstant
                     && !IsConstantIndexInRange(projection.Index,
@@ -1031,7 +1034,8 @@ internal static class NativeFixedArrayContract
                     out var optionalLayout))
             {
                 layout = new TypeLayout(optionalLayout.Size,
-                    checked((ulong)optionalLayout.Alignment),
+                    checked((ulong)Math.Max(optionalLayout.Alignment,
+                        optionalLayout.RequiredAlignment)),
                     checked((ulong)optionalLayout.RequiredAlignment));
                 return true;
             }

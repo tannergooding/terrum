@@ -8015,7 +8015,8 @@ internal sealed partial class Binder
 
     private bool IsSupportedOptionalType(PrimitiveType type) =>
         SourceOptionalTypes.IsSupported(type, _checkedReferenceTypes, _structs,
-            _classes, _enumDefinitions.Count, _nativeLoweringAgreement);
+            _classes, _enumDefinitions.Count, _nativeLoweringAgreement,
+            _nativeFixedArrayTypes);
 
     private bool TryGetRequiredOptionalType(
         PrimitiveType type,
@@ -8025,6 +8026,18 @@ internal sealed partial class Binder
         {
             requiredType = ManagedClassTypes.Required(type);
             return true;
+        }
+        if (CheckedReferenceTypeContract.IsOptionalValueType(
+                type, _checkedReferenceTypes))
+        {
+            if (IsSupportedOptionalType(type)
+                && SourceOptionalTypes.TryGetRequired(
+                    type, _checkedReferenceTypes, out requiredType))
+            {
+                return true;
+            }
+            requiredType = default;
+            return false;
         }
         if (_nativeLoweringAgreement is not (
                 CompilationOptions.WindowsX64NormalBackingAgreement
@@ -10533,7 +10546,10 @@ internal sealed partial class Binder
                         Report("TRM3030", "A pointer assignment requires a writable pointer to a value type.",
                             target.Span);
                     }
-                    if (!DirectNativeImportContract.IsCopyablePointee(pointerDefinition.PointeeType, _structs))
+                    if (!NativePointerTypeContract.IsCopyableSourcePointee(
+                        pointerDefinition.PointeeType, _structs,
+                        _checkedReferenceTypes, _nativeLoweringAgreement,
+                        _nativeFixedArrayTypes))
                     {
                         Report("TRM3023",
                             "A raw pointer cannot load or store an owning value without preserving its ownership and cleanup.",
@@ -11076,8 +11092,20 @@ internal sealed partial class Binder
                     Report("TRM3008", "Coalescing assignment requires a mut field.", target.Span);
                 }
                 break;
+            case BoundFieldRead field:
+                CheckUpdateFieldPlace(field);
+                break;
+            case BoundNativeFixedArrayElement element:
+                CheckUpdateNativeFixedArrayElementPlace(element.Variable,
+                    element.Layout, element.FieldPlace, element.Type,
+                    target.Span);
+                break;
+            case BoundNativeFixedArrayPathElement element:
+                CheckUpdateNativeFixedArrayPathElementPlace(element,
+                    target.Span);
+                break;
             default:
-                Report("TRM3008", "Coalescing assignment requires a mutable local or writable class field, not a value-returning getter or temporary.", target.Span);
+                Report("TRM3008", "Coalescing assignment requires a mutable local, writable field, or mutable fixed-array element.", target.Span);
                 _ = BindExpression(value, place.Type);
                 return new BoundBlock([], span);
         }
@@ -12072,7 +12100,10 @@ internal sealed partial class Binder
                                 expression = ErrorExpression(node.Span);
                                 break;
                             }
-                            if (!DirectNativeImportContract.IsCopyablePointee(pointeeType, _structs))
+                            if (!NativePointerTypeContract.IsCopyableSourcePointee(
+                                pointeeType, _structs, _checkedReferenceTypes,
+                                _nativeLoweringAgreement,
+                                _nativeFixedArrayTypes))
                             {
                                 Report("TRM3023",
                                     "A raw pointer cannot load or store an owning value without preserving its ownership and cleanup.",
@@ -12098,24 +12129,41 @@ internal sealed partial class Binder
                 }
                 if (op.Kind == TokenKind.Ampersand)
                 {
-                    if (expected is PrimitiveType expectedPointerType
-                        && NativePointerTypeContract.IsValidType(expectedPointerType, [.. _nativePointerTypes]))
+                    PrimitiveType? expectedPointerType = expected is PrimitiveType pointerType
+                        && NativePointerTypeContract.IsValidType(
+                            pointerType, [.. _nativePointerTypes])
+                        ? pointerType : null;
+                    if (expectedPointerType is null
+                        && expected is PrimitiveType optionalPointerType
+                        && IsSupportedOptionalType(optionalPointerType)
+                        && TryGetRequiredOptionalType(optionalPointerType,
+                            out var optionalPointerPayloadType)
+                        && NativePointerTypeContract.IsValidType(
+                            optionalPointerPayloadType,
+                            [.. _nativePointerTypes]))
+                    {
+                        expectedPointerType = optionalPointerPayloadType;
+                    }
+                    if (expectedPointerType is PrimitiveType concretePointerType)
                     {
                         if (operandNode.Kind == SyntaxKind.IndexExpression)
                         {
                             expression = BindNativeFixedArrayPointerAddress(operandNode,
-                                expectedPointerType, node.Span);
+                                concretePointerType, node.Span);
                             break;
                         }
                         if (operandNode.Kind != SyntaxKind.NameExpression
                             || !TryFindVariable(
                                 ((SyntaxTokenElement)operandNode.Children[0]).Token,
                                 out var pointerVariable)
-                            || _nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].PointeeType
+                            || _nativePointerTypes[NativePointerTypes.Index(concretePointerType)].PointeeType
                                 != _variables[pointerVariable].Type
-                            || !DirectNativeImportContract.IsInputPointee(
-                                _variables[pointerVariable].Type, _structs)
-                            || (_nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].IsWritable
+                            || !NativePointerTypeContract.IsSourcePointee(
+                                _variables[pointerVariable].Type, _structs,
+                                _checkedReferenceTypes,
+                                _nativeLoweringAgreement,
+                                _nativeFixedArrayTypes)
+                            || (_nativePointerTypes[NativePointerTypes.Index(concretePointerType)].IsWritable
                                 && !_variables[pointerVariable].IsMutable))
                         {
                             Report("TRM3030",
@@ -12132,7 +12180,7 @@ internal sealed partial class Binder
                                     node.Span);
                             }
                             expression = new BoundNativePointerAddress(pointerVariable,
-                                expectedPointerType, node.Span) {
+                                concretePointerType, node.Span) {
                                 IsUnsafeAuthorized = _unsafeDepth != 0,
                             };
                         }
@@ -12150,6 +12198,18 @@ internal sealed partial class Binder
                             && NativeFunctionPointerTypes.IsType(functionPointerExpectedType)
                                 ? functionPointerExpectedType
                                 : null;
+                        if (expectedFunctionPointerType is null
+                            && expected is PrimitiveType optionalFunctionPointerType
+                            && IsSupportedOptionalType(optionalFunctionPointerType)
+                            && TryGetRequiredOptionalType(
+                                optionalFunctionPointerType,
+                                out var optionalFunctionPointerPayloadType)
+                            && NativeFunctionPointerTypes.IsType(
+                                optionalFunctionPointerPayloadType))
+                        {
+                            expectedFunctionPointerType
+                                = optionalFunctionPointerPayloadType;
+                        }
                         var functionPointerType = expectedFunctionPointerType
                             ?? (expected is null ? actualType : null);
                         if (functionPointerType is not PrimitiveType addressType

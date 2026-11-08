@@ -135,7 +135,8 @@ public static partial class SemanticVerifier
                 if (parent.Type != element.ArrayType
                     || !NativeFixedArrayContract.TryGetLayout(
                         element.ArrayType, program.Structures,
-                        program.NativeFixedArrayTypes, out var layout)
+                        program.NativeFixedArrayTypes, out var layout,
+                        program.CheckedReferenceTypes)
                     || layout.ElementType != element.Type
                     || (!NativeFixedArrayContract.IsRevision100RuntimeArrayLayout(
                             layout, program.Structures,
@@ -308,7 +309,8 @@ public static partial class SemanticVerifier
                     function, program, span, ref remaining, depth + 1);
                 if (!NativeFixedArrayContract.TryGetLayout(
                         element.ArrayType, program.Structures,
-                        program.NativeFixedArrayTypes, out var layout)
+                        program.NativeFixedArrayTypes, out var layout,
+                        program.CheckedReferenceTypes)
                     || !TryGetPrivateBodyPlaceRoot(parent, out var rootVariable))
                 {
                     throw InvalidEffect(span, "CheckedReference");
@@ -386,7 +388,7 @@ public static partial class SemanticVerifier
             Count(ref remaining, depth++);
             if (!NativeFixedArrayContract.TryGetLayout(element.ArrayType,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var layout)
+                    out var layout, program.CheckedReferenceTypes)
                 || element.Type != layout.ElementType)
             {
                 return false;
@@ -1016,7 +1018,8 @@ public static partial class SemanticVerifier
                 : default;
             if (!NativeFixedArrayContract.TryGetLayout(arrayPlace.ArrayType,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var arrayLayout)
+                    out var arrayLayout,
+                    program.CheckedReferenceTypes)
                 || arrayLayout.ElementType != arrayPlace.Type
                 || layout.ElementType != arrayLayout.ElementType)
             {

@@ -139,7 +139,8 @@ public static partial class SemanticVerifier
             || !NativeFixedArrayContract.MatchesLayout(layout, program)
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(
                 layout.ElementType, program.Structures,
-                program.NativeFixedArrayTypes)
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes)
             || (function.Variables[variable].IsMutable
                 && !NativeFixedArrayContract.AllowsMutableLocal(layout)))
         {
@@ -544,7 +545,7 @@ public static partial class SemanticVerifier
             || !NativeFixedArrayContract.IsCarrier(carrierType)
             || !NativeFixedArrayContract.TryGetLayout(carrierType,
                 program.Structures, program.NativeFixedArrayTypes,
-                out var layout)
+                out var layout, program.CheckedReferenceTypes)
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
             || variable >= function.Variables.Length
             || !declarations.Contains(variable)

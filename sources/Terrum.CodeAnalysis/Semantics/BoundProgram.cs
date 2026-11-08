@@ -1972,10 +1972,10 @@ public sealed record BoundNativeStorageAddress(
 public sealed record BoundNativeOutputReservation(int Variable, PrimitiveType PointeeType,
     TextSpan Span) : BoundExpression(PrimitiveType.Void, Span);
 
-/// <summary>An explicitly absent optional managed handle.</summary>
+/// <summary>An explicitly absent optional value.</summary>
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
-/// <summary>Widens a known non-null handle without changing its pointer bits.</summary>
+/// <summary>Lifts a value into its normalized optional representation.</summary>
 public sealed record BoundOptionalLift(BoundExpression Value, PrimitiveType Type, TextSpan Span)
     : BoundExpression(Type, Span)
 {
@@ -2005,7 +2005,7 @@ public sealed record BoundReadonlyProjection(BoundExpression Value, PrimitiveTyp
         Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
 }
 
-/// <summary>Tests an optional handle for absence.</summary>
+/// <summary>Tests an optional value for absence.</summary>
 public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span)
 {
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
@@ -2013,7 +2013,7 @@ public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundEx
         Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
 }
 
-/// <summary>Tests an optional handle and snapshots its non-null value into a scoped variable on success.</summary>
+/// <summary>Tests an optional value and snapshots its payload into a scoped variable on success.</summary>
 public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span)
 {
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
@@ -2024,7 +2024,7 @@ public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan S
 /// <summary>Tests whether a named local or parameter currently contains an initialized value.</summary>
 public sealed record BoundIsInitialized(int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
 
-/// <summary>Tests optional-handle presence or captures a supported inferred value on a successful match.</summary>
+/// <summary>Tests optional presence or captures a supported inferred value on a successful match.</summary>
 public sealed record BoundIsVariablePattern(BoundExpression Value, int Variable, bool IncludeNull, TextSpan Span)
     : BoundExpression(PrimitiveType.Bool, Span)
 {

@@ -85,7 +85,8 @@ internal static class ValueLayout
                 return TryGetOptionalValueLayout(type, structures,
                         checkedReferenceTypes, nativeLoweringAgreement,
                         fixedArrayTypes, out var optionalLayout)
-                    ? optionalLayout.Alignment : 0;
+                    ? Math.Max(optionalLayout.Alignment,
+                        optionalLayout.RequiredAlignment) : 0;
             }
 
             var size = CheckedReferenceSize(type, structures,
@@ -207,8 +208,9 @@ internal static class ValueLayout
 
         var payloadSize = Size(payloadType, structures,
             checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes);
-        var payloadAlignment = Alignment(payloadType, structures,
-            checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes);
+        var payloadAlignment = NaturalAlignment(payloadType, structures,
+            checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes,
+            [], 0);
         var requiredAlignment = RequiredAlignment(payloadType, structures,
             fixedArrayTypes, checkedReferenceTypes);
 
@@ -230,6 +232,127 @@ internal static class ValueLayout
         layout = new OptionalValueLayout(payloadType, payloadOffset, size,
             alignment, required, UsesNullNiche: false);
         return true;
+    }
+
+    private static int NaturalAlignment(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes,
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes,
+        HashSet<PrimitiveType> visiting, int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth
+            || !visiting.Add(type))
+        {
+            throw new NotSupportedException(
+                "Natural alignment requires a complete acyclic layout.");
+        }
+
+        try
+        {
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                if (fixedArrayTypes is null
+                    || !TryGetFixedArrayLayout(type, structures,
+                        fixedArrayTypes, checkedReferenceTypes,
+                        out _))
+                {
+                    throw new NotSupportedException(
+                        "Fixed-array natural alignment requires its validated type table.");
+                }
+
+                var fixedArray = fixedArrayTypes[
+                    NativeFixedArrayTypes.Index(type)];
+                return Math.Max(1, NaturalAlignment(
+                    fixedArray.ElementType, structures,
+                    checkedReferenceTypes, nativeLoweringAgreement,
+                    fixedArrayTypes, visiting, depth + 1));
+            }
+
+            if (CheckedReferenceTypes.IsType(type))
+            {
+                if (checkedReferenceTypes is not null
+                    && CheckedReferenceTypeContract.IsOptionalValueType(
+                        type, checkedReferenceTypes))
+                {
+                    return NaturalAlignment(
+                        checkedReferenceTypes[
+                            CheckedReferenceTypes.Index(type)].ReferentType,
+                        structures, checkedReferenceTypes,
+                        nativeLoweringAgreement, fixedArrayTypes, visiting,
+                        depth + 1);
+                }
+
+                return Alignment(type, structures, checkedReferenceTypes,
+                    nativeLoweringAgreement, fixedArrayTypes);
+            }
+
+            if (BoundGenericNominalTypeTypes.IsType(type)
+                || BoundEnumTypes.IsType(type)
+                || NativePointerTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type)
+                || ManagedClassTypes.IsManaged(type)
+                || (int)type < 100)
+            {
+                return Math.Max(1, Alignment(type, structures,
+                    checkedReferenceTypes, nativeLoweringAgreement,
+                    fixedArrayTypes));
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex < 0
+                || structureIndex >= structures.Count
+                || structureIndex >= BoundEnumTypes.First - 100)
+            {
+                throw new NotSupportedException(
+                    "Natural alignment requires a verified inline structure.");
+            }
+
+            var structure = structures[structureIndex];
+            if (structure.IsTransparent)
+            {
+                return NaturalAlignment(structure.Fields[0].Type,
+                    structures, checkedReferenceTypes,
+                    nativeLoweringAgreement, fixedArrayTypes, visiting,
+                    depth + 1);
+            }
+
+            if (structure.DeclaredAlignment is int declaredAlignment)
+            {
+                return declaredAlignment;
+            }
+            if (structure.Fields.IsDefaultOrEmpty)
+            {
+                return structure.Alignment;
+            }
+
+            var alignment = 1;
+            foreach (var field in structure.Fields)
+            {
+                if (Size(field.Type, structures, checkedReferenceTypes,
+                        nativeLoweringAgreement, fixedArrayTypes) == 0)
+                {
+                    continue;
+                }
+
+                var fieldAlignment = NaturalAlignment(field.Type,
+                    structures, checkedReferenceTypes,
+                    nativeLoweringAgreement, fixedArrayTypes, visiting,
+                    depth + 1);
+                if (structure.IsSequential || structure.IsUnion)
+                {
+                    fieldAlignment = Math.Min(fieldAlignment,
+                        structure.Packing);
+                }
+                alignment = Math.Max(alignment, fieldAlignment);
+            }
+
+            return alignment;
+        }
+        finally
+        {
+            _ = visiting.Remove(type);
+        }
     }
 
     private static bool IsRootlessCopyPayload(PrimitiveType type,
@@ -294,7 +417,8 @@ internal static class ValueLayout
         }
 
         var structure = structures[structureIndex];
-        if (structure.IsUnique || structure.CleanupMethod is not null)
+        if (structure.IsUnique || structure.IsUnion
+            || structure.CleanupMethod is not null)
         {
             return false;
         }

@@ -25,7 +25,8 @@ public static partial class SemanticVerifier
             if (!NativeFixedArrayContract.TryGetLayout(
                     copyType,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var copyLayout)
+                    out var copyLayout,
+                    program.CheckedReferenceTypes)
                 || !NativeFixedArrayContract.MatchesLayout(copyLayout,
                     program)
                 || expression.Type != copyLayout.CarrierType
@@ -213,10 +214,11 @@ public static partial class SemanticVerifier
             || function.Variables[read.Variable].Type != arrayType
             || !NativeFixedArrayContract.TryGetLayout(arrayType,
                 program.Structures, program.NativeFixedArrayTypes,
-                out var layout)
+                out var layout, program.CheckedReferenceTypes)
             || !NativeFixedArrayContract.MatchesLayout(layout, program)
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(arrayType,
-                program.Structures, program.NativeFixedArrayTypes))
+                program.Structures, program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes))
         {
             throw InvalidEffect(expression?.Span ?? default,
                 "NativeImport");
@@ -364,7 +366,8 @@ public static partial class SemanticVerifier
             || initialization.Seed.Type != layout.ElementType
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(
                 layout.ElementType, program.Structures,
-                program.NativeFixedArrayTypes))
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes))
         {
             throw InvalidEffect(initialization.Span, "NativeImport");
         }
@@ -662,7 +665,8 @@ public static partial class SemanticVerifier
             || placeType != layout.CarrierType
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(
                 function.Variables[rootVariable].Type, program.Structures,
-                program.NativeFixedArrayTypes))
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes))
         {
             return false;
         }
@@ -849,7 +853,8 @@ public static partial class SemanticVerifier
 
         var rootType = root.Type;
         if (!NativeFixedArrayContract.IsRootlessCopyFieldType(rootType,
-                program.Structures, program.NativeFixedArrayTypes))
+                program.Structures, program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes))
         {
             return false;
         }
@@ -1112,6 +1117,125 @@ public static partial class SemanticVerifier
             && writable;
     }
 
+    private static bool IsWritableNativeFixedArrayElementPlace(
+        BoundNativeFixedArrayElement element,
+        InitializationState initialized, HashSet<int> declarations,
+        BoundFunction function, BoundProgram program)
+    {
+        var variable = element.Variable;
+        var fieldPlace = element.FieldPlace;
+        var layout = element.Layout;
+        return NativeFixedArrayContract.MatchesProgram(program)
+            && !function.IsExternal && function.IndexedBody is null
+            && variable >= function.ParameterCount
+                + (function.IsConstructor ? 1 : 0)
+            && (uint)variable < (uint)function.Variables.Length
+            && declarations.Contains(variable)
+            && (fieldPlace is null
+                ? initialized[variable]
+                    && function.Variables[variable].IsMutable
+                    && function.Variables[variable].Type
+                        == layout.CarrierType
+                : IsWritableNativeFixedArrayFieldPlace(variable,
+                    fieldPlace, function, program))
+            && TryGetNativeFixedArrayArrayPrefix(variable, fieldPlace,
+                layout, function, program, out _)
+            && NativeFixedArrayContract.AllowsElementWrites(layout)
+            && NativeFixedArrayContract.AllowsMutableLocal(layout)
+            && NativeFixedArrayContract.MatchesType(
+                layout.CarrierType, layout, program)
+            && element.Type == layout.ElementType;
+    }
+
+    private static bool IsWritableNativeFixedArrayPathElementPlace(
+        BoundNativeFixedArrayPathElement element,
+        InitializationState initialized, HashSet<int> declarations,
+        BoundFunction function, BoundProgram program)
+    {
+        var variable = element.Variable;
+        var fieldPlace = element.FieldPlace;
+        if (element.Projections.IsDefaultOrEmpty
+            || !IsValidNativeFixedArrayPath(variable,
+                element.Projections, function, program, out var leafLayout,
+                fieldPlace)
+            || variable < function.ParameterCount
+                + (function.IsConstructor ? 1 : 0)
+            || (uint)variable >= (uint)function.Variables.Length
+            || !declarations.Contains(variable)
+            || !(fieldPlace is null
+                ? initialized[variable]
+                    && function.Variables[variable].IsMutable
+                : IsWritableNativeFixedArrayFieldPlace(variable,
+                    fieldPlace, function, program))
+            || !NativeFixedArrayContract.AllowsMutableLocal(
+                element.Projections[0].Layout))
+        {
+            return false;
+        }
+
+        foreach (var projection in element.Projections)
+        {
+            if (!NativeFixedArrayContract.AllowsElementWrites(
+                    projection.Layout)
+                || !NativeFixedArrayContract.MatchesLayout(
+                    projection.Layout, program))
+            {
+                return false;
+            }
+        }
+
+        return element.Type == leafLayout.ElementType;
+    }
+
+    private static bool IsWritableOptionalStructFieldPlace(
+        BoundFieldRead fieldPlace, InitializationState initialized,
+        HashSet<int> declarations, BoundFunction function,
+        BoundProgram program, int depth = 0)
+    {
+        if (depth >= MaximumDepth)
+        {
+            return false;
+        }
+
+        var ownerType = fieldPlace.Receiver.Type;
+        if (ManagedClassTypes.IsClass(ownerType))
+        {
+            return ManagedClassTypes.IsWritable(ownerType)
+                && (uint)fieldPlace.Field
+                    < (uint)Fields(program, ownerType).Length
+                && Fields(program, ownerType)[fieldPlace.Field].IsMutable;
+        }
+
+        if (!IsInlineStructStorage(ownerType, program)
+            || IsUnique(program, ownerType)
+            || !HasFields(program, ownerType)
+            || (uint)fieldPlace.Field
+                >= (uint)Fields(program, ownerType).Length
+            || !Fields(program, ownerType)[fieldPlace.Field].IsMutable)
+        {
+            return false;
+        }
+
+        return fieldPlace.Receiver switch {
+            BoundRead root => (uint)root.Variable
+                    < (uint)function.Variables.Length
+                && root.Type == function.Variables[root.Variable].Type
+                && declarations.Contains(root.Variable)
+                && initialized[root.Variable]
+                && function.Variables[root.Variable].IsMutable,
+            BoundFieldRead parent =>
+                IsWritableOptionalStructFieldPlace(parent, initialized,
+                    declarations, function, program, depth + 1),
+            BoundNativeFixedArrayElement element =>
+                IsWritableNativeFixedArrayElementPlace(element,
+                    initialized, declarations, function, program),
+            BoundNativeFixedArrayPathElement element =>
+                IsWritableNativeFixedArrayPathElementPlace(element,
+                    initialized, declarations, function, program),
+            _ => false,
+        };
+    }
+
     private static StorageProjection GetNativeFixedArrayPathPrefix(
         StorageProjection arrayPrefix,
         ImmutableArray<BoundNativeFixedArrayProjection> projections)
@@ -1221,7 +1345,7 @@ public static partial class SemanticVerifier
 
         if (!NativeFixedArrayContract.TryGetLayout(address.CarrierType,
                 program.Structures, program.NativeFixedArrayTypes,
-                out var rootLayout)
+                out var rootLayout, program.CheckedReferenceTypes)
             || !TryGetNativeFixedArrayArrayPrefix(address.Variable,
                 address.FieldPlace, rootLayout, function, program,
                 out var arrayPrefix))
@@ -1243,7 +1367,7 @@ public static partial class SemanticVerifier
 
         if (!NativeFixedArrayContract.TryGetLayout(address.CarrierType,
                 program.Structures, program.NativeFixedArrayTypes,
-                out var rootLayout)
+                out var rootLayout, program.CheckedReferenceTypes)
             || !TryGetNativeFixedArrayArrayPrefix(address.Variable,
                 address.FieldPlace, rootLayout, program,
                 out var arrayPrefix))
@@ -1707,7 +1831,8 @@ public static partial class SemanticVerifier
             || IsUnique(program, elementType)
             || !NativeFixedArrayContract.IsRootlessCopyFieldType(
                 elementType, program.Structures,
-                program.NativeFixedArrayTypes))
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes))
         {
             return false;
         }
@@ -1720,7 +1845,8 @@ public static partial class SemanticVerifier
                 || IsUnique(program, ownerType)
                 || !NativeFixedArrayContract.IsRootlessCopyFieldType(
                     ownerType, program.Structures,
-                    program.NativeFixedArrayTypes)
+                    program.NativeFixedArrayTypes,
+                    program.CheckedReferenceTypes)
                 || !HasFields(program, ownerType)
                 || (uint)projection.Field >= (uint)Fields(program,
                     ownerType).Length)
@@ -1745,7 +1871,8 @@ public static partial class SemanticVerifier
             program.NativeFixedArrayTypes);
         if (!NativeFixedArrayContract.IsRootlessCopyFieldType(
                 ownerType, program.Structures,
-                program.NativeFixedArrayTypes)
+                program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes)
             || !TryGetFieldPathOffset(elementType, fieldPath, program,
                 out fieldOffset)
             || fieldOffset > elementSize

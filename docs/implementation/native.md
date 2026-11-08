@@ -703,10 +703,24 @@ forms, including closed generic aliases. Layout queries compute tagged layouts
 for scalar/unit, enums, plain function
 pointers and eligible rootless-Copy aggregates; optional data pointers retain
 the eight-byte null niche. Required alignment carries through fixed-layout
-fields and fixed-array geometry. Source operations and runtime execution are
-not yet supported for general optional values, and broader aggregate/fixed-array
-qualification remains in progress. The provisional Windows x64 rootless-Copy layout remains
-unapproved, and no new argument/result or wire representation follows.
+fields and fixed-array geometry. The implemented rootless-Copy slice supports
+tagged construction, absence, presence tests, extraction, coalescing,
+conditional assignment and typed copies, plus null-niche data pointers.
+Optional fixed-array elements support initialization, reads, writes, nested
+paths, copies and repeat initialization. Debug JIT regressions exercise scalar,
+unit, function-pointer, aggregate, pointer and fixed-array cases under both
+runtime policies; a source-backed over-aligned payload checks natural
+alignment 8, required alignment 32, and optional payload offset/extent 32/64.
+A supervised Windows x64 image executes optional aggregate copy and repeat.
+A supervised guard-page JIT regression confirms copying an absent optional
+does not read its inaccessible payload. Supervised Windows x64 images execute
+optional aggregate copy/repeat and the source-derived `A=8/R=32` composition.
+JIT tests also cover internal aggregate call/return and success-conditioned
+out publication under both runtime policies; broader call/output/reference
+paths and padding treatment remain in progress. The raw overlapping-layout
+Union payload remains excluded because no active-member copy representation is
+selected. The provisional Windows x64 rootless-Copy layout remains unapproved,
+and no new argument/result or wire representation follows.
 Bounded generic functions may use the existing optional source-class/
 `ManagedNode` handle forms described in the
 [generic implementation contract](../implementation.md#bounded-generic-functions).

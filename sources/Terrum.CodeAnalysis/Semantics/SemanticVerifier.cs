@@ -1086,7 +1086,8 @@ public static partial class SemanticVerifier
                                 || !NativeFixedArrayContract.TryGetLayout(
                                     variable.Type, program.Structures,
                                     program.NativeFixedArrayTypes,
-                                    out var fixedArrayLayout)
+                                    out var fixedArrayLayout,
+                                    program.CheckedReferenceTypes)
                                 || fixedArrayLayout.CarrierType != variable.Type
                                 || (variable.IsMutable
                                     && !NativeFixedArrayContract.AllowsMutableLocal(fixedArrayLayout))
@@ -3449,7 +3450,8 @@ public static partial class SemanticVerifier
                     || variable.IsInitializationLocal
                     || !NativeFixedArrayContract.TryGetLayout(
                         variable.Type, program.Structures,
-                        program.NativeFixedArrayTypes, out var layout)
+                        program.NativeFixedArrayTypes, out var layout,
+                        program.CheckedReferenceTypes)
                     || !NativeFixedArrayContract.MatchesLayout(layout, program))
                 {
                     return true;
@@ -3502,7 +3504,8 @@ public static partial class SemanticVerifier
 
                 var hasLayout = NativeFixedArrayContract.TryGetLayout(
                     variable.Type, program.Structures,
-                    program.NativeFixedArrayTypes, out var layout);
+                    program.NativeFixedArrayTypes, out var layout,
+                    program.CheckedReferenceTypes);
                 var matchesLayout = hasLayout
                     && NativeFixedArrayContract.MatchesLayout(layout,
                         program);
@@ -3547,7 +3550,8 @@ public static partial class SemanticVerifier
             && IsInlineStructStorage(type, program)
             && !IsUnique(program, type)
             && NativeFixedArrayContract.IsRootlessCopyFieldType(type,
-                program.Structures, program.NativeFixedArrayTypes);
+                program.Structures, program.NativeFixedArrayTypes,
+                program.CheckedReferenceTypes);
     }
 
     private static bool HasUnsupportedMetadataOnlyArrayType(
@@ -4357,12 +4361,46 @@ public static partial class SemanticVerifier
                 }
                 else if (optionalAssignment.Place is BoundFieldRead fieldPlace)
                 {
-                    if (!ValidType(fieldPlace.Receiver.Type, allowVoid: false, program)
-                        || !ManagedClassTypes.IsClass(fieldPlace.Receiver.Type)
-                        || !ManagedClassTypes.IsWritable(fieldPlace.Receiver.Type)
-                        || fieldPlace.Field < 0
-                        || fieldPlace.Field >= Fields(program, fieldPlace.Receiver.Type).Length
-                        || !Fields(program, fieldPlace.Receiver.Type)[fieldPlace.Field].IsMutable)
+                    if (ManagedClassTypes.IsClass(fieldPlace.Receiver.Type))
+                    {
+                        if (!ValidType(fieldPlace.Receiver.Type,
+                                allowVoid: false, program)
+                            || !ManagedClassTypes.IsWritable(
+                                fieldPlace.Receiver.Type)
+                            || fieldPlace.Field < 0
+                            || fieldPlace.Field
+                                >= Fields(program,
+                                    fieldPlace.Receiver.Type).Length
+                            || !Fields(program,
+                                fieldPlace.Receiver.Type)[
+                                    fieldPlace.Field].IsMutable)
+                        {
+                            throw Invalid(optionalAssignment.Span);
+                        }
+                    }
+                    else if (!IsWritableOptionalStructFieldPlace(
+                            fieldPlace, initialized, declarations, function,
+                            program))
+                    {
+                        throw Invalid(optionalAssignment.Span);
+                    }
+                }
+                else if (optionalAssignment.Place
+                    is BoundNativeFixedArrayElement fixedArrayElement)
+                {
+                    if (!IsWritableNativeFixedArrayElementPlace(
+                            fixedArrayElement, initialized, declarations,
+                            function, program))
+                    {
+                        throw Invalid(optionalAssignment.Span);
+                    }
+                }
+                else if (optionalAssignment.Place
+                    is BoundNativeFixedArrayPathElement fixedArrayPathElement)
+                {
+                    if (!IsWritableNativeFixedArrayPathElementPlace(
+                            fixedArrayPathElement, initialized, declarations,
+                            function, program))
                     {
                         throw Invalid(optionalAssignment.Span);
                     }
@@ -4430,6 +4468,56 @@ public static partial class SemanticVerifier
                         optionalReferenceField.Type, optionalAssignment.Value,
                         optionalFieldDependencies, assignedState, function,
                         program, ref remaining, depth + 1, assignedMasks);
+                }
+                if (optionalAssignment.Place
+                        is BoundNativeFixedArrayElement assignedFixedArrayElement
+                    && CarriesNativePointer(assignedFixedArrayElement.Type,
+                        program)
+                    && assignedState.Dependencies
+                        is BackingDependencies fixedArrayDependencies)
+                {
+                    var write = new BoundNativeFixedArrayWrite(
+                        assignedFixedArrayElement.Variable,
+                        assignedFixedArrayElement.Layout,
+                        assignedFixedArrayElement.Index,
+                        optionalAssignment.Value,
+                        optionalAssignment.Span) {
+                            FieldPlace = assignedFixedArrayElement.FieldPlace,
+                        };
+                    ApplyNativeFixedArrayWriteProvenance(write,
+                        fixedArrayDependencies, function, program,
+                        ref remaining, depth + 1);
+                    RefreshNativePointerAggregateProvenance(
+                        assignedFixedArrayElement.Variable,
+                        function.Variables[
+                            assignedFixedArrayElement.Variable].Type,
+                        fixedArrayDependencies, program, ref remaining,
+                        depth + 1);
+                }
+                else if (optionalAssignment.Place
+                        is BoundNativeFixedArrayPathElement assignedFixedArrayPath
+                    && CarriesNativePointer(assignedFixedArrayPath.Type,
+                        program)
+                    && assignedState.Dependencies
+                        is BackingDependencies fixedArrayPathDependencies)
+                {
+                    var write = new BoundNativeFixedArrayPathWrite(
+                        assignedFixedArrayPath.Variable,
+                        assignedFixedArrayPath.Projections,
+                        optionalAssignment.Value,
+                        optionalAssignment.Span) {
+                            FieldPlace = assignedFixedArrayPath.FieldPlace,
+                        };
+                    ApplyNativeFixedArrayPathWriteProvenance(write,
+                        assignedFixedArrayPath.Projections[^1].Layout,
+                        fixedArrayPathDependencies, function, program,
+                        ref remaining, depth + 1);
+                    RefreshNativePointerAggregateProvenance(
+                        assignedFixedArrayPath.Variable,
+                        function.Variables[
+                            assignedFixedArrayPath.Variable].Type,
+                        fixedArrayPathDependencies, program, ref remaining,
+                        depth + 1);
                 }
                 for (var index = 0; index < initialized.Length; index++)
                 {
@@ -4818,14 +4906,16 @@ public static partial class SemanticVerifier
                     if (!NativeFixedArrayContract.TryGetLayout(
                             targetField.Type, program.Structures,
                             program.NativeFixedArrayTypes,
-                            out var fixedArrayLayout)
+                            out var fixedArrayLayout,
+                            program.CheckedReferenceTypes)
                         || !NativeFixedArrayContract.MatchesLayout(
                             fixedArrayLayout, program)
                         || !NativeFixedArrayContract.IsRootlessCopyFieldType(
                             function.Variables[
                                 fieldAssignment.Variable].Type,
                             program.Structures,
-                            program.NativeFixedArrayTypes)
+                            program.NativeFixedArrayTypes,
+                            program.CheckedReferenceTypes)
                         || targetField.Size < 0
                         || fixedArrayLayout.ByteExtent
                             != (ulong)targetField.Size)
@@ -13423,7 +13513,11 @@ public static partial class SemanticVerifier
                 var pointerDefinition = program.NativePointerTypes[NativePointerTypes.Index(address.Type)];
                 var addressedVariable = function.Variables[address.Variable];
                 if (pointerDefinition.PointeeType != addressedVariable.Type
-                    || !DirectNativeImportContract.IsInputPointee(addressedVariable.Type, program.Structures)
+                    || !NativePointerTypeContract.IsSourcePointee(
+                        addressedVariable.Type, program.Structures,
+                        program.CheckedReferenceTypes,
+                        program.NativeLoweringAgreement,
+                        program.NativeFixedArrayTypes)
                     || (pointerDefinition.IsWritable && !addressedVariable.IsMutable))
                 {
                     throw InvalidEffect(address.Span, "NativePointer");
@@ -13443,7 +13537,11 @@ public static partial class SemanticVerifier
                     program.NativePointerTypes[NativePointerTypes.Index(pointerRead.Address.Type)];
                 if (readPointerDefinition.PointeeType == PrimitiveType.Void
                     || readPointerDefinition.PointeeType != pointerRead.Type
-                    || !DirectNativeImportContract.IsCopyablePointee(pointerRead.Type, program.Structures))
+                    || !NativePointerTypeContract.IsCopyableSourcePointee(
+                        pointerRead.Type, program.Structures,
+                        program.CheckedReferenceTypes,
+                        program.NativeLoweringAgreement,
+                        program.NativeFixedArrayTypes))
                 {
                     throw InvalidEffect(pointerRead.Span, "NativePointer");
                 }
@@ -14116,7 +14214,11 @@ public static partial class SemanticVerifier
                 if (!writePointerDefinition.IsWritable
                     || writePointerDefinition.PointeeType == PrimitiveType.Void
                     || writePointerDefinition.PointeeType != pointerWrite.Value.Type
-                    || !DirectNativeImportContract.IsCopyablePointee(pointerWrite.Value.Type, program.Structures))
+                    || !NativePointerTypeContract.IsCopyableSourcePointee(
+                        pointerWrite.Value.Type, program.Structures,
+                        program.CheckedReferenceTypes,
+                        program.NativeLoweringAgreement,
+                        program.NativeFixedArrayTypes))
                 {
                     throw InvalidEffect(pointerWrite.Span, "NativePointer");
                 }
@@ -17070,7 +17172,7 @@ public static partial class SemanticVerifier
         BoundProgram program) =>
         SourceOptionalTypes.IsSupported(type, program.CheckedReferenceTypes,
             program.Structures, program.Classes, program.EnumDefinitions.Length,
-            program.NativeLoweringAgreement);
+            program.NativeLoweringAgreement, program.NativeFixedArrayTypes);
 
     private static bool TryGetOptionalPayloadType(
         PrimitiveType type,
@@ -17357,7 +17459,7 @@ public static partial class SemanticVerifier
         var size = NativeFixedArrayTypes.IsType(type)
             ? NativeFixedArrayContract.TryGetLayout(type,
                 program.Structures, program.NativeFixedArrayTypes,
-                out var layout)
+                out var layout, program.CheckedReferenceTypes)
                 ? layout.ByteExtent
                 : throw InvalidEffect(default, "NativeImport")
             : ValueLayout.Size(type, program.Structures,
@@ -17389,7 +17491,7 @@ public static partial class SemanticVerifier
                 }
                 if (!NativeFixedArrayContract.TryGetLayout(current,
                         program.Structures, program.NativeFixedArrayTypes,
-                        out var layout))
+                        out var layout, program.CheckedReferenceTypes))
                 {
                     throw InvalidEffect(default, "NativeImport");
                 }
@@ -17432,7 +17534,7 @@ public static partial class SemanticVerifier
             {
                 if (!NativeFixedArrayContract.TryGetLayout(item.Type,
                         program.Structures, program.NativeFixedArrayTypes,
-                        out var layout))
+                        out var layout, program.CheckedReferenceTypes))
                 {
                     throw InvalidEffect(default, "NativeImport");
                 }
@@ -18315,7 +18417,8 @@ public static partial class SemanticVerifier
                 }
                 if (!NativeFixedArrayContract.TryGetLayout(item.Type,
                         program.Structures,
-                        program.NativeFixedArrayTypes, out var layout))
+                        program.NativeFixedArrayTypes, out var layout,
+                        program.CheckedReferenceTypes))
                 {
                     throw InvalidEffect(default, "NativeImport");
                 }
@@ -18385,7 +18488,7 @@ public static partial class SemanticVerifier
             {
                 if (!NativeFixedArrayContract.TryGetLayout(type,
                         program.Structures, program.NativeFixedArrayTypes,
-                        out var layout))
+                        out var layout, program.CheckedReferenceTypes))
                 {
                     throw Invalid();
                 }
@@ -18867,7 +18970,8 @@ public static partial class SemanticVerifier
             }
             if (!NativeFixedArrayContract.TryGetLayout(currentType,
                     program.Structures,
-                    program.NativeFixedArrayTypes, out var layout))
+                    program.NativeFixedArrayTypes, out var layout,
+                    program.CheckedReferenceTypes))
             {
                 throw Invalid();
             }
@@ -19035,7 +19139,7 @@ public static partial class SemanticVerifier
                     or StorageProjectionSegmentKind.ArrayRange)
                 || !NativeFixedArrayContract.TryGetLayout(currentType,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var layout)
+                    out var layout, program.CheckedReferenceTypes)
                 || !NativeFixedArrayContract.MatchesLayout(layout, program)
                 || (segment.Kind
                         == StorageProjectionSegmentKind.ArrayIndex
@@ -19199,7 +19303,7 @@ public static partial class SemanticVerifier
                     or StorageProjectionSegmentKind.ArrayRange)
                 || !NativeFixedArrayContract.TryGetLayout(currentType,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var layout)
+                    out var layout, program.CheckedReferenceTypes)
                 || !NativeFixedArrayContract.MatchesLayout(layout, program)
                 || (segment.Kind
                         == StorageProjectionSegmentKind.ArrayIndex
@@ -20889,7 +20993,8 @@ public static partial class SemanticVerifier
         if (expression is BoundIsVariablePattern pattern)
         {
             Count(ref remaining, 0);
-            if (!ManagedClassTypes.IsOptional(pattern.Value.Type))
+            if (!ManagedClassTypes.IsOptional(pattern.Value.Type)
+                && !CheckedReferenceTypes.IsType(pattern.Value.Type))
             {
                 return result;
             }
@@ -20925,7 +21030,8 @@ public static partial class SemanticVerifier
         using var repeatSnapshotState
             = CreateRepeatSnapshotScopeIfNeeded(initialized);
         Count(ref remaining, 0);
-        if (!ManagedClassTypes.IsOptional(expression.Type))
+        if (!ManagedClassTypes.IsOptional(expression.Type)
+            && !CheckedReferenceTypes.IsType(expression.Type))
         {
             return null;
         }
@@ -21068,7 +21174,8 @@ public static partial class SemanticVerifier
         Dictionary<BoundExpression, byte> remainingCanBeFacts, ref int remaining)
     {
         Count(ref remaining, 0);
-        if (!ManagedClassTypes.IsOptional(expression.Type))
+        if (!ManagedClassTypes.IsOptional(expression.Type)
+            && !CheckedReferenceTypes.IsType(expression.Type))
         {
             return null;
         }

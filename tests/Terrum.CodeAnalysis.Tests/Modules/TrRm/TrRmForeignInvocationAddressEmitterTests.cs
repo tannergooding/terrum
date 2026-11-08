@@ -33,6 +33,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
     private const string A2R1RepeatInitializationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
+    private const string OptionalGuardChildEnvironmentVariable
+        = "TERRUM_OPTIONAL_GUARD_CHILD";
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int NativeAddressExport();
@@ -1134,6 +1136,353 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             "native-scalar-repeat-initialization", 0x5A)
             .ConfigureAwait(true);
     }
+
+    [Test]
+    public async Task NativeImageExecutesOptionalAggregateCopyAndRepeat()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            struct Envelope {
+                public mut int32? Value;
+                public int32 Marker;
+                public Envelope(int32? value, int32 marker) {
+                    Value = value;
+                    Marker = marker;
+                }
+            }
+            int32 Main() {
+                int32 raw = 42;
+                Envelope absentField = new Envelope(null, 13);
+                Envelope presentField = new Envelope(raw, 29);
+                mut [Envelope?; 2] values = [absentField, presentField];
+                mut [Envelope?; 2] repeated = [absentField; 2];
+                [Envelope?; 2] copy = values;
+                if (!(copy[0] is some copied)
+                    || !(repeated[1] is some repeatedPayload)) { return 1; }
+                unsafe {
+                    if (!(copied.Value is null) || copied.Marker != 13) {
+                        return 2;
+                    }
+                    if (!(repeatedPayload.Value is null)
+                        || repeatedPayload.Marker != 13) { return 3; }
+                    if (!(copy[1] is some present)
+                        || !(present.Value is some payload)
+                        || payload != 42 || present.Marker != 29) {
+                        return 4;
+                    }
+                }
+                return 42;
+            }
+            """;
+        var options = NativeCoreRegistrationTests
+            .CreateRegisteredCompilationOptions(BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var image = NativeEmitter.EmitWithNativeImports(program,
+            NativeRuntimePolicy.FailFast);
+        var compilerPath = typeof(NativeEmitter).Assembly.Location;
+        TestContext.WriteLine(
+            $"Optional aggregate image input: target=WindowsX64; policy=FailFast; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}.");
+        await AssertNativeImageExitCodeAsync(image,
+            "native-optional-aggregate-copy-repeat", 42)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task NativeImageExecutesOptionalPayloadWithRequiredAlignmentAboveNatural()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Alignment: 32)]
+            struct Payload {
+                public uint64 First;
+                public uint64 Second;
+                public uint64 Third;
+                public uint64 Fourth;
+                public Payload(uint64 first) {
+                    First = first;
+                    Second = 2;
+                    Third = 3;
+                    Fourth = 4;
+                }
+            }
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Packing: 8)]
+            struct Holder {
+                public Payload Value;
+                public Holder(Payload value) { Value = value; }
+            }
+            int32 Main() {
+                unsafe {
+                    Payload payload = new Payload(1);
+                    Holder holder = new Holder(payload);
+                    mut [Holder?; 3] values = [null, holder, null];
+                    if (!(values[1] is some current)
+                        || current.Value.First != 1
+                        || current.Value.Fourth != 4) { return 1; }
+                    values[0] ??= holder;
+                    [Holder?; 3] copy = values;
+                    if (!(copy[0] is some copied)
+                        || copied.Value.Second != 2
+                        || copied.Value.Third != 3) { return 2; }
+                    mut [Holder?; 2] repeated = [holder; 2];
+                    if (!(repeated[1] is some repeatedPayload)
+                        || repeatedPayload.Value.First != 1
+                        || repeatedPayload.Value.Fourth != 4) {
+                        return 3;
+                    }
+                    return 42;
+                }
+            }
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException(
+                "A successful compilation must contain a bound program.");
+        var holder = program.Structures.Single(
+            static structure => structure.Name == "Holder");
+        Assert.That((holder.Size, holder.Alignment,
+            holder.RequiredAlignment), Is.EqualTo((32, 32, 32)));
+        var array = program.NativeFixedArrayTypes.Single(
+            static value => value.ElementCount == 3);
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(array.ElementType,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes, out var optionalLayout),
+            Is.True);
+        Assert.That((optionalLayout.Alignment,
+            optionalLayout.RequiredAlignment, optionalLayout.PayloadOffset,
+            optionalLayout.Size), Is.EqualTo((8, 32, 32UL, 64UL)));
+
+        var image = NativeEmitter.EmitWithNativeImports(program,
+            NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"Optional over-aligned image input: target=WindowsX64; policy=FailFast; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={typeof(NativeEmitter).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(NativeEmitter).Assembly.Location)))}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}.");
+        await AssertNativeImageExitCodeAsync(image,
+            "native-optional-overaligned-copy-repeat", 42)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task AbsentOptionalCopyDoesNotReadGuardedPayload()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assume.That(Environment.SystemPageSize, Is.EqualTo(4096));
+
+        if (Environment.GetEnvironmentVariable(
+                OptionalGuardChildEnvironmentVariable) == "1")
+        {
+            ExecuteAbsentOptionalGuardProbe();
+            return;
+        }
+
+        var assemblyPath = typeof(
+            TrRmForeignInvocationAddressEmitterTests).Assembly.Location;
+        var startInfo = new ProcessStartInfo("dotnet") {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(assemblyPath)!,
+        };
+        startInfo.ArgumentList.Add("test");
+        startInfo.ArgumentList.Add(assemblyPath);
+        startInfo.ArgumentList.Add("--filter");
+        startInfo.ArgumentList.Add(
+            "FullyQualifiedName=Terrum.CodeAnalysis.Tests.Modules.TrRm."
+            + "TrRmForeignInvocationAddressEmitterTests."
+            + "AbsentOptionalCopyDoesNotReadGuardedPayload");
+        startInfo.ArgumentList.Add("--logger");
+        startInfo.ArgumentList.Add("console;verbosity=quiet");
+        startInfo.Environment[OptionalGuardChildEnvironmentVariable] = "1";
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException(
+                "The supervised optional guard probe was not started.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync()
+                .WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(true);
+        }
+        catch (TimeoutException exception)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().ConfigureAwait(true);
+            }
+
+            throw new TimeoutException(
+                $"The supervised optional guard probe exceeded its 60-second deadline. "
+                + $"{await stdout.ConfigureAwait(true)}"
+                + $"{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                exception);
+        }
+
+        var output = await stdout.ConfigureAwait(true);
+        var error = await stderr.ConfigureAwait(true);
+        Assert.That(process.ExitCode, Is.Zero,
+            $"The supervised optional guard probe failed with "
+            + $"0x{process.ExitCode:X8}.{Environment.NewLine}{output}"
+            + $"{Environment.NewLine}{error}");
+    }
+
+    private static void ExecuteAbsentOptionalGuardProbe()
+    {
+        var source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential, Alignment: 4096)]
+            struct GuardPayload { public int32 Value; }
+
+            unsafe int32 Probe(ptr<GuardPayload?> source) {
+                unsafe {
+                    GuardPayload? snapshot = *source;
+                    if (snapshot is null) { return 42; }
+                    return 1;
+                }
+            }
+
+            int32 Main() {
+                mut GuardPayload? local = null;
+                unsafe {
+                    write ptr<GuardPayload?> address = &local;
+                    *address = null;
+                    GuardPayload? snapshot = *address;
+                    if (!(snapshot is null)) { return 1; }
+                }
+                return 0;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException(
+                "A successful compilation must contain a bound program.");
+        var payloadLayout = program.Structures.Single(
+            static structure => structure.Name == "GuardPayload");
+        var payloadType = (PrimitiveType)(100
+            + program.Structures.IndexOf(payloadLayout));
+        var optionalIndex = Enumerable.Range(0,
+                program.CheckedReferenceTypes.Length)
+            .Single(index => program.CheckedReferenceTypes[index]
+                .IsOptionalValue
+                && program.CheckedReferenceTypes[index].ReferentType
+                    == payloadType);
+        var optionalType = CheckedReferenceTypes.Type(optionalIndex);
+        Assert.That(ValueLayout.TryGetOptionalValueLayout(optionalType,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement,
+                program.NativeFixedArrayTypes, out var optionalLayout),
+            Is.True);
+        Assert.That((payloadLayout.Size, payloadLayout.Alignment,
+            payloadLayout.RequiredAlignment, optionalLayout.PayloadOffset,
+            optionalLayout.Size), Is.EqualTo((4096, 4096, 4096, 4096UL,
+                8192UL)));
+
+        var code = NativeEmitter.EmitCode(program,
+            NativeRuntimePolicy.FailFast);
+        var probeIndex = program.Functions.IndexOf(program.Functions.Single(
+            static function => function.Name == "Probe"));
+        var probeOffset = code.SourceFunctionOffsets[probeIndex];
+        Assert.That(probeOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(code.Data, Is.Empty);
+        Assert.That(code.NativeImports, Is.Empty);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast),
+            Is.Zero);
+
+        var pageSize = Environment.SystemPageSize;
+        var memory = VirtualAlloc(0, checked((nuint)(2 * pageSize)),
+            0x3000, 0x04);
+        Assert.That(memory, Is.Not.Zero,
+            $"VirtualAlloc failed with error {Marshal.GetLastPInvokeError()}.");
+        try
+        {
+            Assert.That((nuint)memory % (nuint)optionalLayout.RequiredAlignment,
+                Is.EqualTo((nuint)0));
+            Marshal.WriteByte(memory, 0);
+            var payloadAddress = IntPtr.Add(memory, pageSize);
+            Assert.That(VirtualProtect(payloadAddress, (nuint)pageSize,
+                    0x01, out _),
+                Is.True,
+                $"VirtualProtect failed with error "
+                + $"{Marshal.GetLastPInvokeError()}.");
+
+            var wrapperStart = code.Code.Length;
+            byte[] wrapper = [
+                0x55,
+                0x48, 0x81, 0xEC, 0x20, 0x00, 0x00, 0x00,
+                0x48, 0x89, 0xE5,
+                0x48, 0xB9, 0, 0, 0, 0, 0, 0, 0, 0,
+                0xE8, 0, 0, 0, 0,
+                0x48, 0x81, 0xC4, 0x20, 0x00, 0x00, 0x00,
+                0x5D,
+                0xC3,
+            ];
+            BinaryPrimitives.WriteInt64LittleEndian(
+                wrapper.AsSpan(13, sizeof(long)), memory.ToInt64());
+            BinaryPrimitives.WriteInt32LittleEndian(
+                wrapper.AsSpan(22, sizeof(int)),
+                checked(probeOffset - (wrapperStart + 26)));
+            var codeBytes = new byte[checked(code.Code.Length
+                + wrapper.Length)];
+            code.Code.CopyTo(codeBytes, 0);
+            wrapper.CopyTo(codeBytes, code.Code.Length);
+            var callable = code with {
+                Code = codeBytes,
+                EntryPoint = wrapperStart,
+                Functions = code.Functions.Add(
+                    new NativeFunctionRange(wrapperStart,
+                        checked(wrapperStart + wrapper.Length), 40) {
+                        UsesFramePointer = true,
+                    }),
+            };
+            Assert.That(NativeJit.ExecuteImportedCode(callable, [], []),
+                Is.EqualTo(42));
+        }
+        finally
+        {
+            if (!VirtualFree(memory, 0, 0x8000))
+            {
+                throw new InvalidOperationException(
+                    $"VirtualFree failed with error "
+                    + $"{Marshal.GetLastPInvokeError()}.");
+            }
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint VirtualAlloc(nint address, nuint size,
+        uint allocationType, uint protection);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool VirtualProtect(nint address, nuint size,
+        uint protection, out uint previousProtection);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool VirtualFree(nint address, nuint size,
+        uint freeType);
 
     [Test]
     public async Task NativeImageExecutesNestedRepeatedArrayFieldReplacement()

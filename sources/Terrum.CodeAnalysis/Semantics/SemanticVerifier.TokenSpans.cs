@@ -6911,7 +6911,7 @@ public static partial class SemanticVerifier
             {
                 if (!NativeFixedArrayContract.TryGetLayout(current,
                         program.Structures, program.NativeFixedArrayTypes,
-                        out var layout))
+                        out var layout, program.CheckedReferenceTypes))
                 {
                     throw InvalidEffect(default, "Ownership");
                 }
@@ -6945,7 +6945,8 @@ public static partial class SemanticVerifier
         => IsCopyOriginValueType(type, program)
             || (NativeFixedArrayTypes.IsType(type)
                 && NativeFixedArrayContract.IsRootlessCopyFieldType(type,
-                    program.Structures, program.NativeFixedArrayTypes));
+                    program.Structures, program.NativeFixedArrayTypes,
+                    program.CheckedReferenceTypes));
 
     private static bool IsCopyOriginSummarySourceFunction(BoundFunction function)
         => !function.IsExternal && !function.IsModuleReference
@@ -7189,7 +7190,7 @@ public static partial class SemanticVerifier
         {
             if (!NativeFixedArrayContract.TryGetLayout(type,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out _))
+                    out _, program.CheckedReferenceTypes))
             {
                 throw InvalidEffect(default, "Ownership");
             }
@@ -7243,7 +7244,7 @@ public static partial class SemanticVerifier
         {
             if (!NativeFixedArrayContract.TryGetLayout(type,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var layout))
+                    out var layout, program.CheckedReferenceTypes))
             {
                 throw InvalidEffect(default, "NativePointer");
             }
@@ -10464,7 +10465,8 @@ public static partial class SemanticVerifier
                 if (!CarriesRawUnionPayloadFacts(program, currentType)
                     || !NativeFixedArrayContract.TryGetLayout(currentType,
                         program.Structures,
-                        program.NativeFixedArrayTypes, out var layout))
+                        program.NativeFixedArrayTypes, out var layout,
+                        program.CheckedReferenceTypes))
                 {
                     return;
                 }
@@ -11996,7 +11998,8 @@ public static partial class SemanticVerifier
                         && (!NativeFixedArrayContract.TryGetLayout(
                                 address.CarrierType, program.Structures,
                                 program.NativeFixedArrayTypes,
-                                out var rootArrayLayout)
+                                out var rootArrayLayout,
+                                program.CheckedReferenceTypes)
                             || !TryGetNativeFixedArrayArrayPrefix(
                                 address.Variable, address.FieldPlace,
                                 rootArrayLayout, function, program, out _)
@@ -12417,7 +12420,7 @@ public static partial class SemanticVerifier
         var variable = function.Variables[source.Identity];
         if (!NativeFixedArrayContract.TryGetLayout(variable.Type,
                 program.Structures, program.NativeFixedArrayTypes,
-                out var layout))
+                out var layout, program.CheckedReferenceTypes))
         {
             if (storage.Projection.Kind != StorageProjectionKind.WholeObject
                 || variable.Type != pointeeType)
@@ -13479,7 +13482,7 @@ public static partial class SemanticVerifier
                 }
                 if (NativeFixedArrayContract.TryGetLayout(root.Type,
                         program.Structures, program.NativeFixedArrayTypes,
-                        out var layout))
+                        out var layout, program.CheckedReferenceTypes))
                 {
                     if (!NativeFixedArrayContract.MatchesLayout(layout, program))
                     {
@@ -16056,7 +16059,7 @@ public static partial class SemanticVerifier
                     or StorageProjectionSegmentKind.ArrayRange
                 && NativeFixedArrayContract.TryGetLayout(type,
                     program.Structures, program.NativeFixedArrayTypes,
-                    out var layout))
+                    out var layout, program.CheckedReferenceTypes))
             {
                 type = layout.ElementType;
                 continue;

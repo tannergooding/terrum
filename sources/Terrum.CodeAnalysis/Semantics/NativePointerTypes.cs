@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -17,6 +18,45 @@ internal static class NativePointerTypes
 
 internal static class NativePointerTypeContract
 {
+    internal static bool IsSourcePointee(
+        PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes) =>
+        IsOptionalValuePointee(type, structures, checkedReferenceTypes,
+            nativeLoweringAgreement, fixedArrayTypes)
+        || DirectNativeImportContract.IsInputPointee(type, structures);
+
+    internal static bool IsCopyableSourcePointee(
+        PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes)
+    {
+        return IsOptionalValuePointee(type, structures,
+                checkedReferenceTypes, nativeLoweringAgreement,
+                fixedArrayTypes)
+            || DirectNativeImportContract.IsCopyablePointee(type,
+                structures);
+    }
+
+    private static bool IsOptionalValuePointee(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<CheckedReferenceTypeDefinition>
+            checkedReferenceTypes,
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes) =>
+        CheckedReferenceTypes.IsType(type)
+        && CheckedReferenceTypeContract.IsOptionalValueType(type,
+            checkedReferenceTypes)
+        && ValueLayout.TryGetOptionalValueLayout(type, structures,
+            checkedReferenceTypes, nativeLoweringAgreement, fixedArrayTypes,
+            out _);
+
     internal static bool IsValidTable(
         ImmutableArray<NativePointerTypeDefinition> pointerTypes,
         ImmutableArray<BoundStruct> structures,

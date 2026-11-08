@@ -215,9 +215,7 @@ Before claiming an implementation slice, establish its corresponding gates:
 Normative adoption, the excluded runtime/ABI profiles and additional
 interchange value codecs remain decisions outside this proposal. The
 rootless Copy/unit tagged layout itself needs no further niche or tag choice.
-Integration of [source admission](../../sources/Terrum.CodeAnalysis/Semantics/CheckedReferenceTypes.cs)
-and [`ValueLayout`](../../sources/Terrum.CodeAnalysis/Semantics/ValueLayout.cs)
-must be qualified independently of type-row transport. The
-[native inventory](../implementation/native.md) records scalar options/general
-generic optional normalization outside its profile. No new execution result,
-implementation or inventory change is claimed here.
+The [native inventory](../implementation/native.md) records provisional
+implementation and qualification separately from this proposal's unapproved
+status. Neither prototype support nor this layout recommendation assigns an
+optional ABI, wire encoding or executable interchange contract.

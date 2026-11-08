@@ -49,16 +49,19 @@ internal static class SourceOptionalTypes
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundClass> classes,
         int enumDefinitionCount,
-        string? nativeLoweringAgreement)
+        string? nativeLoweringAgreement,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes)
     {
         if (ManagedClassTypes.IsOptional(type))
         {
-            return true;
+                return true;
         }
         if (CheckedReferenceTypeContract.IsOptionalValueType(
                 type, referenceTypes))
         {
-            return false;
+                return ValueLayout.TryGetOptionalValueLayout(
+                    type, structures, referenceTypes, nativeLoweringAgreement,
+                    fixedArrayTypes, out _);
         }
         if (nativeLoweringAgreement is not (
                 CompilationOptions.WindowsX64NormalBackingAgreement

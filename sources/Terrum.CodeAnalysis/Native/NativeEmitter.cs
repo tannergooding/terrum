@@ -1193,6 +1193,8 @@ internal sealed partial class PeCompiler
     private readonly int[] _frameAlignments;
     private readonly int[][] _slots;
     private readonly int[] _spillBases;
+    private readonly int[] _typedCopyScratchBases;
+    private readonly int[] _typedCopyScratchDepths;
     private readonly int[][] _outSlots;
     private readonly int[] _returnSlots;
     private readonly int[][] _edgeCopySlots;
@@ -1204,6 +1206,7 @@ internal sealed partial class PeCompiler
     private readonly int[] _replacementSlots;
     private readonly int[] _oldReplacementSlots;
     private readonly int[] _cleanupArgumentSlots;
+    private readonly Dictionary<PrimitiveType, OptionalValueLayout> _optionalValueLayouts = [];
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, string Function)> _binary128Calls = [];
     private readonly List<(int Offset, string Function)> _bidDecimalCalls = [];
@@ -1321,6 +1324,9 @@ internal sealed partial class PeCompiler
         _frameAlignments = new int[program.Functions.Length];
         _slots = new int[program.Functions.Length][];
         _spillBases = new int[program.Functions.Length];
+        _typedCopyScratchBases = new int[program.Functions.Length];
+        Array.Fill(_typedCopyScratchBases, -1);
+        _typedCopyScratchDepths = new int[program.Functions.Length];
         _outSlots = new int[program.Functions.Length][];
         _returnSlots = new int[program.Functions.Length];
         _edgeCopySlots = new int[program.Functions.Length][];
@@ -1841,7 +1847,8 @@ internal sealed partial class PeCompiler
                             variableType,
                             _program.Structures,
                             _program.NativeFixedArrayTypes,
-                            out var fixedArrayLayout))
+                            out var fixedArrayLayout,
+                            _program.CheckedReferenceTypes))
                     {
                         throw new InvalidOperationException(
                             "The native fixed-array local has no structural type row.");
@@ -1853,7 +1860,8 @@ internal sealed partial class PeCompiler
                 {
                     variableSize = checked((ulong)(
                         (IsIndirect(variableType)
-                            && IsStruct(variableType))
+                            && (IsStruct(variableType)
+                                || IsOptionalValueType(variableType)))
                             ? Size(variableType)
                             : (IsIndirect(variableType)
                                 || variableType
@@ -1872,8 +1880,17 @@ internal sealed partial class PeCompiler
                 at = checked((at + 7) & ~7);
             }
             _slots[i] = slots;
-            _spillBases[i] = AlignOffset(at, 16);
+            _spillBases[i] = AlignOffset(at, Math.Max(16, frameAlignment));
             at = checked(_spillBases[i] + (16 * spillSlots));
+            var typedCopyDepth = NativeTypedCopyDepthForFunction(
+                function, out var needsTypedCopyScratch);
+            if (needsTypedCopyScratch)
+            {
+                _typedCopyScratchBases[i] = AlignOffset(at, 16);
+                _typedCopyScratchDepths[i] = typedCopyDepth;
+                at = checked(_typedCopyScratchBases[i]
+                    + (32 * (typedCopyDepth + 1)));
+            }
             var outputSlots = new int[function.Variables.Length];
             Array.Fill(outputSlots, -1);
             for (var variable = 0; variable < function.Variables.Length; variable++)
@@ -2431,7 +2448,14 @@ internal sealed partial class PeCompiler
                     && !(slot == 0 && IsBorrowedReceiver()))
                 {
                     _code.Load64(Slot(slot));
-                    CopyToFrame(Slot(slot), Size(type));
+                    if (IsTaggedOptionalValueType(type))
+                    {
+                        StoreValue(Slot(slot), type);
+                    }
+                    else
+                    {
+                        CopyToFrame(Slot(slot), Size(type));
+                    }
                 }
                 if (!function.Variables[slot].IsOut && !function.Variables[slot].IsImplicitRef
                     && function.Variables[slot].Type is PrimitiveType.Bool or PrimitiveType.Char16)
@@ -2742,17 +2766,44 @@ internal sealed partial class PeCompiler
                     HasDeclaredCleanup(assignment.Value.Type)
                         ? CleanupSpills(ref maximumArguments) : 0);
             case BoundOptionalAssignment optionalAssignment:
-                return optionalAssignment.Place is BoundFieldRead field
-                    ? Math.Max(ExpressionSpills(field.Receiver, ref maximumArguments),
-                        1 + ExpressionSpills(optionalAssignment.Value, ref maximumArguments))
-                    : ExpressionSpills(optionalAssignment.Value, ref maximumArguments);
+                if (optionalAssignment.Place is BoundFieldRead field)
+                {
+                    if (IsStruct(field.Receiver.Type))
+                    {
+                        return Math.Max(
+                            2 + ExpressionSpills(field.Receiver,
+                                ref maximumArguments),
+                            2 + ExpressionSpills(
+                                optionalAssignment.Value,
+                                ref maximumArguments));
+                    }
+
+                    return Math.Max(
+                        ExpressionSpills(field.Receiver,
+                            ref maximumArguments),
+                        1 + ExpressionSpills(optionalAssignment.Value,
+                            ref maximumArguments));
+                }
+                if (optionalAssignment.Place is BoundNativeFixedArrayElement
+                    or BoundNativeFixedArrayPathElement)
+                {
+                    return Math.Max(
+                        ExpressionSpills(optionalAssignment.Place,
+                            ref maximumArguments),
+                        1 + ExpressionSpills(optionalAssignment.Value,
+                            ref maximumArguments));
+                }
+                return ExpressionSpills(optionalAssignment.Value,
+                    ref maximumArguments);
             case BoundDrop drop:
                 return drop.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
             case BoundLifetimeEnd end:
                 return end.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
             case BoundFieldAssignment assignment:
                 return Math.Max(_normalBacking ? 4 : 2,
-                    1 + ExpressionSpills(assignment.Value, ref maximumArguments));
+                    Math.Max(1 + ExpressionSpills(
+                            assignment.Value, ref maximumArguments),
+                        1 + SpillSlotsForType(assignment.Value.Type)));
             case BoundBufferAssignment assignment:
                 return Math.Max(ExpressionSpills(assignment.Index, ref maximumArguments),
                     1 + ExpressionSpills(assignment.Value, ref maximumArguments));
@@ -2952,7 +3003,7 @@ internal sealed partial class PeCompiler
                 return Math.Max(2, Math.Max(1 + ExpressionSpills(pointerWrite.Address, ref maximumArguments),
                     1 + ExpressionSpills(pointerWrite.Value, ref maximumArguments)));
             case BoundConstant constant:
-                return IsIndirect(constant.Type) ? Math.Max(1, (Size(constant.Type) + 15) / 16) : 0;
+                return IsIndirect(constant.Type) ? SpillSlotsForType(constant.Type) : 0;
             case BoundUnary unary:
                 if (IsBidDecimal(unary.Type))
                 {
@@ -2993,7 +3044,7 @@ internal sealed partial class PeCompiler
                 return Math.Max(4, update.Place is BoundFieldRead nominalField
                     ? ExpressionSpills(nominalField.Receiver, ref maximumArguments) : 0);
             case BoundCast cast:
-                return Math.Max(IsIndirect(cast.Type) ? Math.Max(1, (Size(cast.Type) + 15) / 16) : 0,
+                return Math.Max(IsIndirect(cast.Type) ? SpillSlotsForType(cast.Type) : 0,
                     Math.Max(RequiresFloatingEnvironment(cast.Operand.Type, cast.Type) ? 3 : 0,
                         ExpressionSpills(cast.Operand, ref maximumArguments)));
             case TrRmScalarConvert conversion:
@@ -3007,10 +3058,31 @@ internal sealed partial class PeCompiler
             case TrRmScalarOptionalEquality:
                 return 2;
             case BoundOptionalLift lift:
-                return ExpressionSpills(lift.Value, ref maximumArguments);
+                var optionalLiftValueSpills
+                    = ExpressionSpills(lift.Value, ref maximumArguments);
+                return IsTaggedOptionalValueType(lift.Type)
+                    && IsIndirect(lift.Type)
+                    ? SpillSlotsForType(lift.Type)
+                        + optionalLiftValueSpills
+                    : optionalLiftValueSpills;
+            case BoundNull absent when IsTaggedOptionalValueType(absent.Type)
+                && IsIndirect(absent.Type):
+                return SpillSlotsForType(absent.Type);
             case BoundCoalesce coalesce:
-                return Math.Max(ExpressionSpills(coalesce.Optional, ref maximumArguments),
-                    ExpressionSpills(coalesce.Fallback, ref maximumArguments));
+                var optionalSpills = ExpressionSpills(
+                    coalesce.Optional, ref maximumArguments);
+                var fallbackSpills = ExpressionSpills(
+                    coalesce.Fallback, ref maximumArguments);
+                var coalesceSpills = Math.Max(optionalSpills, fallbackSpills);
+                if (IsTaggedOptionalValueType(coalesce.Optional.Type)
+                    && !IsIndirect(coalesce.Optional.Type)
+                    && coalesce.Type == GetOptionalValueLayout(
+                        coalesce.Optional.Type).PayloadType
+                    && IsIndirect(coalesce.Type))
+                {
+                    coalesceSpills += SpillSlotsForType(coalesce.Type);
+                }
+                return coalesceSpills;
             case BoundReadonlyProjection projection:
                 return ExpressionSpills(projection.Value, ref maximumArguments);
             case BoundIsNull test:
@@ -3021,6 +3093,12 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsInitialized:
                 return 0;
+            case BoundFieldRead field when IsTaggedOptionalValueType(field.Type)
+                && IsStruct(field.Receiver.Type)
+                && !IsIndirect(field.Receiver.Type)
+                && !IsUnique(field.Receiver.Type):
+                return Math.Max(1,
+                    ExpressionSpills(field.Receiver, ref maximumArguments));
             case BoundFieldRead field:
                 return ExpressionSpills(field.Receiver, ref maximumArguments);
             case BoundBufferRead buffer:
@@ -3115,14 +3193,14 @@ internal sealed partial class PeCompiler
         var isAddress = IsImplicitReferenceArgument(call, index)
             || argument is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                 or BoundFieldLoan or BoundMutableFieldLoan;
-        return isAddress ? 1 : Math.Max(1, (Size(argument.Type) + 15) / 16);
+        return isAddress ? 1 : SpillSlotsForType(argument.Type);
     }
 
     private int CallArgumentAuxiliarySpills(BoundExpression argument) =>
-        argument is BoundOutArgument output ? Math.Max(1, (Size(output.Type) + 15) / 16) : 1;
+        argument is BoundOutArgument output ? SpillSlotsForType(output.Type) : 1;
 
     private int CallResultSpills(BoundCall call) =>
-        IsIndirect(call.Type) ? Math.Max(1, (Size(call.Type) + 15) / 16) : 1;
+        SpillSlotsForType(call.Type);
 
     private int CallArgumentSpills(BoundCall call)
     {
@@ -3256,6 +3334,15 @@ internal sealed partial class PeCompiler
                     VisitExpression(test.Value);
                     break;
                 case BoundIsSome pattern:
+                    VisitExpression(pattern.Value);
+                    break;
+                case BoundIsVariablePattern {
+                    Value: BoundRead sourceRead,
+                } pattern:
+                    if (CheckedReferenceTypes.IsType(sourceRead.Type))
+                    {
+                        _ = variables.Add(sourceRead.Variable);
+                    }
                     VisitExpression(pattern.Value);
                     break;
                 case BoundIsVariablePattern pattern:
@@ -3407,6 +3494,16 @@ internal sealed partial class PeCompiler
 
     private int Slot(int index) => _slots[_currentFunction][index];
     private int Spill(int index) => _spillBase + (index * 16);
+    private int SpillOffsetForType(int index, PrimitiveType type) =>
+        AlignOffset(Spill(index), ScratchAlignment(type));
+    private int SpillSlotsForType(PrimitiveType type)
+    {
+        var alignment = Math.Max(16, ScratchAlignment(type));
+        var alignmentPadding = (alignment / 16) - 1;
+        var storageSlots = Math.Max(1, (Size(type) + 15) / 16);
+        return checked(alignmentPadding + storageSlots);
+    }
+
     private int OutSlot(int index)
     {
         var slots = _outSlots[_currentFunction];
@@ -3552,6 +3649,10 @@ internal sealed partial class PeCompiler
             return NativeLayoutSize(
                 _program.NativeFixedArrayTypes[arrayIndex].ByteExtent);
         }
+        if (IsOptionalValueType(type))
+        {
+            return NativeLayoutSize(GetOptionalValueLayout(type).Size);
+        }
 
         return NativeLayoutSize(ValueLayout.Size(type, _program.Structures,
             _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
@@ -3575,6 +3676,11 @@ internal sealed partial class PeCompiler
 
     private void LoadTypedPointerField(int offset, PrimitiveType type)
     {
+        if (IsTaggedOptionalValueType(type) && !IsIndirect(type))
+        {
+            LoadTaggedOptionalValueFromPointerField(offset, type);
+            return;
+        }
         _code.LoadPointerField(offset, Size(type));
         NormalizeNarrowInteger(type, checkRange: false);
     }
@@ -3593,10 +3699,16 @@ internal sealed partial class PeCompiler
     }
 
     private int ScratchSize(PrimitiveType type) => Math.Max(8, Size(type));
-    private int ScratchAlignment(PrimitiveType type) =>
-        Math.Max(8, ValueLayout.Alignment(type, _program.Structures,
+    private int ScratchAlignment(PrimitiveType type)
+    {
+        var alignment = ValueLayout.Alignment(type, _program.Structures,
             _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
-            _program.NativeFixedArrayTypes));
+            _program.NativeFixedArrayTypes);
+        var requiredAlignment = ValueLayout.RequiredAlignment(type,
+            _program.Structures, _program.NativeFixedArrayTypes,
+            _program.CheckedReferenceTypes);
+        return Math.Max(8, Math.Max(alignment, requiredAlignment));
+    }
     private static int AlignOffset(int offset, int alignment)
         => checked((int)AlignOffset((long)offset, alignment));
     private static long AlignOffset(long offset, int alignment)
@@ -5442,9 +5554,33 @@ internal sealed partial class PeCompiler
                 "Native floating binary lowering does not support this format or operation.");
         }
     }
+    private bool IsOptionalValueType(PrimitiveType type) =>
+        CheckedReferenceTypeContract.IsOptionalValueType(
+            type, _program.CheckedReferenceTypes);
+    private OptionalValueLayout GetOptionalValueLayout(PrimitiveType type)
+    {
+        if (_optionalValueLayouts.TryGetValue(type, out var layout))
+        {
+            return layout;
+        }
+        if (!ValueLayout.TryGetOptionalValueLayout(type, _program.Structures,
+                _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
+                _program.NativeFixedArrayTypes, out layout))
+        {
+            throw new InvalidOperationException(
+                "A verified optional value has no native layout.");
+        }
+        _optionalValueLayouts.Add(type, layout);
+        return layout;
+    }
+    private bool IsTaggedOptionalValueType(PrimitiveType type) =>
+        IsOptionalValueType(type) && !GetOptionalValueLayout(type).UsesNullNiche;
+
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
         || NativeFixedArrayTypes.IsType(type)
-        || (_normalBacking && CheckedReferenceTypes.IsType(type))
+        || (IsOptionalValueType(type)
+            ? Size(type) is not (1 or 2 or 4 or 8)
+            : _normalBacking && CheckedReferenceTypes.IsType(type))
         || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
             or PrimitiveType.Decimal128
         || (IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8));
@@ -6078,7 +6214,19 @@ internal sealed partial class PeCompiler
             return;
         }
 
-        if (_normalBacking && IsNormalBackingHandle(type))
+        if (IsTaggedOptionalValueType(type))
+        {
+            if (IsIndirect(type))
+            {
+                _code.AddressToRdx(offset);
+                StoreTaggedOptionalValueToPointer(type);
+            }
+            else
+            {
+                StoreTaggedOptionalValueInFrame(offset, type);
+            }
+        }
+        else if (_normalBacking && IsNormalBackingHandle(type))
         {
             StoreNormalBackingHandle(offset);
         }
@@ -6089,6 +6237,28 @@ internal sealed partial class PeCompiler
         else if (_normalBacking && ContainsNormalBackingReferenceValue(type, _program))
         {
             StoreNormalBackingReferenceAggregate(offset, type);
+        }
+        else if (NativeFixedArrayTypes.IsType(type))
+        {
+            _code.AddressToRdx(offset);
+            CopyNativeFixedArrayToPointer(type);
+        }
+        else if (ContainsTaggedOptionalValue(type))
+        {
+            if (!IsIndirect(type))
+            {
+                var scratch = _typedCopyScratchBases[_currentFunction];
+                if (scratch < 0)
+                {
+                    throw new InvalidOperationException(
+                        "A direct aggregate copy has no staging storage.");
+                }
+
+                _code.Store64(scratch);
+                _code.Address(scratch);
+            }
+            _code.AddressToRdx(offset);
+            CopyNativeValueToPointer(type);
         }
         else if (IsIndirect(type))
         {
@@ -6110,7 +6280,11 @@ internal sealed partial class PeCompiler
             return;
         }
 
-        if (IsIndirect(type))
+        if (IsTaggedOptionalValueType(type) && !IsIndirect(type))
+        {
+            LoadTaggedOptionalValueFromFrame(offset, type);
+        }
+        else if (IsIndirect(type))
         {
             _code.Address(offset);
         }
@@ -6123,6 +6297,384 @@ internal sealed partial class PeCompiler
             _code.Load(offset);
         }
     }
+
+    private void StoreTaggedOptionalValueInFrame(
+        int destination,
+        PrimitiveType type)
+    {
+        var layout = GetOptionalValueLayout(type);
+        _code.Bytes(0x84, 0xC0);
+        var absent = _code.JumpIf(0x84);
+        var payloadSize = Size(layout.PayloadType);
+        if (payloadSize != 0)
+        {
+            _code.Bytes(0x48, 0xC1, 0xE8,
+                checked((byte)(layout.PayloadOffset * 8)));
+            if (IsStruct(layout.PayloadType)
+                || NativeFixedArrayTypes.IsType(layout.PayloadType)
+                || ContainsTaggedOptionalValue(layout.PayloadType))
+            {
+                var scratch = _typedCopyScratchBases[_currentFunction];
+                if (scratch < 0)
+                {
+                    throw new InvalidOperationException(
+                        "A tagged optional copy has no payload staging storage.");
+                }
+                StoreOptionalPayloadInFrame(scratch, payloadSize);
+                _code.Address(scratch);
+                _code.AddressToRdx(checked(destination
+                    + NativeLayoutOffset(layout.PayloadOffset)));
+                _code.Bytes(0x49, 0x89, 0xC3); // r11 = payload source
+                _code.Bytes(0x49, 0x89, 0xD1); // r9 = payload destination
+                CopyNativeValueAtOffsets(layout.PayloadType, 0, 0,
+                    copyLoopDepth: 0);
+            }
+            else
+            {
+                StoreOptionalPayloadInFrame(
+                    checked(destination
+                        + NativeLayoutOffset(layout.PayloadOffset)),
+                    payloadSize);
+            }
+        }
+        _code.Byte(0xB8);
+        _code.Int32(1);
+        _code.StoreField(destination, 1);
+        var done = _code.Jump();
+        _code.PatchRelative(absent, _code.Position);
+        _code.Bytes(0x31, 0xC0);
+        _code.StoreField(destination, 1);
+        _code.PatchRelative(done, _code.Position);
+    }
+
+    private void StoreTaggedOptionalValueToPointer(PrimitiveType type)
+    {
+        var layout = GetOptionalValueLayout(type);
+        var payloadSize = Size(layout.PayloadType);
+        if (IsIndirect(type))
+        {
+            _code.Bytes(0x49, 0x89, 0xC3); // r11 = source
+            _code.Bytes(0x49, 0x89, 0xD1); // r9 = destination
+            LoadOptionalChunkFromR11(0, 1, useR10: false);
+            _code.Bytes(0x85, 0xC0);
+            var absent = _code.JumpIf(0x84);
+            if (payloadSize != 0)
+            {
+                var payloadOffset = NativeLayoutOffset(
+                    layout.PayloadOffset);
+                CopyNativeValueAtOffsets(layout.PayloadType,
+                    payloadOffset, payloadOffset, copyLoopDepth: 0);
+            }
+            StoreNativeCopyTag(0, present: true);
+            var done = _code.Jump();
+            _code.PatchRelative(absent, _code.Position);
+            StoreNativeCopyTag(0, present: false);
+            _code.PatchRelative(done, _code.Position);
+            return;
+        }
+
+        if (payloadSize != 0
+            && (IsStruct(layout.PayloadType)
+                || NativeFixedArrayTypes.IsType(layout.PayloadType)
+                || ContainsTaggedOptionalValue(layout.PayloadType)))
+        {
+            var scratch = _typedCopyScratchBases[_currentFunction];
+            if (scratch < 0)
+            {
+                throw new InvalidOperationException(
+                    "A direct tagged optional copy has no staging storage.");
+            }
+
+            _code.Bytes(0x49, 0x89, 0xD1); // r9 = destination
+            _code.Bytes(0x84, 0xC0);
+            var typedDirectAbsent = _code.JumpIf(0x84);
+            _code.Bytes(0x48, 0xC1, 0xE8,
+                checked((byte)(layout.PayloadOffset * 8)));
+            StoreOptionalPayloadInFrame(scratch, payloadSize);
+            _code.Address(scratch + (2 * sizeof(ulong)));
+            _code.Bytes(0x4C, 0x89, 0x08); // [rax] = r9
+            _code.Address(scratch);
+            _code.Bytes(0x49, 0x89, 0xC3); // r11 = payload source
+            _code.Bytes(0x4C, 0x89, 0xCA); // rdx = destination base
+            AddToRdx(NativeLayoutOffset(layout.PayloadOffset));
+            _code.Bytes(0x49, 0x89, 0xD1); // r9 = payload destination
+            CopyNativeValueAtOffsets(layout.PayloadType, 0, 0,
+                copyLoopDepth: 0);
+            _code.Load64(scratch + (2 * sizeof(ulong)));
+            _code.Bytes(0x49, 0x89, 0xC1); // r9 = optional destination
+            StoreNativeCopyTag(0, present: true);
+            var typedDirectDone = _code.Jump();
+            _code.PatchRelative(typedDirectAbsent, _code.Position);
+            _code.Bytes(0x4C, 0x89, 0xCA);
+            _code.Bytes(0x31, 0xC0);
+            _code.StorePointerField(1);
+            _code.PatchRelative(typedDirectDone, _code.Position);
+            return;
+        }
+
+        _code.Bytes(0x49, 0x89, 0xD3); // r11 = destination
+        _code.Bytes(0x84, 0xC0);
+        var directAbsent = _code.JumpIf(0x84);
+        if (payloadSize != 0)
+        {
+            _code.Bytes(0x49, 0x89, 0xC2); // r10 = value
+            _code.Bytes(0x4C, 0x89, 0xD0); // rax = value
+            _code.Bytes(0x48, 0xC1, 0xE8,
+                checked((byte)(layout.PayloadOffset * 8)));
+            _code.Bytes(0x4C, 0x89, 0xDA); // rdx = destination
+            AddToRdx(NativeLayoutOffset(layout.PayloadOffset));
+            StoreOptionalPayloadToPointer(payloadSize);
+        }
+        _code.Bytes(0x4C, 0x89, 0xDA);
+        _code.Byte(0xB8);
+        _code.Int32(1);
+        _code.StorePointerField(1);
+        var directDone = _code.Jump();
+        _code.PatchRelative(directAbsent, _code.Position);
+        _code.Bytes(0x4C, 0x89, 0xDA);
+        _code.Bytes(0x31, 0xC0);
+        _code.StorePointerField(1);
+        _code.PatchRelative(directDone, _code.Position);
+    }
+
+    private void StoreOptionalPayloadInFrame(int destination, int size)
+    {
+        var offset = 0;
+        while (offset < size)
+        {
+            var width = CopyChunkWidth(size - offset);
+            _code.StoreField(destination + offset, width);
+            offset += width;
+            if (offset < size)
+            {
+                _code.Bytes(0x48, 0xC1, 0xE8,
+                    checked((byte)(width * 8)));
+            }
+        }
+    }
+
+    private void StoreOptionalPayloadToPointer(int size)
+    {
+        var offset = 0;
+        while (offset < size)
+        {
+            var width = CopyChunkWidth(size - offset);
+            _code.StorePointerField(width);
+            offset += width;
+            if (offset < size)
+            {
+                _code.Bytes(0x48, 0xC1, 0xE8,
+                    checked((byte)(width * 8)));
+                AddToRdx(width);
+            }
+        }
+    }
+
+    private void LoadTaggedOptionalValueFromFrame(
+        int source,
+        PrimitiveType type)
+    {
+        var layout = GetOptionalValueLayout(type);
+        _code.LoadUnsigned(source, 1);
+        _code.Bytes(0x85, 0xC0);
+        var absent = _code.JumpIf(0x84);
+        var payloadSize = Size(layout.PayloadType);
+        if (payloadSize == 0)
+        {
+            _code.Byte(0xB8);
+            _code.Int32(1);
+        }
+        else
+        {
+            LoadOptionalPayloadFromFrame(
+                checked(source + NativeLayoutOffset(layout.PayloadOffset)),
+                payloadSize);
+            ShiftAccumulatorLeft(checked((int)(layout.PayloadOffset * 8)));
+            _code.Bytes(0x48, 0x83, 0xC8, 0x01);
+        }
+        var done = _code.Jump();
+        _code.PatchRelative(absent, _code.Position);
+        _code.Bytes(0x31, 0xC0);
+        _code.PatchRelative(done, _code.Position);
+    }
+
+    private void LoadTaggedOptionalValueFromPointerField(
+        int offset,
+        PrimitiveType type)
+    {
+        var layout = GetOptionalValueLayout(type);
+        _code.Bytes(0x49, 0x89, 0xC3); // r11 = containing address
+        LoadOptionalChunkFromR11(offset, 1, useR10: false);
+        _code.Bytes(0x85, 0xC0);
+        var absent = _code.JumpIf(0x84);
+        var payloadSize = Size(layout.PayloadType);
+        if (payloadSize == 0)
+        {
+            _code.Byte(0xB8);
+            _code.Int32(1);
+        }
+        else
+        {
+            LoadOptionalPayloadFromR11(
+                checked(offset + NativeLayoutOffset(layout.PayloadOffset)),
+                payloadSize);
+            ShiftAccumulatorLeft(checked((int)(layout.PayloadOffset * 8)));
+            _code.Bytes(0x48, 0x83, 0xC8, 0x01);
+        }
+        var done = _code.Jump();
+        _code.PatchRelative(absent, _code.Position);
+        _code.Bytes(0x31, 0xC0);
+        _code.PatchRelative(done, _code.Position);
+    }
+
+    private void LoadOptionalPayloadFromFrame(int offset, int size) =>
+        LoadOptionalPayload(offset, size, fromPointer: false);
+
+    private void LoadOptionalPayloadFromR11(int offset, int size) =>
+        LoadOptionalPayload(offset, size, fromPointer: true);
+
+    private void LoadOptionalPayload(int baseOffset, int size, bool fromPointer)
+    {
+        var offset = 0;
+        var first = true;
+        while (offset < size)
+        {
+            var width = CopyChunkWidth(size - offset);
+            if (fromPointer)
+            {
+                LoadOptionalChunkFromR11(
+                    checked(baseOffset + offset), width, useR10: !first);
+            }
+            else if (!first)
+            {
+                LoadOptionalFrameChunkToR10(
+                    checked(baseOffset + offset), width);
+            }
+            else if (width == 4)
+            {
+                _code.Load(checked(baseOffset + offset));
+            }
+            else
+            {
+                _code.LoadUnsigned(
+                    checked(baseOffset + offset), width);
+            }
+            if (!first)
+            {
+                ShiftR10Left(checked(offset * 8));
+                _code.Bytes(0x4C, 0x09, 0xD0); // or rax,r10
+            }
+            offset += width;
+            first = false;
+        }
+    }
+
+    private void LoadOptionalChunkFromR11(int offset, int width, bool useR10)
+    {
+        if (useR10)
+        {
+            switch (width)
+            {
+                case 1:
+                    _code.Bytes(0x45, 0x0F, 0xB6, 0x93);
+                    break;
+                case 2:
+                    _code.Bytes(0x45, 0x0F, 0xB7, 0x93);
+                    break;
+                default:
+                    _code.Bytes(0x45, 0x8B, 0x93);
+                    break;
+            }
+        }
+        else
+        {
+            switch (width)
+            {
+                case 1:
+                    _code.Bytes(0x41, 0x0F, 0xB6, 0x83);
+                    break;
+                case 2:
+                    _code.Bytes(0x41, 0x0F, 0xB7, 0x83);
+                    break;
+                default:
+                    _code.Bytes(0x41, 0x8B, 0x83);
+                    break;
+            }
+        }
+        _code.Int32(offset);
+    }
+
+    private void LoadOptionalFrameChunkToR10(int offset, int width)
+    {
+        switch (width)
+        {
+            case 1:
+                _code.Bytes(0x44, 0x0F, 0xB6, 0x95);
+                break;
+            case 2:
+                _code.Bytes(0x44, 0x0F, 0xB7, 0x95);
+                break;
+            default:
+                _code.Bytes(0x44, 0x8B, 0x95);
+                break;
+        }
+        _code.Int32(offset);
+    }
+
+    private void ShiftAccumulatorLeft(int bits)
+    {
+        if (bits != 0)
+        {
+            _code.Bytes(0x48, 0xC1, 0xE0, checked((byte)bits));
+        }
+    }
+
+    private void ShiftAccumulatorRight(int bits)
+    {
+        if (bits != 0)
+        {
+            _code.Bytes(0x48, 0xC1, 0xE8, checked((byte)bits));
+        }
+    }
+
+    private void MaskOptionalPayloadInAccumulator(int size)
+    {
+        if (size is > 0 and < sizeof(ulong))
+        {
+            var shift = checked((byte)((sizeof(ulong) - size) * 8));
+            _code.Bytes(0x48, 0xC1, 0xE0, shift,
+                0x48, 0xC1, 0xE8, shift);
+        }
+    }
+
+    private void ShiftR10Left(int bits)
+    {
+        if (bits != 0)
+        {
+            _code.Bytes(0x49, 0xC1, 0xE2, checked((byte)bits));
+        }
+    }
+
+    private void AddToRdx(int offset)
+    {
+        if (offset == 0)
+        {
+            return;
+        }
+        if (offset <= sbyte.MaxValue)
+        {
+            _code.Bytes(0x48, 0x83, 0xC2, checked((byte)offset));
+        }
+        else
+        {
+            _code.Bytes(0x48, 0x81, 0xC2);
+            _code.Int32(offset);
+        }
+    }
+
+    private static int CopyChunkWidth(int remaining) =>
+        remaining >= sizeof(int) ? sizeof(int)
+            : remaining >= sizeof(ushort) ? sizeof(ushort) : sizeof(byte);
 
     private void EmitOptionalPresenceInAccumulator(PrimitiveType optionalType)
     {
@@ -6777,7 +7329,12 @@ internal sealed partial class PeCompiler
                 }
                 if (_program.Functions[_currentFunction].Variables[assignment.Variable].IsOut)
                 {
-                    if (IsIndirect(assignment.Value.Type))
+                    if (ContainsTaggedOptionalValue(assignment.Value.Type))
+                    {
+                        StoreValue(OutSlot(assignment.Variable),
+                            assignment.Value.Type);
+                    }
+                    else if (IsIndirect(assignment.Value.Type))
                     {
                         CopyToFrame(OutSlot(assignment.Variable), Size(assignment.Value.Type));
                     }
@@ -6796,8 +7353,16 @@ internal sealed partial class PeCompiler
                 if (optionalAssignment.Place is BoundRead optionalLocal)
                 {
                     var optionalDestination = OwnerPlace(optionalLocal.Variable);
-                    _code.Load64(optionalDestination);
-                    _code.Bytes(0x48, 0x85, 0xC0);
+                    if (IsTaggedOptionalValueType(optionalLocal.Type))
+                    {
+                        _code.LoadUnsigned(optionalDestination, 1);
+                        _code.Bytes(0x85, 0xC0);
+                    }
+                    else
+                    {
+                        _code.Load64(optionalDestination);
+                        _code.Bytes(0x48, 0x85, 0xC0);
+                    }
                     var localPresent = _code.JumpIf(0x85);
                     Expression(optionalAssignment.Value, 0);
                     StoreValue(optionalDestination, optionalLocal.Type);
@@ -6805,6 +7370,20 @@ internal sealed partial class PeCompiler
                         optionalDestination, optionalLocal.Type, active: true);
                     _code.PatchRelative(localPresent, _code.Position);
                     break;
+                }
+                if (optionalAssignment.Place is BoundNativeFixedArrayElement
+                        or BoundNativeFixedArrayPathElement)
+                {
+                    EmitNativeFixedArrayOptionalAssignment(
+                        optionalAssignment, spill: 0);
+                    break;
+                }
+                if (optionalAssignment.Place is BoundFieldRead structField
+                        && IsStruct(structField.Receiver.Type))
+                {
+                        EmitNativeStructOptionalAssignment(
+                            optionalAssignment, structField, spill: 0);
+                        break;
                 }
                 var optionalField = (BoundFieldRead)optionalAssignment.Place;
                 Expression(optionalField.Receiver, 0);
@@ -6817,7 +7396,8 @@ internal sealed partial class PeCompiler
                 var fieldOffset = checked(32
                     + NativeLayoutOffset(fieldDeclaration.Offset));
                 var fieldSize = NativeLayoutSize(fieldDeclaration.Size);
-                _code.LoadPointerField(fieldOffset, 8);
+                _code.LoadPointerField(fieldOffset,
+                    IsTaggedOptionalValueType(optionalField.Type) ? 1 : 8);
                 _code.Bytes(0x48, 0x85, 0xC0);
                 var fieldPresent = _code.JumpIf(0x85);
                 if (isNormalBackingOptionalReferenceField)
@@ -6868,11 +7448,23 @@ internal sealed partial class PeCompiler
                 }
                 else
                 {
-                    _code.Bytes(0x48, 0x89, 0xC1);
-                    _code.Load64(Spill(0));
-                    _code.PointerOffset(fieldOffset);
-                    _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0x89, 0xC8);
-                    _code.Bytes(0x48, 0x89, 0x02);
+                    if (IsTaggedOptionalValueType(optionalField.Type))
+                    {
+                        _code.Bytes(0x49, 0x89, 0xC2); // r10 = fallback value
+                        _code.Load64(Spill(0));
+                        _code.PointerOffset(fieldOffset);
+                        _code.Bytes(0x48, 0x89, 0xC2);
+                        _code.Bytes(0x4C, 0x89, 0xD0);
+                        StoreTaggedOptionalValueToPointer(optionalField.Type);
+                    }
+                    else
+                    {
+                        _code.Bytes(0x48, 0x89, 0xC1);
+                        _code.Load64(Spill(0));
+                        _code.PointerOffset(fieldOffset);
+                        _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0x89, 0xC8);
+                        _code.Bytes(0x48, 0x89, 0x02);
+                    }
                 }
                 if (fallbackFunclet >= 0)
                 {
@@ -7090,7 +7682,8 @@ internal sealed partial class PeCompiler
                         + _normalBackingReferenceScratchSizes[_currentFunction];
                     if (normalBackingHandleField)
                     {
-                        StoreValue(Spill(1), field.Type);
+                        StoreValue(SpillOffsetForType(1, field.Type),
+                            field.Type);
                     }
                     else if (normalBackingReferenceField)
                     {
@@ -7103,6 +7696,11 @@ internal sealed partial class PeCompiler
                             EmitNormalBackingRetain(
                                 stagedReferenceValue + leaf.Offset + sizeof(ulong));
                         }
+                    }
+                    else if (ContainsTaggedOptionalValue(field.Type))
+                    {
+                        StoreValue(SpillOffsetForType(1, field.Type),
+                            field.Type);
                     }
                     else if (IsIndirect(field.Type))
                     {
@@ -7169,7 +7767,14 @@ internal sealed partial class PeCompiler
                     else
                     {
                         _code.Bytes(0x48, 0x89, 0xC2);
-                        if (IsIndirect(field.Type))
+                        if (ContainsTaggedOptionalValue(field.Type))
+                        {
+                            LoadValue(SpillOffsetForType(1, field.Type),
+                                field.Type);
+                            CopyNativeValueFromAccumulatorToPointer(
+                                field.Type);
+                        }
+                        else if (IsIndirect(field.Type))
                         {
                             _code.Bytes(0x48, 0x89, 0xC8);
                             _code.CopyMemory(managedFieldSize);
@@ -7207,12 +7812,18 @@ internal sealed partial class PeCompiler
                     Expression(fieldAssignment.Value, 0);
                     if (fieldAssignment.Variable == 0 && IsBorrowedReceiver())
                     {
-                        StoreValue(Spill(0), field.Type);
+                        var stagedValue = SpillOffsetForType(0, field.Type);
+                        StoreValue(stagedValue, field.Type);
                         _code.Load64(Slot(0));
                         _code.PointerOffset(destination - Slot(0));
                         _code.Bytes(0x48, 0x89, 0xC2);
-                        LoadValue(Spill(0), field.Type);
-                        if (IsIndirect(field.Type))
+                        LoadValue(stagedValue, field.Type);
+                        if (ContainsTaggedOptionalValue(field.Type))
+                        {
+                            CopyNativeValueFromAccumulatorToPointer(
+                                field.Type);
+                        }
+                        else if (IsIndirect(field.Type))
                         {
                             _code.CopyMemory(NativeLayoutSize(field.Size));
                         }
@@ -7234,6 +7845,10 @@ internal sealed partial class PeCompiler
                                     break;
                             }
                         }
+                    }
+                    else if (ContainsTaggedOptionalValue(field.Type))
+                    {
+                        StoreValue(destination, field.Type);
                     }
                     else if (IsIndirect(field.Type))
                     {
@@ -7308,7 +7923,15 @@ internal sealed partial class PeCompiler
                     if (IsIndirectResult(result.Value.Type))
                     {
                         _code.Load64(_returnSlot, destinationRegister: true);
-                        _code.CopyMemory(Size(result.Value.Type));
+                        if (ContainsTaggedOptionalValue(result.Value.Type))
+                        {
+                            CopyNativeValueFromAccumulatorToPointer(
+                                result.Value.Type);
+                        }
+                        else
+                        {
+                            _code.CopyMemory(Size(result.Value.Type));
+                        }
                         _code.Load64(_returnSlot);
                         if (normalBackingReferenceReturn)
                         {
@@ -7548,6 +8171,13 @@ internal sealed partial class PeCompiler
                 continue;
             }
             var size = Size(variables[i].Type);
+            if (ContainsTaggedOptionalValue(variables[i].Type))
+            {
+                _code.Address(OutSlot(i));
+                _code.Load64(Slot(i), destinationRegister: true);
+                CopyNativeValueToPointer(variables[i].Type);
+                continue;
+            }
             if (IsIndirect(variables[i].Type))
             {
                 _code.Address(OutSlot(i));
@@ -7636,6 +8266,315 @@ internal sealed partial class PeCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier excludes unsupported expression variants and unary operators.")]
+    private void NormalizeTaggedOptionalAccumulator()
+    {
+        _code.Bytes(0x84, 0xC0);
+        var present = _code.JumpIf(0x85);
+        _code.Bytes(0x31, 0xC0);
+        _code.PatchRelative(present, _code.Position);
+    }
+
+    private void TestTaggedOptionalPresence(PrimitiveType type)
+    {
+        if (IsIndirect(type))
+        {
+            _code.Bytes(0x49, 0x89, 0xC3); // r11 = optional address
+            LoadOptionalChunkFromR11(0, 1, useR10: false);
+            _code.Bytes(0x85, 0xC0);
+        }
+        else
+        {
+            _code.Bytes(0x84, 0xC0);
+        }
+    }
+
+    private void EmitTaggedOptionalCoalesce(BoundCoalesce coalesce, int spill)
+    {
+        var layout = GetOptionalValueLayout(coalesce.Optional.Type);
+        var optionalIndirect = IsIndirect(coalesce.Optional.Type);
+        var payloadSize = Size(layout.PayloadType);
+        var returnsOptional = coalesce.Type == coalesce.Optional.Type;
+        var returnsPayload = coalesce.Type == layout.PayloadType;
+        if (!returnsOptional && !returnsPayload)
+        {
+            throw new InvalidOperationException(
+                "A verified tagged coalesce has an incompatible result type.");
+        }
+
+        var payloadSlot = -1;
+        if (returnsPayload && IsIndirect(layout.PayloadType)
+            && !optionalIndirect)
+        {
+            var ignoredArguments = 0;
+            var optionalSpills = ExpressionSpills(
+                coalesce.Optional, ref ignoredArguments);
+            var fallbackSpills = ExpressionSpills(
+                coalesce.Fallback, ref ignoredArguments);
+            payloadSlot = SpillOffsetForType(
+                checked(spill + Math.Max(optionalSpills, fallbackSpills)),
+                layout.PayloadType);
+        }
+
+        Expression(coalesce.Optional, spill);
+        TestTaggedOptionalPresence(coalesce.Optional.Type);
+        var absent = _code.JumpIf(0x84);
+
+        if (returnsOptional)
+        {
+            if (optionalIndirect)
+            {
+                _code.Bytes(0x4C, 0x89, 0xD8); // rax = r11
+            }
+        }
+        else if (payloadSize == 0)
+        {
+            if (IsIndirect(layout.PayloadType))
+            {
+                _code.Address(payloadSlot);
+            }
+            else
+            {
+                _code.Bytes(0x31, 0xC0);
+            }
+        }
+        else if (optionalIndirect)
+        {
+            if (IsIndirect(layout.PayloadType))
+            {
+                _code.Bytes(0x4C, 0x89, 0xD8); // rax = r11
+                _code.PointerOffset(
+                    NativeLayoutOffset(layout.PayloadOffset));
+            }
+            else
+            {
+                LoadOptionalPayloadFromR11(
+                    NativeLayoutOffset(layout.PayloadOffset), payloadSize);
+                NormalizeNarrowInteger(layout.PayloadType,
+                    checkRange: false);
+            }
+        }
+        else
+        {
+            ShiftAccumulatorRight(
+                checked((int)(layout.PayloadOffset * 8)));
+            if (IsIndirect(layout.PayloadType))
+            {
+                StoreOptionalPayloadInFrame(payloadSlot, payloadSize);
+                _code.Address(payloadSlot);
+            }
+            else
+            {
+                MaskOptionalPayloadInAccumulator(payloadSize);
+                NormalizeNarrowInteger(layout.PayloadType,
+                    checkRange: false);
+            }
+        }
+
+        var present = _code.Jump();
+        _code.PatchRelative(absent, _code.Position);
+        Expression(coalesce.Fallback, spill);
+        _code.PatchRelative(present, _code.Position);
+    }
+
+    private void EmitTaggedOptionalSome(BoundIsSome pattern, int spill)
+    {
+        var layout = GetOptionalValueLayout(pattern.Value.Type);
+        var payloadSize = Size(layout.PayloadType);
+        Expression(pattern.Value, spill);
+        TestTaggedOptionalPresence(pattern.Value.Type);
+        var absent = _code.JumpIf(0x84);
+        if (payloadSize != 0)
+        {
+            if (IsIndirect(pattern.Value.Type))
+            {
+                if (IsIndirect(layout.PayloadType))
+                {
+                    _code.Bytes(0x4C, 0x89, 0xD8); // rax = r11
+                    _code.PointerOffset(
+                        NativeLayoutOffset(layout.PayloadOffset));
+                }
+                else
+                {
+                    LoadOptionalPayloadFromR11(
+                        NativeLayoutOffset(layout.PayloadOffset),
+                        payloadSize);
+                    NormalizeNarrowInteger(layout.PayloadType,
+                        checkRange: false);
+                }
+            }
+            else
+            {
+                ShiftAccumulatorRight(
+                    checked((int)(layout.PayloadOffset * 8)));
+                if (IsIndirect(layout.PayloadType))
+                {
+                    StoreOptionalPayloadInFrame(
+                        Slot(pattern.Variable), payloadSize);
+                }
+                else
+                {
+                    MaskOptionalPayloadInAccumulator(payloadSize);
+                    NormalizeNarrowInteger(layout.PayloadType,
+                        checkRange: false);
+                }
+            }
+            if (IsIndirect(pattern.Value.Type)
+                || !IsIndirect(layout.PayloadType))
+            {
+                StoreValue(Slot(pattern.Variable), layout.PayloadType);
+            }
+        }
+        _code.Byte(0xB8);
+        _code.Int32(1);
+        var present = _code.Jump();
+        _code.PatchRelative(absent, _code.Position);
+        _code.Bytes(0x31, 0xC0);
+        _code.PatchRelative(present, _code.Position);
+    }
+
+    private void EmitOptionalValueVariablePattern(
+        BoundIsVariablePattern pattern,
+        int spill)
+    {
+        var layout = GetOptionalValueLayout(pattern.Value.Type);
+        var sourceRead = pattern.Value as BoundRead;
+        var vacant = -1;
+        if (sourceRead is not null)
+        {
+            EmitInitializationTest(sourceRead.Variable);
+            _code.Bytes(0x85, 0xC0);
+            vacant = _code.JumpIf(0x84);
+        }
+
+        Expression(pattern.Value, spill);
+        var absent = -1;
+        if (!pattern.IncludeNull)
+        {
+            if (layout.UsesNullNiche)
+            {
+                _code.Bytes(0x48, 0x85, 0xC0);
+            }
+            else
+            {
+                TestTaggedOptionalPresence(pattern.Value.Type);
+            }
+            absent = _code.JumpIf(0x84);
+        }
+
+        if (pattern.IncludeNull)
+        {
+            StoreValue(Slot(pattern.Variable), pattern.Value.Type);
+        }
+        else if (layout.UsesNullNiche)
+        {
+            StoreValue(Slot(pattern.Variable), layout.PayloadType);
+        }
+        else
+        {
+            var payloadSize = Size(layout.PayloadType);
+            if (payloadSize != 0)
+            {
+                if (IsIndirect(pattern.Value.Type))
+                {
+                    if (IsIndirect(layout.PayloadType))
+                    {
+                        _code.Bytes(0x4C, 0x89, 0xD8); // rax = r11
+                        _code.PointerOffset(
+                            NativeLayoutOffset(layout.PayloadOffset));
+                    }
+                    else
+                    {
+                        LoadOptionalPayloadFromR11(
+                            NativeLayoutOffset(layout.PayloadOffset),
+                            payloadSize);
+                        NormalizeNarrowInteger(layout.PayloadType,
+                            checkRange: false);
+                    }
+                }
+                else
+                {
+                    ShiftAccumulatorRight(
+                        checked((int)(layout.PayloadOffset * 8)));
+                    if (IsIndirect(layout.PayloadType))
+                    {
+                        StoreOptionalPayloadInFrame(
+                            Slot(pattern.Variable), payloadSize);
+                    }
+                    else
+                    {
+                        MaskOptionalPayloadInAccumulator(payloadSize);
+                        NormalizeNarrowInteger(layout.PayloadType,
+                            checkRange: false);
+                    }
+                }
+                if (IsIndirect(pattern.Value.Type)
+                    || !IsIndirect(layout.PayloadType))
+                {
+                    StoreValue(Slot(pattern.Variable),
+                        layout.PayloadType);
+                }
+            }
+        }
+
+        _code.Byte(0xB8);
+        _code.Int32(1);
+        if (absent >= 0 || vacant >= 0)
+        {
+            var matched = _code.Jump();
+            if (absent >= 0)
+            {
+                _code.PatchRelative(absent, _code.Position);
+            }
+            if (vacant >= 0)
+            {
+                _code.PatchRelative(vacant, _code.Position);
+            }
+            _code.Bytes(0x31, 0xC0);
+            _code.PatchRelative(matched, _code.Position);
+        }
+    }
+
+    private bool TryEmitPlaceAddress(BoundExpression expression, int spill)
+    {
+        switch (expression)
+        {
+            case BoundRead read:
+                var variable = _program.Functions[_currentFunction]
+                    .Variables[read.Variable];
+                if (variable.IsImplicitRef
+                    || (read.Variable == 0 && IsBorrowedReceiver()))
+                {
+                    _code.Load64(Slot(read.Variable));
+                }
+                else
+                {
+                    _code.Address(OwnerPlace(read.Variable));
+                }
+                return true;
+            case BoundFieldRead field when ManagedClassTypes.IsClass(
+                field.Receiver.Type):
+                Expression(field.Receiver, spill);
+                var classField = _program.Classes[
+                    ManagedClassTypes.ClassIndex(field.Receiver.Type)]
+                    .Fields[field.Field];
+                _code.PointerOffset(checked(32
+                    + NativeLayoutOffset(classField.Offset)));
+                return true;
+            case BoundFieldRead field when IsStruct(field.Receiver.Type):
+                if (!TryEmitPlaceAddress(field.Receiver, spill))
+                {
+                    return false;
+                }
+                var structureField = _program.Structures[
+                    (int)field.Receiver.Type - 100].Fields[field.Field];
+                _code.PointerOffset(
+                    NativeLayoutOffset(structureField.Offset));
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private void Expression(BoundExpression expression, int spill)
     {
         _cancellationToken.ThrowIfCancellationRequested();
@@ -7807,16 +8746,73 @@ internal sealed partial class PeCompiler
                     ZeroStruct(storage, Size(expression.Type));
                     _code.Address(storage);
                 }
+                else if (IsTaggedOptionalValueType(expression.Type)
+                    && IsIndirect(expression.Type))
+                {
+                    var storage = SpillOffsetForType(spill, expression.Type);
+                    _code.Bytes(0x31, 0xC0);
+                    _code.StoreField(storage, 1);
+                    _code.Address(storage);
+                }
                 else
                 {
                     _code.Bytes(0x31, 0xC0);
                 }
                 break;
+            case BoundOptionalLift lift when IsTaggedOptionalValueType(lift.Type):
+            {
+                var layout = GetOptionalValueLayout(lift.Type);
+                var payloadSize = Size(layout.PayloadType);
+                if (!IsIndirect(lift.Type))
+                {
+                    Expression(lift.Value, spill);
+                    if (payloadSize == 0)
+                    {
+                        _code.Byte(0xB8);
+                        _code.Int32(1);
+                    }
+                    else
+                    {
+                        if (IsIndirect(lift.Value.Type))
+                        {
+                            _code.Bytes(0x49, 0x89, 0xC3); // r11 = payload address
+                            LoadOptionalPayloadFromR11(0, payloadSize);
+                        }
+                        MaskOptionalPayloadInAccumulator(payloadSize);
+                        ShiftAccumulatorLeft(
+                            checked((int)(layout.PayloadOffset * 8)));
+                        _code.Bytes(0x48, 0x83, 0xC8, 0x01);
+                    }
+                    break;
+                }
+
+                var storage = SpillOffsetForType(spill, lift.Type);
+                var storageSlot = checked((storage - _spillBase) / 16);
+                var payloadSpill = checked(storageSlot
+                    + Math.Max(1, (Size(lift.Type) + 15) / 16));
+                Expression(lift.Value, payloadSpill);
+                if (payloadSize != 0)
+                {
+                    StoreValue(checked(storage
+                        + NativeLayoutOffset(layout.PayloadOffset)),
+                        layout.PayloadType);
+                }
+                _code.Byte(0xB8);
+                _code.Int32(1);
+                _code.StoreField(storage, 1);
+                _code.Address(storage);
+                break;
+            }
             case BoundOptionalLift lift:
                 Expression(lift.Value, spill);
                 break;
             case BoundCoalesce coalesce:
             {
+                if (IsTaggedOptionalValueType(coalesce.Optional.Type))
+                {
+                    EmitTaggedOptionalCoalesce(coalesce, spill);
+                    break;
+                }
                 if (IsNormalBackingOptionalReference(coalesce.Optional.Type))
                 {
                     var descriptor = _normalBackingTemporarySlots[_currentFunction];
@@ -7844,6 +8840,12 @@ internal sealed partial class PeCompiler
             case BoundReadonlyProjection projection:
                 Expression(projection.Value, spill);
                 break;
+            case BoundIsNull test when IsTaggedOptionalValueType(
+                test.Value.Type):
+                Expression(test.Value, spill);
+                TestTaggedOptionalPresence(test.Value.Type);
+                _code.Bytes(0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0);
+                break;
             case BoundIsNull test:
                 Expression(test.Value, spill);
                 if (IsNormalBackingOptionalReference(test.Value.Type))
@@ -7851,6 +8853,25 @@ internal sealed partial class PeCompiler
                     _code.Bytes(0x48, 0x8B, 0x00);
                 }
                 _code.Bytes(0x48, 0x85, 0xC0, 0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0);
+                break;
+            case BoundIsSome pattern when IsTaggedOptionalValueType(
+                pattern.Value.Type):
+                EmitTaggedOptionalSome(pattern, spill);
+                break;
+            case BoundIsSome pattern when IsOptionalValueType(
+                pattern.Value.Type)
+                && GetOptionalValueLayout(pattern.Value.Type).UsesNullNiche:
+                Expression(pattern.Value, spill);
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var nullNicheAbsent = _code.JumpIf(0x84);
+                StoreValue(Slot(pattern.Variable),
+                    GetOptionalValueLayout(pattern.Value.Type).PayloadType);
+                _code.Byte(0xB8);
+                _code.Int32(1);
+                var nullNicheDone = _code.Jump();
+                _code.PatchRelative(nullNicheAbsent, _code.Position);
+                _code.Bytes(0x31, 0xC0);
+                _code.PatchRelative(nullNicheDone, _code.Position);
                 break;
             case BoundIsSome pattern:
             {
@@ -7884,6 +8905,10 @@ internal sealed partial class PeCompiler
                 _code.PatchRelative(patternDone, _code.Position);
                 break;
             }
+            case BoundIsVariablePattern pattern when IsOptionalValueType(
+                pattern.Value.Type):
+                EmitOptionalValueVariablePattern(pattern, spill);
+                break;
             case BoundIsVariablePattern pattern:
             {
                 if (IsNormalBackingOptionalReference(pattern.Value.Type))
@@ -8088,6 +9113,23 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundFieldRead fieldRead:
+                if (IsTaggedOptionalValueType(fieldRead.Type)
+                    && IsStruct(fieldRead.Receiver.Type)
+                    && !IsIndirect(fieldRead.Receiver.Type)
+                    && !IsUnique(fieldRead.Receiver.Type))
+                {
+                    if (!TryEmitPlaceAddress(fieldRead.Receiver, spill))
+                    {
+                        Expression(fieldRead.Receiver, spill);
+                        _code.Store64(Spill(spill));
+                        _code.Address(Spill(spill));
+                    }
+                    var optionalField = _program.Structures[
+                        (int)fieldRead.Receiver.Type - 100].Fields[fieldRead.Field];
+                    _code.PointerOffset(NativeLayoutOffset(optionalField.Offset));
+                    LoadTaggedOptionalValueFromPointerField(0, fieldRead.Type);
+                    break;
+                }
                 if (ManagedClassTypes.IsClass(fieldRead.Receiver.Type))
                 {
                     Expression(fieldRead.Receiver, spill);
@@ -8818,6 +9860,7 @@ internal sealed partial class PeCompiler
                         "A support-bearing call has no verified call-plan storage.");
                 }
                 var argumentsBase = spill + CallResultSpills(call);
+                var resultSlot = SpillOffsetForType(spill, call.Type);
                 var argumentSpills = new int[call.Arguments.Length];
                 var auxiliarySpills = new int[call.Arguments.Length];
                 var nextSpill = argumentsBase;
@@ -8850,7 +9893,9 @@ internal sealed partial class PeCompiler
                     }
                     staged ??= [];
                     var live = Spill(auxiliarySpills[i]);
-                    staged.Add((Spill(argumentSpills[i]), live, call.Arguments[i].Type));
+                    staged.Add((SpillOffsetForType(
+                        argumentSpills[i], call.Arguments[i].Type),
+                        live, call.Arguments[i].Type));
                     _code.Clear(live);
                 }
                 var stagedBegin = _code.Position;
@@ -8864,7 +9909,8 @@ internal sealed partial class PeCompiler
                         if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                         {
                             managedSlots ??= [];
-                            managedSlots.Add(Spill(argumentSpills[i]));
+                            managedSlots.Add(SpillOffsetForType(
+                                argumentSpills[i], call.Arguments[i].Type));
                             if (call.Arguments[i] is BoundOutArgument)
                             {
                                 managedSlots.Add(Spill(auxiliarySpills[i]));
@@ -8884,7 +9930,9 @@ internal sealed partial class PeCompiler
                             {
                                 managedSlots ??= [];
                                 managedSlots.Add(checked(
-                                    Spill(argumentSpills[i]) + leaf.Offset + sizeof(ulong)));
+                                    SpillOffsetForType(argumentSpills[i],
+                                        call.Arguments[i].Type)
+                                    + leaf.Offset + sizeof(ulong)));
                             }
                         }
                     }
@@ -8895,7 +9943,7 @@ internal sealed partial class PeCompiler
                         {
                             managedSlots ??= [];
                             managedSlots.Add(checked(
-                                Spill(spill) + leaf.Offset + sizeof(ulong)));
+                                resultSlot + leaf.Offset + sizeof(ulong)));
                         }
                     }
                     if (managedSlots is not null)
@@ -8920,7 +9968,8 @@ internal sealed partial class PeCompiler
                 {
                     if (call.Arguments[i] is BoundOutArgument)
                     {
-                        var scratch = Spill(auxiliarySpills[i]);
+                        var scratch = SpillOffsetForType(
+                            auxiliarySpills[i], call.Arguments[i].Type);
                         ZeroStruct(scratch, IsIndirect(call.Arguments[i].Type) ? Size(call.Arguments[i].Type) : 8);
                         if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                         {
@@ -8953,10 +10002,12 @@ internal sealed partial class PeCompiler
                         }
                         else
                         {
-                            StoreValue(Spill(argumentSpills[i]), call.Arguments[i].Type);
+                            var argumentValueSlot = SpillOffsetForType(
+                                argumentSpills[i], call.Arguments[i].Type);
+                            StoreValue(argumentValueSlot, call.Arguments[i].Type);
                             if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                             {
-                                SetManagedRoot(Spill(argumentSpills[i]), active: true);
+                                SetManagedRoot(argumentValueSlot, active: true);
                             }
                             var formal = call.ParameterIndex(i);
                             var formalSlot = formal
@@ -8968,7 +10019,7 @@ internal sealed partial class PeCompiler
                                     formalVariable.Type, _program))
                             {
                                 SetManagedValueRoots(
-                                    Spill(argumentSpills[i]), formalVariable.Type, active: true);
+                                    argumentValueSlot, formalVariable.Type, active: true);
                             }
                         }
                         ClearNormalBackingSpillRoots(
@@ -9037,7 +10088,9 @@ internal sealed partial class PeCompiler
                     }
                     else
                     {
-                        LoadValue(Spill(argumentSpills[argumentIndex]), call.Arguments[argumentIndex].Type);
+                        LoadValue(SpillOffsetForType(argumentSpills[argumentIndex],
+                            call.Arguments[argumentIndex].Type),
+                            call.Arguments[argumentIndex].Type);
                     }
                     _code.StoreOutgoing64(32 + (8 * (i + hidden - 4)));
                 }
@@ -9052,7 +10105,9 @@ internal sealed partial class PeCompiler
                     }
                     else
                     {
-                        LoadValue(Spill(argumentSpills[argumentIndex]), call.Arguments[argumentIndex].Type);
+                        LoadValue(SpillOffsetForType(argumentSpills[argumentIndex],
+                            call.Arguments[argumentIndex].Type),
+                            call.Arguments[argumentIndex].Type);
                     }
                     var argumentType = call.Arguments[argumentIndex].Type;
                     var isAddress = IsImplicitReferenceArgument(call, argumentIndex)
@@ -9078,7 +10133,7 @@ internal sealed partial class PeCompiler
                 }
                 if (hiddenReturn != 0)
                 {
-                    _code.Address(Spill(spill));
+                    _code.Address(resultSlot);
                     _code.MoveArgument(0, true);
                 }
                 EmitTargetCall(call.Function);
@@ -9092,16 +10147,21 @@ internal sealed partial class PeCompiler
                 }
                 else if (call.Type == PrimitiveType.Float128)
                 {
-                    _code.StoreFloating128Return(Spill(spill));
-                    _code.Address(Spill(spill));
+                    _code.StoreFloating128Return(resultSlot);
+                    _code.Address(resultSlot);
                 }
                 else if (nativeAbi)
                 {
                     NormalizeNativeNarrowReturn(call.Type);
                 }
+                if (IsTaggedOptionalValueType(call.Type)
+                    && !IsIndirect(call.Type))
+                {
+                    NormalizeTaggedOptionalAccumulator();
+                }
                 if (hiddenReturn != 0)
                 {
-                    _code.Address(Spill(spill));
+                    _code.Address(resultSlot);
                 }
                 var hasOut = false;
                 foreach (var argument in call.Arguments)
@@ -9119,19 +10179,27 @@ internal sealed partial class PeCompiler
                     }
                     else if (call.Type != PrimitiveType.Void && !IsIndirect(call.Type))
                     {
-                        StoreValue(Spill(spill), call.Type);
+                        StoreValue(resultSlot, call.Type);
                     }
                     for (var i = 0; i < call.Arguments.Length; i++)
                     {
                         if (call.Arguments[i] is BoundOutArgument output)
                         {
-                            var scratch = Spill(auxiliarySpills[i]);
+                            var scratch = SpillOffsetForType(
+                                auxiliarySpills[i], output.Type);
                             var destination = _program.Functions[_currentFunction].Variables[output.Variable].IsOut
                                 ? OutSlot(output.Variable) : Slot(output.Variable);
                             if (IsIndirect(output.Type))
                             {
                                 _code.Address(scratch);
-                                CopyToFrame(destination, Size(output.Type));
+                                if (ContainsTaggedOptionalValue(output.Type))
+                                {
+                                    StoreValue(destination, output.Type);
+                                }
+                                else
+                                {
+                                    CopyToFrame(destination, Size(output.Type));
+                                }
                                 if (IsUnique(output.Type))
                                 {
                                     _code.Set(_liveSlots[_currentFunction][output.Variable]);
@@ -9181,11 +10249,11 @@ internal sealed partial class PeCompiler
                     {
                         if (IsIndirect(call.Type))
                         {
-                            _code.Address(Spill(spill));
+                            _code.Address(resultSlot);
                         }
                         else
                         {
-                            LoadValue(Spill(spill), call.Type);
+                            LoadValue(resultSlot, call.Type);
                         }
                     }
                 }
@@ -9205,7 +10273,9 @@ internal sealed partial class PeCompiler
                 {
                     if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                     {
-                        SetManagedRoot(Spill(argumentSpills[i]), active: false);
+                        SetManagedRoot(SpillOffsetForType(
+                            argumentSpills[i], call.Arguments[i].Type),
+                            active: false);
                         if (call.Arguments[i] is BoundOutArgument)
                         {
                             SetManagedRoot(Spill(auxiliarySpills[i]), active: false);
@@ -9221,7 +10291,9 @@ internal sealed partial class PeCompiler
                             formalVariable.Type, _program))
                     {
                         SetManagedValueRoots(
-                            Spill(argumentSpills[i]), formalVariable.Type, active: false);
+                            SpillOffsetForType(argumentSpills[i],
+                                call.Arguments[i].Type),
+                            formalVariable.Type, active: false);
                     }
                 }
                 if (preserveNormalCallResult)

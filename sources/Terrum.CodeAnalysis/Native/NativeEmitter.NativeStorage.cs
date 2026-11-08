@@ -695,11 +695,24 @@ internal sealed partial class PeCompiler
         StoreValue(replacement, type);
 
         _code.Load64(Spill(spill));
-        CopyToFrame(oldReplacement, Size(type));
+        if (ContainsTaggedOptionalValue(type))
+        {
+            _code.AddressToRdx(oldReplacement);
+            CopyNativeValueFromAccumulatorToPointer(type);
+        }
+        else
+        {
+            CopyToFrame(oldReplacement, Size(type));
+        }
         EmitDropValue(oldReplacement, type);
 
         _code.Load64(Spill(spill), destinationRegister: true);
         LoadValue(replacement, type);
+        if (ContainsTaggedOptionalValue(type))
+        {
+            CopyNativeValueFromAccumulatorToPointer(type);
+            return;
+        }
         if (IsIndirect(type))
         {
             _code.CopyMemory(Size(type));
@@ -740,6 +753,12 @@ internal sealed partial class PeCompiler
         }
         _code.Store64(Spill(spill));
         Expression(value, spill + 1);
+        if (ContainsTaggedOptionalValue(value.Type))
+        {
+            _code.Load64(Spill(spill), destinationRegister: true);
+            CopyNativeValueFromAccumulatorToPointer(value.Type);
+            return;
+        }
         if (IsIndirect(value.Type))
         {
             _code.Load64(Spill(spill), destinationRegister: true);
@@ -862,6 +881,116 @@ internal sealed partial class PeCompiler
         }
     }
 
+    private void EmitNativeFixedArrayOptionalAssignment(
+        BoundOptionalAssignment assignment, int spill)
+    {
+        switch (assignment.Place)
+        {
+            case BoundNativeFixedArrayElement element:
+                EmitNativeFixedArrayElementAddress(element.Variable,
+                    element.FieldPlace, element.Index, spill,
+                    element.Layout.ElementCount,
+                    element.Layout.ElementStride);
+                break;
+            case BoundNativeFixedArrayPathElement path:
+                EmitNativeFixedArrayPathAddress(path.Variable,
+                    path.Projections, spill,
+                    fieldPlace: path.FieldPlace);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "A verified optional fixed-array assignment has no array place.");
+        }
+
+        _code.Store64(Spill(spill));
+        if (IsTaggedOptionalValueType(assignment.Place.Type))
+        {
+            _code.LoadPointerField(0, 1);
+            _code.Bytes(0x85, 0xC0);
+        }
+        else if (IsOptionalValueType(assignment.Place.Type)
+            && GetOptionalValueLayout(assignment.Place.Type).UsesNullNiche)
+        {
+            _code.LoadPointerField(0, sizeof(ulong));
+            _code.Bytes(0x48, 0x85, 0xC0);
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "A verified optional fixed-array assignment has no supported representation.");
+        }
+
+        var present = _code.JumpIf(0x85);
+        Expression(assignment.Value, spill + 1);
+        _code.Load64(Spill(spill), destinationRegister: true);
+        if (IsTaggedOptionalValueType(assignment.Place.Type))
+        {
+            StoreTaggedOptionalValueToPointer(assignment.Place.Type);
+        }
+        else
+        {
+            _code.StorePointerField(Size(assignment.Place.Type));
+        }
+        _code.PatchRelative(present, _code.Position);
+    }
+
+    private void EmitNativeStructOptionalAssignment(
+        BoundOptionalAssignment assignment, BoundFieldRead field,
+        int spill)
+    {
+        var rooted = UpdateAddress(field, spill);
+        var addressSlot = rooted ? spill + 1 : spill;
+        _code.Store64(Spill(addressSlot));
+
+        var layout = IsOptionalValueType(field.Type)
+            ? GetOptionalValueLayout(field.Type)
+            : throw new InvalidOperationException(
+                "A verified struct optional assignment has no optional layout.");
+        _code.Load64(Spill(addressSlot));
+        _code.LoadPointerField(0,
+            layout.UsesNullNiche ? Size(field.Type) : 1);
+        if (layout.UsesNullNiche)
+        {
+            _code.Bytes(0x48, 0x85, 0xC0);
+        }
+        else
+        {
+            _code.Bytes(0x85, 0xC0);
+        }
+        var present = _code.JumpIf(0x85);
+
+        var fallbackBegin = _code.Position;
+        var fallbackFunclet = -1;
+        if (rooted && _checkedExceptions && !_emittingFunclet)
+        {
+            fallbackFunclet = _funclets.Count;
+            _funclets.Add((new BoundBlock([], assignment.Span),
+                _currentFunction, 0, 0));
+            _managedStagedRoots.Add(fallbackFunclet, [Spill(spill)]);
+        }
+        Expression(assignment.Value, addressSlot + 1);
+        _code.Load64(Spill(addressSlot), destinationRegister: true);
+        if (ContainsTaggedOptionalValue(field.Type))
+        {
+            CopyNativeValueFromAccumulatorToPointer(field.Type);
+        }
+        else
+        {
+            _code.StorePointerField(Size(field.Type));
+        }
+        if (fallbackFunclet >= 0)
+        {
+            _code.Byte(0x90);
+            _scopes[_currentFunction].Add(new NativeExceptionScope(
+                fallbackBegin, _code.Position, -fallbackFunclet - 1, 0));
+        }
+        _code.PatchRelative(present, _code.Position);
+        if (rooted)
+        {
+            SetManagedRoot(Spill(spill), active: false);
+        }
+    }
+
     private void EmitNativeFixedArrayWrite(BoundNativeFixedArrayWrite write, int spill)
     {
         EmitNativeFixedArrayElementAddress(write.Variable,
@@ -881,6 +1010,12 @@ internal sealed partial class PeCompiler
             return;
         }
         Expression(write.Value, spill + 1);
+        if (ContainsTaggedOptionalValue(write.Value.Type))
+        {
+            _code.Load64(Spill(spill), destinationRegister: true);
+            CopyNativeValueFromAccumulatorToPointer(write.Value.Type);
+            return;
+        }
         if (Size(write.Value.Type) == 0)
         {
             return;
@@ -970,6 +1105,12 @@ internal sealed partial class PeCompiler
         }
 
         Expression(write.Value, spill + 1);
+        if (ContainsTaggedOptionalValue(write.Value.Type))
+        {
+            _code.Load64(Spill(spill), destinationRegister: true);
+            CopyNativeValueFromAccumulatorToPointer(write.Value.Type);
+            return;
+        }
         if (Size(write.Value.Type) == 0)
         {
             return;
@@ -1016,7 +1157,8 @@ internal sealed partial class PeCompiler
         int destinationOffset, int scratchSpill)
     {
         ValidateNativeFixedArrayRepeatInitialization(initialization);
-        var seedScratchOffset = Spill(scratchSpill);
+        var seedScratchOffset = SpillOffsetForType(
+            scratchSpill, initialization.Layout.ElementType);
         EmitNativeFixedArraySeedAtAddress(initialization.Seed,
             seedScratchOffset,
             scratchSpill + NativeFixedArrayScratchSlots(
@@ -1030,7 +1172,8 @@ internal sealed partial class PeCompiler
         int destinationAddressSlot, int scratchSpill)
     {
         ValidateNativeFixedArrayRepeatInitialization(initialization);
-        var seedScratchOffset = Spill(scratchSpill);
+        var seedScratchOffset = SpillOffsetForType(
+            scratchSpill, initialization.Layout.ElementType);
         EmitNativeFixedArraySeedAtAddress(initialization.Seed,
             seedScratchOffset,
             scratchSpill + NativeFixedArrayScratchSlots(
@@ -1056,11 +1199,27 @@ internal sealed partial class PeCompiler
         }
 
         Expression(seed, spill);
+        if (ContainsTaggedOptionalValue(seed.Type))
+        {
+            _code.AddressToRdx(destinationOffset);
+            CopyNativeValueFromAccumulatorToPointer(seed.Type);
+            return;
+        }
+        if (NativeFixedArrayTypes.IsType(seed.Type))
+        {
+            _code.AddressToRdx(destinationOffset);
+            CopyNativeFixedArrayToPointer(seed.Type);
+            return;
+        }
         if (Size(seed.Type) == 0)
         {
             return;
         }
-        if (IsIndirect(seed.Type))
+        if (IsTaggedOptionalValueType(seed.Type))
+        {
+            StoreValue(destinationOffset, seed.Type);
+        }
+        else if (IsIndirect(seed.Type))
         {
             _code.AddressToRdx(destinationOffset);
             _code.CopyMemory(Size(seed.Type));
@@ -1078,6 +1237,85 @@ internal sealed partial class PeCompiler
         var elementStride = checked((int)layout.ElementStride);
         if (layout.ElementCount == 0 || elementStride == 0)
         {
+            return;
+        }
+
+        if (NativeFixedArrayTypes.IsType(layout.ElementType)
+            && TryGetFlatNativeFixedArrayElement(layout.ElementType,
+                out var nestedElementType,
+                out var nestedElementCount, out var nestedElementStride)
+            && ContainsTaggedOptionalValue(nestedElementType))
+        {
+            if (layout.ElementStride
+                != (ulong)Size(layout.ElementType))
+            {
+                throw new InvalidOperationException(
+                    "A repeated nested fixed-array seed has an invalid stride.");
+            }
+
+            _code.Address(seedOffset);
+            _code.Bytes(0x49, 0x89, 0xC3); // r11 = seed address
+            if (destinationIsAddress)
+            {
+                _code.Load64(destinationOffset);
+            }
+            else
+            {
+                _code.Address(destinationOffset);
+            }
+            _code.Bytes(0x49, 0x89, 0xC1); // r9 = destination address
+            _code.Bytes(0x49, 0xBA);
+            _code.Int64(unchecked((long)layout.ElementCount));
+            var outerLoop = _code.Position;
+            _code.Bytes(0x4D, 0x85, 0xD2);
+            var outerDone = _code.JumpIf(0x84);
+            _code.Bytes(0x49, 0xB8);
+            _code.Int64(unchecked((long)nestedElementCount));
+            var innerLoop = _code.Position;
+            _code.Bytes(0x4D, 0x85, 0xC0);
+            var innerDone = _code.JumpIf(0x84);
+            CopyNativeValueAtOffsets(nestedElementType, 0, 0,
+                copyLoopDepth: 1);
+            _code.Bytes(0x49, 0x81, 0xC1);
+            _code.Int32(nestedElementStride);
+            _code.Bytes(0x49, 0x81, 0xC3);
+            _code.Int32(nestedElementStride);
+            _code.Bytes(0x49, 0xFF, 0xC8);
+            _code.PatchRelative(_code.Jump(), innerLoop);
+            _code.PatchRelative(innerDone, _code.Position);
+            _code.Bytes(0x49, 0x81, 0xEB);
+            _code.Int32(elementStride);
+            _code.Bytes(0x49, 0xFF, 0xCA);
+            _code.PatchRelative(_code.Jump(), outerLoop);
+            _code.PatchRelative(outerDone, _code.Position);
+            return;
+        }
+
+        if (ContainsTaggedOptionalValue(layout.ElementType))
+        {
+            _code.Address(seedOffset);
+            _code.Bytes(0x49, 0x89, 0xC3); // r11 = seed address
+            if (destinationIsAddress)
+            {
+                _code.Load64(destinationOffset);
+            }
+            else
+            {
+                _code.Address(destinationOffset);
+            }
+            _code.Bytes(0x49, 0x89, 0xC1); // r9 = destination address
+            _code.Bytes(0x49, 0xBA);
+            _code.Int64(unchecked((long)layout.ElementCount));
+            var optionalLoop = _code.Position;
+            _code.Bytes(0x4D, 0x85, 0xD2);
+            var optionalDone = _code.JumpIf(0x84);
+            CopyNativeValueAtOffsets(layout.ElementType, 0, 0,
+                copyLoopDepth: 1);
+            _code.Bytes(0x49, 0x81, 0xC1);
+            _code.Int32(elementStride);
+            _code.Bytes(0x49, 0xFF, 0xCA); // dec r10
+            _code.PatchRelative(_code.Jump(), optionalLoop);
+            _code.PatchRelative(optionalDone, _code.Position);
             return;
         }
 
@@ -1107,6 +1345,459 @@ internal sealed partial class PeCompiler
         _code.PatchRelative(done, _code.Position);
     }
 
+    private bool TryGetFlatNativeFixedArrayElement(
+        PrimitiveType arrayType, out PrimitiveType elementType,
+        out ulong elementCount, out int elementStride)
+    {
+        elementType = default;
+        elementCount = 1;
+        elementStride = 0;
+        var currentType = arrayType;
+        BoundNativeFixedArrayLayout? rootLayout = null;
+        while (NativeFixedArrayTypes.IsType(currentType))
+        {
+            if (!NativeFixedArrayContract.TryGetLayout(currentType,
+                    _program.Structures, _program.NativeFixedArrayTypes,
+                    out var layout, _program.CheckedReferenceTypes))
+            {
+                throw new InvalidOperationException(
+                    "A verified fixed-array copy has no target layout.");
+            }
+
+            rootLayout ??= layout;
+            elementCount = checked(elementCount * layout.ElementCount);
+            currentType = layout.ElementType;
+        }
+
+        elementType = currentType;
+        elementStride = Size(currentType);
+        return rootLayout is { } root
+            && checked(elementCount * (ulong)elementStride)
+                == root.ByteExtent;
+    }
+
+    private void CopyNativeFixedArrayToPointer(PrimitiveType arrayType)
+    {
+        if (ContainsTaggedOptionalValue(arrayType))
+        {
+            _code.Bytes(0x49, 0x89, 0xC3); // r11 = source address
+            _code.Bytes(0x49, 0x89, 0xD1); // r9 = destination address
+            CopyNativeFixedArrayAtOffsets(arrayType, 0, 0,
+                copyLoopDepth: 0);
+        }
+        else
+        {
+            _code.CopyMemory(Size(arrayType));
+        }
+    }
+
+    private void CopyNativeValueToPointer(PrimitiveType type)
+    {
+        _code.Bytes(0x49, 0x89, 0xC3); // r11 = source address
+        _code.Bytes(0x49, 0x89, 0xD1); // r9 = destination address
+        CopyNativeValueAtOffsets(type, 0, 0, copyLoopDepth: 0);
+    }
+
+    private void CopyNativeValueFromAccumulatorToPointer(
+        PrimitiveType type)
+    {
+        if (!IsIndirect(type))
+        {
+            var scratch = _typedCopyScratchBases[_currentFunction];
+            if (scratch < 0)
+            {
+                throw new InvalidOperationException(
+                    "A direct optional-aware value copy has no staging storage.");
+            }
+
+            _code.Store64(scratch);
+            _code.Address(scratch);
+        }
+
+        CopyNativeValueToPointer(type);
+    }
+
+    private void CopyNativeValueAtOffsets(PrimitiveType type,
+        int sourceOffset, int destinationOffset, int copyLoopDepth)
+    {
+        if (type == PrimitiveType.Void || Size(type) == 0)
+        {
+            return;
+        }
+
+        if (TryGetTaggedOptionalValueLayout(type, out var optionalLayout))
+        {
+            LoadOptionalChunkFromR11(sourceOffset, 1, useR10: false);
+            _code.Bytes(0x85, 0xC0);
+            var absent = _code.JumpIf(0x84);
+            var payloadSize = Size(optionalLayout.PayloadType);
+            if (payloadSize != 0)
+            {
+                var payloadSourceOffset = checked(sourceOffset
+                    + NativeLayoutOffset(optionalLayout.PayloadOffset));
+                var payloadDestinationOffset = checked(destinationOffset
+                    + NativeLayoutOffset(optionalLayout.PayloadOffset));
+                CopyNativeValueAtOffsets(optionalLayout.PayloadType,
+                    payloadSourceOffset, payloadDestinationOffset,
+                    copyLoopDepth);
+            }
+            StoreNativeCopyTag(destinationOffset, present: true);
+            var present = _code.Jump();
+            _code.PatchRelative(absent, _code.Position);
+            StoreNativeCopyTag(destinationOffset, present: false);
+            _code.PatchRelative(present, _code.Position);
+            return;
+        }
+
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            EmitRawNativeValueCopy(type, sourceOffset, destinationOffset);
+            return;
+        }
+
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            CopyNativeFixedArrayAtOffsets(type, sourceOffset,
+                destinationOffset, copyLoopDepth);
+            return;
+        }
+
+        if (IsStruct(type))
+        {
+            var structureIndex = (int)type - 100;
+            if ((uint)structureIndex >= (uint)_program.Structures.Length)
+            {
+                throw new InvalidOperationException(
+                    "A verified aggregate copy has no structural type row.");
+            }
+            var structure = _program.Structures[structureIndex];
+            if (!structure.IsUnion)
+            {
+                foreach (var field in structure.Fields)
+                {
+                    if (Size(field.Type) == 0)
+                    {
+                        continue;
+                    }
+
+                    CopyNativeValueAtOffsets(field.Type,
+                        checked(sourceOffset
+                            + NativeLayoutOffset(field.Offset)),
+                        checked(destinationOffset
+                            + NativeLayoutOffset(field.Offset)),
+                        copyLoopDepth);
+                }
+                return;
+            }
+        }
+
+        EmitRawNativeValueCopy(type, sourceOffset, destinationOffset);
+    }
+
+    private void EmitRawNativeValueCopy(PrimitiveType type,
+        int sourceOffset, int destinationOffset)
+    {
+        if (Size(type) == 0)
+        {
+            return;
+        }
+
+        _code.Bytes(0x4C, 0x89, 0xD8); // rax = source base
+        if (sourceOffset != 0)
+        {
+            _code.PointerOffset(sourceOffset);
+        }
+        _code.Bytes(0x4C, 0x89, 0xCA); // rdx = destination base
+        AddToRdx(destinationOffset);
+        _code.CopyMemory(Size(type));
+    }
+
+    private void CopyNativeFixedArrayAtOffsets(PrimitiveType arrayType,
+        int sourceOffset, int destinationOffset, int copyLoopDepth)
+    {
+        if (!TryGetFlatNativeFixedArrayElement(arrayType,
+                out var elementType, out var elementCount,
+                out var elementStride))
+        {
+            _code.Bytes(0x4C, 0x89, 0xD8);
+            if (sourceOffset != 0)
+            {
+                _code.PointerOffset(sourceOffset);
+            }
+            _code.Bytes(0x4C, 0x89, 0xCA);
+            AddToRdx(destinationOffset);
+            _code.CopyMemory(Size(arrayType));
+            return;
+        }
+        if (elementCount == 0)
+        {
+            return;
+        }
+        if ((uint)copyLoopDepth
+            >= (uint)_typedCopyScratchDepths[_currentFunction])
+        {
+            throw new InvalidOperationException(
+                "A verified typed copy exceeds its reserved loop depth.");
+        }
+
+        var scratch = checked(_typedCopyScratchBases[_currentFunction]
+            + 32 + (copyLoopDepth * 32));
+        StoreNativeCopyLoopRegisters(scratch);
+        if (sourceOffset != 0)
+        {
+            _code.Bytes(0x49, 0x81, 0xC3);
+            _code.Int32(sourceOffset);
+        }
+        if (destinationOffset != 0)
+        {
+            _code.Bytes(0x49, 0x81, 0xC1);
+            _code.Int32(destinationOffset);
+        }
+        _code.Bytes(0x49, 0xBA);
+        _code.Int64(unchecked((long)elementCount));
+        var loop = _code.Position;
+        _code.Bytes(0x4D, 0x85, 0xD2);
+        var done = _code.JumpIf(0x84);
+        CopyNativeValueAtOffsets(elementType, 0, 0,
+            checked(copyLoopDepth + 1));
+        _code.Bytes(0x49, 0x81, 0xC3);
+        _code.Int32(elementStride);
+        _code.Bytes(0x49, 0x81, 0xC1);
+        _code.Int32(elementStride);
+        _code.Bytes(0x49, 0xFF, 0xCA);
+        _code.PatchRelative(_code.Jump(), loop);
+        _code.PatchRelative(done, _code.Position);
+        RestoreNativeCopyLoopRegisters(scratch);
+    }
+
+    private void StoreNativeCopyTag(int destinationOffset, bool present)
+    {
+        _code.Bytes(0x4C, 0x89, 0xCA); // rdx = destination base
+        AddToRdx(destinationOffset);
+        if (present)
+        {
+            _code.Byte(0xB8);
+            _code.Int32(1);
+        }
+        else
+        {
+            _code.Bytes(0x31, 0xC0);
+        }
+        _code.StorePointerField(1);
+    }
+
+    private void StoreNativeCopyLoopRegisters(int scratch)
+    {
+        _code.Address(scratch);
+        _code.Bytes(0x4C, 0x89, 0x18); // [rax] = r11
+        _code.Address(scratch + sizeof(ulong));
+        _code.Bytes(0x4C, 0x89, 0x08); // [rax] = r9
+        _code.Address(scratch + (2 * sizeof(ulong)));
+        _code.Bytes(0x4C, 0x89, 0x10); // [rax] = r10
+    }
+
+    private void RestoreNativeCopyLoopRegisters(int scratch)
+    {
+        _code.Load64(scratch);
+        _code.Bytes(0x49, 0x89, 0xC3); // r11 = rax
+        _code.Load64(scratch + sizeof(ulong));
+        _code.Bytes(0x49, 0x89, 0xC1); // r9 = rax
+        _code.Load64(scratch + (2 * sizeof(ulong)));
+        _code.Bytes(0x49, 0x89, 0xC2); // r10 = rax
+    }
+
+    private bool TryGetTaggedOptionalValueLayout(PrimitiveType type,
+        out OptionalValueLayout layout)
+    {
+        if (CheckedReferenceTypeContract.IsOptionalValueType(
+                type, _program.CheckedReferenceTypes)
+            && ValueLayout.TryGetOptionalValueLayout(type,
+                _program.Structures, _program.CheckedReferenceTypes,
+                _program.NativeLoweringAgreement,
+                _program.NativeFixedArrayTypes, out layout)
+            && !layout.UsesNullNiche)
+        {
+            return true;
+        }
+
+        layout = default;
+        return false;
+    }
+
+    private bool ContainsTaggedOptionalValue(PrimitiveType type)
+        => ContainsTaggedOptionalValue(type, []);
+
+    private bool ContainsTaggedOptionalValue(PrimitiveType type,
+        HashSet<PrimitiveType> visiting)
+    {
+        if (TryGetTaggedOptionalValueLayout(type, out _))
+        {
+            return true;
+        }
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            return false;
+        }
+        if (!visiting.Add(type))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                if (!NativeFixedArrayContract.TryGetLayout(type,
+                        _program.Structures, _program.NativeFixedArrayTypes,
+                        out var layout, _program.CheckedReferenceTypes))
+                {
+                    throw new InvalidOperationException(
+                        "A verified fixed-array type has no target layout.");
+                }
+
+                return ContainsTaggedOptionalValue(layout.ElementType,
+                    visiting);
+            }
+
+            if (BoundEnumTypes.IsType(type)
+                || NativePointerTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type)
+                || BoundGenericNominalTypeTypes.IsType(type)
+                || ManagedClassTypes.IsClass(type))
+            {
+                return false;
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex < 0
+                || structureIndex >= _program.Structures.Length)
+            {
+                return false;
+            }
+
+            foreach (var field in _program.Structures[structureIndex].Fields)
+            {
+                if (ContainsTaggedOptionalValue(field.Type, visiting))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            _ = visiting.Remove(type);
+        }
+    }
+
+    private int NativeTypedCopyDepthForFunction(BoundFunction function,
+        out bool needsScratch)
+    {
+        var hasCopyScratch = false;
+        var maximumDepth = 0;
+
+        void Include(PrimitiveType type)
+        {
+            if (!ContainsTaggedOptionalValue(type))
+            {
+                return;
+            }
+
+            hasCopyScratch = true;
+            maximumDepth = Math.Max(maximumDepth,
+                NativeTypedCopyLoopDepth(type, []));
+        }
+
+        Include(function.ReturnType);
+        foreach (var variable in function.Variables)
+        {
+            Include(variable.Type);
+        }
+
+        if (function.Body is not null
+            && !BoundTreeTraversal.VisitExpressions(function.Body,
+                expression => Include(expression.Type)))
+        {
+            throw new InvalidOperationException(
+                "Native typed-copy scratch traversal is incomplete.");
+        }
+
+        if (function.IndexedBody is TrRmScalarGraph indexed)
+        {
+            foreach (var type in indexed.Types)
+            {
+                Include(type);
+            }
+        }
+
+        needsScratch = hasCopyScratch;
+        return maximumDepth;
+    }
+
+    private int NativeTypedCopyLoopDepth(PrimitiveType type,
+        HashSet<PrimitiveType> visiting)
+    {
+        if (!visiting.Add(type))
+        {
+            return 0;
+        }
+
+        try
+        {
+            if (TryGetTaggedOptionalValueLayout(type, out var optionalLayout))
+            {
+                return NativeTypedCopyLoopDepth(optionalLayout.PayloadType,
+                    visiting);
+            }
+
+            if (CheckedReferenceTypes.IsType(type))
+            {
+                return 0;
+            }
+
+            if (BoundEnumTypes.IsType(type)
+                || NativePointerTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type)
+                || BoundGenericNominalTypeTypes.IsType(type)
+                || ManagedClassTypes.IsClass(type))
+            {
+                return 0;
+            }
+
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                if (!TryGetFlatNativeFixedArrayElement(type,
+                        out var elementType, out _, out _))
+                {
+                    return 0;
+                }
+
+                return checked(1 + NativeTypedCopyLoopDepth(elementType,
+                    visiting));
+            }
+
+            var maximumDepth = 0;
+            var structureIndex = (int)type - 100;
+            if (structureIndex >= 0
+                && structureIndex < _program.Structures.Length)
+            {
+                foreach (var field in _program.Structures[
+                             structureIndex].Fields)
+                {
+                    maximumDepth = Math.Max(maximumDepth,
+                        NativeTypedCopyLoopDepth(field.Type, visiting));
+                }
+            }
+
+            return maximumDepth;
+        }
+        finally
+        {
+            _ = visiting.Remove(type);
+        }
+    }
+
     private void ValidateNativeFixedArrayRepeatInitialization(
         BoundNativeFixedArrayRepeatInitialization initialization)
     {
@@ -1123,7 +1814,7 @@ internal sealed partial class PeCompiler
     }
 
     private int NativeFixedArrayScratchSlots(PrimitiveType type)
-        => Math.Max(1, checked((int)(((long)Size(type) + 7) / 8)));
+        => SpillSlotsForType(type);
 
     private void EmitNativeFixedArrayInitializationAtAddress(
         BoundNativeFixedArrayInitialization initialization,
@@ -1155,6 +1846,20 @@ internal sealed partial class PeCompiler
             }
 
             Expression(element, scratchSpill + 1);
+            if (ContainsTaggedOptionalValue(element.Type))
+            {
+                _code.Load64(Spill(scratchSpill),
+                    destinationRegister: true);
+                CopyNativeValueFromAccumulatorToPointer(element.Type);
+                continue;
+            }
+            if (NativeFixedArrayTypes.IsType(element.Type))
+            {
+                _code.Load64(Spill(scratchSpill),
+                    destinationRegister: true);
+                CopyNativeFixedArrayToPointer(element.Type);
+                continue;
+            }
             if (stride == 0)
             {
                 continue;
@@ -1227,7 +1932,17 @@ internal sealed partial class PeCompiler
             {
                 continue;
             }
-            if (IsIndirect(element.Type))
+            if (ContainsTaggedOptionalValue(element.Type))
+            {
+                _code.AddressToRdx(elementDestination);
+                CopyNativeValueFromAccumulatorToPointer(element.Type);
+            }
+            else if (NativeFixedArrayTypes.IsType(element.Type))
+            {
+                _code.AddressToRdx(elementDestination);
+                CopyNativeFixedArrayToPointer(element.Type);
+            }
+            else if (IsIndirect(element.Type))
             {
                 CopyToFrame(elementDestination, checked((int)stride));
             }
