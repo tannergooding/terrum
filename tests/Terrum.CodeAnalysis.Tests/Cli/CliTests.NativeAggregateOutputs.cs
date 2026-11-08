@@ -2,8 +2,10 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
@@ -125,10 +127,8 @@ internal sealed partial class CliTests
 
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
-    public async Task NativeAggregateOutputPublishesOnlyAfterSuccessfulStatusAsync(string policy)
+    public async Task CliNativeAggregateOutputRequiresOutputRegistrationAsync(string policy)
     {
-        Assume.That(OperatingSystem.IsWindows()
-            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         const string Source = """
             [Blittable]
             [Layout(LayoutKind.Sequential)]
@@ -179,13 +179,18 @@ internal sealed partial class CliTests
             await File.WriteAllTextAsync(nativeManifest,
                 CreateNativeCoreManifest()).ConfigureAwait(false);
             var (exitCode, output, error) = await RunAsync(
-                Encoding.UTF8.GetBytes(Source), "jit", "-", "--runtime",
+                Encoding.UTF8.GetBytes(Source), "analyze", "-", "--runtime",
                 policy, "--native-core-manifest", nativeManifest,
                 "--layout-core-manifest", layoutManifest, "--json")
                 .ConfigureAwait(false);
 
-            Assert.That(exitCode, Is.EqualTo(42), output + error);
+            Assert.That(exitCode, Is.EqualTo(1), output + error);
             Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")
+                .EnumerateArray().Any(static diagnostic =>
+                    diagnostic.GetProperty("code").GetString() == "TRM3030"),
+                Is.True, output);
         }
         finally
         {
@@ -196,10 +201,9 @@ internal sealed partial class CliTests
 
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
-    public async Task NativeScalarAndPointerOutputCellsUseExactStorageAsync(string policy)
+    public async Task CliScalarAndPointerNativeOutputRequiresOutputRegistrationAsync(
+        string policy)
     {
-        Assume.That(OperatingSystem.IsWindows()
-            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         const string Source = """
             [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
             [param(ticks): Terrum.Interop.NativeOutput(
@@ -236,12 +240,17 @@ internal sealed partial class CliTests
             await File.WriteAllTextAsync(nativeManifest,
                 CreateNativeCoreManifest()).ConfigureAwait(false);
             var (exitCode, output, error) = await RunAsync(
-                Encoding.UTF8.GetBytes(Source), "jit", "-", "--runtime",
+                Encoding.UTF8.GetBytes(Source), "analyze", "-", "--runtime",
                 policy, "--native-core-manifest", nativeManifest, "--json")
                 .ConfigureAwait(false);
 
-            Assert.That(exitCode, Is.EqualTo(42), output + error);
+            Assert.That(exitCode, Is.EqualTo(1), output + error);
             Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")
+                .EnumerateArray().Any(static diagnostic =>
+                    diagnostic.GetProperty("code").GetString() == "TRM3030"),
+                Is.True, output);
         }
         finally
         {

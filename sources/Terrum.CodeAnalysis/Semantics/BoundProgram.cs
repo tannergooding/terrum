@@ -514,6 +514,11 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
 
+    internal NativeOutputCoreRegistrationSet? NativeOutputCoreRegistration
+    {
+        get; init;
+    }
+
     internal LayoutCoreRegistrationSet? LayoutCoreRegistration { get; init; }
 
     internal StaticInitializationCoreRegistrationSet?

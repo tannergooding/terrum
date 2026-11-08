@@ -33,7 +33,9 @@ public sealed class CompilationReference
         ImmutableArray<CoreContractFailureIdentitySelection>
             coreContractFailureIdentitySelections = default,
         LazyInitializationCoreRegistrationSet?
-            lazyInitializationCoreRegistration = null)
+            lazyInitializationCoreRegistration = null,
+        NativeOutputCoreRegistrationSet?
+            nativeOutputCoreRegistration = null)
     {
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
@@ -90,6 +92,13 @@ public sealed class CompilationReference
                 "The selected LazyInitialization Core registration is invalid.",
                 nameof(lazyInitializationCoreRegistration));
         }
+        if (nativeOutputCoreRegistration is not null
+            && !nativeOutputCoreRegistration.IsValid())
+        {
+            throw new ArgumentException(
+                "The selected NativeOutput Core registration is invalid.",
+                nameof(nativeOutputCoreRegistration));
+        }
         if (nativeCoreRegistration is not null && layoutCoreRegistration is not null
             && !ReferenceEquals(nativeCoreRegistration.ModuleBindings,
                 layoutCoreRegistration.ModuleBindings))
@@ -101,7 +110,16 @@ public sealed class CompilationReference
         var selectedBindings = nativeCoreRegistration?.ModuleBindings
             ?? layoutCoreRegistration?.ModuleBindings
             ?? staticInitializationCoreRegistration?.ModuleBindings
-            ?? lazyInitializationCoreRegistration?.ModuleBindings;
+            ?? lazyInitializationCoreRegistration?.ModuleBindings
+            ?? nativeOutputCoreRegistration?.ModuleBindings;
+        if (nativeOutputCoreRegistration is not null
+            && !ReferenceEquals(selectedBindings,
+                nativeOutputCoreRegistration.ModuleBindings))
+        {
+            throw new ArgumentException(
+                "The selected NativeOutput Core registration must share the provider binding snapshot.",
+                nameof(nativeOutputCoreRegistration));
+        }
         if ((layoutCoreRegistration is not null
                 && !ReferenceEquals(selectedBindings,
                     layoutCoreRegistration.ModuleBindings))
@@ -119,6 +137,15 @@ public sealed class CompilationReference
         if (!enumDefinitions.IsDefault && !BoundEnumTypes.IsValidTable(enumDefinitions))
         {
             throw new ArgumentException("The selected nominal enum declarations are invalid.",
+                nameof(enumDefinitions));
+        }
+        if (nativeOutputCoreRegistration is not null
+            && !BoundEnumTypes.ContainsNativeOutputRegistration(
+                enumDefinitions.IsDefault ? [] : enumDefinitions,
+                nativeOutputCoreRegistration))
+        {
+            throw new ArgumentException(
+                "The NativeOutputCondition enum is missing or incompatible.",
                 nameof(enumDefinitions));
         }
         if (!checkedReferenceTypes.IsDefault
@@ -194,6 +221,7 @@ public sealed class CompilationReference
             = staticInitializationCoreRegistration;
         LazyInitializationCoreRegistration
             = lazyInitializationCoreRegistration;
+        NativeOutputCoreRegistration = nativeOutputCoreRegistration;
         EnumDefinitions = enumDefinitions.IsDefault ? [] : enumDefinitions;
         CheckedReferenceTypes = checkedReferenceTypes.IsDefault ? [] : checkedReferenceTypes;
         Interfaces = interfaces.IsDefault ? [] : interfaces;
@@ -330,6 +358,9 @@ public sealed class CompilationReference
     internal LazyInitializationCoreRegistrationSet?
         LazyInitializationCoreRegistration { get; }
 
+    internal NativeOutputCoreRegistrationSet?
+        NativeOutputCoreRegistration { get; }
+
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; }
 
     internal ImmutableArray<CheckedReferenceTypeDefinition> CheckedReferenceTypes { get; }
@@ -393,6 +424,8 @@ public sealed class CompilationReference
             coreContractFailureIdentitySelections:
                 CoreContractFailureIdentitySelections,
             lazyInitializationCoreRegistration:
-                LazyInitializationCoreRegistration);
+                LazyInitializationCoreRegistration,
+            nativeOutputCoreRegistration:
+                NativeOutputCoreRegistration);
     }
 }

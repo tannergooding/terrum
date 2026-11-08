@@ -540,17 +540,6 @@ internal sealed class Parser
                     attribute.Add(ParseExpression());
                 }
             }
-            else if (attributeName is "Terrum.Interop.NativeOutput" or "NativeOutput")
-            {
-                attribute.Add(Expect(TokenKind.Identifier));
-                attribute.Add(Expect(TokenKind.Colon));
-                attribute.Add(Expect(TokenKind.Identifier));
-                while (Current.Kind == TokenKind.Dot)
-                {
-                    attribute.Add(TakeDot(qualified: true));
-                    attribute.Add(Expect(TokenKind.Identifier));
-                }
-            }
             else if (attributeName == "Terrum.Interop.NativeVTableMethod")
             {
                 attribute.Add(Expect(TokenKind.NumericLiteral));

@@ -75,11 +75,12 @@ internal sealed class NativeModuleTests
 
     private static BoundProgram CompileLibrary(
         string source,
-        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast,
+        bool includeNativeOutput = false)
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
-                policy));
+                policy, includeNativeOutput));
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = result.Program;
@@ -308,7 +309,8 @@ internal sealed class NativeModuleTests
             }
             """;
         var provider = NativeModuleCompiler.CreateProducer(
-            CompileLibrary(Source, boundPolicy), ["ReadCounter"], "CounterOutput", policy);
+                CompileLibrary(Source, boundPolicy, includeNativeOutput: true),
+                ["ReadCounter"], "CounterOutput", policy);
         var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse("int32 Main() { return ReadCounter(); }"),
             NativeModuleCompiler.CreateReference(provider), boundPolicy);

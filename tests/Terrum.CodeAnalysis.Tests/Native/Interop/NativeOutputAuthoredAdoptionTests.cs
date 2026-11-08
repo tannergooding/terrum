@@ -119,12 +119,13 @@ internal sealed class NativeOutputAuthoredAdoptionTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var nativeRegistration
-            = NativeCoreRegistrationTests.CreateRegistration();
+        var (nativeRegistration, outputRegistration)
+            = NativeOutputCoreRegistrationTests.CreateCombinedRegistrations();
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             new CompilationOptions {
                 RuntimePolicy = (BoundRuntimePolicy)policy,
                 NativeCoreRegistration = nativeRegistration,
+                NativeOutputCoreRegistration = outputRegistration,
                 LayoutCoreRegistration =
                     NativeCoreRegistrationTests.CreateLayoutRegistration(
                         nativeRegistration),
@@ -141,12 +142,13 @@ internal sealed class NativeOutputAuthoredAdoptionTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var nativeRegistration
-            = NativeCoreRegistrationTests.CreateRegistration();
+        var (nativeRegistration, outputRegistration)
+            = NativeOutputCoreRegistrationTests.CreateCombinedRegistrations();
         var compilation = Compilation.Create(SyntaxTree.Parse(ExceptionalSource),
             new CompilationOptions {
                 RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
                 NativeCoreRegistration = nativeRegistration,
+                NativeOutputCoreRegistration = outputRegistration,
                 LayoutCoreRegistration =
                     NativeCoreRegistrationTests.CreateLayoutRegistration(
                         nativeRegistration),
@@ -165,13 +167,14 @@ internal sealed class NativeOutputAuthoredAdoptionTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var nativeRegistration
-            = NativeCoreRegistrationTests.CreateRegistration();
+        var (nativeRegistration, outputRegistration)
+            = NativeOutputCoreRegistrationTests.CreateCombinedRegistrations();
         var compilation = Compilation.Create(
             SyntaxTree.Parse(FailedAcquisitionSource),
             new CompilationOptions {
                 RuntimePolicy = (BoundRuntimePolicy)policy,
                 NativeCoreRegistration = nativeRegistration,
+                NativeOutputCoreRegistration = outputRegistration,
                 LayoutCoreRegistration =
                     NativeCoreRegistrationTests.CreateLayoutRegistration(
                         nativeRegistration),
@@ -190,12 +193,13 @@ internal sealed class NativeOutputAuthoredAdoptionTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var nativeRegistration
-            = NativeCoreRegistrationTests.CreateRegistration();
+        var (nativeRegistration, outputRegistration)
+            = NativeOutputCoreRegistrationTests.CreateCombinedRegistrations();
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             new CompilationOptions {
                 RuntimePolicy = (BoundRuntimePolicy)policy,
                 NativeCoreRegistration = nativeRegistration,
+                NativeOutputCoreRegistration = outputRegistration,
                 LayoutCoreRegistration =
                     NativeCoreRegistrationTests.CreateLayoutRegistration(
                         nativeRegistration),
@@ -261,13 +265,15 @@ internal sealed class NativeOutputAuthoredAdoptionTests
                 NativeRuntimePolicy.CheckedExceptions,
             })
             {
-                var nativeRegistration
-                    = NativeCoreRegistrationTests.CreateRegistration();
+                var (nativeRegistration, outputRegistration)
+                    = NativeOutputCoreRegistrationTests
+                        .CreateCombinedRegistrations();
                 var compilation = Compilation.Create(
                     SyntaxTree.Parse(FailedAcquisitionSource),
                     new CompilationOptions {
                         RuntimePolicy = (BoundRuntimePolicy)policy,
                         NativeCoreRegistration = nativeRegistration,
+                        NativeOutputCoreRegistration = outputRegistration,
                         LayoutCoreRegistration =
                             NativeCoreRegistrationTests.CreateLayoutRegistration(
                                 nativeRegistration),

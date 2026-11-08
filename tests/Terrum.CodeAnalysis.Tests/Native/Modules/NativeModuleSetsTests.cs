@@ -36,26 +36,19 @@ internal sealed class NativeModuleSetsTests
         => Producer(source, [export], identity);
 
     private static byte[] Producer(string source, string[] exports, string identity)
-    {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
-        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
-            var __nunitActual0 = compilation.Program;
-            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
-            return (BoundProgram)__nunitActual0!;
-        }))(),
-            exports, identity, NativeRuntimePolicy.FailFast);
-    }
+        => Producer(source, exports, identity, NativeRuntimePolicy.FailFast);
 
-    private static byte[] Producer(string source, string export, string identity, NativeRuntimePolicy policy)
-        => Producer(source, [export], identity, policy);
+    private static byte[] Producer(string source, string export, string identity,
+        NativeRuntimePolicy policy, bool includeNativeOutput = false)
+        => Producer(source, [export], identity, policy,
+            includeNativeOutput);
 
-    private static byte[] Producer(string source, string[] exports, string identity, NativeRuntimePolicy policy)
+    private static byte[] Producer(string source, string[] exports, string identity,
+        NativeRuntimePolicy policy, bool includeNativeOutput = false)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
-                (BoundRuntimePolicy)policy));
+                (BoundRuntimePolicy)policy, includeNativeOutput));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
             var __nunitActual1 = compilation.Program;
@@ -94,6 +87,23 @@ internal sealed class NativeModuleSetsTests
             return (BoundProgram)__nunitActual3!;
         }))(),
             producers, policy);
+    }
+
+    private static byte[] MakeNativeOutputConsumerSource(
+        string source, NativeRuntimePolicy policy, params byte[][] producers)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            NativeModuleCompiler.CreateReferenceSet(producers),
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                (BoundRuntimePolicy)policy));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateConsumerSet(
+            ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual = compilation.Program;
+                Assert.That(__nunitActual, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual!;
+            }))(), producers, policy);
     }
 
     private static byte[] WithUpdatedSetChecksum(byte[] artifact, Action<byte[]> mutate)
@@ -306,10 +316,11 @@ internal sealed class NativeModuleSetsTests
             }
             """;
         var outputProvider = Producer(
-            OutputProviderSource, "ReadCounter", "CounterOutput", policy);
+            OutputProviderSource, "ReadCounter", "CounterOutput", policy,
+            includeNativeOutput: true);
         var secondProvider = Producer(
             "public int32 Other() { return 22; }", "Other", "OtherProvider", policy);
-        var consumer = MakeConsumerSource("""
+        var consumer = MakeNativeOutputConsumerSource("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct ConsumerCounter { public int64 Value; }
 
@@ -343,7 +354,8 @@ internal sealed class NativeModuleSetsTests
 
         var replacementSource = OutputProviderSource.Replace(
             "return 42;", "return 43;", StringComparison.Ordinal);
-        var replacement = Producer(replacementSource, "ReadCounter", "CounterOutput", policy);
+        var replacement = Producer(replacementSource, "ReadCounter",
+            "CounterOutput", policy, includeNativeOutput: true);
         NativeModuleCompiler.ValidateConsumerSet(consumer, [replacement, secondProvider]);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer,
             [replacement, secondProvider], TimeSpan.FromSeconds(30), policy)
@@ -355,7 +367,7 @@ internal sealed class NativeModuleSetsTests
     {
         var alpha = Producer(Alpha, "Alpha", "First");
         var beta = Producer(Beta, "Beta", "Second");
-        var consumer = MakeConsumerSource("""
+        var consumer = MakeNativeOutputConsumerSource("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Packet { public uint32 Value; }
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
@@ -378,7 +390,7 @@ internal sealed class NativeModuleSetsTests
                 }
                 return Alpha() + Beta() + int32(value.Value);
             }
-            """, alpha, beta);
+            """, NativeRuntimePolicy.FailFast, alpha, beta);
 
         Assert.That(NativeModuleCompiler.InspectConsumerSet(consumer).Dependencies,
             Is.EqualTo(["First", "Second"]));
@@ -476,7 +488,7 @@ internal sealed class NativeModuleSetsTests
         NativeRuntimePolicy policy)
     {
         var counterProvider = Producer(CounterOutputImport, "ReadCounter",
-            "CounterProvider", policy);
+            "CounterProvider", policy, includeNativeOutput: true);
         var helperProvider = Producer("public int32 Helper() { return 0; }",
             "Helper", "HelperProvider", policy);
         var providers = new[] { counterProvider, helperProvider };
@@ -502,7 +514,8 @@ internal sealed class NativeModuleSetsTests
 
         var changedProvider = Producer(CounterOutputImport.Replace(
                 "QueryPerformanceCounter", "QueryPerformanceFrequency", StringComparison.Ordinal),
-            "ReadCounter", "CounterProvider", policy);
+            "ReadCounter", "CounterProvider", policy,
+            includeNativeOutput: true);
         _ = Assert.Throws<ModuleContractException>(() =>
             NativeModuleCompiler.ValidateConsumerSet(consumer,
                 [changedProvider, helperProvider]));

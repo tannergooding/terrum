@@ -47,7 +47,9 @@ internal sealed class DirectNativeImportTests
                 public uint32 Count;
             }
             """;
-        const string Attribute = "NativeOutput(When: NativeOutputCondition.NonZero)";
+        const string Attribute =
+            "Terrum.Interop.NativeOutput(When: "
+            + "Terrum.Interop.NativeOutputCondition.NonZero)";
         var outputDeclaration = useParameterTarget
             ? $"[param(packet): {Attribute}]\n"
                 + "[Terrum.Interop.NativeImport(\"sensor.dll\", \"TryReadPacket\")]\n"
@@ -2490,7 +2492,8 @@ internal sealed class DirectNativeImportTests
             }
             """), reference,
             NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
-                BoundRuntimePolicy.FailFast));
+                BoundRuntimePolicy.FailFast,
+                includeNativeOutput: true));
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
 
@@ -2771,7 +2774,8 @@ internal sealed class DirectNativeImportTests
                 return -1;
             }
             """), NativeModuleCompiler.CreateReference(provider),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+                includeNativeOutput: true));
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
 
@@ -3004,7 +3008,7 @@ internal sealed class DirectNativeImportTests
     private static Compilation Create(SyntaxTree tree,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
         Compilation.Create(tree,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 runtimePolicy));
 
     private static Compilation Create(SyntaxTree tree,
@@ -3015,13 +3019,13 @@ internal sealed class DirectNativeImportTests
     private static Compilation Create(IEnumerable<SyntaxTree> trees,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
         Compilation.Create(trees,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 runtimePolicy));
 
     private static Compilation CreateLibrary(SyntaxTree tree,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
         Compilation.CreateLibrary(tree,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 runtimePolicy));
 
     private static Compilation CreateLibrary(SyntaxTree tree,

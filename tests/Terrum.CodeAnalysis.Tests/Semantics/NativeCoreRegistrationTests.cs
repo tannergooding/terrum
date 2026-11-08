@@ -2543,8 +2543,23 @@ internal sealed class NativeCoreRegistrationTests
             LayoutCoreRegistrationTestData.CreateDeclarations("core.native"));
 
     internal static CompilationOptions CreateRegisteredCompilationOptions(
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast,
+        bool includeNativeOutput = false)
     {
+        if (includeNativeOutput)
+        {
+            var (nativeRegistration, outputRegistration)
+                = NativeOutputCoreRegistrationTests
+                    .CreateCombinedRegistrations();
+            return new CompilationOptions {
+                RuntimePolicy = runtimePolicy,
+                NativeCoreRegistration = nativeRegistration,
+                LayoutCoreRegistration =
+                    CreateLayoutRegistration(nativeRegistration),
+                NativeOutputCoreRegistration = outputRegistration,
+            };
+        }
+
         var registration = CreateRegistration();
         return new CompilationOptions {
             RuntimePolicy = runtimePolicy,

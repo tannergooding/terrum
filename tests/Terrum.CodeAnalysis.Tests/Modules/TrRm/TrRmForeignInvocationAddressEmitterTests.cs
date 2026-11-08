@@ -1373,7 +1373,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1484,7 +1484,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut uint32 value;
                 unsafe { Observe(&init value); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1569,7 +1569,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     Observe(&init second);
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1674,7 +1674,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     GetPointer(&backing, &init second);
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1746,7 +1746,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     unsafe { Observe(&init value); }
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1804,7 +1804,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     unsafe { Observe(&init value); }
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1883,7 +1883,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     unsafe { Observe(&init third); }
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1955,7 +1955,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     unsafe { GetPointer(&backing, &init result); }
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2026,7 +2026,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut Packet value;
                 unsafe { Observe(&init value); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2067,7 +2067,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut uint32 value;
                 unsafe { Observe(&init value, selector); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2130,7 +2130,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 {{stagedInitialization}}
                 unsafe { Observe(&init value, {{stagedArgument}}); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2216,7 +2216,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 int32 adjusted = selector + 1;
                 unsafe { Observe(&init value, adjusted); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions()
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions()
                 with { SourceArithmeticProfile = profile });
 
         Assert.That(compilation.HasErrors, Is.False,
@@ -2361,7 +2361,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 {{type}} adjusted = {{expression}};
                 unsafe { Observe(&init value, adjusted); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions()
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions()
                 with { SourceArithmeticProfile = profile });
 
         Assert.That(compilation.HasErrors, Is.False,
@@ -2458,7 +2458,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 {{type}} adjusted = -selector;
                 unsafe { Observe(&init value, adjusted); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions()
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions()
                 with { SourceArithmeticProfile = profile });
 
         Assert.That(compilation.HasErrors, Is.False,
@@ -2542,7 +2542,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut uint32 second;
                 unsafe { ReadPair(&init first, &init second); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2596,7 +2596,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut Packet packet;
                 unsafe { Observe(source, &init packet); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2643,7 +2643,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut uint32 value;
                 unsafe { Observe(&init value); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2708,7 +2708,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut ptr<void> result;
                 unsafe { return GetPointer(&backing, &init result); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2786,7 +2786,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut ptr<void> result;
                 unsafe { return GetPointer({{pointerArgument}}, &init result); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2847,7 +2847,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut int64 ticks;
                 unsafe { return QueryPerformanceCounter(&init ticks); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2897,7 +2897,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     return QueryPerformanceCounter(&init secondTicks);
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2940,7 +2940,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     }
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -3008,7 +3008,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     }
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -3090,7 +3090,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -3132,7 +3132,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 "ReadValue(&init value) >= 0",
                 "ReadValue(&init value) != 0",
                 StringComparison.Ordinal)),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(incompatible.HasErrors, Is.True,
             "A NonZero branch must not prove a NonNegative output live.");
 
@@ -3141,7 +3141,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 "ReadValue(&init value) >= 0",
                 "ReadValue(&init value) < 0",
                 StringComparison.Ordinal)),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(complementary.HasErrors, Is.True,
             "The NonNegative complement must leave the output unavailable.");
     }
@@ -6791,7 +6791,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 init mut Result result;
                 unsafe { return Observe(&backing[index], &init result); }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -9476,7 +9476,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         var source = CreatePrivateNestedAddressSource(dimensionCount);
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -9653,7 +9653,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var compilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(CreateDeepPrivateNestedAddressSource(64)),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 compilation.Diagnostics));
@@ -9686,7 +9686,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     {
         var compilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(CreateDeepPrivateNestedAddressSource(65)),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 compilation.Diagnostics));
@@ -10095,7 +10095,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
@@ -10116,7 +10116,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
             diagnostic.Code == "TRM3030"), Is.True);
@@ -10147,7 +10147,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Diagnostics.Any(static diagnostic =>
@@ -10161,7 +10161,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var arrayCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(CreatePrivateNestedAddressSource(3)),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(arrayCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 arrayCompilation.Diagnostics));
@@ -10225,7 +10225,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 StringComparison.Ordinal);
         var graphProviderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(graphProviderSource), graphReference,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(graphProviderCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 graphProviderCompilation.Diagnostics));
@@ -10291,7 +10291,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """;
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -10348,7 +10348,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """;
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -10406,7 +10406,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """;
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -10466,7 +10466,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """;
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -10521,7 +10521,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """;
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -10600,7 +10600,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """;
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -10656,7 +10656,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             """;
         var libraryCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source),
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
         Assert.That(libraryCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
                 libraryCompilation.Diagnostics));
@@ -14812,7 +14812,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             = "trrm/1-draft-foreign-invocation-storage-addresses-1";
         const string rootIdentity = "native-output-provider-root";
         const string providerIdentity = "ReadValue";
-        var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        var core = NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions();
 
         byte[] CreateArtifact(string moduleIdentity, string access,
             bool provider, string outputType = "uint32",
@@ -14926,7 +14926,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 {{caller}}
                 """;
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
-                NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+                NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
@@ -15126,7 +15126,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         const string intermediateIdentity = "ReadValue";
         const string secondaryIntermediateIdentity = "ReadOther";
         const string leafIdentity = "example.dll";
-        var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        var core = NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions();
         var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             internal extern int32 ReadValue(
@@ -15301,7 +15301,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-contracts-1";
         const string moduleIdentity = "native-output-self-provider";
-        var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        var core = NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions();
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "GetValue")]
             public extern int32 GetValue(
@@ -15352,7 +15352,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         const string rootIdentity = "native-output-cycle-root";
         const string firstIdentity = "ReadValue";
         const string secondIdentity = "ReadAux";
-        var core = NativeCoreRegistrationTests.CreateRegisteredCompilationOptions();
+        var core = NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions();
 
         byte[] CreateProvider(string moduleIdentity, string nextProvider)
         {
@@ -19435,7 +19435,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 uint32 value = 42;
                 unsafe { Observe(&value); return 0; }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

@@ -87,13 +87,14 @@ internal sealed class NativeGraphTests
     private static CompilationOptions LayoutOptions(
         NativeRuntimePolicy policy)
     {
-        var nativeRegistration
-            = NativeCoreRegistrationTests.CreateRegistration();
+        var (nativeRegistration, outputRegistration)
+            = NativeOutputCoreRegistrationTests.CreateCombinedRegistrations();
         return new() {
             RuntimePolicy = (BoundRuntimePolicy)policy,
             LayoutCoreRegistration = NativeCoreRegistrationTests
                 .CreateLayoutRegistration(nativeRegistration),
             NativeCoreRegistration = nativeRegistration,
+            NativeOutputCoreRegistration = outputRegistration,
         };
     }
 

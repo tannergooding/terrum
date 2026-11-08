@@ -49,6 +49,10 @@ internal sealed partial class Binder
         _privateClassReferences = [];
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Expression)>
         _pendingNativeCallConvExpressions = [];
+    private readonly Dictionary<int, int>
+        _pendingNativeImportFunctionPointerTypes = [];
+    private readonly HashSet<int>
+        _pendingNativeImportFunctionPointerTypeIndexes = [];
     private readonly List<BoundEnumDefinition> _enumDefinitions = [];
     private readonly Dictionary<string, PrimitiveType> _enumNames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _ambiguousEnumNames = new(StringComparer.Ordinal);
@@ -113,6 +117,8 @@ internal sealed partial class Binder
         _staticInitializationCoreRegistration;
     private readonly LazyInitializationCoreRegistrationSet?
         _lazyInitializationCoreRegistration;
+    private readonly NativeOutputCoreRegistrationSet?
+        _nativeOutputCoreRegistration;
     private int _layoutKindsEnumIndex = -1;
     private bool _layoutKindsEnumWasAdded;
     private bool _layoutKindsUsedInSource;
@@ -178,6 +184,8 @@ internal sealed partial class Binder
         internal bool RequiresConstEvalTypeContext { get; set; }
         internal PrimitiveType Type { get; set; }
         internal CoreNativeAttributeSchema? NativeAttributeSchema { get; set; }
+        internal CoreNativeOutputAttributeSchema?
+            NativeOutputAttributeSchema { get; set; }
         internal CoreStaticInitializerAttributeSchema?
             StaticInitializerAttributeSchema { get; set; }
         internal CoreLazyInitializationAttributeSchema?
@@ -223,7 +231,9 @@ internal sealed partial class Binder
         CoreContractFailureIdentitySelection?
             coreContractFailureIdentitySelection = null,
         LazyInitializationCoreRegistrationSet?
-            lazyInitializationCoreRegistration = null)
+            lazyInitializationCoreRegistration = null,
+        NativeOutputCoreRegistrationSet?
+            nativeOutputCoreRegistration = null)
     {
         if (coreLibrary && (!isLibrary || reference is not null))
         {
@@ -257,6 +267,8 @@ internal sealed partial class Binder
         _lazyInitializationCoreRegistration
             = lazyInitializationCoreRegistration
                 ?? reference?.LazyInitializationCoreRegistration;
+        _nativeOutputCoreRegistration = nativeOutputCoreRegistration
+            ?? reference?.NativeOutputCoreRegistration;
         _coreExceptionIdentitySelections
             = coreExceptionIdentitySelections.IsDefault
                 ? reference?.CoreExceptionIdentitySelections ?? []
@@ -562,6 +574,16 @@ internal sealed partial class Binder
                     DependencyContracts = importedFunction.DependencyContracts,
                 });
             }
+        }
+        if (_nativeOutputCoreRegistration is
+            NativeOutputCoreRegistrationSet outputRegistration)
+        {
+            _ = AddBoundEnumDefinition(BoundEnumDefinition.FromCore(
+                outputRegistration.OutputConditions));
+        }
+        if (DiagnosticCount != 0)
+        {
+            return null;
         }
         if (_layoutCoreRegistration is LayoutCoreRegistrationSet layoutRegistration)
         {
@@ -966,6 +988,7 @@ internal sealed partial class Binder
             SourceTypeDeclarations = sourceTypeDeclarations.MoveToImmutable(),
             EnumDefinitions = GetProgramEnumDefinitions(),
             NativeCoreRegistration = _nativeCoreRegistration,
+            NativeOutputCoreRegistration = _nativeOutputCoreRegistration,
             LayoutCoreRegistration = _layoutCoreRegistration,
             StaticInitializationCoreRegistration =
                 _staticInitializationCoreRegistration,
@@ -2100,41 +2123,41 @@ internal sealed partial class Binder
         return relation != 0;
     }
 
-    private static bool TryDecodeDirectNativeOutputAttribute(SyntaxNode attribute,
-        out bool nonNegative)
+    private bool TryBindNativeOutputAttribute(SyntaxNode attribute,
+        out SyntaxNode whenExpression)
     {
-        nonNegative = false;
-        var children = attribute.Children.OfType<SyntaxTokenElement>().ToArray();
-        var argumentStart = Array.FindLastIndex(children,
-            static child => child.Token.Kind == TokenKind.OpenParen);
-        if (argumentStart < 0 || argumentStart + 4 >= children.Length
-            || children[argumentStart + 1].Token.Name != "When"
-            || children[argumentStart + 2].Token.Kind != TokenKind.Colon
-            || children[^2].Token.Kind != TokenKind.CloseParen
-            || children[^1].Token.Kind != TokenKind.CloseBracket
-            || children.Skip(argumentStart + 3).Take(children.Length - argumentStart - 5)
-                .Any(static child => child.Token.Kind is not (TokenKind.Identifier or TokenKind.Dot)))
+        whenExpression = null!;
+        if (_nativeOutputCoreRegistration is not
+            NativeOutputCoreRegistrationSet registration)
         {
+            Report("TRM3030",
+                "NativeOutput requires an explicitly selected Core schema.",
+                attribute.Span);
             return false;
         }
 
-        var conditionName = string.Concat(children.Skip(argumentStart + 3)
-            .Take(children.Length - argumentStart - 5)
-            .Select(static child => child.Token.Kind == TokenKind.Dot ? "." : child.Token.Name));
-        if (conditionName is not ("NativeOutputCondition.NonZero"
-            or "NativeOutputCondition.NonNegative"
-            or "Terrum.Interop.NativeOutputCondition.NonZero"
-            or "Terrum.Interop.NativeOutputCondition.NonNegative"))
+        var attributeName = AttributeName(attribute);
+        if (!TryGetRegisteredNativeOutputAttributeSchema(attributeName,
+                out var selectedSchema)
+            || selectedSchema.Identity != registration.NativeOutput.Identity)
         {
+            Report("TRM3030",
+                "NativeOutput does not resolve to the selected Core schema.",
+                attribute.Span);
             return false;
         }
 
-        nonNegative = conditionName.EndsWith(".NonNegative", StringComparison.Ordinal);
+        if (!TryGetSingleNamedAttributeArgument(attribute, "When",
+                out whenExpression))
+        {
+            Report("TRM3030",
+                "NativeOutput requires one named When argument of the registered enum.",
+                attribute.Span);
+            return false;
+        }
+
         return true;
     }
-
-    private static bool IsNativeOutputAttribute(string name) =>
-        name is "NativeOutput" or "Terrum.Interop.NativeOutput";
 
     private bool TryBindDirectNativePointerType(SyntaxNode node, out PrimitiveType pointeeType,
         out bool isWritable)
@@ -4635,7 +4658,8 @@ internal sealed partial class Binder
             {
                 if (TryResolveLazyInitializationAttributeSchemaAlias(alias)
                     || TryResolveStaticInitializerAttributeSchemaAlias(alias)
-                    || TryResolveNativeAttributeSchemaAlias(alias))
+                    || TryResolveNativeAttributeSchemaAlias(alias)
+                    || TryResolveNativeOutputAttributeSchemaAlias(alias))
                 {
                     continue;
                 }
@@ -4898,6 +4922,64 @@ internal sealed partial class Binder
         }
     }
 
+    private bool TryResolveNativeOutputAttributeSchemaAlias(
+        AliasDefinition alias)
+    {
+        if (_nativeOutputCoreRegistration is null || alias.IsInvalid
+            || !alias.TypeParameters.IsEmpty
+            || !TryResolveNativeOutputAttributeSchemaAlias(alias,
+                new HashSet<AliasDefinition>(), out var schema))
+        {
+            return false;
+        }
+
+        alias.NativeOutputAttributeSchema = schema;
+        return true;
+    }
+
+    private bool TryResolveNativeOutputAttributeSchemaAlias(
+        AliasDefinition alias, HashSet<AliasDefinition> visited,
+        out CoreNativeOutputAttributeSchema schema)
+    {
+        schema = null!;
+        if (alias.IsInvalid || !alias.TypeParameters.IsEmpty
+            || !visited.Add(alias))
+        {
+            return false;
+        }
+
+        var previousContext = CaptureContext();
+        try
+        {
+            SetContext(alias.Tree, alias.Target);
+            var targetName = NameText(alias.Target);
+            if (FindAliasDefinition(targetName) is AliasDefinition targetAlias)
+            {
+                return TryResolveNativeOutputAttributeSchemaAlias(
+                    targetAlias, visited, out schema);
+            }
+
+            var registration = _nativeOutputCoreRegistration
+                ?? throw new InvalidOperationException(
+                    "NativeOutput schema aliases require a selected Core registration.");
+            var selected = registration.NativeOutput;
+            if (HasLocalCoreTypeShadow(targetName,
+                    selected.QualifiedName)
+                || !NativeCoreRegistrationSet.NameResolvesTo(targetName,
+                    selected.QualifiedName, _namespace, _usings))
+            {
+                return false;
+            }
+
+            schema = selected;
+            return true;
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
+    }
+
     private bool TryResolveStaticInitializerAttributeSchemaAlias(
         AliasDefinition alias)
     {
@@ -5143,6 +5225,77 @@ internal sealed partial class Binder
         }
     }
 
+    private bool TryGetRegisteredNativeOutputAttributeSchema(
+        string sourceName, out CoreNativeOutputAttributeSchema schema)
+    {
+        schema = null!;
+        if (_nativeOutputCoreRegistration
+            is not NativeOutputCoreRegistrationSet registration)
+        {
+            return false;
+        }
+
+        if (FindAliasDefinition(sourceName) is AliasDefinition alias)
+        {
+            if (alias.NativeOutputAttributeSchema
+                is CoreNativeOutputAttributeSchema aliasSchema)
+            {
+                schema = aliasSchema;
+                return true;
+            }
+
+            return false;
+        }
+
+        var selected = registration.NativeOutput;
+        if (HasLocalCoreTypeShadow(sourceName, selected.QualifiedName)
+            || !NativeCoreRegistrationSet.NameResolvesTo(sourceName,
+                selected.QualifiedName, _namespace, _usings))
+        {
+            return false;
+        }
+
+        schema = selected;
+        return true;
+    }
+
+    private bool IsNativeOutputAttribute(string sourceName)
+    {
+        return TryGetRegisteredNativeOutputAttributeSchema(sourceName,
+                out _)
+            || sourceName is "NativeOutput"
+                or "Terrum.Interop.NativeOutput"
+            || IsNativeOutputAttributeAliasSpelling(sourceName,
+                new HashSet<AliasDefinition>());
+    }
+
+    private bool IsNativeOutputAttributeAliasSpelling(string sourceName,
+        HashSet<AliasDefinition> visited)
+    {
+        if (FindAliasDefinition(sourceName) is not AliasDefinition alias
+            || !visited.Add(alias))
+        {
+            return false;
+        }
+
+        var previousContext = CaptureContext();
+        try
+        {
+            SetContext(alias.Tree, alias.Target);
+            var targetName = NameText(alias.Target);
+            return targetName is "NativeOutput"
+                    or "Terrum.Interop.NativeOutput"
+                || IsNativeAttributeSpelling(targetName,
+                    "Terrum.Interop.NativeOutput")
+                || IsNativeOutputAttributeAliasSpelling(targetName,
+                    visited);
+        }
+        finally
+        {
+            RestoreContext(previousContext);
+        }
+    }
+
     private bool IsNativeAttributeSpelling(string sourceName,
         string qualifiedName)
         => !HasLocalCoreTypeShadow(sourceName, qualifiedName)
@@ -5185,7 +5338,8 @@ internal sealed partial class Binder
     private DeclaredTypeResolution ResolveAlias(AliasDefinition alias,
         ImmutableArray<PrimitiveType>? typeArguments, TextSpan useSite, out PrimitiveType type)
     {
-        if (alias.NativeAttributeSchema is not null)
+        if (alias.NativeAttributeSchema is not null
+            || alias.NativeOutputAttributeSchema is not null)
         {
             type = default;
             return DeclaredTypeResolution.Missing;
@@ -5347,7 +5501,8 @@ internal sealed partial class Binder
         var nativeImportCallingConvention = NativeCallingConvention.Unmanaged;
         var nativeImportResolutionMode = NativeImportResolutionMode.Link;
         var nativeImportResolutionPolicy = NativeImportResolutionPolicy.NotApplicable;
-        var nativeOutputConditionsByName = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var nativeOutputConditionsByName
+            = new Dictionary<string, SyntaxNode>(StringComparer.Ordinal);
         var nativeParameters = new Dictionary<int, NativeParameterDefinition>();
         var dependencyAttributes = new List<(SyntaxNode Attribute,
             int? InlineParameterOrdinal)>();
@@ -5384,7 +5539,7 @@ internal sealed partial class Binder
                 var attributeName = AttributeName(attribute);
                 if (attributeName.Contains('.', StringComparison.Ordinal)
                     && attributeName != DirectNativeImportContract.AttributeFullyQualifiedName
-                    && attributeName != "Terrum.Interop.NativeOutput"
+                    && !IsNativeOutputAttribute(attributeName)
                     && attributeName != "Terrum.Interop.NativeParameter"
                     && attributeName != "Terrum.Interop.NativeCallable"
                     && attributeName != "Terrum.Interop.NativeExport"
@@ -5482,9 +5637,18 @@ internal sealed partial class Binder
                 }
                 if (IsNativeOutputAttribute(attributeName))
                 {
-                    if (returnTarget || !TryGetParameterAttributeTarget(attribute, out var outputParameterName)
-                        || !TryDecodeDirectNativeOutputAttribute(attribute, out var nonNegative)
-                        || !nativeOutputConditionsByName.TryAdd(outputParameterName, nonNegative))
+                    if (returnTarget
+                        || !TryGetParameterAttributeTarget(attribute,
+                            out var outputParameterName))
+                    {
+                        Report("TRM3030",
+                            "NativeOutput must target one distinct parameter with a supported When condition.",
+                            attribute.Span);
+                    }
+                    else if (TryBindNativeOutputAttribute(attribute,
+                        out var whenExpression)
+                        && !nativeOutputConditionsByName.TryAdd(
+                            outputParameterName, whenExpression))
                     {
                         Report("TRM3030",
                             "NativeOutput must target one distinct parameter with a supported When condition.",
@@ -5972,6 +6136,8 @@ internal sealed partial class Binder
         var declared = ImmutableArray.CreateBuilder<Parameter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
         var nativeOutputConditionsByIndex = new Dictionary<int, bool>();
+        var nativeOutputConditionExpressionsByIndex
+            = new Dictionary<int, SyntaxNode>();
 
         foreach (var child in parameters?.Children ?? [])
         {
@@ -5986,10 +6152,12 @@ internal sealed partial class Binder
             var typeNode = sourceChildren.OfType<SyntaxNode>().Single();
             var token = ((SyntaxTokenElement)sourceChildren[^1]).Token;
             var parameterIndex = declared.Count;
-            bool? nativeOutputCondition = null;
-            if (nativeOutputConditionsByName.Remove(token.Name, out var targetedCondition))
+            SyntaxNode? nativeOutputConditionExpression = null;
+            if (nativeOutputConditionsByName.Remove(token.Name,
+                out var targetedConditionExpression))
             {
-                nativeOutputCondition = targetedCondition;
+                nativeOutputConditionExpression
+                    = targetedConditionExpression;
             }
             foreach (var attribute in parameter.Children.OfType<SyntaxNode>()
                 .Where(static node => node.Kind == SyntaxKind.Attribute))
@@ -6009,22 +6177,34 @@ internal sealed partial class Binder
                     }
                 }
                 else if (!IsNativeOutputAttribute(AttributeName(attribute))
-                    || TryGetParameterAttributeTarget(attribute, out _)
-                    || !TryDecodeDirectNativeOutputAttribute(attribute, out var inlineCondition)
-                    || nativeOutputCondition.HasValue)
+                    || TryGetParameterAttributeTarget(attribute, out _))
                 {
                     Report("TRM3030",
                         "A native output parameter accepts one parameter-targeted NativeOutput attribute with a supported When condition.",
                         attribute.Span);
                 }
-                else
+                else if (TryBindNativeOutputAttribute(attribute,
+                    out var inlineConditionExpression))
                 {
-                    nativeOutputCondition = inlineCondition;
+                    if (nativeOutputConditionExpression is not null)
+                    {
+                        Report("TRM3030",
+                            "A native output parameter accepts one parameter-targeted NativeOutput attribute with a supported When condition.",
+                            attribute.Span);
+                    }
+                    else
+                    {
+                        nativeOutputConditionExpression
+                            = inlineConditionExpression;
+                    }
                 }
             }
-            if (nativeOutputCondition is bool outputCondition)
+            if (nativeOutputConditionExpression is SyntaxNode
+                outputConditionExpression)
             {
-                nativeOutputConditionsByIndex.Add(declared.Count, outputCondition);
+                nativeOutputConditionsByIndex.Add(declared.Count, false);
+                nativeOutputConditionExpressionsByIndex.Add(
+                    declared.Count, outputConditionExpression);
             }
             PrimitiveType? nativePointeeType = null;
             PrimitiveType type;
@@ -6499,6 +6679,10 @@ internal sealed partial class Binder
                 && nativeExportEntryName is null,
             NativeCallableConventionExpression = nativeCallableConventionExpression,
             NativeImportEnumArguments = nativeImportEnumArguments,
+            NativeOutputConditionExpressions = [.. nativeOutputConditionExpressionsByIndex
+                .OrderBy(static pair => pair.Key)
+                .Select(static pair =>
+                    (FormalOrdinal: pair.Key, Expression: pair.Value))],
             CapturedParameters = capturedParameters,
             ReturnsForwardedBacking = returnsForwardedBacking,
             ResultDependencyParameters = resultDependencyParameters,
@@ -8633,7 +8817,8 @@ internal sealed partial class Binder
     {
         for (var index = 0; index < _nativeFunctionPointerSignatures.Count; index++)
         {
-            if (_pendingNativeCallConvExpressions.ContainsKey(index))
+            if (_pendingNativeCallConvExpressions.ContainsKey(index)
+                || _pendingNativeImportFunctionPointerTypeIndexes.Contains(index))
             {
                 continue;
             }
@@ -8649,7 +8834,8 @@ internal sealed partial class Binder
         return type;
     }
 
-    private PrimitiveType? GetAddressableFunctionPointerType(Signature signature)
+    private PrimitiveType? GetAddressableFunctionPointerType(Signature signature,
+        int functionIndex)
     {
         if (signature.NativeFunctionPointerType is PrimitiveType nativeCallableType)
         {
@@ -8662,6 +8848,31 @@ internal sealed partial class Binder
                 out var nativeImportSignature)
             && nativeImportSignature is not null)
         {
+            if (!signature.NativeOutputConditionExpressions.IsEmpty)
+            {
+                if (_pendingNativeImportFunctionPointerTypes.TryGetValue(
+                    functionIndex, out var pendingTypeIndex))
+                {
+                    return NativeFunctionPointerTypes.Type(pendingTypeIndex);
+                }
+
+                if (_nativeFunctionPointerSignatures.Count
+                    >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    var declaration = signature.Declaration ?? _tree.Root;
+                    Report("TRM3016",
+                        "The compilation exceeds the native function-pointer type limit.",
+                        declaration.Span);
+                    return null;
+                }
+
+                var index = _nativeFunctionPointerSignatures.Count;
+                _nativeFunctionPointerSignatures.Add(nativeImportSignature);
+                _pendingNativeImportFunctionPointerTypes.Add(functionIndex, index);
+                _ = _pendingNativeImportFunctionPointerTypeIndexes.Add(index);
+                return NativeFunctionPointerTypes.Type(index);
+            }
+
             return GetNativeFunctionPointerType(nativeImportSignature);
         }
         if (signature.External is not null || signature.NativeCallableConvention is not null
@@ -11775,7 +11986,8 @@ internal sealed partial class Binder
                         && TryFindFunction(functionName, out var addressTarget))
                     {
                         var signature = _signatures[addressTarget];
-                        var actualType = GetAddressableFunctionPointerType(signature);
+                        var actualType = GetAddressableFunctionPointerType(signature,
+                            addressTarget);
                         PrimitiveType? expectedFunctionPointerType = expected is PrimitiveType functionPointerExpectedType
                             && NativeFunctionPointerTypes.IsType(functionPointerExpectedType)
                                 ? functionPointerExpectedType
@@ -11785,6 +11997,8 @@ internal sealed partial class Binder
                         if (functionPointerType is not PrimitiveType addressType
                             || actualType is not PrimitiveType targetType
                             || (signature.NativeCallableConventionExpression is null
+                                && !_pendingNativeImportFunctionPointerTypes
+                                    .ContainsKey(addressTarget)
                                 && !NativeFunctionPointerContract.CanProject(targetType,
                                     addressType, [.. _nativeFunctionPointerSignatures])))
                         {
@@ -15270,6 +15484,8 @@ internal sealed partial class Binder
         internal bool DeclaredRequiresUnsafeCaller { get; init; }
         internal SyntaxNode? NativeCallableConventionExpression { get; init; }
         internal NativeImportEnumArgumentExpressions? NativeImportEnumArguments { get; init; }
+        internal ImmutableArray<(int FormalOrdinal, SyntaxNode Expression)>
+            NativeOutputConditionExpressions { get; init; } = [];
         internal ImmutableArray<int> CapturedParameters { get; init; } = [];
         internal bool ReturnsForwardedBacking { get; init; }
         internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];

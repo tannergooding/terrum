@@ -353,8 +353,9 @@ internal sealed class NativeFunctionPointerTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var boundRuntimePolicy = runtimePolicy == NativeRuntimePolicy.CheckedExceptions
             ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
-        var reference = new CompilationReference([], [], boundRuntimePolicy,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference(
+                boundRuntimePolicy);
         var compilation = Create(SyntaxTree.Parse("""
             [param(counter): Terrum.Interop.NativeOutput(
                 When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -390,8 +391,9 @@ internal sealed class NativeFunctionPointerTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var boundRuntimePolicy = runtimePolicy == NativeRuntimePolicy.CheckedExceptions
             ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
-        var reference = new CompilationReference([], [], boundRuntimePolicy,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference(
+                boundRuntimePolicy);
         var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
@@ -427,8 +429,9 @@ internal sealed class NativeFunctionPointerTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var boundRuntimePolicy = runtimePolicy == NativeRuntimePolicy.CheckedExceptions
             ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
-        var reference = new CompilationReference([], [], boundRuntimePolicy,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference(
+                boundRuntimePolicy);
         var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
             [param(bytesRead): Terrum.Interop.NativeOutput(
@@ -461,11 +464,8 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void IndirectNativeOutputCarriesDependencyToItsSourceFormal()
     {
-        var nativeRegistration = NativeCoreRegistrationTests.CreateRegistration();
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: nativeRegistration,
-            layoutCoreRegistration: NativeCoreRegistrationTests.CreateLayoutRegistration(
-                nativeRegistration));
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference();
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct Packet { public ptr<void> Value; }
@@ -525,8 +525,8 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void IndirectNativeOutputRejectsReadingOnItsComplementResult()
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference();
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             [param(counter): Terrum.Interop.NativeOutput(
                 When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -550,8 +550,8 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void IndirectNativeOutputRejectsReadingAfterDiscardedStatus()
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference();
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             [param(counter): Terrum.Interop.NativeOutput(
                 When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -574,8 +574,8 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void IndirectNativeOutputRejectsDuplicateReservationTargets()
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference();
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             [param(first): Terrum.Interop.NativeOutput(
                 When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -600,8 +600,8 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void IndirectNativeOutputRejectsReentrantReservationOfSameCell()
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference();
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             [param(value): Terrum.Interop.NativeOutput(
                 When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -629,8 +629,9 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void IndirectNativeOutputCancelsReservationWhenLaterArgumentDoesNotComplete()
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.CheckedExceptions,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference(
+                BoundRuntimePolicy.CheckedExceptions);
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             [param(value): Terrum.Interop.NativeOutput(
                 When: Terrum.Interop.NativeOutputCondition.NonZero)]
@@ -667,8 +668,10 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void IndirectNativeParameterCallRejectsWrongPointeeType()
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+                nativeCoreRegistration:
+                    NativeCoreRegistrationTests.CreateRegistration());
         var compilation = Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
             [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
@@ -927,8 +930,8 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void NativeImportPointerIdentityRetainsOutputAndParameterContracts()
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var reference =
+            NativeOutputCoreRegistrationTests.CreateNativeOutputReference();
         var compilation = CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("synthetic.dll", "ReadAndProbe")]
             [param(result): DependsOn(nameof(source))]
@@ -1774,12 +1777,14 @@ internal sealed class NativeFunctionPointerTests
     [Test]
     public void NativeFunctionPointerOutputRetainsItsNestedSignature()
     {
-        var compilation = CreateLibrary(SyntaxTree.Parse("""
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "AcquireCallback")]
             extern int32 AcquireCallback(
                 [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
                 write ptr<[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<[Terrum.Interop.NativeCallConv(Terrum.Interop.NativeCallingConvention.Unmanaged)] fnptr<int32>, int32>> callback);
-            """));
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

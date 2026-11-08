@@ -136,7 +136,7 @@ public static unsafe partial class NativeJit
         SourceText source, NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
         => ExecuteWithScalarFrontendProfileCore(program, source,
             (BoundRuntimePolicy)runtimePolicy, SourceArithmeticProfile.Development,
-            registrarAssembly, null, null);
+            registrarAssembly, null, null, null);
 
     /// <summary>Executes the complete frontend component and binds subject source with the selected options.</summary>
     public static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfile(BoundProgram program,
@@ -147,13 +147,15 @@ public static unsafe partial class NativeJit
         Compilation.ValidateOptions(options);
         return ExecuteWithScalarFrontendProfileCore(program, source, options.RuntimePolicy,
             options.SourceArithmeticProfile, registrarAssembly, options.NativeCoreRegistration,
-            options.LayoutCoreRegistration);
+            options.LayoutCoreRegistration,
+            options.NativeOutputCoreRegistration);
     }
 
     private static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfileCore(BoundProgram program,
         SourceText source, BoundRuntimePolicy boundPolicy, SourceArithmeticProfile sourceArithmeticProfile,
         string? registrarAssembly, NativeCoreRegistrationSet? nativeCoreRegistration,
-        LayoutCoreRegistrationSet? layoutCoreRegistration)
+        LayoutCoreRegistrationSet? layoutCoreRegistration,
+        NativeOutputCoreRegistrationSet? nativeOutputCoreRegistration)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(source);
@@ -181,6 +183,7 @@ public static unsafe partial class NativeJit
                 RuntimePolicy = boundPolicy,
                 NativeCoreRegistration = nativeCoreRegistration,
                 LayoutCoreRegistration = layoutCoreRegistration,
+                NativeOutputCoreRegistration = nativeOutputCoreRegistration,
             });
     }
 

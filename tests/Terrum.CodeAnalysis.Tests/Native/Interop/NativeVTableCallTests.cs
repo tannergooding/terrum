@@ -620,6 +620,8 @@ internal sealed class NativeVTableCallTests
     [Test]
     public void NativeVTableSlotAloneDoesNotAdmitAggregateOutput()
     {
+        var (nativeRegistration, outputRegistration)
+            = NativeOutputCoreRegistrationTests.CreateCombinedRegistrations();
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct Packet { public uint32 Value; }
@@ -628,7 +630,13 @@ internal sealed class NativeVTableCallTests
             extern unsafe int32 Invoke(ptr<void> receiver,
                 [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
                 write ptr<Packet> output);
-            """));
+            """), new CompilationOptions {
+                NativeCoreRegistration = nativeRegistration,
+                NativeOutputCoreRegistration = outputRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        nativeRegistration),
+            });
 
         Assert.That(compilation.HasErrors, Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));

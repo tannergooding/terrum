@@ -368,6 +368,35 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (program.NativeOutputCoreRegistration is
+                NativeOutputCoreRegistrationSet nativeOutputRegistration
+            && (!BoundEnumTypes.ContainsNativeOutputRegistration(
+                    program.EnumDefinitions, nativeOutputRegistration)
+                || (program.NativeCoreRegistration is
+                        NativeCoreRegistrationSet outputNativeRegistration
+                    && !ReferenceEquals(
+                        outputNativeRegistration.ModuleBindings,
+                        nativeOutputRegistration.ModuleBindings))
+                || (program.LayoutCoreRegistration is
+                        LayoutCoreRegistrationSet outputLayoutRegistration
+                    && !ReferenceEquals(
+                        outputLayoutRegistration.ModuleBindings,
+                        nativeOutputRegistration.ModuleBindings))
+                || (program.StaticInitializationCoreRegistration is
+                        StaticInitializationCoreRegistrationSet
+                            outputStaticRegistration
+                    && !ReferenceEquals(
+                        outputStaticRegistration.ModuleBindings,
+                        nativeOutputRegistration.ModuleBindings))
+                || (program.LazyInitializationCoreRegistration is
+                        LazyInitializationCoreRegistrationSet
+                            outputLazyRegistration
+                    && !ReferenceEquals(
+                        outputLazyRegistration.ModuleBindings,
+                        nativeOutputRegistration.ModuleBindings))))
+        {
+            throw Invalid();
+        }
         if (!IsValidStaticInitializationTables(program))
         {
             throw Invalid();

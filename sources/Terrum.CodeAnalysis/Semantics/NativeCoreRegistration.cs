@@ -116,6 +116,14 @@ public sealed class CoreProviderModuleBindings
             declaration.NativeAttributeSchema is CoreNativeAttributeSchema exported
             && CoreNativeAttributeSchema.AreEquivalent(exported, schema));
 
+    internal bool ContainsDeclaration(
+        CoreNativeOutputAttributeSchema schema)
+        => Declarations.Any(declaration =>
+            declaration.NativeOutputAttributeSchema
+                is CoreNativeOutputAttributeSchema exported
+            && CoreNativeOutputAttributeSchema.AreEquivalent(
+                exported, schema));
+
     internal bool ContainsDeclaration(CoreLayoutAttributeSchema schema)
         => Declarations.Any(declaration => declaration.LayoutAttributeSchema is
                 CoreLayoutAttributeSchema exported
@@ -475,13 +483,15 @@ public sealed record CoreNativeAttributeSchema(
 /// <param name="LayoutAttributeSchema">The complete layout attribute schema, when selected.</param>
 /// <param name="StaticInitializerAttributeSchema">The complete static-initializer attribute schema, when selected.</param>
 /// <param name="LazyInitializationAttributeSchema">The complete LazyInitialization attribute schema, when selected.</param>
+/// <param name="NativeOutputAttributeSchema">The complete NativeOutput attribute schema, when selected.</param>
 public sealed record CoreProviderDeclarationSnapshot(
     CoreDeclarationIdentity Identity,
     CoreEnumDefinition? EnumDefinition,
     CoreNativeAttributeSchema? NativeAttributeSchema,
     CoreLayoutAttributeSchema? LayoutAttributeSchema,
     CoreStaticInitializerAttributeSchema? StaticInitializerAttributeSchema = null,
-    CoreLazyInitializationAttributeSchema? LazyInitializationAttributeSchema = null)
+    CoreLazyInitializationAttributeSchema? LazyInitializationAttributeSchema = null,
+    CoreNativeOutputAttributeSchema? NativeOutputAttributeSchema = null)
 {
     /// <summary>Creates a snapshot for a complete enum declaration.</summary>
     public static CoreProviderDeclarationSnapshot From(CoreEnumDefinition definition)
@@ -522,6 +532,14 @@ public sealed record CoreProviderDeclarationSnapshot(
         return new(schema.Identity, null, null, null, null, schema);
     }
 
+    /// <summary>Creates a snapshot for the complete NativeOutput schema.</summary>
+    public static CoreProviderDeclarationSnapshot From(
+        CoreNativeOutputAttributeSchema schema)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        return new(schema.Identity, null, null, null, null, null, schema);
+    }
+
     internal bool IsValid
     {
         get
@@ -533,11 +551,13 @@ public sealed record CoreProviderDeclarationSnapshot(
                 = StaticInitializerAttributeSchema is not null;
             var hasLazyInitializationSchema
                 = LazyInitializationAttributeSchema is not null;
+            var hasNativeOutputSchema = NativeOutputAttributeSchema is not null;
             if (!Identity.IsValid
                 || (hasEnum ? 1 : 0) + (hasNativeSchema ? 1 : 0)
                     + (hasLayoutSchema ? 1 : 0)
                     + (hasStaticInitializerSchema ? 1 : 0)
-                    + (hasLazyInitializationSchema ? 1 : 0) != 1)
+                    + (hasLazyInitializationSchema ? 1 : 0)
+                    + (hasNativeOutputSchema ? 1 : 0) != 1)
             {
                 return false;
             }
@@ -557,10 +577,17 @@ public sealed record CoreProviderDeclarationSnapshot(
                                 && StaticInitializerAttributeSchema!.Identity
                                     == Identity
                                 && StaticInitializerAttributeSchema.IsStructurallyValid
-                            : Identity.Kind == CoreDeclarationKind.AttributeSchema
-                            && LazyInitializationAttributeSchema!.Identity
-                                == Identity
-                            && LazyInitializationAttributeSchema.IsStructurallyValid;
+                            : hasLazyInitializationSchema
+                                ? Identity.Kind
+                                    == CoreDeclarationKind.AttributeSchema
+                                    && LazyInitializationAttributeSchema!.Identity
+                                        == Identity
+                                    && LazyInitializationAttributeSchema.IsStructurallyValid
+                                : Identity.Kind
+                                    == CoreDeclarationKind.AttributeSchema
+                                    && NativeOutputAttributeSchema!.Identity
+                                        == Identity
+                                    && NativeOutputAttributeSchema.IsStructurallyValid;
         }
     }
 }

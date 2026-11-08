@@ -1801,27 +1801,27 @@ internal sealed class NativeOutputModulePersistenceTests
     private static Compilation CreateLibrary(SyntaxTree tree,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
         Compilation.CreateLibrary(tree,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 runtimePolicy));
 
     private static Compilation CreateLibrary(SyntaxTree tree,
         CompilationReference reference,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
         Compilation.CreateLibrary(tree, reference,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 runtimePolicy));
 
     private static Compilation Create(SyntaxTree tree,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
         Compilation.Create(tree,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 runtimePolicy));
 
     private static Compilation Create(SyntaxTree tree,
         CompilationReference reference,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast) =>
         Compilation.Create(tree, reference,
-            NativeCoreRegistrationTests.CreateRegisteredCompilationOptions(
+            NativeOutputCoreRegistrationTests.CreateRegisteredCompilationOptions(
                 runtimePolicy));
 
     private static byte[] CreateOutputProducer()

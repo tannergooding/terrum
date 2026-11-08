@@ -152,7 +152,8 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
                     return 0;
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var sourceSignature = compilation.Program!
@@ -233,7 +234,8 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
                         return 0;
                     }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(compilation.Program!,
@@ -601,7 +603,8 @@ internal sealed class NativeParameterFunctionPointerPersistenceTests
                     return 0;
                 }
             }
-            """), NativeCoreRegistrationTests.CreateRegisteredCompilationOptions());
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(compilation.Program!,

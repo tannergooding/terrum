@@ -1336,6 +1336,8 @@ internal sealed partial class Binder
                 Structures = [.. proofBinder._structs],
                 EnumDefinitions = [.. proofBinder._enumDefinitions],
                 NativeCoreRegistration = proofBinder._nativeCoreRegistration,
+                NativeOutputCoreRegistration
+                    = proofBinder._nativeOutputCoreRegistration,
                 LayoutCoreRegistration = proofBinder._layoutCoreRegistration,
                 CoreExceptionIdentitySelections =
                     proofBinder._coreExceptionIdentitySelections,

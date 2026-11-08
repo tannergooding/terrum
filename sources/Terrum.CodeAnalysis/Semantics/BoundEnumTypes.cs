@@ -291,6 +291,21 @@ internal static class BoundEnumTypes
         return true;
     }
 
+    internal static bool ContainsNativeOutputRegistration(
+        ImmutableArray<BoundEnumDefinition> definitions,
+        NativeOutputCoreRegistrationSet registration)
+    {
+        if (definitions.IsDefault || !registration.IsValid())
+        {
+            return false;
+        }
+
+        var expected = BoundEnumDefinition.FromCore(
+            registration.OutputConditions);
+        return definitions.Any(definition => definition is not null
+            && AreEquivalent(definition, expected));
+    }
+
     internal static bool MatchesLayoutRegistration(
         ImmutableArray<BoundEnumDefinition> definitions,
         LayoutCoreRegistrationSet registration)

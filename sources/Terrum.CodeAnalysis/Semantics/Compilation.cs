@@ -42,6 +42,9 @@ public readonly record struct CompilationOptions
     /// <summary>The explicit host-selected Core native registration for this using compilation, if any.</summary>
     public NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
 
+    /// <summary>The independent host-selected NativeOutput source registration for this using compilation, if any.</summary>
+    public NativeOutputCoreRegistrationSet? NativeOutputCoreRegistration { get; init; }
+
     /// <summary>The explicit host-selected Core layout registration for this using compilation, if any.</summary>
     public LayoutCoreRegistrationSet? LayoutCoreRegistration { get; init; }
 
@@ -563,6 +566,7 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -596,6 +600,7 @@ public sealed class Compilation
         return CreateCore([tree], [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -621,6 +626,7 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -645,6 +651,7 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -689,6 +696,7 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: true, cancellationToken, reference,
             options.RuntimePolicy, options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -725,6 +733,7 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: false, cancellationToken, reference,
             options.RuntimePolicy, options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -748,6 +757,14 @@ public sealed class Compilation
             && !registration.IsValid())
         {
             throw new ArgumentException("The selected Core native registration is invalid.",
+                nameof(options));
+        }
+        if (options.NativeOutputCoreRegistration is
+                NativeOutputCoreRegistrationSet nativeOutputRegistration
+            && !nativeOutputRegistration.IsValid())
+        {
+            throw new ArgumentException(
+                "The selected NativeOutput Core registration is invalid.",
                 nameof(options));
         }
         if (options.LayoutCoreRegistration is LayoutCoreRegistrationSet layoutRegistration
@@ -785,7 +802,8 @@ public sealed class Compilation
         var selectedBindings = options.NativeCoreRegistration?.ModuleBindings
             ?? options.LayoutCoreRegistration?.ModuleBindings
             ?? options.StaticInitializationCoreRegistration?.ModuleBindings
-            ?? options.LazyInitializationCoreRegistration?.ModuleBindings;
+            ?? options.LazyInitializationCoreRegistration?.ModuleBindings
+            ?? options.NativeOutputCoreRegistration?.ModuleBindings;
         if ((options.LayoutCoreRegistration is LayoutCoreRegistrationSet composedLayoutRegistration
                 && !ReferenceEquals(selectedBindings,
                     composedLayoutRegistration.ModuleBindings))
@@ -796,7 +814,11 @@ public sealed class Compilation
             || (options.LazyInitializationCoreRegistration is
                     LazyInitializationCoreRegistrationSet composedLazyRegistration
                 && !ReferenceEquals(selectedBindings,
-                    composedLazyRegistration.ModuleBindings)))
+                    composedLazyRegistration.ModuleBindings))
+            || (options.NativeOutputCoreRegistration is
+                    NativeOutputCoreRegistrationSet composedOutputRegistration
+                && !ReferenceEquals(selectedBindings,
+                    composedOutputRegistration.ModuleBindings)))
         {
             throw new ArgumentException(
                 "Selected Core registrations must share one provider binding snapshot.",
@@ -840,7 +862,9 @@ public sealed class Compilation
         string? nativeLoweringAgreement = null,
         ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default,
         CoreContractFailureIdentitySelection?
-            coreContractFailureIdentitySelection = null)
+            coreContractFailureIdentitySelection = null,
+        NativeOutputCoreRegistrationSet?
+            nativeOutputCoreRegistration = null)
     {
         ArgumentNullException.ThrowIfNull(tree);
         cancellationToken.ThrowIfCancellationRequested();
@@ -854,10 +878,14 @@ public sealed class Compilation
         var selectedLazyInitializationCoreRegistration
             = SelectLazyInitializationCoreRegistration(reference,
                 lazyInitializationCoreRegistration);
+        var selectedNativeOutputCoreRegistration
+            = SelectNativeOutputCoreRegistration(reference,
+                nativeOutputCoreRegistration);
         ValidateCoreRegistrationComposition(selectedNativeCoreRegistration,
             selectedLayoutCoreRegistration,
             selectedStaticInitializationCoreRegistration,
-            selectedLazyInitializationCoreRegistration);
+            selectedLazyInitializationCoreRegistration,
+            selectedNativeOutputCoreRegistration);
         var selectedCoreExceptionIdentitySelections
             = SelectCoreExceptionIdentitySelections(reference,
                 coreExceptionIdentitySelections);
@@ -879,6 +907,8 @@ public sealed class Compilation
                 selectedStaticInitializationCoreRegistration,
             lazyInitializationCoreRegistration:
                 selectedLazyInitializationCoreRegistration,
+            nativeOutputCoreRegistration:
+                selectedNativeOutputCoreRegistration,
             nativeLoweringAgreement: nativeLoweringAgreement,
             coreExceptionIdentitySelections:
                 selectedCoreExceptionIdentitySelections,
@@ -1032,18 +1062,52 @@ public sealed class Compilation
         return selected;
     }
 
+    private static NativeOutputCoreRegistrationSet?
+        SelectNativeOutputCoreRegistration(
+            CompilationReference? reference,
+            NativeOutputCoreRegistrationSet? configured)
+    {
+        if (configured is not null
+            && reference?.NativeOutputCoreRegistration is not null)
+        {
+            throw new ArgumentException(
+                "A NativeOutput Core registration can be supplied only once for a using compilation.",
+                nameof(configured));
+        }
+
+        var selected = configured
+            ?? reference?.NativeOutputCoreRegistration;
+        if (selected is not null && !selected.IsValid())
+        {
+            if (configured is not null)
+            {
+                throw new ArgumentException(
+                    "The selected NativeOutput Core registration is invalid.",
+                    nameof(configured));
+            }
+
+            throw new ArgumentException(
+                "The referenced NativeOutput Core registration is invalid.",
+                nameof(reference));
+        }
+        return selected;
+    }
+
     private static void ValidateCoreRegistrationComposition(
         NativeCoreRegistrationSet? nativeRegistration,
         LayoutCoreRegistrationSet? layoutRegistration,
         StaticInitializationCoreRegistrationSet?
             staticInitializationRegistration,
         LazyInitializationCoreRegistrationSet?
-            lazyInitializationRegistration)
+            lazyInitializationRegistration,
+        NativeOutputCoreRegistrationSet?
+            nativeOutputRegistration)
     {
         var moduleBindings = nativeRegistration?.ModuleBindings
             ?? layoutRegistration?.ModuleBindings
             ?? staticInitializationRegistration?.ModuleBindings
-            ?? lazyInitializationRegistration?.ModuleBindings;
+            ?? lazyInitializationRegistration?.ModuleBindings
+            ?? nativeOutputRegistration?.ModuleBindings;
         if ((layoutRegistration is not null
                 && !ReferenceEquals(moduleBindings,
                     layoutRegistration.ModuleBindings))
@@ -1052,7 +1116,10 @@ public sealed class Compilation
                     staticInitializationRegistration.ModuleBindings))
             || (lazyInitializationRegistration is not null
                 && !ReferenceEquals(moduleBindings,
-                    lazyInitializationRegistration.ModuleBindings)))
+                    lazyInitializationRegistration.ModuleBindings))
+            || (nativeOutputRegistration is not null
+                && !ReferenceEquals(moduleBindings,
+                    nativeOutputRegistration.ModuleBindings)))
         {
             throw new ArgumentException(
                 "Selected Core registrations must share one provider binding snapshot.");
@@ -1146,6 +1213,7 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -1176,6 +1244,7 @@ public sealed class Compilation
         return CreateCore(trees, buffers, isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -1210,6 +1279,7 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -1240,6 +1310,7 @@ public sealed class Compilation
         return CreateCore(trees, buffers, isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -1272,6 +1343,7 @@ public sealed class Compilation
             runtimePolicy: options.RuntimePolicy, coreLibrary: true,
             sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -1309,6 +1381,7 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: true, cancellationToken, reference,
             options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -1345,6 +1418,7 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: false, cancellationToken, reference,
             options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,
@@ -1370,7 +1444,9 @@ public sealed class Compilation
         string? nativeLoweringAgreement = null,
         ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default,
         CoreContractFailureIdentitySelection?
-            coreContractFailureIdentitySelection = null)
+            coreContractFailureIdentitySelection = null,
+        NativeOutputCoreRegistrationSet?
+            nativeOutputCoreRegistration = null)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -1384,10 +1460,14 @@ public sealed class Compilation
         var selectedLazyInitializationCoreRegistration
             = SelectLazyInitializationCoreRegistration(reference,
                 lazyInitializationCoreRegistration);
+        var selectedNativeOutputCoreRegistration
+            = SelectNativeOutputCoreRegistration(reference,
+                nativeOutputCoreRegistration);
         ValidateCoreRegistrationComposition(selectedNativeCoreRegistration,
             selectedLayoutCoreRegistration,
             selectedStaticInitializationCoreRegistration,
-            selectedLazyInitializationCoreRegistration);
+            selectedLazyInitializationCoreRegistration,
+            selectedNativeOutputCoreRegistration);
         var selectedCoreExceptionIdentitySelections
             = SelectCoreExceptionIdentitySelections(reference,
                 coreExceptionIdentitySelections);
@@ -1434,7 +1514,9 @@ public sealed class Compilation
             selectedCoreContractFailureIdentitySelections,
             coreContractFailureIdentitySelection,
             lazyInitializationCoreRegistration:
-                selectedLazyInitializationCoreRegistration);
+                selectedLazyInitializationCoreRegistration,
+            nativeOutputCoreRegistration:
+                selectedNativeOutputCoreRegistration);
         var program = binder.Bind();
         if (binder.Diagnostics.Count != 0)
         {
@@ -1488,6 +1570,7 @@ public sealed class Compilation
         var binder = new Binder([tree], buffers, cancellationToken, runtimePolicy: options.RuntimePolicy,
             sourceArithmeticProfile: options.SourceArithmeticProfile,
             nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeOutputCoreRegistration: options.NativeOutputCoreRegistration,
             layoutCoreRegistration: options.LayoutCoreRegistration,
             staticInitializationCoreRegistration:
                 options.StaticInitializationCoreRegistration,

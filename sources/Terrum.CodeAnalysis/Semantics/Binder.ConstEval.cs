@@ -98,7 +98,12 @@ internal sealed partial class Binder
 
     private bool ResolveNativeEnumArguments(ImmutableArray<BoundFunction>.Builder functions)
     {
-        if (_nativeCoreRegistration is not NativeCoreRegistrationSet registration)
+        var nativeRegistration = _nativeCoreRegistration;
+        if (nativeRegistration is null
+            && !_signatures.Any(static signature =>
+                signature.NativeCallableConventionExpression is not null
+                || signature.NativeImportEnumArguments is not null
+                || !signature.NativeOutputConditionExpressions.IsEmpty))
         {
             return true;
         }
@@ -109,7 +114,8 @@ internal sealed partial class Binder
             var signature = _signatures[index];
             var importArguments = signature.NativeImportEnumArguments;
             if (signature.NativeCallableConventionExpression is null
-                && importArguments is null)
+                && importArguments is null
+                && signature.NativeOutputConditionExpressions.IsEmpty)
             {
                 continue;
             }
@@ -133,7 +139,9 @@ internal sealed partial class Binder
             var boundFunction = functions[index];
             if (signature.NativeCallableConventionExpression is SyntaxNode callableExpression)
             {
-                if (!TryGetBoundEnumType(registration.CallingConventions, out var conventionType)
+                if (nativeRegistration is null
+                    || !TryGetBoundEnumType(nativeRegistration.CallingConventions,
+                        out var conventionType)
                     || !TryEvaluateNativeEnumValue(callableExpression, conventionType, functions,
                         "NativeCallable.CallConv", out var value)
                     || !TryMapNativeCallingConvention(value, out var convention))
@@ -190,7 +198,14 @@ internal sealed partial class Binder
 
             if (importArguments is not null)
             {
-                if (boundFunction.DirectNativeImport is not DirectNativeImport directImport)
+                if (nativeRegistration is null)
+                {
+                    Report("TRM3030",
+                        "NativeImport enum arguments require the selected Core schema registration.",
+                        declaration.Span);
+                    success = false;
+                }
+                else if (boundFunction.DirectNativeImport is not DirectNativeImport directImport)
                 {
                     Report("TRM3030",
                         "NativeImport enum arguments require a bound direct callable import.",
@@ -205,7 +220,8 @@ internal sealed partial class Binder
                     var argumentSuccess = true;
                     if (importArguments.CallingConvention is SyntaxNode callConvExpression)
                     {
-                        argumentSuccess &= TryGetBoundEnumType(registration.CallingConventions,
+                        argumentSuccess &= TryGetBoundEnumType(
+                            nativeRegistration.CallingConventions,
                             out var conventionType)
                             && TryEvaluateNativeEnumValue(callConvExpression, conventionType,
                                 functions, "NativeImport.CallConv", out var value)
@@ -213,7 +229,8 @@ internal sealed partial class Binder
                     }
                     if (importArguments.ResolutionMode is SyntaxNode modeExpression)
                     {
-                        argumentSuccess &= TryGetBoundEnumType(registration.ResolutionModes,
+                        argumentSuccess &= TryGetBoundEnumType(
+                            nativeRegistration.ResolutionModes,
                             out var modeType)
                             && TryEvaluateNativeEnumValue(modeExpression, modeType,
                                 functions, "NativeImport.ResolutionMode", out var value)
@@ -221,7 +238,8 @@ internal sealed partial class Binder
                     }
                     if (importArguments.ResolutionPolicy is SyntaxNode policyExpression)
                     {
-                        argumentSuccess &= TryGetBoundEnumType(registration.ResolutionPolicies,
+                        argumentSuccess &= TryGetBoundEnumType(
+                            nativeRegistration.ResolutionPolicies,
                             out var policyType)
                             && TryEvaluateNativeEnumValue(policyExpression, policyType,
                                 functions, "NativeImport.ResolutionPolicy", out var value)
@@ -264,6 +282,41 @@ internal sealed partial class Binder
                 }
             }
 
+            if (!signature.NativeOutputConditionExpressions.IsEmpty)
+            {
+                if (!TryResolveNativeOutputConditionExpressions(signature,
+                    boundFunction, functions,
+                    out var updatedBoundFunction))
+                {
+                    success = false;
+                }
+                else
+                {
+                    boundFunction = updatedBoundFunction;
+                }
+            }
+
+            if (_pendingNativeImportFunctionPointerTypes.TryGetValue(index,
+                out var pendingFunctionPointerIndex))
+            {
+                if (!NativeFunctionPointerContract.TryCreateNativeImportSignature(
+                    boundFunction, [.. _nativeFunctionPointerSignatures],
+                    out var nativeImportSignature)
+                    || nativeImportSignature is null)
+                {
+                    SetContext(signature.Tree, declaration);
+                    Report("TRM3030",
+                        "The resolved NativeImport contract cannot be represented as a native function pointer.",
+                        declaration.Span);
+                    success = false;
+                }
+                else
+                {
+                    _nativeFunctionPointerSignatures[pendingFunctionPointerIndex]
+                        = nativeImportSignature;
+                }
+            }
+
             _signatures[index] = signature with {
                 External = signature.External is null ? null : boundFunction,
             };
@@ -277,6 +330,171 @@ internal sealed partial class Binder
 
         return ResolvePendingNativeCallConvTypes(functions)
             && ResolvePendingInterfaceNativeCallableConventions(functions);
+    }
+
+    private bool TryResolveNativeOutputConditionExpressions(
+        Signature signature,
+        BoundFunction function,
+        ImmutableArray<BoundFunction>.Builder functions,
+        out BoundFunction updatedFunction)
+    {
+        updatedFunction = function;
+        if (_nativeOutputCoreRegistration is not
+                NativeOutputCoreRegistrationSet registration
+            || !TryGetBoundEnumType(registration.OutputConditions,
+                out var outputConditionType))
+        {
+            var declaration = signature.Declaration ?? signature.Tree.Root;
+            SetContext(signature.Tree, declaration);
+            Report("TRM3030",
+                "NativeOutput.When requires the selected Core condition enum.",
+                declaration.Span);
+            return false;
+        }
+        if (function.DirectNativeImport is not DirectNativeImport directImport)
+        {
+            var declaration = signature.Declaration ?? signature.Tree.Root;
+            SetContext(signature.Tree, declaration);
+            Report("TRM3030",
+                "NativeOutput conditions require a bound direct native import.",
+                declaration.Span);
+            return false;
+        }
+
+        var resolvedConditions = new Dictionary<int,
+            (bool NonNegative, SyntaxTree Tree, SyntaxNode Expression)>(
+                signature.NativeOutputConditionExpressions.Length);
+        var success = true;
+        foreach (var (formalOrdinal, expression)
+            in signature.NativeOutputConditionExpressions)
+        {
+            SetContext(signature.Tree, expression);
+            _variables.Clear();
+            _scopes.Clear();
+            _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+            _unresolvedVacantLocals.Clear();
+            _constLocals.Clear();
+            _constScalarValues.Clear();
+            _localStart = 0;
+            _returnType = PrimitiveType.Void;
+            _currentStruct = null;
+            _constructor = false;
+            _unsafeDepth = 0;
+            _hasReceiver = false;
+            _genericContext = null;
+
+            if (!TryEvaluateNativeEnumValue(expression, outputConditionType,
+                    functions, "NativeOutput.When", out var value))
+            {
+                success = false;
+                continue;
+            }
+            if (!TryMapNativeOutputCondition(value, out var nonNegative))
+            {
+                Report("TRM3030",
+                    "NativeOutput.When must evaluate to NonZero or NonNegative of the registered enum.",
+                    expression.Span);
+                success = false;
+                continue;
+            }
+            if (!resolvedConditions.TryAdd(formalOrdinal,
+                    (nonNegative, signature.Tree, expression)))
+            {
+                throw new InvalidOperationException(
+                    "A NativeOutput formal has multiple pending condition expressions.");
+            }
+        }
+        if (!success || DiagnosticCount != 0)
+        {
+            return false;
+        }
+
+        var outputs = directImport.Outputs.ToBuilder();
+        var contracts = function.NativeOutputContracts.ToBuilder();
+        foreach (var (formalOrdinal, condition) in resolvedConditions
+                     .OrderBy(static pair => pair.Key))
+        {
+            var outputIndex = -1;
+            for (var index = 0; index < outputs.Count; index++)
+            {
+                if (outputs[index].ParameterIndex == formalOrdinal)
+                {
+                    if (outputIndex >= 0)
+                    {
+                        throw new InvalidOperationException(
+                            "A NativeOutput formal has multiple direct import records.");
+                    }
+                    outputIndex = index;
+                }
+            }
+
+            var contractIndex = -1;
+            for (var index = 0; index < contracts.Count; index++)
+            {
+                if (contracts[index].FormalOrdinal == formalOrdinal)
+                {
+                    if (contractIndex >= 0)
+                    {
+                        throw new InvalidOperationException(
+                            "A NativeOutput formal has multiple bound contracts.");
+                    }
+                    contractIndex = index;
+                }
+            }
+            if (outputIndex < 0 || contractIndex < 0)
+            {
+                throw new InvalidOperationException(
+                    "A pending NativeOutput condition has no bound output contract.");
+            }
+
+            var resultCondition
+                = DirectNativeImportContract.ResolveResultCondition(
+                    function.ReturnType, condition.NonNegative
+                        ? DirectNativeImportContract
+                            .Int32NonNegativeResultCondition
+                        : DirectNativeImportContract
+                            .Int32NonZeroResultCondition);
+            if (!DirectNativeImportContract.IsValidResultCondition(
+                function.ReturnType, resultCondition))
+            {
+                SetContext(condition.Tree, condition.Expression);
+                Report("TRM3030",
+                    "NativeOutput result conditions must be compatible with the callable result type.",
+                    condition.Expression.Span);
+                success = false;
+                continue;
+            }
+
+            var (successSelector, complementSelector) = resultCondition switch {
+                DirectNativeImportContract.Int32NonZeroResultCondition
+                    or DirectNativeImportContract.UInt32NonZeroResultCondition
+                    => (NativeOutputSelector.NonZero, NativeOutputSelector.Zero),
+                DirectNativeImportContract.Int32NonNegativeResultCondition
+                    => (NativeOutputSelector.NonNegative,
+                        NativeOutputSelector.Negative),
+                _ => throw new InvalidOperationException(
+                    "Validated native output condition is unassigned."),
+            };
+            outputs[outputIndex] = outputs[outputIndex] with {
+                ResultCondition = resultCondition,
+            };
+            contracts[contractIndex] = contracts[contractIndex] with {
+                SuccessSelector = successSelector,
+                ComplementSelector = complementSelector,
+            };
+        }
+        if (!success || DiagnosticCount != 0)
+        {
+            return false;
+        }
+
+        updatedFunction = function with {
+            DirectNativeImport = directImport with {
+                Outputs = outputs.ToImmutable(),
+            },
+            NativeOutputContracts = contracts.ToImmutable(),
+        };
+        return true;
     }
 
     private bool ResolvePendingInterfaceNativeCallableConventions(
@@ -993,6 +1211,17 @@ internal sealed partial class Binder
             _ => default,
         };
         return value is >= 1 and <= 4;
+    }
+
+    private static bool TryMapNativeOutputCondition(int value,
+        out bool nonNegative)
+    {
+        nonNegative = value switch {
+            0 => false,
+            1 => true,
+            _ => false,
+        };
+        return value is 0 or 1;
     }
 
     private static bool TryMapNativeImportResolutionMode(int value,
