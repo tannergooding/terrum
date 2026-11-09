@@ -78,6 +78,12 @@ BoundEnumMemberIdentity      += Source(SourceEnumMemberHandle)
   order or primary-first ordering. Do not narrow source constants through
   today's int32 member field or apply today's public/int32-only table
   predicate as the source grammar.
+* Represent each source member's mathematical constant as
+  `BigInteger`, paired with its enum's complete underlying `PrimitiveType`.
+  Check range against that exact type before constructing its canonical
+  `ScalarBits` value. Core registrations and current int32 persistence rows
+  retain their existing int32 fields; projection to those carriers is checked
+  and never truncates a wider source value.
 * A source member has **no producer declaration key until projection**.
   Represent that absence explicitly for the Source alternative, not as a
   valid empty key. Private and existing Core-backed key requirements remain.
