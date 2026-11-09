@@ -258,6 +258,47 @@ internal sealed class TokenCursorTests
             function.Name == "ReplaceThenSelect"), "CopyOriginSummary"), Is.Null);
     }
 
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task GenericReferenceFieldCopyOriginSurvivesConstructionAndForwardingAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferenceCell<T> {
+                public mut write ref<T> Value;
+                [this: Captures(nameof(value))]
+                public ReferenceCell(write ref<T> value) {
+                    Value = value;
+                }
+            }
+            [return: DependsOn(nameof(value))]
+            ReferenceCell<int32> Forward(ReferenceCell<int32> value) {
+                return value;
+            }
+            int32 Main() {
+                mut int32 target = int32(7);
+                ReferenceCell<int32> cell =
+                    new ReferenceCell<int32>(ref target);
+                ReferenceCell<int32> forwarded = Forward(cell);
+                *forwarded.Value = int32(42);
+                return target;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+
+        var constructor = program.Functions.Single(static function =>
+            function.IsConstructor && function.DeclaringStruct == "ReferenceCell<int32>");
+        var forward = program.Functions.Single(static function => function.Name == "Forward");
+        AssertCopyOriginSummary(constructor, "FreshInlineConstruction");
+        Assert.That(CopyOriginSummaryRows(constructor),
+            Is.EqualTo(["0<-Formal:EntryValue:0:"]));
+        AssertCopyOriginSummary(forward, "NormalResult");
+        Assert.That(CopyOriginSummaryRows(forward),
+            Is.EqualTo(["0<-Formal:EntryValue:0:0"]));
+
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
     private static void AssertCopyOriginSummary(BoundFunction function, string expectedKind)
     {
         var summary = GetPropertyValue(function, "CopyOriginSummary");
