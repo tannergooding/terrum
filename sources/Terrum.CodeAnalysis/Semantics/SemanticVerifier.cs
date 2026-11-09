@@ -16377,6 +16377,8 @@ public static partial class SemanticVerifier
                     rawUnionArrayCallState?.Dispose();
                 }
             }
+            // RawUnionArrayFactsForCall is the final consumer of these snapshots.
+            stagedRawUnionSnapshotState.Dispose();
             var backingCallResult =
                 initialized.Dependencies is BackingDependencies backingResultDependencies
                 ? CreateBackingCallResult(call, target, copyOriginSummary,
