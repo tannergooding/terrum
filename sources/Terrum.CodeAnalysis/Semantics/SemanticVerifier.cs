@@ -5339,10 +5339,24 @@ public static partial class SemanticVerifier
                         statementCompound: effect is BoundCompoundAssignment);
                     beforeExpression.CopyTo(initialized);
                     beforeMasks.CopyTo(fieldMasks, 0);
+                    if (effect is BoundCall discardedCall
+                        && initialized.Dependencies
+                            is BackingDependencies discardedCallDependencies)
+                    {
+                        discardedCallDependencies
+                            .ClearRawUnionArrayCallResult(discardedCall);
+                    }
                     return true;
                 }
                 Expression(expressionStatement.Expression, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures, statementCompound: effect is BoundCompoundAssignment);
+                if (effect is BoundCall completedCall
+                    && initialized.Dependencies
+                        is BackingDependencies completedCallDependencies)
+                {
+                    completedCallDependencies
+                        .ClearRawUnionArrayCallResult(completedCall);
+                }
                 return false;
             case BoundIf conditional:
             {

@@ -985,6 +985,39 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
     }
 
     [Test]
+    public void DiscardedCallResultDoesNotAffectLaterRepeatCall()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            s_rawWordDeclarations + """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public mut [RawWord; 2] Values;
+            }
+
+            public Holder Identity(Holder value) {
+                return value;
+            }
+
+            int32 Main() {
+                RawWord wide = new RawWord(uint64(7));
+                init mut Holder holder;
+                holder.Values = [wide; 2];
+                Identity(holder);
+                Holder copy = Identity(holder);
+                unsafe { return int32(copy.Values[1].Wide); }
+            }
+            """), LayoutOptions(BoundRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+    }
+
+    [Test]
     public void RepeatedFieldArrayCoverageSurvivesReceiverReturnCalls()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
