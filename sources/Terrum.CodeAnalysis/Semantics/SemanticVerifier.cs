@@ -15709,6 +15709,32 @@ public static partial class SemanticVerifier
         var argumentsComplete = true;
         InitializationState? nonCompletingArgumentState = null;
         uint[]? nonCompletingArgumentMasks = null;
+        void RetireRawUnionArrayCallInputs()
+        {
+            if (initialized.Dependencies
+                is not BackingDependencies dependencies)
+            {
+                return;
+            }
+
+            for (var argumentIndex = 0;
+                argumentIndex < call.Arguments.Length;
+                argumentIndex++)
+            {
+                if (call.Arguments[argumentIndex]
+                    is not BoundCall rawUnionArrayInputCall
+                    || !CarriesRawUnionArrayFacts(
+                        program, rawUnionArrayInputCall.Type))
+                {
+                    continue;
+                }
+
+                initialized.RepeatResources.ConsumeWork();
+                dependencies.ClearRawUnionArrayCallResult(
+                    rawUnionArrayInputCall);
+            }
+        }
+
         try
         {
             for (var i = 0; i < call.Arguments.Length; i++)
@@ -16328,6 +16354,7 @@ public static partial class SemanticVerifier
             }
             if (!argumentsComplete)
             {
+                RetireRawUnionArrayCallInputs();
                 initialized.CancelUninvokedNativeOutputReservations();
                 return;
             }
@@ -16454,6 +16481,7 @@ public static partial class SemanticVerifier
             InvalidateNativePointerExtentsForCall(
                 call, target, initialized, program);
             ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
+            RetireRawUnionArrayCallInputs();
             if (!ProvidesNoFailureGuarantee(target))
             {
                 failures?.Add(initialized, fieldMasks);

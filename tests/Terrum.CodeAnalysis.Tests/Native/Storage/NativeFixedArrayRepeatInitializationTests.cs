@@ -985,7 +985,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
     }
 
     [Test]
-    public void DiscardedCallResultDoesNotAffectLaterRepeatCall()
+    public void DiscardedCallResultsDoNotAffectLaterRepeatFacts()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             s_rawWordDeclarations + """
@@ -999,13 +999,22 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 return value;
             }
 
+            public Holder IgnoreSecond(Holder value, Holder ignored) {
+                return value;
+            }
+
+            public int32 IgnoreSecondScalar(Holder value, Holder ignored) {
+                return 7;
+            }
+
             int32 Main() {
                 RawWord wide = new RawWord(uint64(7));
                 init mut Holder holder;
                 holder.Values = [wide; 2];
                 Identity(holder);
-                Holder copy = Identity(holder);
-                unsafe { return int32(copy.Values[1].Wide); }
+                Holder copy = IgnoreSecond(holder, Identity(holder));
+                int32 marker = IgnoreSecondScalar(holder, Identity(holder));
+                unsafe { return int32(copy.Values[1].Wide) + marker; }
             }
             """), LayoutOptions(BoundRuntimePolicy.FailFast));
         Assert.That(compilation.HasErrors, Is.False,
@@ -1014,7 +1023,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         Assert.That(NativeJit.Execute(compilation.Program!,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(7));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(14));
     }
 
     [Test]
