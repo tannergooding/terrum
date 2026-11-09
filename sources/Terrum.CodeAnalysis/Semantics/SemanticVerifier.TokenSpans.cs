@@ -10473,6 +10473,7 @@ public static partial class SemanticVerifier
                     return;
                 }
 
+                using var repeatFrame = resources.EnterFrame();
                 var elementSize = MaterializedPayloadSize(
                     layout.ElementType, program);
                 var extent = MaterializedPayloadSize(currentType, program);
@@ -10555,6 +10556,7 @@ public static partial class SemanticVerifier
                         InitializationState.RawUnionArrayRootLogicalBytes(key));
                     result.Add(key, state);
                 }
+                repeatFrame.Complete();
                 return;
             }
 
