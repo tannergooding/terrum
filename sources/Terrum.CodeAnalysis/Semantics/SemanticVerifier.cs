@@ -2730,17 +2730,20 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            InitializationState? inputState = null;
+            if (inputs is not null
+                && !inputs.Remove(statement, out inputState))
+            {
+                throw Invalid();
+            }
             // Borrow occupancy follows possible value liveness at this exact flow point,
             // not the descriptor's lexical declaration. Joins retain either path's loan.
             Array.Clear(roots);
             Array.Clear(exclusive);
-            if (inputs is not null && !inputs.TryGetValue(statement, out _))
-            {
-                throw Invalid();
-            }
             for (var slot = 0; slot < activeCapabilitiesByView.Length; slot++)
             {
-                if (IsActiveLease(slot) && inputs is not null && !inputs[statement].IsVacant(slot))
+                if (IsActiveLease(slot) && inputState is not null
+                    && !inputState.IsVacant(slot))
                 {
                     if (function.Variables[slot].Type == PrimitiveType.MutableInt32BufferView)
                     {
@@ -2751,6 +2754,12 @@ public static partial class SemanticVerifier
                         roots[backing[slot]]++;
                     }
                 }
+            }
+            var executionActivation = inputState?.ScopeActivation
+                ?? BackingDependencies.RootScopeActivation;
+            if (inputState is not null)
+            {
+                ReleaseRepeatSnapshotStateIfTracked(inputState);
             }
             switch (statement)
             {
@@ -2802,9 +2811,6 @@ public static partial class SemanticVerifier
                     }
                     Expression(view.Start, depth + 1, view.IsMutable ? root : -1);
                     Expression(view.RangeEnd ?? view.Length, depth + 1, view.IsMutable ? root : -1);
-                    var executionActivation = inputs is null
-                        ? BackingDependencies.RootScopeActivation
-                        : inputs[view].ScopeActivation;
                     var capability = capabilityAcquisitionContext.Acquire(
                         functionActivation, view, executionActivation,
                         new CapabilityContract(CapabilityKind.Lease,
@@ -2961,6 +2967,10 @@ public static partial class SemanticVerifier
         }
 
         Statement(body, 0);
+        if (inputs is { Count: not 0 })
+        {
+            throw Invalid(function.Span);
+        }
         if (activeCapabilities.Count != 0
             || activeCapabilitiesByView.Any(static capability => capability.HasValue))
         {
@@ -19811,7 +19821,10 @@ public static partial class SemanticVerifier
         }
 
         var stateBytes = state.GetRawUnionArrayStateBytes();
-        if (stateBytes.IsZero)
+        var hasCallResultSnapshots
+            = state.Dependencies is BackingDependencies dependencies
+                && dependencies.HasRawUnionArrayCallResults;
+        if (stateBytes.IsZero && !hasCallResultSnapshots)
         {
             return null;
         }

@@ -1901,6 +1901,8 @@ public static partial class SemanticVerifier
         internal ImmutableArray<BoundNativeFixedArrayType> FixedArrayTypeTable { get; }
         internal const int RootScopeActivation = 0;
         internal List<StagedDependencySource> Staged { get; } = [];
+        internal bool HasRawUnionArrayCallResults
+            => RawUnionArrayCallResults.Count != 0;
 
         internal BackingDependencies(int functionActivation, BoundFunction function, int length,
             BoundCopyOriginSummary?[] copyOriginSummaries,
