@@ -703,6 +703,17 @@ structural-only case validates a nonempty local-FieldDef FieldMap token through
 the permutation; the bounded F consumer does not select the required
 LayoutQueries feature, so this map-only case is not runtime evidence. The
 consumer-global permutation regression passes 1/1 with no skips after the
+Debug fast build. A source-produced A2R1+Repeat type-only Provider Module can
+now be co-located with the consumer artifact while retaining the provider's
+Module-owned TypeDef, FieldDef and Layout rows, its LeafProvider Import, and
+the consumer's original ContainerAKey/UsesLeafKey expectations. Source-free
+LoadStandard/EmitStandard/reload and FailFast JIT match the separately supplied
+provider route; supervised Windows x64 AOT from the co-located artifact also
+exits with `99`. Missing provider/dependency closure, duplicate provider
+identity and an incompatible fixed-array extent reject. The co-located
+provider regression passes 1/1 with no skips after the Debug fast build.
+Broader imported nominal closure and the remaining replacement/topology
+matrix still need qualification.
 General Body remapping and source-free Body execution beyond these exact
 NativeParameter/NativeAddress TypeMap and fixed-array PlaceSelection cases
 remain open. Type-only source

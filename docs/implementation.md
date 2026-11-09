@@ -1083,8 +1083,15 @@ provider expectations reject. A structural-only local-FieldDef FieldMap
 case passes; the bounded F consumer rejects the required LayoutQueries
 feature, so that case is not execution evidence. The consumer-global
 permutation regression passes 1/1 with no skips after the Debug fast build.
-Co-located TypeDef providers, broader imported-type closure and the remaining
-replacement/topology matrices remain open.
+A co-located A2R1+Repeat Provider Module now retains its Module-owned
+TypeDef/FieldDef/Layout rows and both original consumer Import expectations in
+the same artifact as the consumer. Source-free LoadStandard/EmitStandard/reload
+and FailFast JIT match the separately supplied route (`99`); supervised AOT
+from the co-located artifact also exits with `99`. Missing provider/dependency
+closure, duplicate provider identity and changed fixed-array extent reject.
+The co-located consumer regression passes 1/1 with no skips after the Debug
+fast build. Broader imported-type closure and the remaining replacement/
+topology matrices remain open.
 The original A1 array candidate is superseded for integrated nominal arrays
 by the unapproved
 [A2 rootless Copy evidence proposal](proposals/standard-trrm-rootless-copy-type-evidence.md);

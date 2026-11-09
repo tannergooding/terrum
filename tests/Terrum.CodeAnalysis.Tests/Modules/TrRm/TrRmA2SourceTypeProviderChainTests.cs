@@ -1993,6 +1993,22 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
                 == System.Runtime.InteropServices.Architecture.X64);
 
+        static void AssertProviderExpectation(BoundProgram program,
+            string providerIdentity, string consumerIdentity,
+            int providerModuleRow, string typeName, string exportKey)
+        {
+            var origin = program.Structures.Single(
+                structure => structure.Name == typeName)
+                .StandardTypeOrigin!;
+            Assert.That(origin.Provider.ModuleIdentity,
+                Is.EqualTo(providerIdentity));
+            Assert.That(origin.Provider.ModuleRow,
+                Is.EqualTo(providerModuleRow));
+            Assert.That(origin.Expectations.Any(expectation =>
+                expectation.UsingModule.ModuleIdentity == consumerIdentity
+                    && expectation.ExportKey == exportKey), Is.True);
+        }
+
         var leafProviderArtifact = CreateLeafProviderArtifact();
         var leafProviderInput = new TrRmStandardArtifactInput(SchemaIdentity,
             leafProviderArtifact);
@@ -2000,7 +2016,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             = TrRmExecutableCompiler.CreateStandardReference(
                 leafProviderInput, "LeafProvider", [], ["LeafKey"]);
         const string providerIdentity = "consumer-global-provider";
-        byte[] CreateProvider(bool includePrefix)
+        byte[] CreateProvider(bool includePrefix, int arrayExtent = 2,
+            string schemaIdentity = SchemaIdentity)
         {
             var prefix = includePrefix
                 ? """
@@ -2022,8 +2039,14 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                     public Leaf Child;
                 }
                 """;
+            if (arrayExtent != 2)
+            {
+                source = source.Replace("[int32; 2] Values;",
+                    $"[int32; {arrayExtent}] Values;",
+                    StringComparison.Ordinal);
+            }
             return CreateSourceTypeLibraryArtifact(
-                providerIdentity, SchemaIdentity, source,
+                providerIdentity, schemaIdentity, source,
                 [
                 new TrRmSourceTypeExport("", "ContainerA", "ContainerAKey"),
                 new TrRmSourceTypeExport("", "UsesLeaf", "UsesLeafKey"),
@@ -2271,6 +2294,98 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 shiftedProviderReemittedInput, consumerIdentity,
                 shiftedProviders, NativeRuntimePolicy.FailFast);
 
+        var coLocatedArtifact
+            = CombineA2R1ConsumerAndTypeProviderArtifacts(artifact,
+                CreateProvider(includePrefix: false,
+                    schemaIdentity: A2R1SchemaIdentity));
+        var coLocatedInput = new TrRmStandardArtifactInput(
+            A2R1SchemaIdentity, coLocatedArtifact);
+        var coLocatedTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                        coLocatedArtifact));
+        Assert.That(coLocatedTables.Modules.Count, Is.EqualTo(2));
+        Assert.That(coLocatedTables.Modules.GetIdentity(1),
+            Is.EqualTo(consumerIdentity));
+        Assert.That(coLocatedTables.Modules.GetIdentity(2),
+            Is.EqualTo(providerIdentity));
+        var (consumerTypeDefStart, consumerTypeDefEnd)
+            = coLocatedTables.Modules.GetTypeDefRange(1);
+        var (providerTypeDefStart, providerTypeDefEnd)
+            = coLocatedTables.Modules.GetTypeDefRange(2);
+        Assert.That(providerTypeDefStart, Is.EqualTo(consumerTypeDefEnd));
+        Assert.That(providerTypeDefEnd,
+            Is.EqualTo(coLocatedTables.TypeDefs.Count + 1));
+        Assert.That(consumerTypeDefStart, Is.EqualTo(1));
+        var providerFieldCount = 0;
+        for (var row = 1; row <= coLocatedTables.Fields.Count; row++)
+        {
+            var owner = coLocatedTables.Fields.GetOwnerTypeDef(row);
+            if (owner >= providerTypeDefStart && owner < providerTypeDefEnd)
+            {
+                providerFieldCount++;
+            }
+        }
+        Assert.That(providerFieldCount, Is.GreaterThan(0));
+        var providerLayoutCount = 0;
+        for (var row = 1; row <= coLocatedTables.Layouts.Count; row++)
+        {
+            var owner = coLocatedTables.Layouts.GetOwnerTypeDef(row);
+            if (owner >= providerTypeDefStart && owner < providerTypeDefEnd)
+            {
+                providerLayoutCount++;
+            }
+        }
+        Assert.That(providerLayoutCount, Is.GreaterThan(0));
+
+        var coLocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            coLocatedInput, consumerIdentity, [leafProviderInput]);
+        AssertProviderExpectation(coLocatedLoaded, providerIdentity,
+            consumerIdentity, 2, "ContainerA", "ContainerAKey");
+        AssertProviderExpectation(coLocatedLoaded, providerIdentity,
+            consumerIdentity, 2, "UsesLeaf", "UsesLeafKey");
+        Assert.That(NativeModuleCompiler.ExecuteStandard(
+            coLocatedInput, consumerIdentity, [leafProviderInput],
+            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        var coLocatedReemitted = TrRmExecutableCompiler.EmitStandard(
+            coLocatedLoaded, consumerIdentity, A2R1SchemaIdentity, 1);
+        var coLocatedReemittedInput = new TrRmStandardArtifactInput(
+            A2R1SchemaIdentity, coLocatedReemitted);
+        var coLocatedReloaded = TrRmExecutableCompiler.LoadStandard(
+            coLocatedReemittedInput, consumerIdentity, providers);
+        AssertProviderExpectation(coLocatedReloaded, providerIdentity,
+            consumerIdentity, 1, "ContainerA", "ContainerAKey");
+        AssertProviderExpectation(coLocatedReloaded, providerIdentity,
+            consumerIdentity, 1, "UsesLeaf", "UsesLeafKey");
+        Assert.That(NativeModuleCompiler.ExecuteStandard(
+            coLocatedReemittedInput, consumerIdentity, providers,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        var coLocatedImage = NativeModuleCompiler.EmitStandardExecutable(
+            coLocatedInput, consumerIdentity, [leafProviderInput],
+            NativeRuntimePolicy.FailFast);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(input, consumerIdentity,
+                [leafProviderInput]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(coLocatedInput,
+                consumerIdentity, []));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(coLocatedInput,
+                consumerIdentity, [providerInput, leafProviderInput]));
+        var incompatibleCoLocatedProviderArtifact
+            = CreateProvider(includePrefix: false, arrayExtent: 3,
+                schemaIdentity: A2R1SchemaIdentity);
+        var incompatibleCoLocatedArtifact
+            = CombineA2R1ConsumerAndTypeProviderArtifacts(artifact,
+                incompatibleCoLocatedProviderArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                    incompatibleCoLocatedArtifact),
+                consumerIdentity, [leafProviderInput]));
+
         var malformedTypeSpecRows
             = new ReadOnlyMemory<byte>[permutedTables.TypeSpecs.Count];
         var malformedTypeSpecChanged = false;
@@ -2366,6 +2481,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         await TrRmForeignInvocationAddressEmitterTests
             .AssertNativeImageExitCodeAsync(shiftedProviderImage,
                 $"{consumerIdentity}-shifted-provider", 99)
+            .ConfigureAwait(true);
+        await TrRmForeignInvocationAddressEmitterTests
+            .AssertNativeImageExitCodeAsync(coLocatedImage,
+                $"{consumerIdentity}-co-located", 99)
             .ConfigureAwait(true);
     }
 
@@ -3098,6 +3217,687 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         }
 
         return permutedArtifact;
+    }
+
+    private static byte[] CombineA2R1ConsumerAndTypeProviderArtifacts(
+        byte[] consumerArtifact, byte[] providerArtifact)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft;
+        var consumerIndex = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                consumerArtifact);
+        var providerIndex = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                providerArtifact);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                consumerIndex);
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                providerIndex);
+        Assert.That(consumerTables.Modules.Count, Is.EqualTo(1));
+        Assert.That(providerTables.Modules.Count, Is.EqualTo(1));
+        Assert.That(providerTables.TypeDefs.Count, Is.GreaterThan(0));
+        Assert.That(providerTables.Fields.Count, Is.GreaterThan(0));
+        Assert.That(providerTables.Methods.Count, Is.Zero);
+        Assert.That(providerTables.Signatures.Count, Is.Zero);
+        Assert.That(providerTables.Contracts.Count, Is.Zero);
+        Assert.That(providerTables.Bodies.Count, Is.Zero);
+        Assert.That(providerTables.StandardNativeImports.Count, Is.Zero);
+        Assert.That(providerTables.GenericParams.Count, Is.Zero);
+        Assert.That(providerTables.Modules.SourceFileCount, Is.Zero);
+        Assert.That(consumerTables.Modules.SourceFileCount, Is.Zero);
+
+        static (byte[] Bytes, int Count, ushort Flags) GetSection(
+            TrRmArtifactIndex index, ushort requestedKind)
+        {
+            for (var sectionIndex = 0;
+                sectionIndex < index.SectionCount; sectionIndex++)
+            {
+                index.GetSection(sectionIndex, out var kind, out var flags,
+                    out var bytes, out var recordCount);
+                if (kind == requestedKind)
+                {
+                    return (bytes.ToArray(), recordCount, flags);
+                }
+            }
+
+            return ([], 0, 0);
+        }
+
+        static uint ReadUInt32(ReadOnlySpan<byte> bytes, int offset)
+            => BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..]);
+
+        static void WriteUInt32(Span<byte> bytes, int offset, uint value)
+            => BinaryPrimitives.WriteUInt32LittleEndian(bytes[offset..],
+                value);
+
+        static uint RemapTypeSpecRef(uint typeSpecRef, int typeSpecOffset)
+            => typeSpecRef != 0
+                && (typeSpecRef & 0xFF00_0000u) == 0
+                    ? checked(typeSpecRef + (uint)typeSpecOffset)
+                    : typeSpecRef;
+
+        static uint RemapDefinition(uint definition, int typeDefOffset,
+            int fieldDefOffset)
+        {
+            var kind = definition >> 24;
+            var row = definition & 0x00FF_FFFFu;
+            var rowOffset = kind switch {
+                0x13 => typeDefOffset,
+                0x14 => fieldDefOffset,
+                _ => throw new NotSupportedException(
+                    $"The co-located type-only provider Import/Export kind 0x{kind:X2} is unsupported."),
+            };
+            return (definition & 0xFF00_0000u)
+                | checked(row + (uint)rowOffset);
+        }
+
+        static ReadOnlyMemory<byte> RemapTypeSpecRow(
+            TrRmTypeSpecTableReader typeSpecs, int row,
+            int typeDefOffset, int importOffset, int typeSpecOffset,
+            int genericParamOffset, int methodDefOffset)
+        {
+            var data = typeSpecs.GetRow(row);
+            if (typeSpecs.TryGetFixedInlineArray(checked((uint)row),
+                    out var elementTypeSpecRef, out var elementCount))
+            {
+                return TrRmTypeSpecTableWriter.FixedInlineArray(
+                    RemapTypeSpecRef(elementTypeSpecRef, typeSpecOffset),
+                    elementCount);
+            }
+
+            var form = data[0];
+            switch (form)
+            {
+                case 0x01 or 0x0F:
+                    return data.ToArray();
+
+                case 0x02 or 0x03 or 0x04:
+                {
+                    var rowOffset = form switch {
+                        0x02 => typeDefOffset,
+                        0x03 => importOffset,
+                        _ => genericParamOffset,
+                    };
+                    var referencedRow = checked(
+                        ReadUInt32(data, 2) + (uint)rowOffset);
+                    return TrRmTypeSpecTableWriter.Reference(form,
+                        referencedRow, data[1]);
+                }
+
+                case 0x05:
+                {
+                    var argumentCount = (data.Length - 6)
+                        / sizeof(uint);
+                    var arguments = new uint[argumentCount];
+                    for (var argument = 0; argument < argumentCount;
+                        argument++)
+                    {
+                        arguments[argument] = RemapTypeSpecRef(
+                            ReadUInt32(data,
+                                6 + (argument * sizeof(uint))),
+                            typeSpecOffset);
+                    }
+
+                    return TrRmTypeSpecTableWriter.Constructed(
+                        RemapTypeSpecRef(ReadUInt32(data, 2),
+                            typeSpecOffset),
+                        arguments, data[1]);
+                }
+
+                case >= 0x06 and <= 0x0B:
+                    return TrRmTypeSpecTableWriter.Wrapped(form,
+                        RemapTypeSpecRef(ReadUInt32(data, 2),
+                            typeSpecOffset), data[1]);
+
+                case 0x0C:
+                    return TrRmTypeSpecTableWriter.IndexedFamily(data[2],
+                        RemapTypeSpecRef(ReadUInt32(data, 3),
+                            typeSpecOffset), data[1]);
+
+                case 0x0D:
+                    return TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                        data[2], checked(ReadUInt32(data, 3)
+                            + (uint)methodDefOffset));
+
+                case 0x10:
+                    return TrRmTypeSpecTableWriter.PredicateCapturedType(
+                        checked(ReadUInt32(data, 2)
+                            + (uint)genericParamOffset));
+
+                default:
+                    throw new NotSupportedException(
+                        $"The co-located type-only provider TypeSpec form 0x{form:X2} is unsupported.");
+            }
+        }
+
+        var supportedProviderSections = new HashSet<ushort> {
+            0x0001, 0x0002, 0x0004, 0x0010, 0x0011, 0x0012, 0x0013,
+            0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x001B, 0x001C,
+            0x001D, 0x0020, 0x0021, 0x0023, 0x0048,
+        };
+        for (var sectionIndex = 0;
+            sectionIndex < providerIndex.SectionCount; sectionIndex++)
+        {
+            providerIndex.GetSection(sectionIndex, out var kind, out _,
+                out _, out var recordCount);
+            if (recordCount != 0
+                && !supportedProviderSections.Contains(kind))
+            {
+                throw new NotSupportedException(
+                    $"The co-located type-only provider section 0x{kind:X4} is unsupported.");
+            }
+        }
+
+        var consumerStringSection = GetSection(consumerIndex, 0x0002);
+        var providerStringSection = GetSection(providerIndex, 0x0002);
+        var consumerStringIndex = new TrRmVariableTableIndex(
+            consumerStringSection.Bytes, consumerStringSection.Count, 8, 4);
+        var providerStringIndex = new TrRmVariableTableIndex(
+            providerStringSection.Bytes, providerStringSection.Count, 8, 4);
+        var stringRows = new ReadOnlyMemory<byte>[
+            consumerStringSection.Count + providerStringSection.Count];
+        for (var row = 1; row <= consumerStringSection.Count; row++)
+        {
+            stringRows[row - 1] = consumerStringIndex.GetRow(row).ToArray();
+        }
+        for (var row = 1; row <= providerStringSection.Count; row++)
+        {
+            stringRows[consumerStringSection.Count + row - 1]
+                = providerStringIndex.GetRow(row).ToArray();
+        }
+        var stringBytes = TrRmVariableTableWriter.EncodeBlobs(stringRows);
+        var strings = new TrRmStringTableReader(stringBytes,
+            stringRows.Length);
+
+        var consumerFeatureSection = GetSection(consumerIndex, 0x0004);
+        var providerFeatureSection = GetSection(providerIndex, 0x0004);
+        var featureBytes = new byte[consumerFeatureSection.Bytes.Length
+            + providerFeatureSection.Bytes.Length];
+        consumerFeatureSection.Bytes.CopyTo(featureBytes, 0);
+        providerFeatureSection.Bytes.CopyTo(featureBytes,
+            consumerFeatureSection.Bytes.Length);
+        var featureCount = consumerFeatureSection.Count
+            + providerFeatureSection.Count;
+        var features = new TrRmFeatureTableReader(featureBytes,
+            featureCount, schema);
+
+        var targetProfileRows = new List<TrRmTargetProfileRow>(
+            consumerTables.TargetProfiles.Count
+                + providerTables.TargetProfiles.Count);
+        var targetProfileRowByIdentity
+            = new Dictionary<(uint ProfileId, uint RuleRevision), int>();
+        var providerTargetProfileRowByOld
+            = new int[providerTables.TargetProfiles.Count + 1];
+        for (var row = 1; row <= consumerTables.TargetProfiles.Count; row++)
+        {
+            var profile = consumerTables.TargetProfiles.GetProfile(row);
+            var targetRow = targetProfileRows.Count + 1;
+            targetProfileRows.Add(profile);
+            targetProfileRowByIdentity.Add(
+                (profile.ProfileId, profile.RuleRevision), targetRow);
+        }
+        for (var row = 1; row <= providerTables.TargetProfiles.Count; row++)
+        {
+            var profile = providerTables.TargetProfiles.GetProfile(row);
+            if (!targetProfileRowByIdentity.TryGetValue(
+                    (profile.ProfileId, profile.RuleRevision),
+                    out var targetRow))
+            {
+                targetRow = targetProfileRows.Count + 1;
+                targetProfileRows.Add(profile);
+                targetProfileRowByIdentity.Add(
+                    (profile.ProfileId, profile.RuleRevision), targetRow);
+            }
+
+            providerTargetProfileRowByOld[row] = targetRow;
+        }
+        var targetProfileBytes = TrRmTargetProfileTableWriter.Encode(
+            targetProfileRows, schema);
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, targetProfileRows.Count, schema);
+
+        var consumerModuleSection = GetSection(consumerIndex, 0x0001);
+        var providerModuleSection = GetSection(providerIndex, 0x0001);
+        var consumerModuleIdentityStringRow = checked((int)ReadUInt32(
+            consumerModuleSection.Bytes, 0));
+        var (consumerTargetRequirement, consumerRuntimePolicy)
+            = consumerTables.Modules.GetRequirements(1);
+        var (consumerModuleRefStart, _) = consumerTables.Modules
+            .GetModuleRefRange(1);
+        var (consumerTypeDefStart, _) = consumerTables.Modules
+            .GetTypeDefRange(1);
+        var (consumerMethodStart, _) = consumerTables.Modules
+            .GetMethodDefRange(1);
+        var (consumerSourceFileStart, _) = consumerTables.Modules
+            .GetSourceFileRange(1);
+        var (consumerFeatureStart, consumerModuleFeatureCount)
+            = consumerTables.Modules.GetFeatureRange(1);
+        var providerModuleIdentityStringRow = checked((int)ReadUInt32(
+            providerModuleSection.Bytes, 0)
+            + consumerStringSection.Count);
+        var (providerTargetRequirement, providerRuntimePolicy)
+            = providerTables.Modules.GetRequirements(1);
+        var (providerModuleRefStart, _) = providerTables.Modules
+            .GetModuleRefRange(1);
+        var (providerTypeDefStart, _) = providerTables.Modules
+            .GetTypeDefRange(1);
+        var (providerMethodStart, _) = providerTables.Modules
+            .GetMethodDefRange(1);
+        var (providerSourceFileStart, _) = providerTables.Modules
+            .GetSourceFileRange(1);
+        var (providerFeatureStart, providerModuleFeatureCount)
+            = providerTables.Modules.GetFeatureRange(1);
+        var providerEntryMethod = providerTables.Modules.GetEntryMethod(1);
+        if (providerEntryMethod != 0)
+        {
+            providerEntryMethod += consumerTables.Methods.Count;
+        }
+        var moduleRows = new[] {
+            new TrRmModuleRow(consumerModuleIdentityStringRow,
+                consumerTargetRequirement, consumerRuntimePolicy,
+                consumerTables.Modules.GetEntryMethod(1),
+                consumerModuleRefStart, consumerTypeDefStart,
+                consumerMethodStart, consumerSourceFileStart,
+                consumerFeatureStart, consumerModuleFeatureCount,
+                consumerTables.Modules.GetGoverningRuleEdition(1)),
+            new TrRmModuleRow(providerModuleIdentityStringRow,
+                providerTargetRequirement, providerRuntimePolicy,
+                providerEntryMethod,
+                providerModuleRefStart + consumerTables.ModuleRefs.Count,
+                providerTypeDefStart + consumerTables.TypeDefs.Count,
+                providerMethodStart + consumerTables.Methods.Count,
+                providerSourceFileStart
+                    + consumerTables.Modules.SourceFileCount,
+                providerFeatureStart == 0 ? 0
+                    : providerFeatureStart + consumerFeatureSection.Count,
+                providerModuleFeatureCount,
+                providerTables.Modules.GetGoverningRuleEdition(1)),
+        };
+        var moduleRefCount = consumerTables.ModuleRefs.Count
+            + providerTables.ModuleRefs.Count;
+        var typeDefCount = consumerTables.TypeDefs.Count
+            + providerTables.TypeDefs.Count;
+        var methodDefCount = consumerTables.Methods.Count
+            + providerTables.Methods.Count;
+        var sourceFileCount = consumerTables.Modules.SourceFileCount
+            + providerTables.Modules.SourceFileCount;
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows,
+            strings, moduleRefCount, typeDefCount, methodDefCount,
+            sourceFileCount, featureCount);
+        var modules = new TrRmModuleTableReader(moduleBytes,
+            moduleRows.Length, strings, moduleRefCount, typeDefCount,
+            methodDefCount, sourceFileCount, featureCount);
+
+        var consumerModuleRefSection = GetSection(consumerIndex, 0x0010);
+        var providerModuleRefSection = GetSection(providerIndex, 0x0010);
+        var moduleRefRows = new List<TrRmModuleRefRow>(moduleRefCount);
+        for (var row = 0; row < consumerModuleRefSection.Count; row++)
+        {
+            var data = consumerModuleRefSection.Bytes.AsSpan(row * 12, 12);
+            moduleRefRows.Add(new TrRmModuleRefRow(
+                checked((int)ReadUInt32(data, 0)),
+                ReadUInt32(data, 4), ReadUInt32(data, 8)));
+        }
+        for (var row = 0; row < providerModuleRefSection.Count; row++)
+        {
+            var data = providerModuleRefSection.Bytes.AsSpan(row * 12, 12);
+            moduleRefRows.Add(new TrRmModuleRefRow(
+                checked((int)ReadUInt32(data, 0)
+                    + consumerStringSection.Count),
+                ReadUInt32(data, 4), ReadUInt32(data, 8)));
+        }
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode(moduleRefRows,
+            strings, modules);
+
+        var consumerTypeSpecSection = GetSection(consumerIndex, 0x0011);
+        var providerTypeSpecSection = GetSection(providerIndex, 0x0011);
+        var typeSpecRows = new ReadOnlyMemory<byte>[
+            consumerTypeSpecSection.Count + providerTypeSpecSection.Count];
+        var consumerTypeSpecIndex = new TrRmVariableTableIndex(
+            consumerTypeSpecSection.Bytes, consumerTypeSpecSection.Count,
+            2, 1);
+        var providerTypeSpecIndex = new TrRmVariableTableIndex(
+            providerTypeSpecSection.Bytes, providerTypeSpecSection.Count,
+            2, 1);
+        for (var row = 1; row <= consumerTypeSpecSection.Count; row++)
+        {
+            typeSpecRows[row - 1]
+                = consumerTypeSpecIndex.GetRow(row).ToArray();
+        }
+        for (var row = 1; row <= providerTypeSpecSection.Count; row++)
+        {
+            typeSpecRows[consumerTypeSpecSection.Count + row - 1]
+                = RemapTypeSpecRow(providerTables.TypeSpecs, row,
+                    consumerTables.TypeDefs.Count,
+                    consumerTables.Imports.Count,
+                    consumerTables.TypeSpecs.Count,
+                    consumerTables.GenericParams.Count,
+                    consumerTables.Methods.Count);
+        }
+        var typeSpecCount = typeSpecRows.Length;
+        var genericParamCount = consumerTables.GenericParams.Count
+            + providerTables.GenericParams.Count;
+        var predicateCaptureCount = consumerTables.PredicateCaptures.Count
+            + providerTables.PredicateCaptures.Count;
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            typeDefCount,
+            consumerTables.Imports.Count + providerTables.Imports.Count,
+            genericParamCount, 0, schema,
+            methodDefCount: methodDefCount,
+            predicateCaptureCount: predicateCaptureCount);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecCount, typeDefCount,
+            consumerTables.Imports.Count + providerTables.Imports.Count,
+            genericParamCount, 0, schema, methodDefCount,
+            predicateCaptureCount);
+
+        var consumerTypeDefSection = GetSection(consumerIndex, 0x0013);
+        var providerTypeDefSection = GetSection(providerIndex, 0x0013);
+        var typeDefRows = new List<TrRmTypeDefRow>(typeDefCount);
+        for (var artifact = 0; artifact < 2; artifact++)
+        {
+            var tables = artifact == 0 ? consumerTables : providerTables;
+            var section = artifact == 0
+                ? consumerTypeDefSection : providerTypeDefSection;
+            var stringOffset = artifact == 0
+                ? 0 : consumerStringSection.Count;
+            var fieldOffset = artifact == 0
+                ? 0 : consumerTables.Fields.Count;
+            var genericParamOffset = artifact == 0
+                ? 0 : consumerTables.GenericParams.Count;
+            var layoutOffset = artifact == 0
+                ? 0 : consumerTables.Layouts.Count;
+            var contractOffset = artifact == 0
+                ? 0 : consumerTables.Contracts.Count;
+            for (var row = 1; row <= tables.TypeDefs.Count; row++)
+            {
+                var data = section.Bytes.AsSpan((row - 1) * 44, 44);
+                var (fieldStart, fieldEnd)
+                    = tables.TypeDefs.GetFieldRange(row);
+                var (genericFirst, genericCount)
+                    = tables.TypeDefs.GetGenericRange(row);
+                var (layoutFirst, layoutCount)
+                    = tables.TypeDefs.GetLayoutRange(row);
+                var (contractFirst, contractCount)
+                    = tables.TypeDefs.GetContractRange(row);
+                typeDefRows.Add(new TrRmTypeDefRow(
+                    checked((int)ReadUInt32(data, 0) + stringOffset),
+                    checked((int)ReadUInt32(data, 4) + stringOffset),
+                    tables.TypeDefs.GetFlags(row),
+                    fieldStart == 0 ? 0 : fieldStart + fieldOffset,
+                    fieldEnd - fieldStart,
+                    genericFirst == 0 ? 0
+                        : genericFirst + genericParamOffset,
+                    genericCount,
+                    layoutFirst == 0 ? 0 : layoutFirst + layoutOffset,
+                    layoutCount,
+                    contractFirst == 0 ? 0 : contractFirst + contractOffset,
+                    contractCount));
+            }
+        }
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
+            strings, modules,
+            consumerTables.Fields.Count + providerTables.Fields.Count,
+            genericParamCount,
+            consumerTables.Layouts.Count + providerTables.Layouts.Count,
+            consumerTables.Contracts.Count + providerTables.Contracts.Count,
+            schema);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
+            strings, modules,
+            consumerTables.Fields.Count + providerTables.Fields.Count,
+            genericParamCount,
+            consumerTables.Layouts.Count + providerTables.Layouts.Count,
+            consumerTables.Contracts.Count + providerTables.Contracts.Count,
+            schema);
+
+        var consumerFieldSection = GetSection(consumerIndex, 0x0014);
+        var providerFieldSection = GetSection(providerIndex, 0x0014);
+        var fieldRows = new List<TrRmFieldDefRow>(
+            consumerTables.Fields.Count + providerTables.Fields.Count);
+        for (var row = 1; row <= consumerTables.Fields.Count; row++)
+        {
+            var data = consumerFieldSection.Bytes.AsSpan((row - 1) * 16, 16);
+            fieldRows.Add(new TrRmFieldDefRow(
+                checked((int)ReadUInt32(data, 0)),
+                checked((int)ReadUInt32(data, 4)),
+                ReadUInt32(data, 8), ReadUInt32(data, 12)));
+        }
+        for (var row = 1; row <= providerTables.Fields.Count; row++)
+        {
+            var data = providerFieldSection.Bytes.AsSpan((row - 1) * 16, 16);
+            fieldRows.Add(new TrRmFieldDefRow(
+                checked((int)ReadUInt32(data, 0)
+                    + consumerTables.TypeDefs.Count),
+                checked((int)ReadUInt32(data, 4)
+                    + consumerStringSection.Count),
+                RemapTypeSpecRef(ReadUInt32(data, 8),
+                    consumerTables.TypeSpecs.Count),
+                ReadUInt32(data, 12)));
+        }
+        var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
+            typeDefs, typeSpecs);
+        var fields = new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
+            strings, typeDefs, typeSpecs);
+
+        var consumerLayoutFieldSection = GetSection(consumerIndex, 0x0023);
+        var providerLayoutFieldSection = GetSection(providerIndex, 0x0023);
+        var layoutFieldRows = new List<TrRmLayoutFieldRow>(
+            consumerTables.LayoutFields.Count
+                + providerTables.LayoutFields.Count);
+        for (var row = 1; row <= consumerTables.LayoutFields.Count; row++)
+        {
+            layoutFieldRows.Add(new TrRmLayoutFieldRow(
+                consumerTables.LayoutFields.GetOwnerLayout(row),
+                consumerTables.LayoutFields.GetOrdinal(row),
+                consumerTables.LayoutFields.GetFieldDef(row)));
+        }
+        for (var row = 1; row <= providerTables.LayoutFields.Count; row++)
+        {
+            layoutFieldRows.Add(new TrRmLayoutFieldRow(
+                providerTables.LayoutFields.GetOwnerLayout(row)
+                    + consumerTables.Layouts.Count,
+                providerTables.LayoutFields.GetOrdinal(row),
+                providerTables.LayoutFields.GetFieldDef(row)
+                    + consumerTables.Fields.Count));
+        }
+
+        var consumerLayoutSection = GetSection(consumerIndex, 0x0015);
+        var providerLayoutSection = GetSection(providerIndex, 0x0015);
+        var layoutRows = new List<TrRmLayoutRow>(
+            consumerTables.Layouts.Count + providerTables.Layouts.Count);
+        for (var row = 1; row <= consumerTables.Layouts.Count; row++)
+        {
+            var (fieldFirst, fieldCount)
+                = consumerTables.Layouts.GetLayoutFieldRange(row);
+            layoutRows.Add(new TrRmLayoutRow(
+                consumerTables.Layouts.GetOwnerTypeDef(row),
+                consumerTables.Layouts.GetTargetProfileRef(row),
+                consumerTables.Layouts.GetLayoutKind(row),
+                consumerTables.Layouts.GetFlags(row),
+                consumerTables.Layouts.GetAlignment(row),
+                consumerTables.Layouts.GetPack(row), fieldFirst, fieldCount));
+        }
+        for (var row = 1; row <= providerTables.Layouts.Count; row++)
+        {
+            var (fieldFirst, fieldCount)
+                = providerTables.Layouts.GetLayoutFieldRange(row);
+            var oldProfile = providerTables.Layouts
+                .GetTargetProfileRef(row);
+            var newProfile = oldProfile == 0 ? 0
+                : checked((uint)providerTargetProfileRowByOld[
+                    checked((int)oldProfile)]);
+            layoutRows.Add(new TrRmLayoutRow(
+                providerTables.Layouts.GetOwnerTypeDef(row)
+                    + consumerTables.TypeDefs.Count,
+                newProfile,
+                providerTables.Layouts.GetLayoutKind(row),
+                providerTables.Layouts.GetFlags(row),
+                providerTables.Layouts.GetAlignment(row),
+                providerTables.Layouts.GetPack(row),
+                fieldFirst == 0 ? 0
+                    : fieldFirst + consumerTables.LayoutFields.Count,
+                fieldCount));
+        }
+        var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows,
+            typeDefs, targetProfiles, layoutFieldRows.Count);
+        var layouts = new TrRmLayoutTableReader(layoutBytes,
+            layoutRows.Count, typeDefs, targetProfiles,
+            layoutFieldRows.Count);
+        var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
+            layoutFieldRows, layouts, typeDefs, fields);
+
+        var consumerFixedArraySection = GetSection(consumerIndex, 0x0012);
+        var providerFixedArraySection = GetSection(providerIndex, 0x0012);
+        var fixedArrayRows = new List<TrRmFixedArrayLayoutRow>(
+            consumerTables.FixedArrayLayouts.Count
+                + providerTables.FixedArrayLayouts.Count);
+        for (var row = 1;
+            row <= consumerTables.FixedArrayLayouts.Count; row++)
+        {
+            fixedArrayRows.Add(
+                consumerTables.FixedArrayLayouts.GetRow(row));
+        }
+        for (var row = 1;
+            row <= providerTables.FixedArrayLayouts.Count; row++)
+        {
+            var layout = providerTables.FixedArrayLayouts.GetRow(row);
+            fixedArrayRows.Add(layout with {
+                OwnerModuleRow = layout.OwnerModuleRow
+                    + consumerTables.Modules.Count,
+                ArrayTypeSpecRow = layout.ArrayTypeSpecRow
+                    + consumerTables.TypeSpecs.Count,
+                TargetProfileRef = checked((uint)
+                    providerTargetProfileRowByOld[
+                        checked((int)layout.TargetProfileRef)]),
+            });
+        }
+        var fixedArrayBytes = TrRmFixedArrayLayoutTableWriter.Encode(
+            fixedArrayRows, typeSpecs, targetProfiles, features, modules,
+            schema);
+
+        var consumerImportSection = GetSection(consumerIndex, 0x001C);
+        var providerImportSection = GetSection(providerIndex, 0x001C);
+        var importBytes = new byte[consumerImportSection.Bytes.Length
+            + providerImportSection.Bytes.Length];
+        consumerImportSection.Bytes.CopyTo(importBytes, 0);
+        providerImportSection.Bytes.CopyTo(importBytes,
+            consumerImportSection.Bytes.Length);
+        for (var row = 0; row < providerImportSection.Count; row++)
+        {
+            var data = importBytes.AsSpan(
+                consumerImportSection.Bytes.Length + (row * 12), 12);
+            WriteUInt32(data, 0,
+                checked(ReadUInt32(data, 0)
+                    + (uint)consumerTables.ModuleRefs.Count));
+            WriteUInt32(data, 4,
+                checked(ReadUInt32(data, 4)
+                    + (uint)consumerStringSection.Count));
+            WriteUInt32(data, 8, RemapDefinition(
+                ReadUInt32(data, 8), consumerTables.TypeDefs.Count,
+                consumerTables.Fields.Count));
+        }
+        var importCount = consumerImportSection.Count
+            + providerImportSection.Count;
+
+        var consumerExportSection = GetSection(consumerIndex, 0x001D);
+        var providerExportSection = GetSection(providerIndex, 0x001D);
+        var exportBytes = new byte[consumerExportSection.Bytes.Length
+            + providerExportSection.Bytes.Length];
+        consumerExportSection.Bytes.CopyTo(exportBytes, 0);
+        providerExportSection.Bytes.CopyTo(exportBytes,
+            consumerExportSection.Bytes.Length);
+        for (var row = 0; row < providerExportSection.Count; row++)
+        {
+            var data = exportBytes.AsSpan(
+                consumerExportSection.Bytes.Length + (row * 8), 8);
+            WriteUInt32(data, 0, RemapDefinition(
+                ReadUInt32(data, 0), consumerTables.TypeDefs.Count,
+                consumerTables.Fields.Count));
+            WriteUInt32(data, 4,
+                checked(ReadUInt32(data, 4)
+                    + (uint)consumerStringSection.Count));
+        }
+        var exportCount = consumerExportSection.Count
+            + providerExportSection.Count;
+
+        var outputSections
+            = new Dictionary<ushort, (ushort Flags, int Count, byte[] Bytes)>();
+        for (var sectionIndex = 0;
+            sectionIndex < consumerIndex.SectionCount; sectionIndex++)
+        {
+            consumerIndex.GetSection(sectionIndex, out var kind,
+                out var flags, out var bytes, out var recordCount);
+            outputSections.Add(kind,
+                (flags, recordCount, bytes.ToArray()));
+        }
+
+        void SetSection(ushort kind, byte[] bytes, int count,
+            ushort fallbackFlags)
+        {
+            var flags = outputSections.TryGetValue(kind, out var existing)
+                ? existing.Flags : fallbackFlags;
+            outputSections[kind] = (flags, count, bytes);
+        }
+
+        SetSection(0x0001, moduleBytes, moduleRows.Length,
+            consumerModuleSection.Flags);
+        SetSection(0x0002, stringBytes, stringRows.Length,
+            consumerStringSection.Flags);
+        SetSection(0x0004, featureBytes, featureCount,
+            consumerFeatureSection.Flags);
+        SetSection(0x0010, moduleRefBytes, moduleRefRows.Count,
+            consumerModuleRefSection.Flags != 0
+                ? consumerModuleRefSection.Flags
+                : providerModuleRefSection.Flags);
+        SetSection(0x0011, typeSpecBytes, typeSpecCount,
+            consumerTypeSpecSection.Flags);
+        SetSection(0x0012, fixedArrayBytes, fixedArrayRows.Count,
+            consumerFixedArraySection.Flags != 0
+                ? consumerFixedArraySection.Flags
+                : providerFixedArraySection.Flags);
+        SetSection(0x0013, typeDefBytes, typeDefCount,
+            GetSection(consumerIndex, 0x0013).Flags);
+        SetSection(0x0014, fieldBytes, fieldRows.Count,
+            consumerFieldSection.Flags);
+        SetSection(0x0015, layoutBytes, layoutRows.Count,
+            consumerLayoutSection.Flags != 0
+                ? consumerLayoutSection.Flags
+                : providerLayoutSection.Flags);
+        SetSection(0x001C, importBytes, importCount,
+            consumerImportSection.Flags != 0
+                ? consumerImportSection.Flags
+                : providerImportSection.Flags);
+        SetSection(0x001D, exportBytes, exportCount,
+            consumerExportSection.Flags != 0
+                ? consumerExportSection.Flags
+                : providerExportSection.Flags);
+        SetSection(0x0023, layoutFieldBytes, layoutFieldRows.Count,
+            consumerLayoutFieldSection.Flags != 0
+                ? consumerLayoutFieldSection.Flags
+                : providerLayoutFieldSection.Flags);
+        SetSection(0x0048, targetProfileBytes, targetProfileRows.Count,
+            GetSection(consumerIndex, 0x0048).Flags != 0
+                ? GetSection(consumerIndex, 0x0048).Flags
+                : GetSection(providerIndex, 0x0048).Flags);
+
+        var sections = new List<TrRmSection>(outputSections.Count);
+        foreach (var (kind, section) in outputSections)
+        {
+            sections.Add(new TrRmSection(kind, section.Flags,
+                checked((uint)section.Count), section.Bytes));
+        }
+        sections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
+        var combinedArtifact = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                        combinedArtifact));
+        return combinedArtifact;
     }
 
     private static (byte[] Bytes, int RecordCount) GetA2R1Section(
