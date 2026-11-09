@@ -190,7 +190,8 @@ public readonly ref struct TrRmNativeImportTableReader
             {
                 case MethodDefOwnerKind:
                     ValidateMethod((int)ownerRef, callConv, methods, signatures,
-                        parameters, types, contracts, layouts,
+                        parameters, types, typeDefs, imports, contracts,
+                        layouts,
                         _resourceLedger);
                     _resourceLedger?.ConsumeWork(2);
                     if (_rowByMethod[ownerRef] != 0)
@@ -302,6 +303,7 @@ public readonly ref struct TrRmNativeImportTableReader
     private static void ValidateMethod(int ownerRef, byte callConv,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader types,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports,
         TrRmContractTableReader contracts, TrRmLayoutTableReader layouts,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
@@ -354,8 +356,7 @@ public readonly ref struct TrRmNativeImportTableReader
 
         TrRmNativeImportSignatureValidator.Validate((uint)ownerRef, methods,
             signatures, parameters, types, contracts.GetNativeOutputs(ownerRef),
-            nativeParameters, layouts,
-            validateNativeParameterAccess: true);
+            nativeParameters, layouts, true, typeDefs, imports);
     }
 
     internal static bool IsNativeAbiFieldType(TrRmTypeSpecTableReader types,

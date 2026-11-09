@@ -360,12 +360,26 @@ public static partial class TrRmExecutableCompiler
             or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
+            or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
             or StandardLocalAggregateLayoutSchemaIdentity
             or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
         {
             typeProviderBindings = TrRmFixedArrayProviderBindingValidator
                 .Validate(tables, artifacts, schemaIdentities,
                     moduleValidation.Modules, rootModuleRow);
+        }
+        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
+            && typeProviderBindings.Any(binding =>
+                schemaIdentities[binding.ConsumerArtifactIndex] is not (
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
+                || schemaIdentities[binding.ProviderArtifactIndex] is not (
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)))
+        {
+            throw Invalid(
+                "A2R1 TypeDef provider edges require exact A2 or A2R1+Repeat selections.");
         }
 
         if (StringComparer.Ordinal.Equals(schemaIdentities[0],

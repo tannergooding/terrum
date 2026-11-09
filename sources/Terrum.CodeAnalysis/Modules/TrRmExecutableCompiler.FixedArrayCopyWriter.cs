@@ -1133,6 +1133,19 @@ public static partial class TrRmExecutableCompiler
                 => StandardForeignInvocationStorageFixedArraySchemaIdentity,
             _ => null,
         };
+        bool IsSupportedProviderSchemaIdentity(string identity)
+        {
+            return schema
+                    == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                ? StringComparer.Ordinal.Equals(identity,
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                    || StringComparer.Ordinal.Equals(identity,
+                        StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
+                : expectedProviderSchemaIdentity is not null
+                    && StringComparer.Ordinal.Equals(identity,
+                        expectedProviderSchemaIdentity);
+        }
+
         var moduleRefs = new List<TrRmModuleRefRow>();
         var imports = new List<TrRmImportRow>();
         var firstImportRowByStructure = new Dictionary<int, int>();
@@ -1184,10 +1197,9 @@ public static partial class TrRmExecutableCompiler
             var referenceRoot = origin.ReferenceRoot
                 ?? throw Unsupported(
                     "A Standard source type origin does not retain its reference root.");
-            if (!StringComparer.Ordinal.Equals(provider.SchemaIdentity,
-                    expectedProviderSchema)
-                || !StringComparer.Ordinal.Equals(referenceRoot.SchemaIdentity,
-                    expectedProviderSchema)
+            if (!IsSupportedProviderSchemaIdentity(provider.SchemaIdentity)
+                || !IsSupportedProviderSchemaIdentity(
+                    referenceRoot.SchemaIdentity)
                 || string.IsNullOrEmpty(provider.ModuleIdentity)
                 || origin.DefinitionId >> 24 != 0x13
                 || origin.ExportKeys.IsDefaultOrEmpty)
@@ -1369,6 +1381,17 @@ public static partial class TrRmExecutableCompiler
                     "A Standard source type origin does not retain its reference root.");
             foreach (var expectation in origin.Expectations)
             {
+                if (schema
+                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                    && (!IsSupportedProviderSchemaIdentity(
+                            expectation.UsingModule.SchemaIdentity)
+                        || !IsSupportedProviderSchemaIdentity(
+                            expectation.Provider.SchemaIdentity)))
+                {
+                    throw Unsupported(
+                        "A source TypeDef Import edge does not retain an exact A2 or A2R1+Repeat selection.");
+                }
+
                 if (schema == TrRmArtifactSchema.LocalAggregateLayoutDraft
                     && (!StringComparer.Ordinal.Equals(
                             expectation.UsingModule.SchemaIdentity,

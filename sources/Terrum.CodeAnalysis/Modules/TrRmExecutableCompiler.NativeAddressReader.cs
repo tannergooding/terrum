@@ -470,16 +470,17 @@ public static partial class TrRmExecutableCompiler
             var parameterTypes = ReadForeignInvocationParameterTypes(method,
                 tables.Methods, tables.Signatures, tables.Parameters,
                 tables.TypeSpecs, nativePointerTypeDefinitions,
-                signatureIndexByAnchorMethod, structureTypeByTypeDef);
+                signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                imports: tables.Imports);
             var returnType = ReadForeignInvocationType(tables.TypeSpecs,
                 tables.Signatures.GetResultTypeSpec(signature),
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-                structureTypeByTypeDef);
+                structureTypeByTypeDef, tables.Imports);
             var nativeParameters = ReadForeignInvocationNativeParameters(
                 method, tables.Methods, tables.Signatures,
                 tables.Parameters, tables.TypeSpecs, tables.Contracts,
                 tables.Layouts, nativePointerTypeDefinitions,
-                structureTypeByTypeDef);
+                structureTypeByTypeDef, tables.TypeDefs, tables.Imports);
             var nativeOutputs = ReadForeignInvocationNativeOutputs(method,
                 parameterTypes, nativePointerTypeDefinitions, tables,
                 out var dependencyContracts);
@@ -804,6 +805,7 @@ public static partial class TrRmExecutableCompiler
                             nativePointerTypeDefinitions,
                             signatureIndexByAnchorMethod,
                             structureTypeByTypeDef,
+                            imports: tables.Imports,
                             arrayTypeByTypeSpecRow:
                                 arrayTypeByTypeSpecRow);
                         if (home[0] != 3
@@ -1430,12 +1432,13 @@ public static partial class TrRmExecutableCompiler
             callerMethodRow, tables.Methods, tables.Signatures,
             tables.Parameters, tables.TypeSpecs, nativePointerTypeDefinitions,
             signatureIndexByAnchorMethod, structureTypeByTypeDef,
-            arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
+            arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow,
+            imports: tables.Imports);
         var callerReturnType = ReadForeignInvocationType(tables.TypeSpecs,
             tables.Signatures.GetResultTypeSpec(
                 tables.Methods.GetSignature(callerMethodRow)),
             nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-            structureTypeByTypeDef);
+            structureTypeByTypeDef, tables.Imports);
         if (callerReturnType != PrimitiveType.Void != returnsCallResult)
         {
             throw Unsupported(
@@ -1518,6 +1521,7 @@ public static partial class TrRmExecutableCompiler
             var type = ReadForeignInvocationType(tables.TypeSpecs,
                 typeSpecRef, nativePointerTypeDefinitions,
                 signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                imports: tables.Imports,
                 arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
             var isOutputHome = outputHomeIndices.Contains(homeIndex);
             if (isOutputHome)
@@ -2939,11 +2943,12 @@ public static partial class TrRmExecutableCompiler
         var anchorParameterTypes = ReadForeignInvocationParameterTypes(
             anchorMethodRow, tables.Methods, tables.Signatures, tables.Parameters,
             tables.TypeSpecs, nativePointerTypeDefinitions,
-            signatureIndexByAnchorMethod, structureTypeByTypeDef);
+            signatureIndexByAnchorMethod, structureTypeByTypeDef,
+            imports: tables.Imports);
         var anchorResultType = ReadForeignInvocationType(tables.TypeSpecs,
             tables.Signatures.GetResultTypeSpec(anchorSignatureRow),
             nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-            structureTypeByTypeDef);
+            structureTypeByTypeDef, tables.Imports);
         if (!IsForeignInvocationValueType(anchorResultType, allowVoid: true))
         {
             throw Unsupported("The pointer anchor result type is unsupported.");
@@ -2952,7 +2957,8 @@ public static partial class TrRmExecutableCompiler
         var anchorNativeParameters = ReadForeignInvocationNativeParameters(
             anchorMethodRow, tables.Methods, tables.Signatures, tables.Parameters,
             tables.TypeSpecs, tables.Contracts, tables.Layouts,
-            nativePointerTypeDefinitions, structureTypeByTypeDef);
+            nativePointerTypeDefinitions, structureTypeByTypeDef,
+            tables.TypeDefs, tables.Imports);
         var anchorNativeOutputs = ReadForeignInvocationNativeOutputs(
             anchorMethodRow, anchorParameterTypes,
             nativePointerTypeDefinitions, tables, out _);
@@ -2990,11 +2996,12 @@ public static partial class TrRmExecutableCompiler
         var targetParameterTypes = ReadForeignInvocationParameterTypes(
             targetMethodRow, tables.Methods, tables.Signatures, tables.Parameters,
             tables.TypeSpecs, nativePointerTypeDefinitions,
-            signatureIndexByAnchorMethod, structureTypeByTypeDef);
+            signatureIndexByAnchorMethod, structureTypeByTypeDef,
+            imports: tables.Imports);
         var targetResultType = ReadForeignInvocationType(tables.TypeSpecs,
             tables.Signatures.GetResultTypeSpec(targetSignatureRow),
             nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-            structureTypeByTypeDef);
+            structureTypeByTypeDef, tables.Imports);
         if (!IsForeignInvocationValueType(targetResultType, allowVoid: true))
         {
             throw Unsupported("The direct NativeImport result type is unsupported.");
@@ -3003,7 +3010,8 @@ public static partial class TrRmExecutableCompiler
         var targetNativeParameters = ReadForeignInvocationNativeParameters(
             targetMethodRow, tables.Methods, tables.Signatures, tables.Parameters,
             tables.TypeSpecs, tables.Contracts, tables.Layouts,
-            nativePointerTypeDefinitions, structureTypeByTypeDef);
+            nativePointerTypeDefinitions, structureTypeByTypeDef,
+            tables.TypeDefs, tables.Imports);
         var targetNativeOutputs = ReadForeignInvocationNativeOutputs(
             targetMethodRow, targetParameterTypes,
             nativePointerTypeDefinitions, tables,
@@ -3053,11 +3061,12 @@ public static partial class TrRmExecutableCompiler
         var callerParameterTypes = ReadForeignInvocationParameterTypes(
             callerMethodRow, tables.Methods, tables.Signatures, tables.Parameters,
             tables.TypeSpecs, nativePointerTypeDefinitions,
-            signatureIndexByAnchorMethod, structureTypeByTypeDef);
+            signatureIndexByAnchorMethod, structureTypeByTypeDef,
+            imports: tables.Imports);
         var callerResultType = ReadForeignInvocationType(tables.TypeSpecs,
             tables.Signatures.GetResultTypeSpec(callerSignatureRow),
             nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-            structureTypeByTypeDef);
+            structureTypeByTypeDef, tables.Imports);
         if (!IsForeignInvocationValueType(callerResultType, allowVoid: true))
         {
             throw Unsupported("The caller result type is unsupported.");
@@ -3123,11 +3132,11 @@ public static partial class TrRmExecutableCompiler
                 importMethodRow, tables.Methods, tables.Signatures,
                 tables.Parameters, tables.TypeSpecs,
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-                structureTypeByTypeDef);
+                structureTypeByTypeDef, imports: tables.Imports);
             var resultType = ReadForeignInvocationType(tables.TypeSpecs,
                 tables.Signatures.GetResultTypeSpec(importSignatureRow),
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-                structureTypeByTypeDef);
+                structureTypeByTypeDef, tables.Imports);
             if (!IsForeignInvocationValueType(resultType, allowVoid: true))
             {
                 throw Unsupported(
@@ -3138,7 +3147,7 @@ public static partial class TrRmExecutableCompiler
                 importMethodRow, tables.Methods, tables.Signatures,
                 tables.Parameters, tables.TypeSpecs, tables.Contracts,
                 tables.Layouts, nativePointerTypeDefinitions,
-                structureTypeByTypeDef);
+                structureTypeByTypeDef, tables.TypeDefs, tables.Imports);
             var nativeOutputs = ReadForeignInvocationNativeOutputs(
                 importMethodRow, parameterTypes, nativePointerTypeDefinitions,
                 tables, out var outputDependencies);
@@ -3401,7 +3410,7 @@ public static partial class TrRmExecutableCompiler
             pointerTypeMapIndex);
         var pointerType = ReadForeignInvocationType(typeSpecs,
             pointerTypeSpecRef, nativePointerTypeDefinitions,
-            signatureIndexByAnchorMethod, structureTypeByTypeDef);
+            signatureIndexByAnchorMethod, structureTypeByTypeDef, imports);
         if (pointerType != NativeFunctionPointerTypes.Type(0)
             || ReadForeignInvocationBodyMethodDef(body, imports,
                 BinaryPrimitives.ReadUInt16LittleEndian(nativeAddress[8..]))
@@ -3500,7 +3509,7 @@ public static partial class TrRmExecutableCompiler
                         ReadForeignInvocationBodyTypeSpec(body,
                             BinaryPrimitives.ReadUInt16LittleEndian(body.HomeMap[10..])),
                         nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-                        structureTypeByTypeDef) != resultType)))
+                       structureTypeByTypeDef, imports) != resultType)))
         {
             throw Invalid("The NativeAddress CallSite result does not match its saved signature.");
         }
@@ -3516,7 +3525,7 @@ public static partial class TrRmExecutableCompiler
                 || ReadForeignInvocationType(typeSpecs,
                     ReadForeignInvocationBodyTypeSpec(body, typeMapIndex),
                     nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-                    structureTypeByTypeDef) != signature.ReturnType)
+                    structureTypeByTypeDef, imports) != signature.ReturnType)
             {
                 throw Invalid("A staged CallSite result Home has the wrong type.");
             }
@@ -3533,7 +3542,8 @@ public static partial class TrRmExecutableCompiler
                 || BinaryPrimitives.ReadUInt16LittleEndian(body.HomeMap[(offset + 2)..])
                     != GetTypeMapIndexForType(body, callerParameterTypes[ordinal],
                         typeSpecs, nativePointerTypeDefinitions,
-                        signatureIndexByAnchorMethod, structureTypeByTypeDef)
+                        signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                        imports)
                 || BinaryPrimitives.ReadUInt16LittleEndian(body.HomeMap[(offset + 4)..])
                     != ordinal)
             {
@@ -4306,6 +4316,7 @@ public static partial class TrRmExecutableCompiler
                 ReadForeignInvocationBodyTypeSpec(body, typeMapIndex),
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
                 structureTypeByTypeDef,
+                imports,
                 arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
             var localVariable = variables.Count;
             localVariableByHome[homeIndex] = localVariable;
@@ -6124,13 +6135,16 @@ public static partial class TrRmExecutableCompiler
                         break;
                     }
 
-                    var isArrayFieldWrite
+                    var isArrayPathWrite
                         = storeRecord.Length == 20
                             && storeRecord[0] == 0x05
                             && storePayload.Length == 16
                             && storePayload[2] == 2
-                            && storePayload[3] == 1;
-                    if (isArrayFieldWrite)
+                            && storePayload[3] == 1
+                            && hasInitializationSelection
+                            && initializationSelection.AccessKind == 2
+                            && initializationSelection.TargetKind is 2 or 3;
+                    if (isArrayPathWrite)
                     {
                         if (!body.Schema
                                 .UsesForeignInvocationStorageFixedArrayRepeatInitialization()
@@ -6146,13 +6160,11 @@ public static partial class TrRmExecutableCompiler
                             || storePayload[13] != 0
                             || BinaryPrimitives.ReadUInt16LittleEndian(
                                 storePayload[14..]) != 0
-                            || !hasInitializationSelection
-                            || initializationSelection.TargetKind != 2
-                            || initializationSelection.AccessKind != 2
-                            || initializationSelection.FieldPlace is null)
+                            || (initializationSelection.TargetKind == 2
+                                && initializationSelection.FieldPlace is null))
                         {
                             throw Invalid(
-                                "The A2R1+Repeat SemanticStore is not an exact captured field replacement.");
+                                "The A2R1+Repeat SemanticStore is not an exact captured array-path write.");
                         }
 
                         var targetType
@@ -8175,13 +8187,18 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var isElementValueWrite = lastElementSelection == selections.Length - 1
+            && selections[^1].TargetKind == 3
+            && selections[^1].AccessKind == 2;
+        var isElementFieldWrite = lastElementSelection >= 0
+            && lastElementSelection < selections.Length - 1
+            && selections[^1].TargetKind == 2
+            && selections[^1].AccessKind == 2;
         if (lastElementSelection < 0
-            || lastElementSelection == selections.Length - 1
-            || selections[^1].TargetKind != 2
-            || selections[^1].AccessKind != 2)
+            || (!isElementValueWrite && !isElementFieldWrite))
         {
             throw Invalid(
-                "The A2R1+Repeat field store has no captured writable array-element field path.");
+                "The A2R1+Repeat store has no captured writable array-element path.");
         }
 
         var arraySelectionPath = finalSelection.Path;
@@ -8789,7 +8806,8 @@ public static partial class TrRmExecutableCompiler
         TrRmTypeSpecTableReader typeSpecs,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
-        IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null)
+        IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
+        TrRmImportTableReader imports = default)
     {
         var signatureRow = methods.GetSignature(methodRow);
         var (first, count) = signatures.GetParamRange(signatureRow);
@@ -8801,6 +8819,7 @@ public static partial class TrRmExecutableCompiler
                 parameters.GetTypeSpec(parameterRow),
                 nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
                 structureTypeByTypeDef,
+                imports,
                 arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
             var isFixedArray = NativeFixedArrayTypes.IsType(type);
             if (parameters.GetMode(parameterRow) != 0
@@ -8826,7 +8845,9 @@ public static partial class TrRmExecutableCompiler
             TrRmContractTableReader contracts,
             TrRmLayoutTableReader layouts,
             List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-            int[] structureTypeByTypeDef)
+            int[] structureTypeByTypeDef,
+            TrRmTypeDefTableReader typeDefs = default,
+            TrRmImportTableReader imports = default)
     {
         var nativeParameters = contracts.GetNativeParameters(methodRow);
         var result = ImmutableArray.CreateBuilder<DirectNativeParameter>(
@@ -8856,7 +8877,8 @@ public static partial class TrRmExecutableCompiler
 
             var pointeeType = NativeParameterPointee(typeSpecs, typeSpecRef,
                 nativeParameter.Access, nativePointerTypeDefinitions,
-                layouts, structureTypeByTypeDef);
+                layouts, structureTypeByTypeDef, typeDefs, imports,
+                hasImportContext: true);
             result.Add(new DirectNativeParameter(
                 checked((int)nativeParameter.ParameterOrdinal), pointeeType,
                 (NativeParameterAccess)(nativeParameter.Access - 1),
@@ -9889,7 +9911,8 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyReader body, PrimitiveType type,
         TrRmTypeSpecTableReader typeSpecs,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        TrRmImportTableReader imports)
     {
         var result = ushort.MaxValue;
         for (var index = 0; index < body.TypeMap.Length / sizeof(uint); index++)
@@ -9904,7 +9927,7 @@ public static partial class TrRmExecutableCompiler
             var typeSpecRef = token & 0x00FF_FFFF;
             if (ReadForeignInvocationType(typeSpecs, typeSpecRef,
                     nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-                    structureTypeByTypeDef) == type)
+                    structureTypeByTypeDef, imports) == type)
             {
                 result = checked((ushort)index);
                 break;

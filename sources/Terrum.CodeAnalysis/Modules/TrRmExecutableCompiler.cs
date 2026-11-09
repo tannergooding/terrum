@@ -4017,16 +4017,24 @@ public static partial class TrRmExecutableCompiler
         uint typeSpecRef, byte access,
         List<NativePointerTypeDefinition> nativePointerTypes,
         TrRmLayoutTableReader layouts,
-        int[] structureTypeByTypeDef)
+        int[] structureTypeByTypeDef,
+        TrRmTypeDefTableReader typeDefs = default,
+        TrRmImportTableReader imports = default,
+        bool hasImportContext = false)
     {
-        if (!TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-                typeSpecs, typeSpecRef, access, layouts, out _))
+        var isValidPointee = hasImportContext
+            ? TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+                typeSpecs, typeSpecRef, access, layouts, typeDefs, imports,
+                out _)
+            : TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+                typeSpecs, typeSpecRef, access, layouts, out _);
+        if (!isValidPointee)
         {
             throw Invalid("Invalid native parameter pointee TypeSpec.");
         }
 
         var formalType = FromNativeValueRow(typeSpecs, typeSpecRef,
-            nativePointerTypes, structureTypeByTypeDef);
+            nativePointerTypes, structureTypeByTypeDef, imports);
         if (formalType == PrimitiveType.NativeRawPointer)
         {
             return PrimitiveType.Void;

@@ -7518,6 +7518,298 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task StandardA2R1ImportedTypePlaceSelectionsSurviveProviderRelocation()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity = A2R1RepeatInitializationSchemaIdentity;
+        const string providerIdentity = "a2r1-imported-field-provider";
+        const string consumerIdentity = "a2r1-imported-field-consumer";
+
+        TrRmStandardArtifactInput CreateProvider(bool relocateContainer,
+            bool changeArrayExtent)
+        {
+            var prefix = relocateContainer
+                ? """
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Prefix {
+                        public int32 Tag;
+                    }
+
+                    """
+                : "";
+            var valuesExtent = changeArrayExtent ? 3 : 2;
+            var source = $$"""
+                {{prefix}}
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Container {
+                    public mut [int32; {{valuesExtent}}] Values;
+                    public mut [int32; 1] Sibling;
+                }
+                """;
+            var providerCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source),
+                WithLayoutRegistration(new CompilationOptions {
+                    RuntimePolicy = BoundRuntimePolicy.FailFast,
+                }));
+            Assert.That(providerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    providerCompilation.Diagnostics));
+            IReadOnlyList<TrRmSourceTypeExport> exports
+                = relocateContainer
+                    ? [
+                        new TrRmSourceTypeExport("", "Prefix", "PrefixKey"),
+                        new TrRmSourceTypeExport("", "Container",
+                            "ContainerKey"),
+                    ]
+                    : [
+                        new TrRmSourceTypeExport("", "Container",
+                            "ContainerKey"),
+                    ];
+            var artifact = TrRmExecutableCompiler.EmitStandard(
+                providerCompilation.Program!, providerIdentity,
+                schemaIdentity, 1, exports);
+            return new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        }
+
+        var providerInput = CreateProvider(relocateContainer: false,
+            changeArrayExtent: false);
+        var providerReference = TrRmExecutableCompiler
+            .CreateStandardReference(providerInput, providerIdentity, [],
+                ["ContainerKey"]);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                int32 oneIndex = 1;
+                [int32; 2] values = [-1, 0];
+                int32 siblingValue = 99;
+                [int32; 1] sibling = [siblingValue];
+                int32 replacement = 42;
+                init mut Container backing;
+                backing.Values = values;
+                backing.Sibling = sibling;
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    backing.Values[oneIndex] = replacement;
+                    var callback = &RtlMoveMemory;
+                    callback(&observed, &backing.Sibling[zeroIndex],
+                        byteCount);
+                }
+                return observed;
+            }
+            """;
+        var nativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            providerReference, WithLayoutRegistration(new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration = nativeRegistration,
+            }));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, consumerIdentity, schemaIdentity, 1);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        var containerTypeDefRow = 0;
+        for (var row = 1; row <= tables.TypeDefs.Count; row++)
+        {
+            if (tables.TypeDefs.GetName(row) == "Container")
+            {
+                containerTypeDefRow = row;
+                break;
+            }
+        }
+        Assert.That(containerTypeDefRow, Is.GreaterThan(0));
+        var importedContainerDefinition = 0x1300_0000u
+            | checked((uint)containerTypeDefRow);
+        var importsContainer = false;
+        for (var row = 1; row <= tables.Imports.Count; row++)
+        {
+            importsContainer |= tables.Imports
+                .GetExpectedDefinitionForImportRow(row)
+                == importedContainerDefinition;
+        }
+        Assert.That(importsContainer, Is.True);
+        var selectedContainerFields = new HashSet<int>();
+        var selectedArrayElement = false;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x04)
+            {
+                continue;
+            }
+
+            var payload = record[4..];
+            if (payload[0] == 2 && payload[9] == 1)
+            {
+                var fieldRow = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]));
+                if (tables.Fields.GetOwnerTypeDef(fieldRow)
+                    == containerTypeDefRow)
+                {
+                    selectedContainerFields.Add(fieldRow);
+                }
+            }
+            else if (payload[0] == 3 && payload[9] == 3)
+            {
+                selectedArrayElement = true;
+            }
+        }
+        Assert.That(selectedContainerFields, Has.Count.EqualTo(2));
+        Assert.That(selectedArrayElement, Is.True);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            consumerIdentity, [providerInput]);
+        var loadedContainer = loaded.Structures.Single(
+            static structure => structure.Name == "Container");
+        Assert.That(loadedContainer.StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo(providerIdentity));
+        var fieldAddresses = new List<BoundNativeStorageAddress>();
+        var caller = loaded.Functions.Single(
+            static function => function.Name == "Main");
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress {
+                    FieldPlace: not null,
+                } address)
+                {
+                    fieldAddresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(fieldAddresses, Has.Count.EqualTo(1));
+        Assert.That(fieldAddresses.All(static address =>
+            address.Projections.IsEmpty
+                && address.FieldPlace is BoundFieldRead), Is.True);
+        Assert.That(((BoundFieldRead)fieldAddresses[0].FieldPlace!).Field,
+            Is.EqualTo(1));
+        var fieldArrayWrites = new List<BoundNativeFixedArrayPathWrite>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayPathWrite {
+                    FieldPlace: BoundFieldRead {
+                        Field: 0,
+                    },
+                } write)
+                {
+                    fieldArrayWrites.Add(write);
+                }
+            }), Is.True);
+        Assert.That(fieldArrayWrites, Has.Count.EqualTo(1));
+        Assert.That(fieldArrayWrites[0].Projections, Has.Length.EqualTo(1));
+        Assert.That(fieldArrayWrites[0].LeafFields, Is.Empty);
+        Assert.That(fieldArrayWrites[0].Projections[0]
+            .Layout.ElementCount, Is.EqualTo(2));
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            consumerIdentity, schemaIdentity, 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(input,
+            consumerIdentity, [providerInput], NativeRuntimePolicy.FailFast),
+            Is.EqualTo(99));
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            consumerIdentity, [providerInput], NativeRuntimePolicy.FailFast);
+        await AssertNativeImageExitCodeAsync(image, consumerIdentity, 99)
+            .ConfigureAwait(true);
+
+        var valueProbeIdentity = $"{consumerIdentity}-mutated-value";
+        var valueProbeSource = source.Replace(
+            "&backing.Sibling[zeroIndex]",
+            "&backing.Values[oneIndex]", StringComparison.Ordinal);
+        var valueProbeCompilation = Compilation.Create(
+            SyntaxTree.Parse(valueProbeSource), providerReference,
+            WithLayoutRegistration(new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            }));
+        Assert.That(valueProbeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                valueProbeCompilation.Diagnostics));
+        var valueProbeArtifact = TrRmExecutableCompiler.EmitStandard(
+            valueProbeCompilation.Program!, valueProbeIdentity,
+            schemaIdentity, 1);
+        var valueProbeInput = new TrRmStandardArtifactInput(schemaIdentity,
+            valueProbeArtifact);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(valueProbeInput,
+            valueProbeIdentity, [providerInput],
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        var valueProbeImage = NativeModuleCompiler.EmitStandardExecutable(
+            valueProbeInput, valueProbeIdentity, [providerInput],
+            NativeRuntimePolicy.FailFast);
+        await AssertNativeImageExitCodeAsync(valueProbeImage,
+            valueProbeIdentity, 42).ConfigureAwait(true);
+
+        var relocatedProvider = CreateProvider(relocateContainer: true,
+            changeArrayExtent: false);
+        var relocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            reemittedInput, consumerIdentity, [relocatedProvider]);
+        var relocatedContainer = relocatedLoaded.Structures.Single(
+            static structure => structure.Name == "Container");
+        Assert.That(relocatedContainer.StandardTypeOrigin!.DefinitionId,
+            Is.Not.EqualTo(
+                loadedContainer.StandardTypeOrigin!.DefinitionId));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(relocatedLoaded,
+            consumerIdentity, schemaIdentity, 1), Is.EqualTo(reemitted));
+        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            consumerIdentity, [relocatedProvider],
+            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        var relocatedImage = NativeModuleCompiler.EmitStandardExecutable(
+            reemittedInput, consumerIdentity, [relocatedProvider],
+            NativeRuntimePolicy.FailFast);
+        await AssertNativeImageExitCodeAsync(relocatedImage,
+            $"{consumerIdentity}-relocated", 99).ConfigureAwait(true);
+
+        var incompatibleProvider = CreateProvider(relocateContainer: false,
+            changeArrayExtent: true);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(reemittedInput,
+                consumerIdentity, [incompatibleProvider]));
+
+        var compilerPath = typeof(TrRmExecutableCompiler).Assembly.Location;
+        var kernel32Path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "kernel32.dll");
+        TestContext.WriteLine(
+            $"A2R1 imported field PlaceSelection: target=WindowsX64; policy=FailFast; schema={schemaIdentity}; expected=sibling-preservation:99, mutated-element:42; JIT=99/42/99; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; consumer-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; reemitted-consumer-sha256={Convert.ToHexString(SHA256.HashData(reemitted))}; value-probe-source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(valueProbeSource)))}; value-probe-consumer-sha256={Convert.ToHexString(SHA256.HashData(valueProbeArtifact))}; provider-sha256={Convert.ToHexString(SHA256.HashData(providerInput.Artifact.Span))}; relocated-provider-sha256={Convert.ToHexString(SHA256.HashData(relocatedProvider.Artifact.Span))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; native-library={kernel32Path}; native-library-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(kernel32Path)))}.");
+    }
+
+    [Test]
     public async Task StandardA2EUFieldArrayNativeAddressFailsFastOutOfBounds()
     {
         Assume.That(OperatingSystem.IsWindows()

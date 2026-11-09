@@ -152,8 +152,28 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
-    internal static bool TryGetNativeParameterPointee(TrRmTypeSpecTableReader types,
-        uint typeSpecRef, byte access, TrRmLayoutTableReader layouts,
+    internal static bool TryGetNativeParameterPointee(
+        TrRmTypeSpecTableReader types, uint typeSpecRef, byte access,
+        TrRmLayoutTableReader layouts, out PrimitiveType pointeeType)
+        => TryGetNativeParameterPointeeCore(types, typeSpecRef, access,
+            layouts, importedTypeDefRow: 0, out pointeeType);
+
+    internal static bool TryGetNativeParameterPointee(
+        TrRmTypeSpecTableReader types, uint typeSpecRef, byte access,
+        TrRmLayoutTableReader layouts, TrRmTypeDefTableReader typeDefs,
+        TrRmImportTableReader imports, out PrimitiveType pointeeType)
+    {
+        pointeeType = PrimitiveType.Void;
+        var importedTypeDefRow = GetExpectedImportedTypeDefRow(types,
+            typeSpecRef, typeDefs, imports);
+        return importedTypeDefRow >= 0
+            && TryGetNativeParameterPointeeCore(types, typeSpecRef, access,
+                layouts, importedTypeDefRow, out pointeeType);
+    }
+
+    private static bool TryGetNativeParameterPointeeCore(
+        TrRmTypeSpecTableReader types, uint typeSpecRef, byte access,
+        TrRmLayoutTableReader layouts, int importedTypeDefRow,
         out PrimitiveType pointeeType)
     {
         pointeeType = PrimitiveType.Void;
@@ -198,8 +218,8 @@ internal static class TrRmNativeImportTypeContract
             return true;
         }
 
-        if (TryGetBlittableAggregateParameterTypeDef(types, typeSpecRef,
-            layouts, access is 2 or 3, out _)
+        if (TryGetBlittableAggregateParameterTypeDefCore(types, typeSpecRef,
+            layouts, access is 2 or 3, importedTypeDefRow, out _)
             || IsNativeAbiValueType(types, pointeeRef))
         {
             pointeeType = PrimitiveType.NativeRawPointer;
@@ -326,6 +346,28 @@ internal static class TrRmNativeImportTypeContract
     internal static bool TryGetBlittableAggregateParameterTypeDef(
         TrRmTypeSpecTableReader types, uint typeSpecRef,
         TrRmLayoutTableReader layouts, bool writableRequired, out int typeDefRow)
+        => TryGetBlittableAggregateParameterTypeDefCore(types, typeSpecRef,
+            layouts, writableRequired, importedTypeDefRow: 0, out typeDefRow);
+
+    internal static bool TryGetBlittableAggregateParameterTypeDef(
+        TrRmTypeSpecTableReader types, uint typeSpecRef,
+        TrRmLayoutTableReader layouts, bool writableRequired,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports,
+        out int typeDefRow)
+    {
+        typeDefRow = 0;
+        var importedTypeDefRow = GetExpectedImportedTypeDefRow(types,
+            typeSpecRef, typeDefs, imports);
+        return importedTypeDefRow >= 0
+            && TryGetBlittableAggregateParameterTypeDefCore(types,
+                typeSpecRef, layouts, writableRequired, importedTypeDefRow,
+                out typeDefRow);
+    }
+
+    private static bool TryGetBlittableAggregateParameterTypeDefCore(
+        TrRmTypeSpecTableReader types, uint typeSpecRef,
+        TrRmLayoutTableReader layouts, bool writableRequired,
+        int importedTypeDefRow, out int typeDefRow)
     {
         var type = types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 7 && type[0] == 0x0C
@@ -333,16 +375,76 @@ internal static class TrRmNativeImportTypeContract
             && type[2] == 0x8C)
         {
             var innerRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
-            var inner = types.GetTypeSpecBytes(innerRef);
-            if (inner.Length == 6 && inner[0] == 0x02 && inner[1] == 0)
+            var inner = types.GetTypeSpecRef(innerRef);
+            if (inner.Form == 0x02 && inner.Qualifiers == 0)
             {
-                typeDefRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner[2..]));
-                return layouts.HasBlittableLayout(typeDefRow, 1, 1);
+                var innerRow = types.GetRow(inner.Row);
+                if (innerRow.Length != 6 || innerRow[1] != 0)
+                {
+                    typeDefRow = 0;
+                    return false;
+                }
+
+                typeDefRow = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(innerRow[2..]));
+            }
+            else if (inner.Form == 0x03 && inner.Qualifiers == 0
+                && importedTypeDefRow > 0)
+            {
+                typeDefRow = importedTypeDefRow;
+            }
+            else
+            {
+                typeDefRow = 0;
+                return false;
+            }
+
+            if (layouts.HasBlittableLayout(typeDefRow, 1, 1))
+            {
+                return true;
             }
         }
 
         typeDefRow = 0;
         return false;
+    }
+
+    private static int GetExpectedImportedTypeDefRow(
+        TrRmTypeSpecTableReader types, uint typeSpecRef,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports)
+    {
+        var pointer = types.GetTypeSpecBytes(typeSpecRef);
+        if (pointer.Length != 7 || pointer[0] != 0x0C
+            || pointer[2] != 0x8C)
+        {
+            return 0;
+        }
+
+        var pointee = types.GetTypeSpecRef(
+            BinaryPrimitives.ReadUInt32LittleEndian(pointer[3..]));
+        if (!pointee.IsRow || pointee.Form != 0x03
+            || pointee.Qualifiers != 0)
+        {
+            return 0;
+        }
+
+        var pointeeRow = types.GetRow(pointee.Row);
+        if (pointeeRow.Length != 6 || pointeeRow[1] != 0)
+        {
+            return -1;
+        }
+
+        var importRow = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(pointeeRow[2..]));
+        var definition = imports.GetExpectedDefinitionForImportRow(
+            importRow);
+        if ((definition >> 24) != 0x13)
+        {
+            return -1;
+        }
+
+        var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+        return typeDefs.GetKind(typeDefRow) == 1 ? typeDefRow : -1;
     }
 
     private static PrimitiveType FromAtomicCode(byte typeCode) => typeCode switch
@@ -685,7 +787,31 @@ internal static class TrRmNativeImportSignatureValidator
         TrRmTypeSpecTableReader types,
         System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
         System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters,
-        TrRmLayoutTableReader layouts, bool validateNativeParameterAccess = false)
+        TrRmLayoutTableReader layouts,
+        bool validateNativeParameterAccess = false)
+        => ValidateCore(method, methods, signatures, parameters, types, outputs,
+            nativeParameters, layouts, validateNativeParameterAccess,
+            false, default, default);
+
+    internal static void Validate(uint method, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types,
+        System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
+        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters,
+        TrRmLayoutTableReader layouts, bool validateNativeParameterAccess,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports)
+        => ValidateCore(method, methods, signatures, parameters, types, outputs,
+            nativeParameters, layouts, validateNativeParameterAccess,
+            true, typeDefs, imports);
+
+    private static void ValidateCore(uint method,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader types,
+        System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
+        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters,
+        TrRmLayoutTableReader layouts, bool validateNativeParameterAccess,
+        bool hasProviderTables, TrRmTypeDefTableReader typeDefs,
+        TrRmImportTableReader imports)
     {
         var signature = methods.GetSignature((int)method);
         if (!TrRmNativeImportTypeContract.TryGetDirectNativeImportResultType(
@@ -716,13 +842,29 @@ internal static class TrRmNativeImportSignatureValidator
             var hasNativeParameter = TryGetNativeParameter(
                 nativeParameters, parameter, out var nativeParameter);
             var nativePointeeType = PrimitiveType.Void;
-            var hasNativePointeeType = hasNativeParameter
-                && (validateNativeParameterAccess
-                    ? TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-                        types, typeRow, nativeParameter.Access, layouts,
-                        out nativePointeeType)
-                    : TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-                        types, typeRow, out nativePointeeType));
+            var hasNativePointeeType = false;
+            if (hasNativeParameter)
+            {
+                if (validateNativeParameterAccess)
+                {
+                    hasNativePointeeType = hasProviderTables
+                        ? TrRmNativeImportTypeContract
+                            .TryGetNativeParameterPointee(types, typeRow,
+                                nativeParameter.Access, layouts, typeDefs,
+                                imports, out nativePointeeType)
+                        : TrRmNativeImportTypeContract
+                            .TryGetNativeParameterPointee(types, typeRow,
+                                nativeParameter.Access, layouts,
+                                out nativePointeeType);
+                }
+                else
+                {
+                    hasNativePointeeType
+                        = TrRmNativeImportTypeContract
+                            .TryGetNativeParameterPointee(types, typeRow,
+                                out nativePointeeType);
+                }
+            }
             if (TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
                     types, typeRow, out var pointeeType)
                 && seenOutputs[parameter])
@@ -748,9 +890,15 @@ internal static class TrRmNativeImportSignatureValidator
 
                 seenNativeParameters[parameter] = true;
             }
-            else if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
-                        types, typeRow, layouts, out _)
-                    && hasNativeParameter)
+            else if (hasNativeParameter
+                && (hasProviderTables
+                    ? TrRmNativeImportTypeContract
+                        .TryGetBlittableAggregateParameterTypeDef(types,
+                            typeRow, layouts, false, typeDefs, imports, out _)
+                    : TrRmNativeImportTypeContract
+                        .TryGetBlittableAggregateParameterTypeDef(types,
+                            typeRow, layouts, out _))
+                )
             {
                 if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
                     || !ValidNativeParameter(nativeParameter, PrimitiveType.NativeRawPointer))

@@ -1048,8 +1048,24 @@ origins, alias keys and imported recipes; private writers still reject
 unsupported projected origins. Compatible provider row relocation and
 incompatible declaration/layout rejection have bounded coverage.
 The [native integration inventory](implementation/conformance-gaps.md#cg-004)
-retains the exact alias, re-encoding and provider gates. General replacement,
-complete Body remapping and source-free provider Body execution remain open.
+retains the exact alias, re-encoding and provider gates. General replacement
+and complete Body remapping remain open.
+The separate unapproved
+[A2R1+Repeat source composition proposal](proposals/standard-trrm-a2r1-source-copy-type-composition.md)
+has a provisional implementation for exact A2R1+Repeat type-only
+source-export/reference and mixed A2/A2R1 provider chains. Imported TypeDef
+pointees survive the NativeParameter/NativeAddress Body TypeMap and
+source-free LoadStandard/EmitStandard/rebind paths; regressions cover retained
+provider expectations, compatible TypeDef-row relocation, changed-field
+replacement and rejection of an A2E provider selection. This does not approve
+the proposal. A focused imported `Container` field-path case now carries
+FieldDef/Element PlaceSelections through source-free LoadStandard/EmitStandard
+and JIT/supervised AOT. The byte-identical consumer re-emission executes before
+and after compatible provider TypeDef-row relocation; separate observations
+verify that writing `Values[1]` returns 42 and that the neighboring `Sibling[0]`
+remains 99. A changed fixed-array extent is rejected. Non-byte Body map/record
+permutations, broader imported-type closure and co-located TypeDef providers
+remain open.
 The original A1 array candidate is superseded for integrated nominal arrays
 by the unapproved
 [A2 rootless Copy evidence proposal](proposals/standard-trrm-rootless-copy-type-evidence.md);

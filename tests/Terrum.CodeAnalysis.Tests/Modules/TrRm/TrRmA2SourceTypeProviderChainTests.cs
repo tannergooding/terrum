@@ -25,6 +25,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
     private const string LocalAggregateLayoutSchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
+    private const string A2R1SchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-repeat-initialization-1";
     private static readonly string[] s_pairExportKeys = ["PairKey", "PairAlias"];
     private static readonly string[] s_leafExportKeys = ["LeafKey", "ProviderLeafKey"];
 
@@ -608,6 +610,350 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             .SequenceEqual(providerSnapshot.AsSpan()), Is.True);
         Assert.That(leafOrigin.Provider.ArtifactSnapshot.AsSpan()
             .SequenceEqual(leafSnapshot.AsSpan()), Is.True);
+    }
+
+    [Test]
+    public void StandardA2R1NativeParameterRetainsImportedProviderTypeMap()
+    {
+        const string schemaIdentity
+            = A2R1SchemaIdentity;
+        static byte[] CreateProviderArtifact(bool relocateContainer = false,
+            bool changeContainerField = false)
+        {
+            var prefix = relocateContainer
+                ? """
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Prefix {
+                        public uint32 Marker;
+                    }
+
+                    """
+                : "";
+            var container = changeContainerField
+                ? """
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Container {
+                        public mut uint32 Other;
+                    }
+                    """
+                : """
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Container {
+                        public mut uint32 Data;
+                    }
+                    """;
+            var exports = relocateContainer
+                ? new[] {
+                    new TrRmSourceTypeExport("", "Prefix", "PrefixKey"),
+                    new TrRmSourceTypeExport("", "Container",
+                        "ContainerKey"),
+                }
+                : new[] {
+                    new TrRmSourceTypeExport("", "Container",
+                        "ContainerKey"),
+                };
+            return CreateSourceTypeLibraryArtifact("Root", SchemaIdentity,
+                prefix + container, exports);
+        }
+
+        var rootArtifact = CreateProviderArtifact();
+        var coreNativeRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+            "Root", [],
+            ["ContainerKey"]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "a2r1-test.dll",
+                "Observe",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern unsafe void Observe(ptr<Container> source,
+                uint64 byteCount);
+
+            void Main(ptr<Container> source,
+                uint64 byteCount) {
+                unsafe {
+                    var callback = &Observe;
+                    callback(source, byteCount);
+                }
+            }
+            """), reference, new CompilationOptions {
+                NativeCoreRegistration = coreNativeRegistration,
+                LayoutCoreRegistration =
+                    NativeCoreRegistrationTests.CreateLayoutRegistration(
+                        coreNativeRegistration),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, coreNativeRegistration.UsingModuleIdentity,
+            schemaIdentity, 1);
+        var index
+            = TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                    artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                index);
+        var inspectRow = 0;
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            if (tables.Methods.GetName(method) == "Main")
+            {
+                inspectRow = method;
+                break;
+            }
+        }
+        Assert.That(inspectRow, Is.Not.Zero);
+        tables.ValidateRegisterBodyMapsForMethod(inspectRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(inspectRow), tables.Contracts.Count);
+        Assert.That(body.TypeMap.Length, Is.GreaterThan(0));
+        var typeDefImportRows = new HashSet<int>();
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
+        {
+            if ((tables.Imports.GetExpectedDefinitionForImportRow(importRow)
+                    >> 24) == 0x13)
+            {
+                _ = typeDefImportRows.Add(importRow);
+            }
+        }
+        var bodyTypeMapReferencesImport = false;
+        for (var offset = 0; offset < body.TypeMap.Length;
+            offset += sizeof(uint))
+        {
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap[offset..]);
+            if ((token >> 24) != 0x11)
+            {
+                continue;
+            }
+
+            var typeSpecRow = tables.TypeSpecs.GetRow(
+                checked((int)(token & 0x00FF_FFFF)));
+            var importedTypeSpecRow = typeSpecRow.Length == 7
+                && typeSpecRow[0] == 0x0C && typeSpecRow[2] == 0x8C
+                ? tables.TypeSpecs.GetTypeSpecRef(
+                    BinaryPrimitives.ReadUInt32LittleEndian(
+                        typeSpecRow[3..]))
+                : default;
+            var importRow = importedTypeSpecRow is {
+                    IsRow: true,
+                    Form: 0x03,
+                }
+                ? checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    tables.TypeSpecs.GetRow(importedTypeSpecRow.Row)[2..]))
+                : 0;
+            if (typeSpecRow.Length == 6 && typeSpecRow[0] == 0x03)
+            {
+                importRow = checked((int)BinaryPrimitives
+                    .ReadUInt32LittleEndian(typeSpecRow[2..]));
+            }
+            if (typeDefImportRows.Contains(importRow))
+            {
+                bodyTypeMapReferencesImport = true;
+                break;
+            }
+        }
+        Assert.That(bodyTypeMapReferencesImport, Is.True);
+
+        var providers = new[] {
+            new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+        };
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            coreNativeRegistration.UsingModuleIdentity, providers);
+        var caller = loaded.Functions.Single(
+            static function => function.Name == "Main");
+        var containerIndex = loaded.Structures
+            .Select((structure, index) => (structure, index))
+            .Single(static item => item.structure.Name == "Container")
+            .index;
+        var containerType = (PrimitiveType)(100 + containerIndex);
+        Assert.That(loaded.NativePointerTypes.Any(pointer =>
+            pointer.PointeeType == containerType), Is.True);
+        Assert.That(caller.Body.Statements, Is.Not.Empty);
+        var containerOrigin = loaded.Structures[containerIndex]
+            .StandardTypeOrigin!;
+        Assert.That(containerOrigin.Provider.ModuleIdentity,
+            Is.EqualTo("Root"));
+        Assert.That(containerOrigin.Expectations.Any(expectation =>
+            expectation.ExportKey == "ContainerKey"
+            && expectation.UsingModule.ModuleIdentity
+                == coreNativeRegistration.UsingModuleIdentity), Is.True);
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            coreNativeRegistration.UsingModuleIdentity, schemaIdentity, 1);
+        var relocatedProviders = new[] {
+            new TrRmStandardArtifactInput(SchemaIdentity,
+                CreateProviderArtifact(relocateContainer: true)),
+        };
+        var relocated = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            coreNativeRegistration.UsingModuleIdentity, relocatedProviders);
+        var relocatedCaller = relocated.Functions.Single(
+            static function => function.Name == "Main");
+        var relocatedContainerIndex = relocated.Structures
+            .Select((structure, index) => (structure, index))
+            .Single(static item => item.structure.Name == "Container").index;
+        var relocatedContainerType
+            = (PrimitiveType)(100 + relocatedContainerIndex);
+        Assert.That(relocated.NativePointerTypes.Any(pointer =>
+            pointer.PointeeType == relocatedContainerType), Is.True);
+        Assert.That(relocatedCaller.Body.Statements, Is.Not.Empty);
+        var relocatedContainerOrigin = relocated.Structures[
+            relocatedContainerIndex].StandardTypeOrigin!;
+        Assert.That(relocatedContainerOrigin.Provider.ModuleIdentity,
+            Is.EqualTo("Root"));
+        Assert.That(relocatedContainerOrigin.DefinitionId,
+            Is.Not.EqualTo(containerOrigin.DefinitionId));
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                coreNativeRegistration.UsingModuleIdentity,
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        CreateProviderArtifact(changeContainerField: true)),
+                ]));
+    }
+
+    [Test]
+    public void StandardA2R1SourceTypeCompositionRetainsMixedProviderSchemas()
+    {
+        var rootArtifact = CreateSourceTypeLibraryArtifact("Root",
+            SchemaIdentity, """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public mut uint32 Data;
+            }
+            """,
+            [new TrRmSourceTypeExport("", "Container", "ContainerKey")]);
+        var rootReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+            "Root", [], ["ContainerKey"]);
+        var repeatProviderArtifact = CreateSourceTypeLibraryArtifact(
+            "RepeatProvider", A2R1SchemaIdentity, """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Wrapper {
+                public mut Container Value;
+            }
+            """,
+            [new TrRmSourceTypeExport("", "Wrapper", "WrapperKey")],
+            rootReference);
+        var repeatProviderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                    repeatProviderArtifact),
+                "RepeatProvider",
+                [new TrRmStandardArtifactInput(SchemaIdentity,
+                    rootArtifact)],
+                ["WrapperKey"]);
+        var outerArtifact = CreateSourceTypeLibraryArtifact("RepeatOuter",
+            A2R1SchemaIdentity, """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Outer {
+                public mut Wrapper Value;
+            }
+            """,
+            [new TrRmSourceTypeExport("", "Outer", "OuterKey")],
+            repeatProviderReference);
+        var providers = new[] {
+            new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                repeatProviderArtifact),
+            new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+        };
+        var outerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(A2R1SchemaIdentity, outerArtifact),
+            "RepeatOuter", providers, ["OuterKey"]);
+
+        var outerOrigin = outerReference.Structures.Single(
+            static structure => structure.Name == "Outer")
+            .StandardTypeOrigin!;
+        var wrapperOrigin = outerReference.Structures.Single(
+            static structure => structure.Name == "Wrapper")
+            .StandardTypeOrigin!;
+        var containerOrigin = outerReference.Structures.Single(
+            static structure => structure.Name == "Container")
+            .StandardTypeOrigin!;
+        Assert.That(outerOrigin.Provider.SchemaIdentity,
+            Is.EqualTo(A2R1SchemaIdentity));
+        Assert.That(wrapperOrigin.Provider.SchemaIdentity,
+            Is.EqualTo(A2R1SchemaIdentity));
+        Assert.That(containerOrigin.Provider.SchemaIdentity,
+            Is.EqualTo(SchemaIdentity));
+        Assert.That(wrapperOrigin.Expectations.Any(expectation =>
+            expectation.UsingModule.ModuleIdentity == "RepeatProvider"
+            && expectation.ExportKey == "ContainerKey"), Is.True,
+            string.Join(Environment.NewLine,
+                wrapperOrigin.Expectations.Select(static expectation =>
+                    $"{expectation.UsingModule.ModuleIdentity} -> "
+                    + $"{expectation.ProducerIdentity} ({expectation.ExportKey})")));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(A2R1SchemaIdentity, outerArtifact),
+            "RepeatOuter", providers);
+        var reencoded = TrRmExecutableCompiler.EmitStandard(loaded,
+            "RepeatOuter", A2R1SchemaIdentity, 1);
+        var reencodedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                    reencoded),
+                "RepeatOuter", providers, ["OuterKey"]);
+        Assert.That(reencodedReference.Structures.Single(
+                static structure => structure.Name == "Wrapper")
+            .StandardTypeOrigin!.Provider.SchemaIdentity,
+            Is.EqualTo(A2R1SchemaIdentity));
+        Assert.That(reencodedReference.Structures.Single(
+                static structure => structure.Name == "Container")
+            .StandardTypeOrigin!.Provider.SchemaIdentity,
+            Is.EqualTo(SchemaIdentity));
+
+        var incompatibleRoot = CreateSourceTypeLibraryArtifact("Root",
+            SchemaIdentity, """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public mut uint32 Other;
+            }
+            """,
+            [new TrRmSourceTypeExport("", "Container", "ContainerKey")]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                    reencoded),
+                "RepeatOuter",
+                [
+                    providers[0],
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        incompatibleRoot),
+                ]));
+
+        var a2eRootArtifact = CreateSourceTypeLibraryArtifact("Root",
+            EmptyInitializationSchemaIdentity, """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public mut uint32 Data;
+            }
+            """,
+            [new TrRmSourceTypeExport("", "Container", "ContainerKey")]);
+        var unsupportedProviderSchema
+            = Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                        repeatProviderArtifact),
+                    "RepeatProvider",
+                    [
+                        new TrRmStandardArtifactInput(
+                            EmptyInitializationSchemaIdentity,
+                            a2eRootArtifact),
+                    ],
+                    ["WrapperKey"]));
+        Assert.That(unsupportedProviderSchema!.Message,
+            Does.Contain("A2R1 TypeDef provider edges"));
     }
 
     [Test]
@@ -1342,6 +1688,24 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 ["ConsumerKey"]);
         Assert.That(reemittedReference.NativeFixedArrayTypes,
             Is.EqualTo(loadedConsumer.NativeFixedArrayTypes));
+    }
+
+    private static byte[] CreateSourceTypeLibraryArtifact(
+        string moduleIdentity, string schemaIdentity, string source,
+        IReadOnlyList<TrRmSourceTypeExport> typeExports,
+        CompilationReference? reference = null)
+    {
+        var syntaxTree = SyntaxTree.Parse(source);
+        var options = new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        };
+        var compilation = reference is null
+            ? Compilation.CreateLibrary(syntaxTree, options)
+            : Compilation.CreateLibrary(syntaxTree, reference, options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+            moduleIdentity, schemaIdentity, 1, typeExports);
     }
 
     private static byte[] CreateRootArtifact(bool duplicatePairAlias = false,

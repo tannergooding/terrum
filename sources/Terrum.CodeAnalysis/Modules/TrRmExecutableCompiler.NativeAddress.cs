@@ -108,7 +108,8 @@ public static partial class TrRmExecutableCompiler
 
             ValidateA2SourceTypeDeclarationMap(program);
             _ = FixedLayoutStorage.Validate(program.Structures,
-                program.NativeFixedArrayTypes);
+                program.NativeFixedArrayTypes,
+                enumDefinitions: program.EnumDefinitions);
         }
 
         if (program.Functions.Length < 2
@@ -189,7 +190,7 @@ public static partial class TrRmExecutableCompiler
                 || !DirectNativeImportContract.IsValid(importedFunction,
                     program.Structures,
                     program.NativeFunctionPointerSignatures,
-                    program.NativePointerTypes))
+                    program.NativePointerTypes, program.EnumDefinitions))
             {
                 throw Unsupported(
                     "The NativeAddress Body supports one caller and direct NativeImport declarations without output contracts.");
@@ -207,7 +208,8 @@ public static partial class TrRmExecutableCompiler
         var moduleImport = target.ModuleImport;
         if (target.DirectNativeImport is not DirectNativeImport import
             || !DirectNativeImportContract.IsValid(target, program.Structures,
-                program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+                program.NativeFunctionPointerSignatures,
+                program.NativePointerTypes, program.EnumDefinitions)
             || target.IsModuleReference != (moduleImport is not null)
             || (moduleImport is not null
                 && (string.IsNullOrEmpty(moduleImport.ProducerIdentity)
@@ -2753,7 +2755,6 @@ public static partial class TrRmExecutableCompiler
                 return false;
             }
         }
-
         foreach (var statement in statements.Take(callStatements[0].index))
         {
             if (statement is BoundAssignment assignment
@@ -3751,7 +3752,7 @@ public static partial class TrRmExecutableCompiler
             || !target.DirectNativeImport.Outputs.IsEmpty
             || !DirectNativeImportContract.IsValid(target,
                 program.Structures, program.NativeFunctionPointerSignatures,
-                program.NativePointerTypes)
+                program.NativePointerTypes, program.EnumDefinitions)
             || (target.ReturnType != PrimitiveType.Void
                 && !DirectNativeImportContract.IsScalar(target.ReturnType))
             || call.Type != target.ReturnType

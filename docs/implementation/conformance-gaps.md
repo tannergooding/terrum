@@ -659,8 +659,28 @@ reorder FieldDef owner blocks, Layout variants, FixedArrayLayout rows and
 topologically valid TypeSpec leaf rows with their child references, then
 exercise CreateStandardReference and LoadStandard/EmitStandard/rebind.
 Separate and co-located provider Module graphs are covered.
-PlaceSelection/TypeMap/Body remapping and source-free Body execution remain
-open. Type-only source
+The separate unapproved
+[A2R1+Repeat source composition proposal](../proposals/standard-trrm-a2r1-source-copy-type-composition.md)
+is provisionally implemented for exact type-only source export/reference,
+mixed A2/A2R1 provider chains, and imported TypeDef pointees in the existing
+NativeParameter/NativeAddress Body TypeMap. The body map directly retains the
+TypeDef Import reference; source-free LoadStandard/EmitStandard/rebind preserves
+provider origins and expectations. Regressions cover compatible TypeDef-row
+relocation, changed-field replacement, A2E-provider rejection and the existing
+A2 malformed/alias cases; the combined provider-chain, NativeParameter and
+NativeImport table selection passed 40/40 with no skips after the Debug fast
+build. A focused exact A2R1+Repeat consumer now maps imported `Container`
+FieldDef owners and fixed-array Element PlaceSelections through its NativeAddress
+Body, source-free load and byte-identical re-emission. A compatible provider
+with a shifted TypeDef row executes after relocation; a changed fixed-array
+extent rejects. Windows x64 FailFast JIT and supervised AOT observe both the
+mutated array element and preserved sibling storage. This evidence does not
+approve the proposal. Non-byte Body map/record permutations, broader imported
+nominal closure, co-located TypeDef providers, and the remaining replacement
+matrix still need qualification.
+General Body remapping and source-free Body execution beyond these exact
+NativeParameter/NativeAddress TypeMap and fixed-array PlaceSelection cases
+remain open. Type-only source
 consumers now re-emit origin-backed TypeDef stubs, ModuleRefs, Imports,
 imported TypeSpec uses and fixed-array recipes without losing them when no
 local ExportKey map is supplied. Explicit local exports preserve the same

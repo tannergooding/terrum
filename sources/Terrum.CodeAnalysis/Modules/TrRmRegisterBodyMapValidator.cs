@@ -3771,6 +3771,7 @@ internal static class TrRmRegisterBodyMapValidator
             place.PlaceSelectionRecordIndex);
         var selectedTypeSpecRef = GetTypeMapTypeSpecRef(body,
             ReadUInt16(body, selection, 16));
+        uint sourceTypeSpecRef;
         if (sourceKind == 2)
         {
             var sourceHome = GetHomeMapEntry(body, sourceIndex);
@@ -3778,32 +3779,50 @@ internal static class TrRmRegisterBodyMapValidator
                 ReadUInt16(body, sourceHome, 2));
             var sourceType = typeSpecs.GetTypeSpecRef(
                 sourceHomeTypeSpecRef);
-            if (transition != 1
-                || ReadByte(body, selection, 0) != 2
-                || ReadByte(body, selection, 1) != 3
-                || ReadByte(body, selection, 2) != 1
-                || ReadByte(body, selection, 9) != 1
+            if (ReadByte(body, selection, 0) == 2)
+            {
+                if (transition != 1
+                    || ReadByte(body, selection, 1) != 3
+                    || ReadByte(body, selection, 2) != 1
+                    || ReadByte(body, selection, 9) != 1
+                    || ReadByte(body, sourceHome, 0) != 3
+                    || !sourceType.IsRow || sourceType.Form != 0x11
+                    || !typeSpecs.TryGetFixedInlineArray(
+                        checked((uint)sourceType.Row), out _, out _)
+                    || !typeSpecs.AreEquivalentTypeSpecRefs(
+                        selectedTypeSpecRef, placeTypeSpecRef)
+                    || !typeSpecs.AreEquivalentTypeSpecRefs(
+                        sourceHomeTypeSpecRef, placeTypeSpecRef))
+                {
+                    throw InvalidMap();
+                }
+
+                return;
+            }
+
+            if (!body.Schema.UsesForeignInvocationStorageFixedArrays()
+                || ReadByte(body, selection, 0) != 3
+                || ReadByte(body, selection, 9) != 3
                 || ReadByte(body, sourceHome, 0) != 3
-                || !sourceType.IsRow || sourceType.Form != 0x11
-                || !typeSpecs.TryGetFixedInlineArray(
-                    checked((uint)sourceType.Row), out _, out _)
-                || !typeSpecs.AreEquivalentTypeSpecRefs(
-                    selectedTypeSpecRef, placeTypeSpecRef)
                 || !typeSpecs.AreEquivalentTypeSpecRefs(
                     sourceHomeTypeSpecRef, placeTypeSpecRef))
             {
                 throw InvalidMap();
             }
 
-            return;
+            sourceTypeSpecRef = sourceHomeTypeSpecRef;
         }
-
-        var source = GetRegisterTypeState(body, registerTypes, sourceIndex);
-        if (source.IsPlaceHandle)
+        else
         {
-            throw InvalidMap();
+            var source = GetRegisterTypeState(body, registerTypes,
+                sourceIndex);
+            if (source.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            sourceTypeSpecRef = GetRegisterTypeSpecRef(body, source);
         }
-        var sourceTypeSpecRef = GetRegisterTypeSpecRef(body, source);
         var isScalar = TrRmNativeImportTypeContract.TryGetScalarType(
                 typeSpecs, placeTypeSpecRef, out var elementType)
             && DirectNativeImportContract.IsScalar(elementType);

@@ -129,6 +129,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
                 or TrRmArtifactSchema.LocalAggregateLayoutDraft)
             || moduleRow <= 0 || moduleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd - typeDefStart
@@ -653,6 +654,9 @@ public static partial class TrRmExecutableCompiler
                 StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
             || StringComparer.Ordinal.Equals(
                 schemaIdentities[consumerArtifactIndex],
+                StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
+            || StringComparer.Ordinal.Equals(
+                schemaIdentities[consumerArtifactIndex],
                 StandardLocalAggregateLayoutSchemaIdentity))
             || tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
@@ -704,6 +708,7 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                     or StandardLocalAggregateLayoutSchemaIdentity))
             {
                 throw Unsupported(
