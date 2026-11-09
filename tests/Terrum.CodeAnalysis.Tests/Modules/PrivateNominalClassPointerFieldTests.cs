@@ -179,6 +179,65 @@ internal sealed class PrivateNominalClassPointerFieldTests
         }
     }
 
+    [Test]
+    public void PrivateClassReferenceRejectsPointerFixedArrayCycles()
+    {
+        var validReference = CreateFixedArrayClassReference();
+        var classReference = validReference.PrivateClassReferences.Single();
+        var pointerType = validReference.Classes.Single().Fields.Single().Type;
+        var fixedArrayTypes = new List<BoundNativeFixedArrayType>();
+        Assert.That(NativeFixedArrayContract.TryCreateType(pointerType,
+                validReference.NativeFixedArrayTypes.Single().ElementCount,
+                validReference.Structures, fixedArrayTypes,
+                out var fixedArrayType,
+                out _),
+            Is.True);
+        var pointerIndex = NativePointerTypes.Index(pointerType);
+        var pointerTypes = validReference.NativePointerTypes.SetItem(
+            pointerIndex, validReference.NativePointerTypes[pointerIndex] with {
+                PointeeType = fixedArrayType,
+            });
+        var fixedArrays = fixedArrayTypes.ToImmutableArray();
+        var cyclicClassReference = classReference with {
+            ExpectedSnapshot = classReference.ExpectedSnapshot with {
+                NativePointerTypes = pointerTypes,
+                NativeFixedArrayTypes = fixedArrays,
+            },
+        };
+
+        Assert.That(NativePointerTypeContract.IsValidTable(pointerTypes,
+                validReference.Structures,
+                validReference.NativeFunctionPointerSignatures, fixedArrays,
+                validReference.CheckedReferenceTypes),
+            Is.False);
+        _ = Assert.Throws<ArgumentException>(() =>
+            new CompilationReference(validReference.Structures, [],
+                validReference.RuntimePolicy,
+                nativeFunctionPointerSignatures:
+                    validReference.NativeFunctionPointerSignatures,
+                nativePointerTypes: pointerTypes,
+                checkedReferenceTypes:
+                    validReference.CheckedReferenceTypes,
+                nativeFixedArrayTypes: fixedArrays,
+                privateNominalTypeOrigins:
+                    validReference.PrivateNominalTypeOrigins,
+                classes: validReference.Classes,
+                privateClassReferences: [cyclicClassReference]));
+
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("public int32 Read() { return 1; }"),
+            validReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var malformedProgram = compilation.Program! with {
+            NativePointerTypes = pointerTypes,
+            NativeFixedArrayTypes = fixedArrays,
+            PrivateClassReferences = [cyclicClassReference],
+        };
+        _ = Assert.Throws<ModuleContractException>(
+            () => ModuleCompiler.CreateProducer(malformedProgram, ["Read"]));
+    }
+
     [TestCase(1)]
     [TestCase(2)]
     public void ClassReferenceRemapsPointerFieldClosureAcrossProviderReplacement(
