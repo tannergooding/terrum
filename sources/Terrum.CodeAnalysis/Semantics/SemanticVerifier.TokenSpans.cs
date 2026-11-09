@@ -1741,11 +1741,13 @@ public static partial class SemanticVerifier
 
             internal SortedDictionary<StorageProjection,
                 InitializationState.RawUnionArrayElementState> Values { get; }
+            internal RepeatResourceLedger Resources { get; }
 
             private RawUnionArrayCallResult(
                 SortedDictionary<StorageProjection,
                     InitializationState.RawUnionArrayElementState> values,
-                RepeatResourceLedger.StateLease state)
+                RepeatResourceLedger.StateLease state,
+                RepeatResourceLedger resources)
             {
                 if (values is null || values.Count == 0)
                 {
@@ -1754,6 +1756,7 @@ public static partial class SemanticVerifier
 
                 Values = values;
                 _state = state;
+                Resources = resources;
             }
 
             internal static RawUnionArrayCallResult Clone(
@@ -1774,7 +1777,7 @@ public static partial class SemanticVerifier
                 {
                     return new RawUnionArrayCallResult(
                         CloneRawUnionArrayFacts(values, outputState),
-                        outputState);
+                        outputState, state.Resources);
                 }
                 catch
                 {
@@ -1787,11 +1790,14 @@ public static partial class SemanticVerifier
                 SortedDictionary<StorageProjection,
                     InitializationState.RawUnionArrayElementState> values)
             {
-                var resources = GetResources(values);
-                var bytes
-                    = InitializationState.RawUnionArrayFactsLogicalBytes(values);
+                var bytes = InitializationState.RawUnionArrayFactsLogicalBytes(
+                    values, out var resources);
+                if (resources is null)
+                {
+                    throw Invalid();
+                }
                 return new RawUnionArrayCallResult(values,
-                    resources.ReservePersistentState(bytes));
+                    resources.ReservePersistentState(bytes), resources);
             }
 
             internal static RawUnionArrayCallResult TakeOwnership(
@@ -1799,44 +1805,16 @@ public static partial class SemanticVerifier
                     InitializationState.RawUnionArrayElementState> values,
                 RepeatResourceLedger.StateLease state)
             {
-                var resources = GetResources(values);
-                if (!state.IsPersistent || !state.IsOwnedBy(resources)
-                    || state.ReservedBytes
-                        != InitializationState.RawUnionArrayFactsLogicalBytes(
-                            values))
+                var bytes = InitializationState.RawUnionArrayFactsLogicalBytes(
+                    values, out var resources);
+                if (resources is null || !state.IsPersistent
+                    || !state.IsOwnedBy(resources)
+                    || state.ReservedBytes != bytes)
                 {
                     throw Invalid();
                 }
 
-                return new RawUnionArrayCallResult(values, state);
-            }
-
-            private static RepeatResourceLedger GetResources(
-                SortedDictionary<StorageProjection,
-                    InitializationState.RawUnionArrayElementState> values)
-            {
-                if (values is null || values.Count == 0)
-                {
-                    throw Invalid();
-                }
-
-                using var enumerator = values.GetEnumerator();
-                if (!enumerator.MoveNext())
-                {
-                    throw Invalid();
-                }
-
-                var resources = enumerator.Current.Value.Resources;
-                do
-                {
-                    if (!ReferenceEquals(
-                            enumerator.Current.Value.Resources, resources))
-                    {
-                        throw Invalid();
-                    }
-                } while (enumerator.MoveNext());
-
-                return resources;
+                return new RawUnionArrayCallResult(values, state, resources);
             }
 
             public void Dispose()
@@ -2153,35 +2131,106 @@ public static partial class SemanticVerifier
                         continue;
                     }
 
-                    using var stateEnumerator
-                        = currentResult.Values.GetEnumerator();
-                    if (!stateEnumerator.MoveNext())
+                    var resources = currentResult.Resources;
+                    if (!ReferenceEquals(resources, otherResult.Resources))
                     {
                         throw Invalid();
                     }
 
-                    var resources = stateEnumerator.Current.Value.Resources;
+                    InitializationState.ChargeRepeatRootListHeader(
+                        resources);
                     InitializationState.ChargeRepeatRootListHeader(
                         resources);
                     var outputBytes = new BigInteger(16);
                     var hasMergedState = false;
-                    foreach (var (prefix, currentState)
-                        in currentResult.Values)
+                    using var currentInputEnumerator
+                        = currentResult.Values.GetEnumerator();
+                    using var otherInputEnumerator
+                        = otherResult.Values.GetEnumerator();
+                    var currentInputLoaded = false;
+                    var currentInputExhausted = false;
+                    var otherInputLoaded = false;
+                    var otherInputExhausted = false;
+                    var currentInputEntry = default(KeyValuePair<
+                        StorageProjection,
+                        InitializationState.RawUnionArrayElementState>);
+                    var otherInputEntry = default(KeyValuePair<
+                        StorageProjection,
+                        InitializationState.RawUnionArrayElementState>);
+                    while (true)
                     {
-                        if (!otherResult.Values.TryGetValue(prefix,
-                                out var otherState))
+                        resources.ConsumeWork();
+                        if (!currentInputLoaded && !currentInputExhausted)
+                        {
+                            if (currentInputEnumerator.MoveNext())
+                            {
+                                resources.ConsumeWork();
+                                currentInputEntry
+                                    = currentInputEnumerator.Current;
+                                InitializationState.ChargeRepeatRoot(
+                                    resources, currentInputEntry.Key);
+                                currentInputLoaded = true;
+                            }
+                            else
+                            {
+                                currentInputExhausted = true;
+                            }
+                        }
+
+                        resources.ConsumeWork();
+                        if (!otherInputLoaded && !otherInputExhausted)
+                        {
+                            if (otherInputEnumerator.MoveNext())
+                            {
+                                resources.ConsumeWork();
+                                otherInputEntry
+                                    = otherInputEnumerator.Current;
+                                InitializationState.ChargeRepeatRoot(
+                                    resources, otherInputEntry.Key);
+                                otherInputLoaded = true;
+                            }
+                            else
+                            {
+                                otherInputExhausted = true;
+                            }
+                        }
+
+                        if (!currentInputLoaded && !otherInputLoaded)
+                        {
+                            break;
+                        }
+
+                        var comparison = 0;
+                        if (currentInputLoaded && otherInputLoaded)
+                        {
+                            resources.ConsumeWork();
+                            comparison
+                                = StorageProjectionComparer.Instance.Compare(
+                                    currentInputEntry.Key,
+                                    otherInputEntry.Key);
+                        }
+
+                        if (!otherInputLoaded || (currentInputLoaded
+                                && comparison < 0))
                         {
                             changed = true;
+                            currentInputLoaded = false;
+                            continue;
+                        }
+                        if (!currentInputLoaded || comparison > 0)
+                        {
+                            otherInputLoaded = false;
                             continue;
                         }
 
                         hasMergedState = true;
-                        InitializationState.ChargeRepeatRoot(resources,
-                            prefix);
                         outputBytes
                             += InitializationState.RawUnionArrayRootLogicalBytes(
-                                prefix)
-                                + currentState.MergeLogicalBytes(otherState);
+                                currentInputEntry.Key)
+                                + currentInputEntry.Value.MergeLogicalBytes(
+                                    otherInputEntry.Value);
+                        currentInputLoaded = false;
+                        otherInputLoaded = false;
                     }
 
                     if (!hasMergedState)
@@ -2199,22 +2248,108 @@ public static partial class SemanticVerifier
                             = new SortedDictionary<StorageProjection,
                                 InitializationState.RawUnionArrayElementState>(
                                     StorageProjectionComparer.Instance);
-                        foreach (var (prefix, currentState)
-                            in currentResult.Values)
+                        InitializationState.ChargeRepeatRootListHeader(
+                            resources);
+                        InitializationState.ChargeRepeatRootListHeader(
+                            resources);
+                        InitializationState.ChargeRepeatRootListHeader(
+                            resources);
+                        using var currentOutputEnumerator
+                            = currentResult.Values.GetEnumerator();
+                        using var otherOutputEnumerator
+                            = otherResult.Values.GetEnumerator();
+                        var currentOutputLoaded = false;
+                        var currentOutputExhausted = false;
+                        var otherOutputLoaded = false;
+                        var otherOutputExhausted = false;
+                        var currentOutputEntry = default(KeyValuePair<
+                            StorageProjection,
+                            InitializationState.RawUnionArrayElementState>);
+                        var otherOutputEntry = default(KeyValuePair<
+                            StorageProjection,
+                            InitializationState.RawUnionArrayElementState>);
+                        while (true)
                         {
-                            if (otherResult.Values.TryGetValue(prefix,
-                                    out var otherState))
+                            resources.ConsumeWork();
+                            if (!currentOutputLoaded
+                                && !currentOutputExhausted)
                             {
-                                var mergedState = currentState.CreateMerge(
-                                    otherState, outputState,
-                                    outputAlreadyReserved: true);
-                                if (!mergedState.SemanticallyEquals(
-                                        currentState))
+                                if (currentOutputEnumerator.MoveNext())
                                 {
-                                    changed = true;
+                                    resources.ConsumeWork();
+                                    currentOutputEntry
+                                        = currentOutputEnumerator.Current;
+                                    InitializationState.ChargeRepeatRoot(
+                                        resources, currentOutputEntry.Key);
+                                    currentOutputLoaded = true;
                                 }
-                                mergedValues.Add(prefix, mergedState);
+                                else
+                                {
+                                    currentOutputExhausted = true;
+                                }
                             }
+
+                            resources.ConsumeWork();
+                            if (!otherOutputLoaded && !otherOutputExhausted)
+                            {
+                                if (otherOutputEnumerator.MoveNext())
+                                {
+                                    resources.ConsumeWork();
+                                    otherOutputEntry
+                                        = otherOutputEnumerator.Current;
+                                    InitializationState.ChargeRepeatRoot(
+                                        resources, otherOutputEntry.Key);
+                                    otherOutputLoaded = true;
+                                }
+                                else
+                                {
+                                    otherOutputExhausted = true;
+                                }
+                            }
+
+                            if (!currentOutputLoaded && !otherOutputLoaded)
+                            {
+                                break;
+                            }
+
+                            var comparison = 0;
+                            if (currentOutputLoaded && otherOutputLoaded)
+                            {
+                                resources.ConsumeWork();
+                                comparison
+                                    = StorageProjectionComparer.Instance
+                                        .Compare(currentOutputEntry.Key,
+                                            otherOutputEntry.Key);
+                            }
+
+                            if (!otherOutputLoaded
+                                || (currentOutputLoaded
+                                    && comparison < 0))
+                            {
+                                currentOutputLoaded = false;
+                                continue;
+                            }
+                            if (!currentOutputLoaded || comparison > 0)
+                            {
+                                otherOutputLoaded = false;
+                                continue;
+                            }
+
+                            InitializationState.ChargeRepeatRoot(resources,
+                                currentOutputEntry.Key);
+                            var mergedState
+                                = currentOutputEntry.Value.CreateMerge(
+                                    otherOutputEntry.Value, outputState,
+                                    outputAlreadyReserved: true);
+                            if (!mergedState.SemanticallyEquals(
+                                    currentOutputEntry.Value))
+                            {
+                                changed = true;
+                            }
+                            mergedValues.Add(currentOutputEntry.Key,
+                                mergedState);
+                            currentOutputLoaded = false;
+                            otherOutputLoaded = false;
                         }
 
                         var mergedResult

@@ -871,6 +871,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
             [Layout(LayoutKind.Sequential)]
             public struct Holder {
                 public mut [RawWord; 2] Values;
+                public mut [RawWord; 2] OtherValues;
             }
 
             public Holder Identity(Holder value) {
@@ -881,13 +882,14 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 RawWord wide = new RawWord(uint64(7));
                 init mut Holder holder;
                 holder.Values = [wide; 2];
+                holder.OtherValues = [wide; 2];
                 Holder copy = Identity(holder);
                 init mut RawWord low;
                 unsafe { low.Low = 1; }
                 if (mutateFirst) {
                     holder.Values[0] = low;
                 } else {
-                    holder.Values[1] = low;
+                    holder.OtherValues[1] = low;
                 }
                 unsafe { return int32(copy.Values[1].Wide); }
             }
