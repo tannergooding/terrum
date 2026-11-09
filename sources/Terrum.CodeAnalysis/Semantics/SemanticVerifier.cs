@@ -7220,7 +7220,9 @@ public static partial class SemanticVerifier
                             continue;
                         }
                         ChargeWork(4);
-                        retained.Add(_elementBytes[item]);
+                        var entry = _elementBytes[item];
+                        retained.Add(new KeyValuePair<ulong, byte[]>(
+                            entry.Key, CopyPayload(entry.Value)));
                     }
                     _elementBytes = retained;
                     return true;
@@ -7253,7 +7255,9 @@ public static partial class SemanticVerifier
                 for (var item = 0; item < position; item++)
                 {
                     ChargeWork(7);
-                    replacement.Add(_elementBytes[item]);
+                    var entry = _elementBytes[item];
+                    replacement.Add(new KeyValuePair<ulong, byte[]>(
+                        entry.Key, CopyPayload(entry.Value)));
                 }
                 if (hasIndex)
                 {
@@ -7266,7 +7270,9 @@ public static partial class SemanticVerifier
                     item < _elementBytes.Count; item++)
                 {
                     ChargeWork(7);
-                    replacement.Add(_elementBytes[item]);
+                    var entry = _elementBytes[item];
+                    replacement.Add(new KeyValuePair<ulong, byte[]>(
+                        entry.Key, CopyPayload(entry.Value)));
                 }
                 _elementBytes = replacement;
                 return true;
