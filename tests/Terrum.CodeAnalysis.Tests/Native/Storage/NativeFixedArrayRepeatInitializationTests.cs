@@ -1800,11 +1800,26 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
 
         Assert.That(overLimit.HasErrors, Is.True,
             string.Join(Environment.NewLine, overLimit.Diagnostics));
-        Assert.That(overLimit.Diagnostics.Any(diagnostic =>
-                diagnostic.Code == "TRM3016"
-                && diagnostic.Message.Contains("work limit",
-                    StringComparison.Ordinal)), Is.True,
+        var workLimitDiagnostics = overLimit.Diagnostics.Where(
+            static diagnostic => diagnostic.Code == "TRM3016"
+                && diagnostic.Message
+                    == "Source exceeds the semantic verification work limit.")
+            .ToArray();
+        Assert.That(workLimitDiagnostics, Has.Length.EqualTo(1),
             string.Join(Environment.NewLine, overLimit.Diagnostics));
+
+        var repeated = CompileSparseUnionUpdates(151);
+        var repeatedWorkLimitDiagnostics = repeated.Diagnostics.Where(
+            static diagnostic => diagnostic.Code == "TRM3016"
+                && diagnostic.Message
+                    == "Source exceeds the semantic verification work limit.")
+            .ToArray();
+        Assert.That(repeatedWorkLimitDiagnostics.Select(
+                static diagnostic => (diagnostic.Code, diagnostic.Message,
+                    diagnostic.Span)),
+            Is.EqualTo(workLimitDiagnostics.Select(
+                static diagnostic => (diagnostic.Code, diagnostic.Message,
+                    diagnostic.Span))));
     }
 
     private const string s_rawWordDeclarations = """

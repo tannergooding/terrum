@@ -16241,6 +16241,9 @@ public static partial class SemanticVerifier
                                     .CloneRawUnionArrayCallResultSnapshot(
                                         storedRawUnionFacts,
                                         stagedRawUnionSnapshotState);
+                            rawUnionInputDependencies
+                                .ClearRawUnionArrayCallResult(
+                                    rawUnionInputCall);
                         }
                         else
                         {
