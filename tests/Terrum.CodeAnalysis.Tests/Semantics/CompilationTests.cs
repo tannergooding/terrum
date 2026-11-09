@@ -123,6 +123,65 @@ internal sealed class CompilationTests
     }
 
     [Test]
+    public void NamespaceImportsResolveNonFunctionTypesAndAliasesAcrossFiles()
+    {
+        var consumer = SyntaxTree.Parse("""
+            using Geometry;
+            namespace App {
+                alias PointAlias = Point;
+                void Accept(PointAlias point) {}
+                int32 Main() { return 0; }
+            }
+            """, "consumer.terrum");
+        var provider = SyntaxTree.Parse("""
+            namespace Geometry {
+                public class Point {
+                    public int32 Value;
+                    public Point(int32 value) { Value = value; }
+                }
+            }
+            """, "provider.terrum");
+
+        var compilation = Compilation.Create([consumer, provider]);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        TestAssertions.NotNull(compilation.Program);
+        SemanticVerifier.Verify(compilation.Program);
+    }
+
+    [Test]
+    public void ImportsDoNotMergeAcrossRepeatedNamespaceParts()
+    {
+        var importedPart = SyntaxTree.Parse("""
+            namespace App {
+                using Geometry;
+                void Accept(Point point) {}
+                int32 Main() { return 0; }
+            }
+            """, "imported.terrum");
+        var siblingPart = SyntaxTree.Parse("""
+            namespace App {
+                void Other(Point point) {}
+            }
+            """, "sibling.terrum");
+        var provider = SyntaxTree.Parse("""
+            namespace Geometry {
+                public class Point {
+                    public int32 Value;
+                    public Point(int32 value) { Value = value; }
+                }
+            }
+            """, "provider.terrum");
+
+        var compilation = Compilation.Create(
+            [importedPart, siblingPart, provider]);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            "A namespace-block import applies only to its lexical block.");
+    }
+
+    [Test]
     public void PublicAliasesPreserveTheResolvedTypeInExecutableSource()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
