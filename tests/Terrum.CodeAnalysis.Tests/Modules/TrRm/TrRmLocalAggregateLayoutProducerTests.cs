@@ -413,6 +413,73 @@ internal sealed class TrRmLocalAggregateLayoutProducerTests
     }
 
     [Test]
+    public void L1MethodMapFollowsFirstCallSiteUse()
+    {
+        const string source = """
+            int32 First() {
+                return 1;
+            }
+
+            int32 Second() {
+                return 2;
+            }
+
+            int32 Main() {
+                int32 first = First();
+                int32 second = Second();
+                return first + second;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                LayoutCoreRegistration =
+                    LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "l1-method-map-first-use", SchemaIdentity, 1);
+        var index = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    index);
+        var mainRow = 0;
+        var firstRow = 0;
+        var secondRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            switch (tables.Methods.GetName(row))
+            {
+                case "Main":
+                    mainRow = row;
+                    break;
+                case "First":
+                    firstRow = row;
+                    break;
+                case "Second":
+                    secondRow = row;
+                    break;
+            }
+        }
+        Assert.That(mainRow, Is.GreaterThan(0));
+        Assert.That(firstRow, Is.GreaterThan(0));
+        Assert.That(secondRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(mainRow), tables.Contracts.Count);
+        Assert.That(body.MethodMap.Length, Is.EqualTo(2 * sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.MethodMap),
+            Is.EqualTo(0x1600_0000u | (uint)firstRow));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.MethodMap[sizeof(uint)..]),
+            Is.EqualTo(0x1600_0000u | (uint)secondRow));
+    }
+
+    [Test]
     public void RejectsL1FixedArrayExtentThatOverflowsTargetNuint()
     {
             const string source = """
