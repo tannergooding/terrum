@@ -7737,13 +7737,86 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             consumerIdentity, schemaIdentity, 1);
         Assert.That(reemitted, Is.EqualTo(artifact));
-        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
-            reemitted);
-        Assert.That(NativeModuleCompiler.ExecuteStandard(input,
+        var permutedArtifact = PermuteA2BodyLocalMaps(artifact, "Main",
+            isRepeatInitialization: true);
+        Assert.That(permutedArtifact, Is.Not.EqualTo(artifact));
+        var permutedIndex
+            = TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                    permutedArtifact);
+        var permutedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    permutedIndex);
+        var permutedBody = permutedTables.Bodies.GetRegisterBody(
+            permutedTables.Methods.GetBodyRow(callerRow),
+            permutedTables.Contracts.Count);
+        Assert.That(permutedBody.TypeMap.ToArray(),
+            Is.Not.EqualTo(body.TypeMap.ToArray()));
+        Assert.That(permutedBody.HomeMap.ToArray(),
+            Is.Not.EqualTo(body.HomeMap.ToArray()));
+        var originalPlaceRecords = new List<byte[]>();
+        var permutedPlaceRecords = new List<byte[]>();
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            if (body.GetRecord(recordIndex)[0] == 0x04)
+            {
+                originalPlaceRecords.Add(
+                    body.GetRecord(recordIndex).ToArray());
+            }
+            if (permutedBody.GetRecord(recordIndex)[0] == 0x04)
+            {
+                permutedPlaceRecords.Add(
+                    permutedBody.GetRecord(recordIndex).ToArray());
+            }
+        }
+        Assert.That(permutedPlaceRecords, Is.Not.EqualTo(originalPlaceRecords));
+        var permutedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            permutedArtifact);
+        var permutedLoaded = TrRmExecutableCompiler.LoadStandard(
+            permutedInput, consumerIdentity, [providerInput]);
+        var permutedContainer = permutedLoaded.Structures.Single(
+            static structure => structure.Name == "Container");
+        Assert.That(permutedContainer.StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo(providerIdentity));
+        var permutedReemitted = TrRmExecutableCompiler.EmitStandard(
+            permutedLoaded, consumerIdentity, schemaIdentity, 1);
+        Assert.That(permutedReemitted, Is.Not.EqualTo(artifact));
+        Assert.That(permutedReemitted, Is.Not.EqualTo(permutedArtifact));
+        var permutedReemittedInput = new TrRmStandardArtifactInput(
+            schemaIdentity, permutedReemitted);
+        var reloadedPermutedReemitted = TrRmExecutableCompiler.LoadStandard(
+            permutedReemittedInput, consumerIdentity, [providerInput]);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(
+            reloadedPermutedReemitted, consumerIdentity, schemaIdentity, 1),
+            Is.EqualTo(permutedReemitted));
+        var permutedCaller = permutedLoaded.Functions.Single(
+            static function => function.Name == "Main");
+        var permutedFieldAddresses
+            = new List<BoundNativeStorageAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            permutedCaller.Body, expression =>
+            {
+                if (expression is BoundNativeStorageAddress {
+                    FieldPlace: not null,
+                } address)
+                {
+                    permutedFieldAddresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(permutedFieldAddresses, Has.Count.EqualTo(1));
+        Assert.That(((BoundFieldRead)
+            permutedFieldAddresses[0].FieldPlace!).Field, Is.EqualTo(1));
+        Assert.That(NativeModuleCompiler.ExecuteStandard(permutedInput,
             consumerIdentity, [providerInput], NativeRuntimePolicy.FailFast),
             Is.EqualTo(99));
-        var image = NativeModuleCompiler.EmitStandardExecutable(input,
-            consumerIdentity, [providerInput], NativeRuntimePolicy.FailFast);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(
+            permutedReemittedInput, consumerIdentity, [providerInput],
+            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        var image = NativeModuleCompiler.EmitStandardExecutable(
+            permutedReemittedInput, consumerIdentity, [providerInput],
+            NativeRuntimePolicy.FailFast);
         await AssertNativeImageExitCodeAsync(image, consumerIdentity, 99)
             .ConfigureAwait(true);
 
@@ -7778,19 +7851,21 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         var relocatedProvider = CreateProvider(relocateContainer: true,
             changeArrayExtent: false);
         var relocatedLoaded = TrRmExecutableCompiler.LoadStandard(
-            reemittedInput, consumerIdentity, [relocatedProvider]);
+            permutedReemittedInput, consumerIdentity, [relocatedProvider]);
         var relocatedContainer = relocatedLoaded.Structures.Single(
             static structure => structure.Name == "Container");
         Assert.That(relocatedContainer.StandardTypeOrigin!.DefinitionId,
             Is.Not.EqualTo(
                 loadedContainer.StandardTypeOrigin!.DefinitionId));
         Assert.That(TrRmExecutableCompiler.EmitStandard(relocatedLoaded,
-            consumerIdentity, schemaIdentity, 1), Is.EqualTo(reemitted));
-        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
+            consumerIdentity, schemaIdentity, 1),
+            Is.EqualTo(permutedReemitted));
+        Assert.That(NativeModuleCompiler.ExecuteStandard(
+            permutedReemittedInput,
             consumerIdentity, [relocatedProvider],
             NativeRuntimePolicy.FailFast), Is.EqualTo(99));
         var relocatedImage = NativeModuleCompiler.EmitStandardExecutable(
-            reemittedInput, consumerIdentity, [relocatedProvider],
+            permutedReemittedInput, consumerIdentity, [relocatedProvider],
             NativeRuntimePolicy.FailFast);
         await AssertNativeImageExitCodeAsync(relocatedImage,
             $"{consumerIdentity}-relocated", 99).ConfigureAwait(true);
@@ -7798,7 +7873,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         var incompatibleProvider = CreateProvider(relocateContainer: false,
             changeArrayExtent: true);
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(reemittedInput,
+            TrRmExecutableCompiler.LoadStandard(permutedReemittedInput,
                 consumerIdentity, [incompatibleProvider]));
 
         var compilerPath = typeof(TrRmExecutableCompiler).Assembly.Location;
@@ -7806,7 +7881,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             Environment.GetFolderPath(Environment.SpecialFolder.System),
             "kernel32.dll");
         TestContext.WriteLine(
-            $"A2R1 imported field PlaceSelection: target=WindowsX64; policy=FailFast; schema={schemaIdentity}; expected=sibling-preservation:99, mutated-element:42; JIT=99/42/99; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; consumer-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; reemitted-consumer-sha256={Convert.ToHexString(SHA256.HashData(reemitted))}; value-probe-source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(valueProbeSource)))}; value-probe-consumer-sha256={Convert.ToHexString(SHA256.HashData(valueProbeArtifact))}; provider-sha256={Convert.ToHexString(SHA256.HashData(providerInput.Artifact.Span))}; relocated-provider-sha256={Convert.ToHexString(SHA256.HashData(relocatedProvider.Artifact.Span))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; native-library={kernel32Path}; native-library-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(kernel32Path)))}.");
+            $"A2R1 imported field PlaceSelection: target=WindowsX64; policy=FailFast; schema={schemaIdentity}; expected=sibling-preservation:99, mutated-element:42; JIT=99/42/99; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; consumer-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; reemitted-consumer-sha256={Convert.ToHexString(SHA256.HashData(reemitted))}; permuted-consumer-sha256={Convert.ToHexString(SHA256.HashData(permutedArtifact))}; permuted-reemission-sha256={Convert.ToHexString(SHA256.HashData(permutedReemitted))}; value-probe-source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(valueProbeSource)))}; value-probe-consumer-sha256={Convert.ToHexString(SHA256.HashData(valueProbeArtifact))}; provider-sha256={Convert.ToHexString(SHA256.HashData(providerInput.Artifact.Span))}; relocated-provider-sha256={Convert.ToHexString(SHA256.HashData(relocatedProvider.Artifact.Span))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; native-library={kernel32Path}; native-library-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(kernel32Path)))}.");
     }
 
     [Test]
@@ -9692,15 +9767,25 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     private static byte[] PermuteA2BodyLocalMaps(byte[] artifact,
-        string methodName)
+        string methodName, bool isRepeatInitialization = false)
     {
-        const TrRmArtifactSchema schema
-            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
-        var index = TrRmArtifactIndex
-            .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
-                index);
+        var schema = isRepeatInitialization
+            ? TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+            : TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var index = isRepeatInitialization
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft(
+                    artifact)
+            : TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+        var tables = isRepeatInitialization
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                    index)
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    index);
         var methodRow = 0;
         for (var row = 1; row <= tables.Methods.Count; row++)
         {
@@ -9755,6 +9840,25 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             }
 
             return newHomeIndexByOld[oldIndex];
+        }
+
+        var newRecordIndexByOld = new ushort[body.RecordCount];
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            newRecordIndexByOld[recordIndex]
+                = checked((ushort)recordIndex);
+        }
+
+        ushort RemapRecordIndex(ushort oldIndex)
+        {
+            if (oldIndex >= newRecordIndexByOld.Length)
+            {
+                throw new InvalidOperationException(
+                    "The A2 PlaceSelection permutation found an invalid record index.");
+            }
+
+            return newRecordIndexByOld[oldIndex];
         }
 
         var homeMap = new byte[body.HomeMap.Length];
@@ -9847,6 +9951,14 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
 
                 case 0x02:
                 {
+                    if (record[4] == 3)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(8),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(8))));
+                    }
                     if (record[5] == 2)
                     {
                         BinaryPrimitives.WriteUInt16LittleEndian(
@@ -9871,6 +9983,79 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     }
                     break;
                 }
+
+                case 0x03:
+                    if (record[4] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(8),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(8))));
+                    }
+                    break;
+
+                case 0x05:
+                    if (record[4] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(8),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(8))));
+                    }
+                    if (record[5] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(10),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(10))));
+                    }
+                    break;
+
+                case 0x07:
+                    if (record[4] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(6),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(6))));
+                    }
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        record.AsSpan(8),
+                        RemapTypeMapIndex(
+                            BinaryPrimitives.ReadUInt16LittleEndian(
+                                record.AsSpan(8))));
+                    break;
+
+                case 0x08:
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        record.AsSpan(4),
+                        RemapTypeMapIndex(
+                            BinaryPrimitives.ReadUInt16LittleEndian(
+                                record.AsSpan(4))));
+                    break;
+
+                case 0x09:
+                    if (record[5] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(6),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(6))));
+                    }
+                    break;
+
+                case 0x0B:
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        record.AsSpan(6),
+                        RemapTypeMapIndex(
+                            BinaryPrimitives.ReadUInt16LittleEndian(
+                                record.AsSpan(6))));
+                    break;
 
                 case 0x0D:
                     if (record[4] == 2)
@@ -9915,6 +10100,44 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
 
             records[recordIndex] = record;
         }
+
+        var firstPlaceSelection = -1;
+        var secondPlaceSelection = -1;
+        for (var first = 0; first < records.Length
+                && firstPlaceSelection < 0; first++)
+        {
+            if (records[first].Span[0] != 0x04)
+            {
+                continue;
+            }
+
+            for (var second = first + 1; second < records.Length; second++)
+            {
+                if (records[second].Span[0] != 0x04
+                    || (first < 16) != (second < 16)
+                    || records[first].Span.SequenceEqual(
+                        records[second].Span))
+                {
+                    continue;
+                }
+
+                firstPlaceSelection = first;
+                secondPlaceSelection = second;
+                break;
+            }
+        }
+        if (firstPlaceSelection < 0 || secondPlaceSelection < 0)
+        {
+            throw new InvalidOperationException(
+                "The A2 Body has no safely permutable PlaceSelection records.");
+        }
+
+        (records[firstPlaceSelection], records[secondPlaceSelection])
+            = (records[secondPlaceSelection], records[firstPlaceSelection]);
+        newRecordIndexByOld[firstPlaceSelection]
+            = checked((ushort)secondPlaceSelection);
+        newRecordIndexByOld[secondPlaceSelection]
+            = checked((ushort)firstPlaceSelection);
 
         var code = body.Code.ToArray();
         for (var blockIndex = 0; blockIndex < body.BlockCount;
@@ -9971,6 +10194,24 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     var operandOffset = codeOffset + position + 1;
                     code[operandOffset] = checked((byte)RemapHomeIndex(
                         code[operandOffset]));
+                }
+
+                if (opcode is 0x61 or 0x91)
+                {
+                    var operandOffset = codeOffset + position + 1;
+                    var operand = code[operandOffset];
+                    var oldIndex = (ushort)(operand & 0x0F);
+                    code[operandOffset] = (byte)((operand & 0xF0)
+                        | RemapRecordIndex(oldIndex));
+                }
+                else if (opcode is 0xD8 or 0xDA or 0xDB or 0xDC or 0xDD)
+                {
+                    var recordOffset = codeOffset + position + 2;
+                    var oldIndex = BinaryPrimitives
+                        .ReadUInt16LittleEndian(code.AsSpan(recordOffset));
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        code.AsSpan(recordOffset),
+                        RemapRecordIndex(oldIndex));
                 }
 
                 position += TrRmRegisterBodyReader.InstructionLength(

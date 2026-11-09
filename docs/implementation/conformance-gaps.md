@@ -675,9 +675,14 @@ Body, source-free load and byte-identical re-emission. A compatible provider
 with a shifted TypeDef row executes after relocation; a changed fixed-array
 extent rejects. Windows x64 FailFast JIT and supervised AOT observe both the
 mutated array element and preserved sibling storage. This evidence does not
-approve the proposal. Non-byte Body map/record permutations, broader imported
-nominal closure, co-located TypeDef providers, and the remaining replacement
-matrix still need qualification.
+approve the proposal. A separate non-byte consumer Body permutation reverses
+TypeMap entries, swaps HomeMap entries and reorders PlaceSelection records with
+their instruction references while remapping SemanticStore Home selectors.
+Source-free load/re-emission,
+JIT and supervised AOT remain valid before and after provider TypeDef-row
+relocation. Global TypeSpec/Import/ModuleRef/layout/anchor permutations,
+broader imported nominal closure, co-located TypeDef providers, and the
+remaining replacement matrix still need qualification.
 General Body remapping and source-free Body execution beyond these exact
 NativeParameter/NativeAddress TypeMap and fixed-array PlaceSelection cases
 remain open. Type-only source

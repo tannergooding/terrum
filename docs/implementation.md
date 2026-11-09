@@ -1063,9 +1063,12 @@ FieldDef/Element PlaceSelections through source-free LoadStandard/EmitStandard
 and JIT/supervised AOT. The byte-identical consumer re-emission executes before
 and after compatible provider TypeDef-row relocation; separate observations
 verify that writing `Values[1]` returns 42 and that the neighboring `Sibling[0]`
-remains 99. A changed fixed-array extent is rejected. Non-byte Body map/record
-permutations, broader imported-type closure and co-located TypeDef providers
-remain open.
+remains 99. A non-byte consumer Body permutation now reorders TypeMap/HomeMap
+and PlaceSelection records with their code and SemanticStore references; the
+permuted Body source-free loads, re-emits and executes before and after provider
+TypeDef-row relocation. A changed fixed-array extent is rejected. Global
+TypeSpec/Import/ModuleRef/layout/anchor permutations, broader imported-type
+closure and co-located TypeDef providers remain open.
 The original A1 array candidate is superseded for integrated nominal arrays
 by the unapproved
 [A2 rootless Copy evidence proposal](proposals/standard-trrm-rootless-copy-type-evidence.md);
