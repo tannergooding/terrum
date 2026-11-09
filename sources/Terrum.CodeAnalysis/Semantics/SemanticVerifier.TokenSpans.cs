@@ -10730,8 +10730,8 @@ public static partial class SemanticVerifier
             BoundProgram program, ref int remaining, int depth,
             out RepeatResourceLedger.StateLease? outputState)
     {
-        outputState = null;
-        Count(ref remaining, depth);
+            outputState = null;
+            Count(ref remaining, depth);
         if (expression is BoundCall call
             && initialized.Dependencies is BackingDependencies callDependencies
             && callDependencies.TryGetRawUnionArrayCallResult(call,
@@ -10806,7 +10806,8 @@ public static partial class SemanticVerifier
             out RepeatResourceLedger.StateLease? outputState)
     {
         outputState = null;
-        Count(ref remaining, depth);
+            var resources = initialized.RepeatResources;
+            Count(ref remaining, depth);
         if (initialized.Dependencies is not BackingDependencies facts
             || referenceRead.Descriptor is not BoundRead descriptor
             || (uint)descriptor.Variable >= (uint)function.Variables.Length
@@ -10862,57 +10863,218 @@ public static partial class SemanticVerifier
                 var currentLease = currentState ?? throw Invalid();
                 try
                 {
+                    using var mapMeetFrame
+                        = resources.EnterFrame();
+                    InitializationState.ChargeRepeatRootListHeader(
+                        resources);
+                    InitializationState.ChargeRepeatRootListHeader(
+                        resources);
                     var mergedBytes = new BigInteger(16);
                     var hasMergedRoots = false;
-                    foreach (var (projection, state) in common)
+                    using var commonInputEnumerator = common.GetEnumerator();
+                    using var currentInputEnumerator = current.GetEnumerator();
+                    var commonInputLoaded = false;
+                    var commonInputExhausted = false;
+                    var currentInputLoaded = false;
+                    var currentInputExhausted = false;
+                    var commonInputEntry = default(KeyValuePair<
+                        StorageProjection,
+                        InitializationState.RawUnionArrayElementState>);
+                    var currentInputEntry = default(KeyValuePair<
+                        StorageProjection,
+                        InitializationState.RawUnionArrayElementState>);
+                    while (true)
                     {
-                        Count(ref remaining, depth + 1);
-                        if (!current.TryGetValue(projection,
-                                out var other))
+                        resources.ConsumeWork();
+                        if (!commonInputLoaded && !commonInputExhausted)
                         {
+                            if (commonInputEnumerator.MoveNext())
+                            {
+                                Count(ref remaining, depth + 1);
+                                resources.ConsumeWork();
+                                commonInputEntry
+                                    = commonInputEnumerator.Current;
+                                InitializationState.ChargeRepeatRoot(
+                                    resources, commonInputEntry.Key);
+                                commonInputLoaded = true;
+                            }
+                            else
+                            {
+                                commonInputExhausted = true;
+                            }
+                        }
+
+                        resources.ConsumeWork();
+                        if (!currentInputLoaded && !currentInputExhausted)
+                        {
+                            if (currentInputEnumerator.MoveNext())
+                            {
+                                resources.ConsumeWork();
+                                currentInputEntry
+                                    = currentInputEnumerator.Current;
+                                InitializationState.ChargeRepeatRoot(
+                                    resources, currentInputEntry.Key);
+                                currentInputLoaded = true;
+                            }
+                            else
+                            {
+                                currentInputExhausted = true;
+                            }
+                        }
+
+                        if (!commonInputLoaded && !currentInputLoaded)
+                        {
+                            break;
+                        }
+
+                        var comparison = 0;
+                        if (commonInputLoaded && currentInputLoaded)
+                        {
+                            resources.ConsumeWork();
+                            comparison
+                                = StorageProjectionComparer.Instance.Compare(
+                                    commonInputEntry.Key,
+                                    currentInputEntry.Key);
+                        }
+
+                        if (!currentInputLoaded || (commonInputLoaded
+                                && comparison < 0))
+                        {
+                            commonInputLoaded = false;
+                            continue;
+                        }
+                        if (!commonInputLoaded || comparison > 0)
+                        {
+                            currentInputLoaded = false;
                             continue;
                         }
 
                         hasMergedRoots = true;
-                        InitializationState.ChargeRepeatRoot(
-                            initialized.RepeatResources, projection);
                         mergedBytes
                             += InitializationState
-                                .RawUnionArrayRootLogicalBytes(projection)
-                                + state.MergeLogicalBytes(other);
+                                .RawUnionArrayRootLogicalBytes(
+                                    commonInputEntry.Key)
+                                + commonInputEntry.Value.MergeLogicalBytes(
+                                    currentInputEntry.Value);
+                        commonInputLoaded = false;
+                        currentInputLoaded = false;
                     }
 
                     if (!hasMergedRoots)
                     {
+                        mapMeetFrame.Complete();
                         commonState?.Dispose();
                         commonState = null;
                         common = null;
-                        return [];
+                        break;
                     }
 
                     var intersection
                         = new SortedDictionary<StorageProjection,
                             InitializationState.RawUnionArrayElementState>(
                                 StorageProjectionComparer.Instance);
-                    var intersectionState = initialized.RepeatResources
+                    var intersectionState = resources
                         .ReserveState(mergedBytes);
                     var intersectionStateTransferred = false;
                     try
                     {
-                        foreach (var (projection, state) in common)
+                        InitializationState.ChargeRepeatRootListHeader(
+                            resources);
+                        InitializationState.ChargeRepeatRootListHeader(
+                            resources);
+                        InitializationState.ChargeRepeatRootListHeader(
+                            resources);
+                        using var commonOutputEnumerator = common.GetEnumerator();
+                        using var currentOutputEnumerator = current.GetEnumerator();
+                        var commonOutputLoaded = false;
+                        var commonOutputExhausted = false;
+                        var currentOutputLoaded = false;
+                        var currentOutputExhausted = false;
+                        var commonOutputEntry = default(KeyValuePair<
+                            StorageProjection,
+                            InitializationState.RawUnionArrayElementState>);
+                        var currentOutputEntry = default(KeyValuePair<
+                            StorageProjection,
+                            InitializationState.RawUnionArrayElementState>);
+                        while (true)
                         {
-                            if (!current.TryGetValue(projection,
-                                    out var other))
+                            resources.ConsumeWork();
+                            if (!commonOutputLoaded
+                                && !commonOutputExhausted)
                             {
+                                if (commonOutputEnumerator.MoveNext())
+                                {
+                                    resources.ConsumeWork();
+                                    commonOutputEntry
+                                        = commonOutputEnumerator.Current;
+                                    InitializationState.ChargeRepeatRoot(
+                                        resources, commonOutputEntry.Key);
+                                    commonOutputLoaded = true;
+                                }
+                                else
+                                {
+                                    commonOutputExhausted = true;
+                                }
+                            }
+
+                            resources.ConsumeWork();
+                            if (!currentOutputLoaded
+                                && !currentOutputExhausted)
+                            {
+                                if (currentOutputEnumerator.MoveNext())
+                                {
+                                    resources.ConsumeWork();
+                                    currentOutputEntry
+                                        = currentOutputEnumerator.Current;
+                                    InitializationState.ChargeRepeatRoot(
+                                        resources, currentOutputEntry.Key);
+                                    currentOutputLoaded = true;
+                                }
+                                else
+                                {
+                                    currentOutputExhausted = true;
+                                }
+                            }
+
+                            if (!commonOutputLoaded
+                                && !currentOutputLoaded)
+                            {
+                                break;
+                            }
+
+                            var comparison = 0;
+                            if (commonOutputLoaded && currentOutputLoaded)
+                            {
+                                resources.ConsumeWork();
+                                comparison
+                                    = StorageProjectionComparer.Instance
+                                        .Compare(commonOutputEntry.Key,
+                                            currentOutputEntry.Key);
+                            }
+
+                            if (!currentOutputLoaded
+                                || (commonOutputLoaded && comparison < 0))
+                            {
+                                commonOutputLoaded = false;
+                                continue;
+                            }
+                            if (!commonOutputLoaded || comparison > 0)
+                            {
+                                currentOutputLoaded = false;
                                 continue;
                             }
 
-                            var merged = state.CreateMerge(other,
-                                intersectionState,
+                            InitializationState.ChargeRepeatRoot(resources,
+                                commonOutputEntry.Key);
+                            var merged = commonOutputEntry.Value.CreateMerge(
+                                currentOutputEntry.Value, intersectionState,
                                 outputAlreadyReserved: true);
-                            intersection.Add(projection, merged);
+                            intersection.Add(commonOutputEntry.Key, merged);
+                            commonOutputLoaded = false;
+                            currentOutputLoaded = false;
                         }
 
+                        mapMeetFrame.Complete();
                         commonState?.Dispose();
                         common = intersection;
                         commonState = intersectionState;
@@ -10983,12 +11145,10 @@ public static partial class SemanticVerifier
                 }
             }
         }
-
         var persistentResultState = resultState
                 ?? resources.ReservePersistentState(BigInteger.Zero);
         try
         {
-                var resultHeaderWritten = result.Count != 0;
             foreach (var fact in summary.Facts)
             {
                 Count(ref remaining, depth + 1);
@@ -11134,30 +11294,107 @@ public static partial class SemanticVerifier
                                 continue;
                             }
 
+                            using var mapMeetFrame = resources.EnterFrame();
+                            InitializationState.ChargeRepeatRootListHeader(
+                                resources);
+                            InitializationState.ChargeRepeatRootListHeader(
+                                resources);
                             var mergedBytes = new BigInteger(16);
                             var hasMergedRoots = false;
-                            foreach (var (arrayPrefix, commonFact) in common)
+                            using var commonInputEnumerator = common.GetEnumerator();
+                            using var currentInputEnumerator = current.GetEnumerator();
+                            var commonInputLoaded = false;
+                            var commonInputExhausted = false;
+                            var currentInputLoaded = false;
+                            var currentInputExhausted = false;
+                            var commonInputEntry = default(KeyValuePair<
+                                StorageProjection,
+                                InitializationState.RawUnionArrayElementState>);
+                            var currentInputEntry = default(KeyValuePair<
+                                StorageProjection,
+                                InitializationState.RawUnionArrayElementState>);
+                            while (true)
                             {
-                                Count(ref remaining, depth + 1);
-                                if (!current.TryGetValue(arrayPrefix,
-                                        out var currentFact))
+                                resources.ConsumeWork();
+                                if (!commonInputLoaded
+                                    && !commonInputExhausted)
                                 {
+                                    if (commonInputEnumerator.MoveNext())
+                                    {
+                                        Count(ref remaining, depth + 1);
+                                        resources.ConsumeWork();
+                                        commonInputEntry
+                                            = commonInputEnumerator.Current;
+                                        InitializationState.ChargeRepeatRoot(
+                                            resources, commonInputEntry.Key);
+                                        commonInputLoaded = true;
+                                    }
+                                    else
+                                    {
+                                        commonInputExhausted = true;
+                                    }
+                                }
+
+                                resources.ConsumeWork();
+                                if (!currentInputLoaded
+                                    && !currentInputExhausted)
+                                {
+                                    if (currentInputEnumerator.MoveNext())
+                                    {
+                                        resources.ConsumeWork();
+                                        currentInputEntry
+                                            = currentInputEnumerator.Current;
+                                        InitializationState.ChargeRepeatRoot(
+                                            resources, currentInputEntry.Key);
+                                        currentInputLoaded = true;
+                                    }
+                                    else
+                                    {
+                                        currentInputExhausted = true;
+                                    }
+                                }
+
+                                if (!commonInputLoaded && !currentInputLoaded)
+                                {
+                                    break;
+                                }
+
+                                var comparison = 0;
+                                if (commonInputLoaded && currentInputLoaded)
+                                {
+                                    resources.ConsumeWork();
+                                    comparison
+                                        = StorageProjectionComparer.Instance
+                                            .Compare(commonInputEntry.Key,
+                                                currentInputEntry.Key);
+                                }
+
+                                if (!currentInputLoaded
+                                    || (commonInputLoaded && comparison < 0))
+                                {
+                                    commonInputLoaded = false;
+                                    continue;
+                                }
+                                if (!commonInputLoaded || comparison > 0)
+                                {
+                                    currentInputLoaded = false;
                                     continue;
                                 }
 
                                 hasMergedRoots = true;
-                                InitializationState.ChargeRepeatRoot(
-                                    resources, arrayPrefix);
                                 mergedBytes
                                     += InitializationState
                                         .RawUnionArrayRootLogicalBytes(
-                                            arrayPrefix)
-                                        + commonFact.MergeLogicalBytes(
-                                            currentFact);
+                                            commonInputEntry.Key)
+                                        + commonInputEntry.Value.MergeLogicalBytes(
+                                            currentInputEntry.Value);
+                                commonInputLoaded = false;
+                                currentInputLoaded = false;
                             }
 
                             if (!hasMergedRoots)
                             {
+                                mapMeetFrame.Complete();
                                 commonState?.Dispose();
                                 commonState = null;
                                 common = null;
@@ -11174,21 +11411,112 @@ public static partial class SemanticVerifier
                             try
                             {
                                 mergedCommonState.Add(mergedBytes);
-                                foreach (var (arrayPrefix, commonFact)
-                                    in common)
+                                InitializationState.ChargeRepeatRootListHeader(
+                                    resources);
+                                InitializationState.ChargeRepeatRootListHeader(
+                                    resources);
+                                InitializationState.ChargeRepeatRootListHeader(
+                                    resources);
+                                using var commonOutputEnumerator
+                                    = common.GetEnumerator();
+                                using var currentOutputEnumerator
+                                    = current.GetEnumerator();
+                                var commonOutputLoaded = false;
+                                var commonOutputExhausted = false;
+                                var currentOutputLoaded = false;
+                                var currentOutputExhausted = false;
+                                var commonOutputEntry = default(KeyValuePair<
+                                    StorageProjection,
+                                    InitializationState.RawUnionArrayElementState>);
+                                var currentOutputEntry = default(KeyValuePair<
+                                    StorageProjection,
+                                    InitializationState.RawUnionArrayElementState>);
+                                while (true)
                                 {
-                                    if (!current.TryGetValue(arrayPrefix,
-                                            out var currentFact))
+                                    resources.ConsumeWork();
+                                    if (!commonOutputLoaded
+                                        && !commonOutputExhausted)
                                     {
+                                        if (commonOutputEnumerator.MoveNext())
+                                        {
+                                            resources.ConsumeWork();
+                                            commonOutputEntry
+                                                = commonOutputEnumerator.Current;
+                                            InitializationState.ChargeRepeatRoot(
+                                                resources,
+                                                commonOutputEntry.Key);
+                                            commonOutputLoaded = true;
+                                        }
+                                        else
+                                        {
+                                            commonOutputExhausted = true;
+                                        }
+                                    }
+
+                                    resources.ConsumeWork();
+                                    if (!currentOutputLoaded
+                                        && !currentOutputExhausted)
+                                    {
+                                        if (currentOutputEnumerator.MoveNext())
+                                        {
+                                            resources.ConsumeWork();
+                                            currentOutputEntry
+                                                = currentOutputEnumerator.Current;
+                                            InitializationState.ChargeRepeatRoot(
+                                                resources,
+                                                currentOutputEntry.Key);
+                                            currentOutputLoaded = true;
+                                        }
+                                        else
+                                        {
+                                            currentOutputExhausted = true;
+                                        }
+                                    }
+
+                                    if (!commonOutputLoaded
+                                        && !currentOutputLoaded)
+                                    {
+                                        break;
+                                    }
+
+                                    var comparison = 0;
+                                    if (commonOutputLoaded
+                                        && currentOutputLoaded)
+                                    {
+                                        resources.ConsumeWork();
+                                        comparison
+                                            = StorageProjectionComparer.Instance
+                                                .Compare(commonOutputEntry.Key,
+                                                    currentOutputEntry.Key);
+                                    }
+
+                                    if (!currentOutputLoaded
+                                        || (commonOutputLoaded
+                                            && comparison < 0))
+                                    {
+                                        commonOutputLoaded = false;
                                         continue;
                                     }
-                                    var mergedState = commonFact.CreateMerge(
-                                        currentFact, mergedCommonState,
-                                        outputAlreadyReserved: true);
-                                    mergedCommon.Add(arrayPrefix,
+                                    if (!commonOutputLoaded || comparison > 0)
+                                    {
+                                        currentOutputLoaded = false;
+                                        continue;
+                                    }
+
+                                    InitializationState.ChargeRepeatRoot(
+                                        resources, commonOutputEntry.Key);
+                                    var mergedState
+                                        = commonOutputEntry.Value.CreateMerge(
+                                            currentOutputEntry.Value,
+                                            mergedCommonState,
+                                            outputAlreadyReserved: true);
+                                    mergedCommon.Add(commonOutputEntry.Key,
                                         mergedState);
+                                    commonOutputLoaded = false;
+                                    currentOutputLoaded = false;
                                 }
 
+                                mapMeetFrame.Complete();
                                 commonState?.Dispose();
                                 common = mergedCommon;
                                 commonState = mergedCommonState;
@@ -11216,40 +11544,133 @@ public static partial class SemanticVerifier
                         continue;
                     }
 
-                    foreach (var (arrayPrefix, state) in common)
+                    using var mapUnionFrame = resources.EnterFrame();
+                    using var mapOutputState
+                        = resources.ReserveState(BigInteger.Zero);
+                    if (result.Count != 0)
                     {
-                        Count(ref remaining, depth + 1);
-                        if (!resultHeaderWritten)
+                        InitializationState.ChargeRepeatRootListHeader(
+                            resources);
+                    }
+                    InitializationState.ChargeRepeatRootListHeader(resources);
+                    InitializationState.ChargeRepeatRootListHeader(resources);
+                    mapOutputState.Add(16);
+                    using var resultEnumerator = result.GetEnumerator();
+                    using var commonEnumerator = common.GetEnumerator();
+                    var resultLoaded = false;
+                    var resultExhausted = false;
+                    var commonLoaded = false;
+                    var commonExhausted = false;
+                    var resultEntry = default(KeyValuePair<
+                        StorageProjection,
+                        InitializationState.RawUnionArrayElementState>);
+                    var commonEntry = default(KeyValuePair<
+                        StorageProjection,
+                        InitializationState.RawUnionArrayElementState>);
+                    var replacement = new SortedDictionary<
+                        StorageProjection,
+                        InitializationState.RawUnionArrayElementState>(
+                            StorageProjectionComparer.Instance);
+                    while (true)
+                    {
+                        resources.ConsumeWork();
+                        if (!resultLoaded && !resultExhausted)
                         {
-                            InitializationState
-                                .ChargeRepeatRootListHeader(resources);
-                            persistentResultState.Add(16);
-                            resultHeaderWritten = true;
+                            if (resultEnumerator.MoveNext())
+                            {
+                                resources.ConsumeWork();
+                                resultEntry = resultEnumerator.Current;
+                                InitializationState.ChargeRepeatRoot(
+                                    resources, resultEntry.Key);
+                                resultLoaded = true;
+                            }
+                            else
+                            {
+                                resultExhausted = true;
+                            }
+                        }
+
+                        resources.ConsumeWork();
+                        if (!commonLoaded && !commonExhausted)
+                        {
+                            if (commonEnumerator.MoveNext())
+                            {
+                                Count(ref remaining, depth + 1);
+                                resources.ConsumeWork();
+                                commonEntry = commonEnumerator.Current;
+                                InitializationState.ChargeRepeatRoot(
+                                    resources, commonEntry.Key);
+                                commonLoaded = true;
+                            }
+                            else
+                            {
+                                commonExhausted = true;
+                            }
+                        }
+
+                        if (!resultLoaded && !commonLoaded)
+                        {
+                            break;
+                        }
+
+                        var comparison = 0;
+                        if (resultLoaded && commonLoaded)
+                        {
+                            resources.ConsumeWork();
+                            comparison
+                                = StorageProjectionComparer.Instance.Compare(
+                                    resultEntry.Key, commonEntry.Key);
+                        }
+
+                        if (!commonLoaded || (resultLoaded
+                                && comparison < 0))
+                        {
+                            var prefix = resultEntry.Key;
+                            InitializationState.ChargeRepeatRoot(resources,
+                                prefix);
+                            mapOutputState.Add(
+                                InitializationState
+                                    .RawUnionArrayRootLogicalBytes(prefix));
+                            var clone = resultEntry.Value.CloneTo(mapOutputState);
+                            replacement.Add(prefix, clone);
+                            resultLoaded = false;
+                            continue;
+                        }
+                        if (!resultLoaded || comparison > 0)
+                        {
+                            var prefix = commonEntry.Key;
+                            InitializationState.ChargeRepeatRoot(resources,
+                                prefix);
+                            mapOutputState.Add(
+                                InitializationState
+                                    .RawUnionArrayRootLogicalBytes(prefix));
+                            var clone = commonEntry.Value.CloneTo(mapOutputState);
+                            replacement.Add(prefix, clone);
+                            commonLoaded = false;
+                            continue;
                         }
 
                         InitializationState.ChargeRepeatRoot(resources,
-                            arrayPrefix);
-                        if (result.TryGetValue(arrayPrefix,
-                                out var existingState))
-                        {
-                            var existingBytes = existingState.LogicalBytes();
-                            result[arrayPrefix]
-                                = existingState.CreateGuaranteeUnion(state,
-                                    persistentResultState);
-                            persistentResultState.Remove(existingBytes);
-                        }
-                        else
-                        {
-                            persistentResultState.Add(
-                                InitializationState
-                                    .RawUnionArrayRootLogicalBytes(
-                                        arrayPrefix)
-                                + state.LogicalBytes());
-                            result.Add(arrayPrefix,
-                                state.CloneTo(persistentResultState,
-                                    outputAlreadyReserved: true));
-                        }
+                            resultEntry.Key);
+                        mapOutputState.Add(
+                            InitializationState.RawUnionArrayRootLogicalBytes(
+                                resultEntry.Key));
+                        var union = resultEntry.Value.CreateGuaranteeUnion(
+                            commonEntry.Value, mapOutputState);
+                        replacement.Add(resultEntry.Key, union);
+                        resultLoaded = false;
+                        commonLoaded = false;
                     }
+
+                    mapUnionFrame.Complete();
+                    commonState?.Dispose();
+                    commonState = null;
+                    common = null;
+                    persistentResultState.Remove(
+                        persistentResultState.ReservedBytes);
+                    persistentResultState.TransferFrom(mapOutputState,
+                        mapOutputState.ReservedBytes, BigInteger.Zero);
+                    result = replacement;
                 }
                 finally
                 {

@@ -7615,10 +7615,8 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
 
-                using var leftInputState
-                    = _resources.ReserveState(LogicalBytes());
-                using var rightInputState
-                    = _resources.ReserveState(other.LogicalBytes());
+                _ = LogicalBytes();
+                _ = other.LogicalBytes();
                 using var templateScratch = _resources.ReserveState(
                     new BigInteger(TemplateBytes.Length));
                 var unionTemplate = new byte[TemplateBytes.Length];

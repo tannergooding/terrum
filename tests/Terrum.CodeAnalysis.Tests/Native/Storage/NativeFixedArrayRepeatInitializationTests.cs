@@ -914,6 +914,7 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
             [Layout(LayoutKind.Sequential)]
             public struct Holder {
                 public mut [RawWord; 2] Values;
+                public mut [RawWord; 2] OtherValues;
             }
 
             public Holder Select(bool chooseFirst, Holder first,
@@ -928,12 +929,16 @@ internal sealed class NativeFixedArrayRepeatInitializationTests
                 RawWord wide = new RawWord(uint64(7));
                 init mut Holder first;
                 first.Values = [wide; 2];
+                first.OtherValues = [wide; 2];
                 init mut RawWord low;
                 unsafe { low.Low = 1; }
                 first.Values[0] = low;
+                first.OtherValues[1] = low;
                 init mut Holder second;
                 second.Values = [wide; 2];
+                second.OtherValues = [wide; 2];
                 second.Values[1] = low;
+                second.OtherValues[0] = low;
                 Holder copy = Select(true, first, second);
                 unsafe { return int32(copy.Values[0].Low); }
             }
