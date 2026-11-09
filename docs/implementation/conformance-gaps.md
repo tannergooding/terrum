@@ -712,6 +712,11 @@ provider route; supervised Windows x64 AOT from the co-located artifact also
 exits with `99`. Missing provider/dependency closure, duplicate provider
 identity and an incompatible fixed-array extent reject. The co-located
 provider regression passes 1/1 with no skips after the Debug fast build.
+The co-located route also passes after non-byte Body-local and consumer-global
+permutations. Source-free load/re-emission/reload, FailFast JIT and supervised
+AOT preserve result `99` with the original provider and after compatible
+provider TypeDef-row relocation; changed array extent still rejects. This
+combined integration regression passes 1/1 with no skips.
 Broader imported nominal closure and the remaining replacement/topology
 matrix still need qualification.
 General Body remapping and source-free Body execution beyond these exact

@@ -9789,7 +9789,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                     checked((ushort)incompatibleHome)));
     }
 
-    private static byte[] PermuteA2BodyLocalMaps(byte[] artifact,
+    internal static byte[] PermuteA2BodyLocalMaps(byte[] artifact,
         string methodName, bool isRepeatInitialization = false)
     {
         var schema = isRepeatInitialization

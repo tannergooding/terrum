@@ -2294,10 +2294,12 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 shiftedProviderReemittedInput, consumerIdentity,
                 shiftedProviders, NativeRuntimePolicy.FailFast);
 
+        var coLocatedProviderArtifact
+            = CreateProvider(includePrefix: false,
+                schemaIdentity: A2R1SchemaIdentity);
         var coLocatedArtifact
             = CombineA2R1ConsumerAndTypeProviderArtifacts(artifact,
-                CreateProvider(includePrefix: false,
-                    schemaIdentity: A2R1SchemaIdentity));
+                coLocatedProviderArtifact);
         var coLocatedInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, coLocatedArtifact);
         var coLocatedTables = TrRmStructuralMetadataValidator
@@ -2365,6 +2367,73 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             coLocatedInput, consumerIdentity, [leafProviderInput],
             NativeRuntimePolicy.FailFast);
 
+        var bodyPermutedConsumer
+            = TrRmForeignInvocationAddressEmitterTests
+                .PermuteA2BodyLocalMaps(artifact, "Main",
+                    isRepeatInitialization: true);
+        var globalPermutedConsumer
+            = PermuteA2R1ConsumerGlobalRows(bodyPermutedConsumer);
+        Assert.That(globalPermutedConsumer, Is.Not.EqualTo(artifact));
+        var coLocatedPermutedArtifact
+            = CombineA2R1ConsumerAndTypeProviderArtifacts(
+                globalPermutedConsumer, coLocatedProviderArtifact);
+        var coLocatedPermutedInput = new TrRmStandardArtifactInput(
+            A2R1SchemaIdentity, coLocatedPermutedArtifact);
+        var coLocatedPermutedLoaded = TrRmExecutableCompiler.LoadStandard(
+            coLocatedPermutedInput, consumerIdentity, [leafProviderInput]);
+        AssertProviderExpectation(coLocatedPermutedLoaded, providerIdentity,
+            consumerIdentity, 2, "ContainerA", "ContainerAKey");
+        AssertProviderExpectation(coLocatedPermutedLoaded, providerIdentity,
+            consumerIdentity, 2, "UsesLeaf", "UsesLeafKey");
+        Assert.That(NativeModuleCompiler.ExecuteStandard(
+            coLocatedPermutedInput, consumerIdentity, [leafProviderInput],
+            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        var coLocatedPermutedReemitted
+            = TrRmExecutableCompiler.EmitStandard(coLocatedPermutedLoaded,
+                consumerIdentity, A2R1SchemaIdentity, 1);
+        var coLocatedPermutedReemittedInput
+            = new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                coLocatedPermutedReemitted);
+        var coLocatedPermutedReloaded
+            = TrRmExecutableCompiler.LoadStandard(
+                coLocatedPermutedReemittedInput, consumerIdentity, providers);
+        AssertProviderExpectation(coLocatedPermutedReloaded,
+            providerIdentity, consumerIdentity, 1, "ContainerA",
+            "ContainerAKey");
+        AssertProviderExpectation(coLocatedPermutedReloaded,
+            providerIdentity, consumerIdentity, 1, "UsesLeaf",
+            "UsesLeafKey");
+        Assert.That(NativeModuleCompiler.ExecuteStandard(
+            coLocatedPermutedReemittedInput, consumerIdentity, providers,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        var coLocatedPermutedImage
+            = NativeModuleCompiler.EmitStandardExecutable(
+                coLocatedPermutedInput, consumerIdentity,
+                [leafProviderInput], NativeRuntimePolicy.FailFast);
+
+        var shiftedCoLocatedProviderArtifact
+            = CreateProvider(includePrefix: true,
+                schemaIdentity: A2R1SchemaIdentity);
+        var shiftedCoLocatedArtifact
+            = CombineA2R1ConsumerAndTypeProviderArtifacts(
+                globalPermutedConsumer,
+                shiftedCoLocatedProviderArtifact);
+        var shiftedCoLocatedInput = new TrRmStandardArtifactInput(
+            A2R1SchemaIdentity, shiftedCoLocatedArtifact);
+        var shiftedCoLocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            shiftedCoLocatedInput, consumerIdentity, [leafProviderInput]);
+        AssertProviderExpectation(shiftedCoLocatedLoaded, providerIdentity,
+            consumerIdentity, 2, "ContainerA", "ContainerAKey");
+        AssertProviderExpectation(shiftedCoLocatedLoaded, providerIdentity,
+            consumerIdentity, 2, "UsesLeaf", "UsesLeafKey");
+        Assert.That(NativeModuleCompiler.ExecuteStandard(
+            shiftedCoLocatedInput, consumerIdentity, [leafProviderInput],
+            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        var shiftedCoLocatedImage
+            = NativeModuleCompiler.EmitStandardExecutable(
+                shiftedCoLocatedInput, consumerIdentity,
+                [leafProviderInput], NativeRuntimePolicy.FailFast);
+
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(input, consumerIdentity,
                 [leafProviderInput]));
@@ -2378,7 +2447,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             = CreateProvider(includePrefix: false, arrayExtent: 3,
                 schemaIdentity: A2R1SchemaIdentity);
         var incompatibleCoLocatedArtifact
-            = CombineA2R1ConsumerAndTypeProviderArtifacts(artifact,
+            = CombineA2R1ConsumerAndTypeProviderArtifacts(
+                globalPermutedConsumer,
                 incompatibleCoLocatedProviderArtifact);
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.LoadStandard(
@@ -2485,6 +2555,14 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         await TrRmForeignInvocationAddressEmitterTests
             .AssertNativeImageExitCodeAsync(coLocatedImage,
                 $"{consumerIdentity}-co-located", 99)
+            .ConfigureAwait(true);
+        await TrRmForeignInvocationAddressEmitterTests
+            .AssertNativeImageExitCodeAsync(coLocatedPermutedImage,
+                $"{consumerIdentity}-co-located-permuted", 99)
+            .ConfigureAwait(true);
+        await TrRmForeignInvocationAddressEmitterTests
+            .AssertNativeImageExitCodeAsync(shiftedCoLocatedImage,
+                $"{consumerIdentity}-co-located-shifted-provider", 99)
             .ConfigureAwait(true);
     }
 

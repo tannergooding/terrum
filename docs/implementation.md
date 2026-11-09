@@ -1090,8 +1090,11 @@ and FailFast JIT match the separately supplied route (`99`); supervised AOT
 from the co-located artifact also exits with `99`. Missing provider/dependency
 closure, duplicate provider identity and changed fixed-array extent reject.
 The co-located consumer regression passes 1/1 with no skips after the Debug
-fast build. Broader imported-type closure and the remaining replacement/
-topology matrices remain open.
+fast build. A co-located artifact with non-byte Body-local and consumer-global
+permutations also source-free loads/re-emits/reloads and passes JIT/AOT. That
+permuted consumer passes again after a compatible provider TypeDef-row shift;
+the changed extent rejects. Broader imported-type closure and the remaining
+replacement/topology matrices remain open.
 The original A1 array candidate is superseded for integrated nominal arrays
 by the unapproved
 [A2 rootless Copy evidence proposal](proposals/standard-trrm-rootless-copy-type-evidence.md);
