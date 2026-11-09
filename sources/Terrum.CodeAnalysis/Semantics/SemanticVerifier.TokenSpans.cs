@@ -10822,22 +10822,35 @@ public static partial class SemanticVerifier
             out RepeatResourceLedger.StateLease? outputState)
     {
             outputState = null;
+            var resources = initialized.RepeatResources;
+            using var repeatFrame = resources.EnterFrame();
             var returnCoverage = RawUnionInitializedPayloadBytesForCall(call,
                     target, summary, stagedInputs,
                     initialized.RawUnionReturnCoverageSummaries, program);
             var result = RawUnionArrayFactsFromCoverage(call.Type,
                     returnCoverage, initialized, program, ref remaining, depth,
                     out var resultState);
+        var resultStateTransferred = false;
         if (summary is null)
         {
+            try
+            {
+                repeatFrame.Complete();
                 outputState = resultState;
+                resultStateTransferred = true;
                 return result;
+            }
+            finally
+            {
+                if (!resultStateTransferred)
+                {
+                    resultState?.Dispose();
+                }
+            }
         }
 
-        var resources = initialized.RepeatResources;
         var persistentResultState = resultState
                 ?? resources.ReservePersistentState(BigInteger.Zero);
-        var resultStateTransferred = false;
         try
         {
                 var resultHeaderWritten = result.Count != 0;
@@ -11111,9 +11124,11 @@ public static partial class SemanticVerifier
 
             if (result.Count == 0)
             {
+                repeatFrame.Complete();
                 return result;
             }
 
+            repeatFrame.Complete();
             outputState = persistentResultState;
             resultStateTransferred = true;
             return result;
