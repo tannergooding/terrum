@@ -7106,14 +7106,20 @@ public static partial class SemanticVerifier
 
             private bool PayloadEquals(
                 ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+                => PayloadEquals(_resources, left, right);
+
+            internal static bool PayloadEquals(
+                RepeatResourceLedger resources,
+                ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
             {
+                ArgumentNullException.ThrowIfNull(resources);
                 if (left.Length != right.Length)
                 {
                     return false;
                 }
                 for (var index = 0; index < left.Length; index++)
                 {
-                    ChargeWork(5);
+                    resources.ConsumeWork(5);
                     if (left[index] != right[index])
                     {
                         return false;
@@ -7293,6 +7299,22 @@ public static partial class SemanticVerifier
                 outputState.Add(new BigInteger(48) + bytes.Length);
                 result._elementBytes.Add(new KeyValuePair<ulong, byte[]>(
                     index, CopyPayload(bytes)));
+            }
+
+            internal void Append(ulong index, ReadOnlySpan<byte> bytes,
+                RepeatResourceLedger.StateLease outputState)
+            {
+                ArgumentNullException.ThrowIfNull(outputState);
+                ChargeWork(3);
+                if (index >= Layout.ElementCount
+                    || bytes.Length != GuaranteedBytes.Length
+                    || (_elementBytes.Count != 0
+                        && _elementBytes[^1].Key >= index))
+                {
+                    throw Invalid();
+                }
+
+                AppendSetEntry(this, index, bytes, outputState);
             }
 
             internal RawUnionArrayElementState CreateSet(ulong index,

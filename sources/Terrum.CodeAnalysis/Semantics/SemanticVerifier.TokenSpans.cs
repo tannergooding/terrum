@@ -10493,6 +10493,7 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 InitializationState.RawUnionArrayElementState? state = null;
+                var stateBytes = BigInteger.Zero;
                 for (ulong element = 0;
                     element < layout.ElementCount; element++)
                 {
@@ -10507,12 +10508,22 @@ public static partial class SemanticVerifier
 
                     var elementBytes = valueBytes.Slice(elementOffset,
                         elementSize);
-                    if (!defaultBytes.AsSpan().SequenceEqual(elementBytes))
+                    if (!InitializationState.RawUnionArrayElementState
+                            .PayloadEquals(resources, defaultBytes,
+                                elementBytes))
                     {
-                        state ??= new InitializationState
-                            .RawUnionArrayElementState(layout, defaultBytes,
-                                defaultBytes, resources);
-                        _ = state.Set(element, elementBytes);
+                        if (state is null)
+                        {
+                            stateBytes = new BigInteger(56)
+                                + defaultBytes.Length;
+                            resultState.Add(stateBytes);
+                            state = new InitializationState
+                                .RawUnionArrayElementState(layout, defaultBytes,
+                                    defaultBytes, resources);
+                        }
+                        state.Append(element, elementBytes, resultState);
+                        stateBytes += new BigInteger(48)
+                            + elementBytes.Length;
                     }
                     var elementProjection = StorageProjection.Combine(
                         prefix, StorageProjection.ForArrayIndex(element));
@@ -10523,6 +10534,10 @@ public static partial class SemanticVerifier
 
                 if (state is not null)
                 {
+                    if (state.LogicalBytes() != stateBytes)
+                    {
+                        throw Invalid();
+                    }
                     var key = prefix;
                     if (result.ContainsKey(key))
                     {
@@ -10537,8 +10552,7 @@ public static partial class SemanticVerifier
                     }
                     InitializationState.ChargeRepeatRoot(resources, key);
                     resultState.Add(
-                        InitializationState.RawUnionArrayRootLogicalBytes(
-                            key) + state.LogicalBytes());
+                        InitializationState.RawUnionArrayRootLogicalBytes(key));
                     result.Add(key, state);
                 }
                 return;
