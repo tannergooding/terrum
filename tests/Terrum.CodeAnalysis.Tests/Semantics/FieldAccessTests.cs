@@ -91,6 +91,38 @@ internal sealed class FieldAccessTests
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(malformed, NativeRuntimePolicy.FailFast))!;
     }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void WritableClassHandleSurvivesReadonlyManagedField(NativeRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            class Pair {
+                public write Leaf Child;
+                public Pair(write Leaf child) { Child = child; }
+            }
+            int32 Main() {
+                require Leaf.TryCreate(41, out var leaf);
+                require Pair.TryCreate(leaf, out var pair);
+                pair.Child.Value = 42;
+                return leaf.Value;
+            }
+            """), runtimePolicy: (BoundRuntimePolicy)policy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => {
+            var actual = compilation.Program;
+            Assert.That(actual, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)actual!;
+        }))();
+        SemanticVerifier.Verify(program);
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+    }
+
     [TestCase(false)]
     [TestCase(true)]
     public void ImportedFieldAuthorityIsDeclarationDerivedAndReplacementChecked(bool mutable)
