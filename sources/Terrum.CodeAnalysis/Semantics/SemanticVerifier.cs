@@ -7113,6 +7113,7 @@ public static partial class SemanticVerifier
                 ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
             {
                 ArgumentNullException.ThrowIfNull(resources);
+                resources.ConsumeWork();
                 if (left.Length != right.Length)
                 {
                     return false;
@@ -7131,6 +7132,7 @@ public static partial class SemanticVerifier
             private byte[] MeetPayload(
                 ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
             {
+                ChargeWork();
                 if (left.Length != right.Length)
                 {
                     throw Invalid();
