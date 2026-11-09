@@ -174,9 +174,31 @@ internal sealed class RepeatResourceLedgerTests
             Assert.That(exception!.Dimension,
                 Is.EqualTo(SemanticResourceDimension.Work));
             Assert.That(exception.Required,
-                Is.EqualTo((BigInteger)RepeatResourceLedger.WorkLimit + 1));
+                Is.EqualTo((BigInteger)RepeatResourceLedger.WorkLimit + 5));
             Assert.That(ledger.WorkUsed,
                 Is.EqualTo(RepeatResourceLedger.WorkLimit));
+        }
+    }
+
+    [Test]
+    public void FailedWorkActionDoesNotChargePartialUnits()
+    {
+        var ledger = new RepeatResourceLedger();
+        using (ledger.BeginCallable())
+        {
+            ledger.ConsumeWork(RepeatResourceLedger.WorkLimit - 3);
+
+            var exception = Assert.Throws<SemanticRepeatResourceLimitException>(
+                () => ledger.ConsumeWork(5));
+
+            Assert.That(exception!.Dimension,
+                Is.EqualTo(SemanticResourceDimension.Work));
+            Assert.That(exception.Required,
+                Is.EqualTo((BigInteger)RepeatResourceLedger.WorkLimit + 2));
+            Assert.That(ledger.WorkUsed,
+                Is.EqualTo(RepeatResourceLedger.WorkLimit - 3));
+            Assert.That(ledger.PeakWork,
+                Is.EqualTo(RepeatResourceLedger.WorkLimit - 3));
         }
     }
 

@@ -91,11 +91,10 @@ internal sealed class RepeatResourceLedger
         var remaining = WorkLimit - _work;
         if (units > remaining)
         {
-            _work = WorkLimit;
-            PeakWork = Math.Max(PeakWork, _work);
+            var required = new BigInteger(_work) + units;
             throw new SemanticRepeatResourceLimitException(
                 SemanticResourceDimension.Work, WorkLimit,
-                new BigInteger(WorkLimit) + 1);
+                required);
         }
 
         _work += units;
