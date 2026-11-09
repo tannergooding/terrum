@@ -8343,9 +8343,11 @@ public static partial class SemanticVerifier
             internal bool SemanticallyEquals(
                 RawUnionArrayElementState other)
             {
+                using var repeatFrame = _resources.EnterFrame();
                 ChargeWork(6);
                 if (Layout != other.Layout)
                 {
+                    repeatFrame.Complete();
                     return false;
                 }
                 ChargeWork();
@@ -8353,6 +8355,7 @@ public static partial class SemanticVerifier
                     || !PayloadEquals(GuaranteedBytes, other.GuaranteedBytes)
                     || !PayloadEquals(TemplateBytes, other.TemplateBytes))
                 {
+                    repeatFrame.Complete();
                     return false;
                 }
 
@@ -8374,6 +8377,7 @@ public static partial class SemanticVerifier
                     }
                     if (!hasLeft && !hasRight)
                     {
+                        repeatFrame.Complete();
                         return true;
                     }
 
@@ -8414,6 +8418,7 @@ public static partial class SemanticVerifier
                     ChargeWork(10);
                     if (!PayloadEquals(leftValue, rightValue))
                     {
+                        repeatFrame.Complete();
                         return false;
                     }
                 }
@@ -9430,6 +9435,14 @@ public static partial class SemanticVerifier
             StorageProjectionPath query,
             StorageProjectionPath candidate)
         {
+            using var repeatFrame = resources.EnterFrame();
+
+            bool Complete(bool result)
+            {
+                repeatFrame.Complete();
+                return result;
+            }
+
             resources.ConsumeWork(8);
             var querySegments = query.Segments;
             var candidateSegments = candidate.Segments;
@@ -9437,7 +9450,7 @@ public static partial class SemanticVerifier
             resources.ConsumeWork();
             if (querySegments.Length > candidateSegments.Length)
             {
-                return false;
+                return Complete(false);
             }
 
             for (var index = 0; index < querySegments.Length; index++)
@@ -9454,7 +9467,7 @@ public static partial class SemanticVerifier
                         if (candidateSegment.Kind
                             != StorageProjectionSegmentKind.Field)
                         {
-                            return false;
+                            return Complete(false);
                         }
 
                         resources.ConsumeWork(2);
@@ -9462,14 +9475,14 @@ public static partial class SemanticVerifier
                         if (querySegment.OwnerType
                             != candidateSegment.OwnerType)
                         {
-                            return false;
+                            return Complete(false);
                         }
 
                         resources.ConsumeWork(2);
                         resources.ConsumeWork();
                         if (querySegment.Field != candidateSegment.Field)
                         {
-                            return false;
+                            return Complete(false);
                         }
                         break;
                     case StorageProjectionSegmentKind.ArrayIndex:
@@ -9477,14 +9490,14 @@ public static partial class SemanticVerifier
                         if (candidateSegment.Kind
                             != StorageProjectionSegmentKind.ArrayIndex)
                         {
-                            return false;
+                            return Complete(false);
                         }
 
                         resources.ConsumeWork(2);
                         resources.ConsumeWork();
                         if (querySegment.Start != candidateSegment.Start)
                         {
-                            return false;
+                            return Complete(false);
                         }
                         break;
                     case StorageProjectionSegmentKind.ArrayRange:
@@ -9496,7 +9509,7 @@ public static partial class SemanticVerifier
                             resources.ConsumeWork();
                             if (candidateSegment.Start < querySegment.Start)
                             {
-                                return false;
+                                return Complete(false);
                             }
 
                             resources.ConsumeWork();
@@ -9506,7 +9519,7 @@ public static partial class SemanticVerifier
                             resources.ConsumeWork();
                             if (offset >= querySegment.Length)
                             {
-                                return false;
+                                return Complete(false);
                             }
                         }
                         else
@@ -9515,7 +9528,7 @@ public static partial class SemanticVerifier
                             if (candidateSegment.Kind
                                 != StorageProjectionSegmentKind.ArrayRange)
                             {
-                                return false;
+                                return Complete(false);
                             }
 
                             resources.ConsumeWork();
@@ -9523,14 +9536,14 @@ public static partial class SemanticVerifier
                             resources.ConsumeWork();
                             if (candidateLength == 0)
                             {
-                                return false;
+                                return Complete(false);
                             }
 
                             resources.ConsumeWork(2);
                             resources.ConsumeWork();
                             if (candidateSegment.Start < querySegment.Start)
                             {
-                                return false;
+                                return Complete(false);
                             }
 
                             resources.ConsumeWork();
@@ -9541,7 +9554,7 @@ public static partial class SemanticVerifier
                             resources.ConsumeWork();
                             if (offset >= queryLength)
                             {
-                                return false;
+                                return Complete(false);
                             }
 
                             resources.ConsumeWork();
@@ -9549,7 +9562,7 @@ public static partial class SemanticVerifier
                             resources.ConsumeWork();
                             if (candidateLength > remaining)
                             {
-                                return false;
+                                return Complete(false);
                             }
                         }
                         break;
@@ -9559,7 +9572,7 @@ public static partial class SemanticVerifier
             }
 
             resources.ConsumeWork();
-            return true;
+            return Complete(true);
         }
 
         internal InitializationState Clone()
