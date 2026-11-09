@@ -680,9 +680,29 @@ TypeMap entries, swaps HomeMap entries and reorders PlaceSelection records with
 their instruction references while remapping SemanticStore Home selectors.
 Source-free load/re-emission,
 JIT and supervised AOT remain valid before and after provider TypeDef-row
-relocation. Global TypeSpec/Import/ModuleRef/layout/anchor permutations,
-broader imported nominal closure, co-located TypeDef providers, and the
-remaining replacement matrix still need qualification.
+relocation.
+
+The imported A2R1+Repeat Body now also rebinds against A2 type-only providers
+with TypeDef, FieldDef-owner, Layout/LayoutField, TypeSpec and
+FixedArrayLayout row permutations, including one combined permutation. Each
+variant source-free loads, re-emits and reloads with stable consumer bytes, then
+executes under FailFast JIT and supervised Windows x64 AOT; the mutated value
+is `42` and the sibling value is `99`. A provider changing the imported array
+extent rejects. After the Debug fast build, the provider-chain/imported-Body
+matrix passes 8/8 with no skips. This evidence does not approve the proposal.
+Consumer global-row permutations now reorder TypeSpecs, ModuleRefs, Imports,
+MethodDefs, MethodSigs, Params and StandardNativeImports while remapping
+TypeSpec references in FieldDefs and FixedArrayLayouts, MethodDef contract
+owners and ranges, the module entry method, native function-pointer anchors,
+and Body TypeMap, MethodMap and ConstantMap entries. The source-free
+LoadStandard/EmitStandard/reload route is stable; FailFast JIT and supervised
+Windows x64 AOT preserve the sibling value `99` after re-emission and after a
+compatible provider TypeDef-row shift. An out-of-range TypeSpec Import and an
+Import redirected to a different provider both reject. A separate
+structural-only case validates a nonempty local-FieldDef FieldMap token through
+the permutation; the bounded F consumer does not select the required
+LayoutQueries feature, so this map-only case is not runtime evidence. The
+consumer-global permutation regression passes 1/1 with no skips after the
 General Body remapping and source-free Body execution beyond these exact
 NativeParameter/NativeAddress TypeMap and fixed-array PlaceSelection cases
 remain open. Type-only source

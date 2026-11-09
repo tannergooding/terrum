@@ -1066,9 +1066,25 @@ verify that writing `Values[1]` returns 42 and that the neighboring `Sibling[0]`
 remains 99. A non-byte consumer Body permutation now reorders TypeMap/HomeMap
 and PlaceSelection records with their code and SemanticStore references; the
 permuted Body source-free loads, re-emits and executes before and after provider
-TypeDef-row relocation. A changed fixed-array extent is rejected. Global
-TypeSpec/Import/ModuleRef/layout/anchor permutations, broader imported-type
-closure and co-located TypeDef providers remain open.
+TypeDef-row relocation. An A2R1+Repeat imported Body also rebinds against A2
+type-only providers with TypeDef, FieldDef-owner, Layout/LayoutField, TypeSpec
+and FixedArrayLayout row permutations, including a combined permutation.
+Source-free load/re-emission/reload, FailFast JIT and supervised Windows x64
+AOT preserve the mutated value (`42`) and sibling value (`99`) across each
+provider variant; changed array extent replacement rejects. Consumer
+global-row permutations now reorder TypeSpec, ModuleRef, Import, MethodDef,
+MethodSig, Param and StandardNativeImport rows, preserving dependent
+FieldDef/FixedArrayLayout TypeSpec references, Contract ownership, entry
+MethodDef, function-pointer anchor and Body maps. Source-free
+LoadStandard/EmitStandard/reload, FailFast JIT and supervised AOT preserve
+the sibling value (`99`) after consumer re-emission and after a compatible
+provider TypeDef-row shift. Malformed TypeSpec Import references and split
+provider expectations reject. A structural-only local-FieldDef FieldMap
+case passes; the bounded F consumer rejects the required LayoutQueries
+feature, so that case is not execution evidence. The consumer-global
+permutation regression passes 1/1 with no skips after the Debug fast build.
+Co-located TypeDef providers, broader imported-type closure and the remaining
+replacement/topology matrices remain open.
 The original A1 array candidate is superseded for integrated nominal arrays
 by the unapproved
 [A2 rootless Copy evidence proposal](proposals/standard-trrm-rootless-copy-type-evidence.md);

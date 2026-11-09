@@ -1008,7 +1008,7 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(fieldReplacementCount, Is.EqualTo(1));
     }
 
-    private static async Task AssertNativeImageExitCodeAsync(byte[] image,
+    internal static async Task AssertNativeImageExitCodeAsync(byte[] image,
         string moduleIdentity, int expectedExitCode)
     {
         var temporaryDirectory = Path.Combine(AppContext.BaseDirectory, "tmp");
@@ -9504,6 +9504,22 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         Action<byte[], byte[], byte[][], byte[]> rewrite,
         bool isRepeatInitialization = false,
         bool preserveInvalidBodyRecords = false)
+        => RewriteA2BodyArtifactCore(artifact, methodName,
+            (homeMap, typeMap, _, _, _, records, code)
+                => rewrite(homeMap, typeMap, records, code),
+            isRepeatInitialization, preserveInvalidBodyRecords);
+
+    internal static byte[] RewriteA2BodyGlobalReferences(byte[] artifact,
+        string methodName,
+        Action<byte[], byte[], byte[], byte[], byte[], byte[][], byte[]> rewrite,
+        bool isRepeatInitialization = true)
+        => RewriteA2BodyArtifactCore(artifact, methodName, rewrite,
+            isRepeatInitialization, preserveInvalidBodyRecords: false);
+
+    private static byte[] RewriteA2BodyArtifactCore(byte[] artifact,
+        string methodName,
+        Action<byte[], byte[], byte[], byte[], byte[], byte[][], byte[]> rewrite,
+        bool isRepeatInitialization, bool preserveInvalidBodyRecords)
     {
         var schema = isRepeatInitialization
             ? TrRmArtifactSchema
@@ -9537,6 +9553,9 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             tables.Contracts.Count);
         var homeMap = body.HomeMap.ToArray();
         var typeMap = body.TypeMap.ToArray();
+        var methodMap = body.MethodMap.ToArray();
+        var fieldMap = body.FieldMap.ToArray();
+        var constantMap = body.ConstantMap.ToArray();
         var records = new byte[body.RecordCount][];
         for (var recordIndex = 0; recordIndex < records.Length;
             recordIndex++)
@@ -9544,7 +9563,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
             records[recordIndex] = body.GetRecord(recordIndex).ToArray();
         }
         var code = body.Code.ToArray();
-        rewrite(homeMap, typeMap, records, code);
+        rewrite(homeMap, typeMap, methodMap, fieldMap, constantMap,
+            records, code);
 
         if (!index.TryGetSection(0x0020, out var bodySection,
                 out var bodyCount))
@@ -9560,6 +9580,9 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
         {
             if (!homeMap.AsSpan().SequenceEqual(body.HomeMap)
                 || !typeMap.AsSpan().SequenceEqual(body.TypeMap)
+                || !methodMap.AsSpan().SequenceEqual(body.MethodMap)
+                || !fieldMap.AsSpan().SequenceEqual(body.FieldMap)
+                || !constantMap.AsSpan().SequenceEqual(body.ConstantMap)
                 || !code.AsSpan().SequenceEqual(body.Code))
             {
                 throw new InvalidOperationException(
@@ -9625,8 +9648,8 @@ internal sealed class TrRmForeignInvocationAddressEmitterTests
                 encodedRecords[recordIndex] = records[recordIndex];
             }
             rewrittenBody = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
-                body.MethodMap.ToArray(), body.FieldMap.ToArray(),
-                body.ConstantMap.ToArray(), blocks, encodedRecords, code,
+                methodMap, fieldMap, constantMap, blocks, encodedRecords,
+                code,
                 tables.Contracts.Count, schema);
         }
 
