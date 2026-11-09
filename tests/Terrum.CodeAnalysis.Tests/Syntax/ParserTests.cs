@@ -883,6 +883,34 @@ internal sealed class ParserTests
     }
 
     [Test]
+    public void ParsesNamespaceLevelEnumDeclarationsAndMembers()
+    {
+        const string source
+            = "namespace Geometry { public enum Direction : int32 { North = 1, East, } }";
+        var tree = SyntaxTree.Parse(source);
+
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.DescendantNodes().Count(node =>
+            node.Kind == SyntaxKind.EnumDeclaration), Is.EqualTo(1));
+        Assert.That(tree.Root.DescendantNodes().Count(node =>
+            node.Kind == SyntaxKind.EnumMemberDeclaration),
+            Is.EqualTo(2));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void RejectsNestedEnumDeclarations()
+    {
+        const string source
+            = "struct Container { enum Kind : int32 { Empty } }";
+        var tree = SyntaxTree.Parse(source);
+
+        Assert.That(tree.HasErrors, Is.True);
+        AssertLossless(tree);
+    }
+
+    [Test]
     public void MissingTokensAreExplicitAndDoNotInventText()
     {
         var tree = SyntaxTree.Parse("void F() { return 1 }");
@@ -894,10 +922,10 @@ internal sealed class ParserTests
     }
 
     [Test]
-    public void UnsupportedDeclarationDoesNotHideFollowingFunction()
+    public void EnumDeclarationDoesNotHideFollowingFunction()
     {
         var tree = SyntaxTree.Parse("enum E { A, B } void Main() { return; }");
-        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.HasErrors, Is.False);
         Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantNodes(),node => node.Kind == SyntaxKind.FunctionDeclaration),Is.True);
         AssertLossless(tree);
     }

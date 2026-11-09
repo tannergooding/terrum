@@ -762,6 +762,58 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.CloseBrace));
             kind = isClass ? SyntaxKind.ClassDeclaration : SyntaxKind.StructDeclaration;
         }
+        else if (Current.Kind == TokenKind.EnumKeyword)
+        {
+            if (containingType is not null || isInterfaceMember)
+            {
+                Report("TRM1002",
+                    "An enum must be declared at namespace or file scope.",
+                    Current.Span);
+                children.Add(SkipDeclaration());
+                kind = SyntaxKind.SkippedSyntax;
+            }
+            else
+            {
+                children.Add(Take());
+                children.Add(Expect(TokenKind.Identifier));
+                if (Current.Kind == TokenKind.Colon)
+                {
+                    children.Add(TakeSeparated());
+                    children.Add(ParseType());
+                }
+                children.Add(Expect(TokenKind.OpenBrace));
+                while (Current.Kind is not (
+                        TokenKind.CloseBrace or TokenKind.EndOfFile))
+                {
+                    var memberChildren = new List<SyntaxElement> {
+                        Expect(TokenKind.Identifier),
+                    };
+                    if (Current.Kind == TokenKind.Equals)
+                    {
+                        memberChildren.Add(TakeSeparated());
+                        memberChildren.Add(ParseExpression());
+                    }
+                    children.Add(Node(SyntaxKind.EnumMemberDeclaration,
+                        memberChildren));
+
+                    if (Current.Kind == TokenKind.Comma)
+                    {
+                        children.Add(Take());
+                        continue;
+                    }
+                    if (Current.Kind != TokenKind.CloseBrace)
+                    {
+                        Report("TRM1002",
+                            "Expected ',' or '}' after an enum member.",
+                            Current.Span);
+                        children.Add(SkipDeclaration());
+                    }
+                    break;
+                }
+                children.Add(Expect(TokenKind.CloseBrace));
+                kind = SyntaxKind.EnumDeclaration;
+            }
+        }
         else if (!isInterfaceMember && Current.Kind == TokenKind.InterfaceKeyword)
         {
             children.Add(Take());

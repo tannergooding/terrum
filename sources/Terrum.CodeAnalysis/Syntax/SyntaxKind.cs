@@ -245,4 +245,8 @@ public enum SyntaxKind
     ExistentialTypeArgument,
     /// <summary>A keyword property used as a generic constraint term.</summary>
     ConstraintTerm,
+    /// <summary>A namespace-level integral enum declaration.</summary>
+    EnumDeclaration,
+    /// <summary>A named enum member and its optional constant expression.</summary>
+    EnumMemberDeclaration,
 }
