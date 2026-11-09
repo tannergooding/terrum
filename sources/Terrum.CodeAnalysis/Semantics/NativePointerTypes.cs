@@ -66,7 +66,7 @@ internal static class NativePointerTypeContract
             checkedReferenceTypes = default)
     {
         var completeReferenceTypes = checkedReferenceTypes.IsDefault
-            ? ImmutableArray<CheckedReferenceTypeDefinition>.Empty
+            ? []
             : checkedReferenceTypes;
         if (pointerTypes.IsDefault || structures.IsDefault || functionPointers.IsDefault
             || pointerTypes.Length > SemanticVerifier.MaximumAnalysisVisits
@@ -302,7 +302,7 @@ internal static class NativePointerTypeContract
             || !ValueLayout.TryGetOptionalValueLayout(type, structures,
                 checkedReferenceTypes, null,
                 fixedArrays.IsDefault
-                    ? ImmutableArray<BoundNativeFixedArrayType>.Empty
+                    ? []
                     : fixedArrays,
                 out _))
         {

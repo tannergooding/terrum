@@ -77,10 +77,10 @@ public static class FixedLayoutStorage
         bool IsBlittablePayload(PrimitiveType type, int depth)
         {
             if (depth > SemanticVerifier.MaximumDepth
-                || CheckedReferenceTypes.IsType(type)
+                || (CheckedReferenceTypes.IsType(type)
                     && (checkedReferenceTypes is null
                         || !CheckedReferenceTypeContract.IsOptionalValueType(
-                            type, checkedReferenceTypes)))
+                            type, checkedReferenceTypes))))
             {
                 return false;
             }

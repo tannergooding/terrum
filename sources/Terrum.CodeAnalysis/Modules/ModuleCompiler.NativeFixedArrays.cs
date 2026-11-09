@@ -75,7 +75,7 @@ public static partial class ModuleCompiler
         var functionPointerStates = new byte[
             module.NativeFunctionPointerSignatures.Length];
         var checkedReferenceTypes = module.CheckedReferenceTypes.IsDefault
-            ? ImmutableArray<CheckedReferenceTypeDefinition>.Empty
+            ? []
             : module.CheckedReferenceTypes;
         if (sourceArrays.Length is > SemanticVerifier.MaximumAnalysisVisits
             or > NativeFixedArrayTypes.MaximumCount

@@ -6707,7 +6707,7 @@ public static partial class ModuleCompiler
         var result = remapped.MoveToImmutable();
         if (!NativeFixedArrayContract.IsValidTable(destinationStructures,
                 result, checkedReferenceTypes.IsDefault
-                    ? ImmutableArray<CheckedReferenceTypeDefinition>.Empty
+                    ? []
                     : checkedReferenceTypes))
         {
             throw new ModuleContractException(

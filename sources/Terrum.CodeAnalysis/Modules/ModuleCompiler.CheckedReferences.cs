@@ -63,12 +63,12 @@ public static partial class ModuleCompiler
         for (var index = 0; index < referenceTypes.Length; index++)
         {
             var referenceType = referenceTypes[index];
-            if (!(referenceType.IsOptionalValue
-                    && referenceType.ReferentType == PrimitiveType.Void)
-                && !IsValidPrivateReferenceValueType(
-                    referenceType.ReferentType, referenceTypes, structures,
-                    classes, functionPointerSignatures, pointerTypes,
-                    fixedArrayTypes, moduleWriter.EnumDefinitions)
+            if ((!(referenceType.IsOptionalValue
+                        && referenceType.ReferentType == PrimitiveType.Void)
+                    && !IsValidPrivateReferenceValueType(
+                        referenceType.ReferentType, referenceTypes, structures,
+                        classes, functionPointerSignatures, pointerTypes,
+                        fixedArrayTypes, moduleWriter.EnumDefinitions))
                 || !seenTypes.Add(referenceType)
                 || (CheckedReferenceTypes.IsType(
                         referenceType.ReferentType)
@@ -308,7 +308,7 @@ public static partial class ModuleCompiler
                 typeRoots.AddRange(importedMethod.Outputs.Select(
                     static output => output.PointeeType));
             }
-            if (item.Function is not BoundFunction)
+            if (item.Function is null)
             {
                 AddContractReferenceRoots(item.Contract, typeRoots);
             }
@@ -319,7 +319,7 @@ public static partial class ModuleCompiler
         var referenceRootOrder = new List<int>();
         PopulateRequiredStructures(
             module.Functions.Where(static item =>
-                    item.Function is BoundFunction)
+                    item.Function is not null)
                 .Select(static item => item.Function!),
             module.Structures, module.Classes, null, requiredTypes,
             new Queue<PrimitiveType>(), module.NativePointerTypes,
@@ -409,7 +409,9 @@ public static partial class ModuleCompiler
         }
 
         PrimitiveType RemapType(PrimitiveType type)
-            => RemapCheckedReferenceType(type, mapping);
+        {
+            return RemapCheckedReferenceType(type, mapping);
+        }
 
         var structures = ImmutableArray.CreateRange(module.Structures.Select(
             structure => BoundTreeTraversal.RewriteTypes(structure,
@@ -568,7 +570,7 @@ public static partial class ModuleCompiler
         var offset = 0;
         while (markerIndex >= 0)
         {
-            builder.Append(contract.AsSpan(offset,
+            _ = builder.Append(contract.AsSpan(offset,
                 markerIndex - offset));
             var digitsStart = markerIndex + marker.Length;
             var digitsEnd = digitsStart;
@@ -590,14 +592,14 @@ public static partial class ModuleCompiler
                     "A bodyless private contract has an invalid checked-reference type identity.");
             }
 
-            builder.Append(marker);
-            builder.Append(mapping[sourceIndex].ToString(
+            _ = builder.Append(marker);
+            _ = builder.Append(mapping[sourceIndex].ToString(
                 System.Globalization.CultureInfo.InvariantCulture));
             offset = digitsEnd;
             markerIndex = contract.IndexOf(marker, offset,
                 StringComparison.Ordinal);
         }
-        builder.Append(contract.AsSpan(offset));
+        _ = builder.Append(contract.AsSpan(offset));
         return builder.ToString();
     }
 

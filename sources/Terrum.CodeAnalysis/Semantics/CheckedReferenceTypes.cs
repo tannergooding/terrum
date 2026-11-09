@@ -394,8 +394,8 @@ internal static class CheckedReferenceTypeContract
         }
 
         var referenceType = referenceTypes[index];
-        if (referenceType is null || referenceType.ReferentType == PrimitiveType.Void
-                && !referenceType.IsOptionalValue
+        if (referenceType is null || (referenceType.ReferentType == PrimitiveType.Void
+                && !referenceType.IsOptionalValue)
             || (referenceType.IsGarbageCollected
                 && referenceType.IsInitialization)
             || (referenceType.IsOptionalValue
