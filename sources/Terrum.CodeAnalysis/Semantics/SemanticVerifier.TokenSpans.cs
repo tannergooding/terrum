@@ -10675,10 +10675,6 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                     var key = prefix;
-                    if (result.ContainsKey(key))
-                    {
-                        throw Invalid();
-                    }
                     if (!resultHeaderWritten)
                     {
                         InitializationState
@@ -10689,7 +10685,10 @@ public static partial class SemanticVerifier
                     InitializationState.ChargeRepeatRoot(resources, key);
                     resultState.Add(
                         InitializationState.RawUnionArrayRootLogicalBytes(key));
-                    result.Add(key, state);
+                    if (!result.TryAdd(key, state))
+                    {
+                        throw Invalid();
+                    }
                 }
                 repeatFrame.Complete();
                 return;
