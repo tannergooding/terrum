@@ -9318,8 +9318,15 @@ public static partial class SemanticVerifier
         internal static BigInteger RawUnionArrayFactsLogicalBytes(
             IReadOnlyDictionary<StorageProjection,
                 RawUnionArrayElementState> values)
+            => RawUnionArrayFactsLogicalBytes(values, out _);
+
+        internal static BigInteger RawUnionArrayFactsLogicalBytes(
+            IReadOnlyDictionary<StorageProjection,
+                RawUnionArrayElementState> values,
+            out RepeatResourceLedger? resources)
         {
             ArgumentNullException.ThrowIfNull(values);
+            resources = null;
             if (values.Count == 0)
             {
                 return BigInteger.Zero;
@@ -9332,19 +9339,20 @@ public static partial class SemanticVerifier
             }
 
             var firstState = enumerator.Current.Value ?? throw Invalid();
-            var resources = firstState.Resources;
-            ChargeRepeatRootListHeader(resources);
+            var stateResources = firstState.Resources;
+            resources = stateResources;
+            ChargeRepeatRootListHeader(stateResources);
             var bytes = new BigInteger(16);
             do
             {
                 var (prefix, state) = enumerator.Current;
                 if (state is null || !ReferenceEquals(state.Resources,
-                        resources))
+                        stateResources))
                 {
                     throw Invalid();
                 }
 
-                ChargeRepeatRoot(resources, prefix);
+                ChargeRepeatRoot(stateResources, prefix);
                 bytes += RawUnionArrayRootLogicalBytes(prefix)
                     + state.LogicalBytes();
             }
