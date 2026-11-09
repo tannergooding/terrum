@@ -1266,8 +1266,6 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var methodMapTokens = new List<uint>();
-        var methodMapTokenSet = new HashSet<uint>();
         if (!BoundTreeTraversal.VisitExpressions(function.Body,
             expression =>
             {
@@ -1321,11 +1319,6 @@ public static partial class TrRmExecutableCompiler
                                 "An L1 direct call does not match its selected local MethodDef.");
                         }
 
-                        var token = methodMapTokenByFunction[call.Function];
-                        if (methodMapTokenSet.Add(token))
-                        {
-                            methodMapTokens.Add(token);
-                        }
                         if (call.Type != PrimitiveType.Void
                             && !DirectNativeImportContract.IsScalar(call.Type))
                         {
@@ -1412,58 +1405,8 @@ public static partial class TrRmExecutableCompiler
             return CreateStandardBodyTypeMapToken(GetTypeSpecRef(type));
         }
 
-        var typeTokens = new List<uint>();
-        for (var index = 0; index < function.Variables.Length; index++)
-        {
-            var type = function.Variables[index].Type;
-            typeTokens.Add(TypeToken(type));
-        }
-        foreach (var target in program.Functions)
-        {
-            if (target.ReturnType != PrimitiveType.Void)
-            {
-                typeTokens.Add(TypeToken(target.ReturnType));
-            }
-            for (var parameter = 0; parameter < target.ParameterCount;
-                parameter++)
-            {
-                typeTokens.Add(TypeToken(target.Variables[parameter].Type));
-            }
-        }
-        if (function.ReturnType != PrimitiveType.Void)
-        {
-            typeTokens.Add(TypeToken(function.ReturnType));
-        }
-        foreach (var structure in program.Structures)
-        {
-            foreach (var field in structure.Fields)
-            {
-                typeTokens.Add(TypeToken(field.Type));
-            }
-        }
-        foreach (var arrayType in program.NativeFixedArrayTypes)
-        {
-            typeTokens.Add(TypeToken(arrayType.ElementType));
-        }
-        if (!BoundTreeTraversal.VisitExpressions(function.Body,
-            expression =>
-            {
-                if (expression.Type != PrimitiveType.Void)
-                {
-                    typeTokens.Add(TypeToken(expression.Type));
-                }
-            }))
-        {
-            throw Unsupported(
-                "L1 Body type-map collection could not traverse the function.");
-        }
-        foreach (var type in temporaryTypes)
-        {
-            typeTokens.Add(TypeToken(type));
-        }
-
-        var maps = TrRmRegisterBodyMapBuilder.Create(typeTokens,
-            methodMapTokens);
+        var typeMap = new TrRmRegisterBodyTokenMapBuilder();
+        var methodMap = new TrRmRegisterBodyTokenMapBuilder();
         var homeMap = new byte[checked(homeCount * 8)];
         for (var variable = function.ParameterCount;
             variable < function.Variables.Length; variable++)
@@ -1475,7 +1418,7 @@ public static partial class TrRmExecutableCompiler
             homeMap[offset + 1] = variableInfo.IsMutable ? (byte)1 : (byte)0;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 2),
-                maps.GetTypeMapIndex(TypeToken(variableInfo.Type)));
+                typeMap.GetIndex(TypeToken(variableInfo.Type)));
         }
         for (var temporary = 0; temporary < temporaryTypes.Count;
             temporary++)
@@ -1485,7 +1428,7 @@ public static partial class TrRmExecutableCompiler
             homeMap[offset + 1] = 1;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 2),
-                maps.GetTypeMapIndex(TypeToken(temporaryTypes[temporary])));
+                typeMap.GetIndex(TypeToken(temporaryTypes[temporary])));
         }
         for (var parameter = 0; parameter < function.ParameterCount;
             parameter++)
@@ -1496,7 +1439,7 @@ public static partial class TrRmExecutableCompiler
             homeMap[offset + 1] = variableInfo.IsMutable ? (byte)1 : (byte)0;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 2),
-                maps.GetTypeMapIndex(TypeToken(variableInfo.Type)));
+                typeMap.GetIndex(TypeToken(variableInfo.Type)));
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 4), checked((ushort)parameter));
         }
@@ -1593,7 +1536,7 @@ public static partial class TrRmExecutableCompiler
                 entryState[9] = 1;
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     entryState.AsSpan(10),
-                    maps.GetTypeMapIndex(TypeToken(placeState.Type)));
+                    typeMap.GetIndex(TypeToken(placeState.Type)));
                 entryState[12] = placeState.AccessKind;
                 blockEntryStateRecordIndices.Add(
                     checked((ushort)records.Count));
@@ -1870,7 +1813,7 @@ public static partial class TrRmExecutableCompiler
                         baseIndex: baseIndex,
                         indexKind: 0, targetRefKind: 1, indexIndex: 0,
                         targetRef: checked((uint)fieldRow),
-                        referentTypeMapIndex: maps.GetTypeMapIndex(
+                        referentTypeMapIndex: typeMap.GetIndex(
                             TypeToken(fieldType)),
                         TrRmArtifactSchema.LocalAggregateLayoutDraft));
                 if (isFinal)
@@ -2059,7 +2002,7 @@ public static partial class TrRmExecutableCompiler
                     targetRefKind: 3,
                     indexIndex: indexIndex,
                     targetRef: checked((uint)layoutRow),
-                    referentTypeMapIndex: maps.GetTypeMapIndex(
+                    referentTypeMapIndex: typeMap.GetIndex(
                         TypeToken(elementType)),
                     TrRmArtifactSchema.LocalAggregateLayoutDraft));
             return selectionIndex;
@@ -2367,7 +2310,7 @@ public static partial class TrRmExecutableCompiler
                         baseIndex: checked((ushort)previousRegister),
                         indexKind: 0, targetRefKind: 1, indexIndex: 0,
                         targetRef: checked((uint)fieldRow),
-                        referentTypeMapIndex: maps.GetTypeMapIndex(
+                        referentTypeMapIndex: typeMap.GetIndex(
                             TypeToken(fieldType)),
                         TrRmArtifactSchema.LocalAggregateLayoutDraft));
                 AppendPlaceSelection(selectionIndex, destination);
@@ -2433,7 +2376,7 @@ public static partial class TrRmExecutableCompiler
                 TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
                     1, 3, 1, 0, 1, 0, 0, 0, 0,
                     checked((uint)homeIndex),
-                    maps.GetTypeMapIndex(TypeToken(initialization.Type)),
+                    typeMap.GetIndex(TypeToken(initialization.Type)),
                     TrRmArtifactSchema.LocalAggregateLayoutDraft));
             AppendPlaceSelection(selectionIndex, 1);
             var storeIndex = checked((ushort)records.Count);
@@ -2638,7 +2581,7 @@ public static partial class TrRmExecutableCompiler
 
             var callSite = checked((ushort)records.Count);
             records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-                1, resultKind, maps.GetMethodMapIndex(methodToken),
+                1, resultKind, methodMap.GetIndex(methodToken),
                 resultIndex, inputs, []));
             AppendCallSiteInstruction(code, callSite);
             if (resultKind == 2)
@@ -2831,7 +2774,7 @@ public static partial class TrRmExecutableCompiler
                         return;
                     }
 
-                    var targetTypeMapIndex = maps.GetTypeMapIndex(
+                    var targetTypeMapIndex = typeMap.GetIndex(
                         TypeToken(cast.Type));
                     code.Add(0xD0);
                     code.Add((byte)(destination | (destination << 4)));
@@ -3060,7 +3003,7 @@ public static partial class TrRmExecutableCompiler
                 TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
                     1, 3, 1, 0, 1, 0, 0, 0, 0,
                     checked((uint)homeIndex),
-                    maps.GetTypeMapIndex(TypeToken(arrayType)),
+                    typeMap.GetIndex(TypeToken(arrayType)),
                     TrRmArtifactSchema.LocalAggregateLayoutDraft));
             AppendPlaceSelection(selectionIndex, 1);
             var storeIndex = checked((ushort)records.Count);
@@ -3124,7 +3067,7 @@ public static partial class TrRmExecutableCompiler
                 TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
                     1, 3, 1, 0, 1, 0, 0, 0, 0,
                     checked((uint)homeIndex),
-                    maps.GetTypeMapIndex(TypeToken(initialization.Type)),
+                    typeMap.GetIndex(TypeToken(initialization.Type)),
                     TrRmArtifactSchema.LocalAggregateLayoutDraft));
             AppendPlaceSelection(selectionIndex, 1);
             var storeIndex = checked((ushort)records.Count);
@@ -3714,8 +3657,8 @@ public static partial class TrRmExecutableCompiler
                 blockEntryStateRecordIndices[blockIndex]));
         }
         var flattenedCode = codeBytes.ToArray();
-        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            maps.MethodMap, default, constantMap,
+        return TrRmRegisterBodyWriter.Encode(homeMap, typeMap.Encode(),
+            methodMap.Encode(), default, constantMap,
             blocks, records, flattenedCode, contractCount,
             TrRmArtifactSchema.LocalAggregateLayoutDraft);
     }

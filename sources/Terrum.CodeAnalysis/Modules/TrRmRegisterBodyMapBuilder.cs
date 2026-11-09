@@ -22,6 +22,40 @@ internal sealed record TrRmRegisterBodyMaps(
             ? index : throw new KeyNotFoundException("MethodMap token was not collected.");
 }
 
+internal sealed class TrRmRegisterBodyTokenMapBuilder
+{
+    private readonly List<uint> _tokens = [];
+    private readonly Dictionary<uint, ushort> _indices = [];
+
+    internal ushort GetIndex(uint token)
+    {
+        if (_indices.TryGetValue(token, out var index))
+        {
+            return index;
+        }
+        if (_tokens.Count == 65_536)
+        {
+            throw new ArgumentOutOfRangeException(nameof(token));
+        }
+
+        index = checked((ushort)_tokens.Count);
+        _tokens.Add(token);
+        _indices.Add(token, index);
+        return index;
+    }
+
+    internal byte[] Encode()
+    {
+        var bytes = new byte[checked(_tokens.Count * sizeof(uint))];
+        for (var index = 0; index < _tokens.Count; index++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                bytes.AsSpan(index * sizeof(uint)), _tokens[index]);
+        }
+        return bytes;
+    }
+}
+
 internal static class TrRmRegisterBodyMapBuilder
 {
     internal static TrRmRegisterBodyMaps Create(IEnumerable<uint> typeTokens,

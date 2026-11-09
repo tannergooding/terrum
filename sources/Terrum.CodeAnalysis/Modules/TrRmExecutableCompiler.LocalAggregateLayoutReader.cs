@@ -796,12 +796,11 @@ public static partial class TrRmExecutableCompiler
             || body.BlockCount < 1
             || body.HasExceptionDirectory
             || (body.MapMask & ~0x17) != 0
-            || (body.MapMask & 0x02) == 0
             || body.FieldCount != 0
             || body.RecordCount < 1)
         {
             throw Unsupported(
-                "The L1 Body requires TypeMap, optional Home/Method/Constant maps, no FieldMap and no exception directory.");
+                "The L1 Body allows only Home/Type/Method/Constant maps and no exception directory.");
         }
 
         var methodSignature = tables.Methods.GetSignature(methodRow);

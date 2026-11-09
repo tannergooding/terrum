@@ -335,6 +335,84 @@ internal sealed class TrRmLocalAggregateLayoutProducerTests
     }
 
     [Test]
+    public void L1TypeMapUsesHomeFirstUseAndExcludesUnreferencedProgramTypes()
+    {
+        const string targetSource = """
+            uint8 Target(int32 parameter) {
+                uint8 local = uint8(1);
+                return local;
+            }
+
+            int32 Main() {
+                return int32(Target(0));
+            }
+            """;
+        const string sourceWithUnreferencedType = """
+            float64 Unused(float64 parameter) {
+                return parameter;
+            }
+
+            uint8 Target(int32 parameter) {
+                uint8 local = uint8(1);
+                return local;
+            }
+
+            int32 Main() {
+                return int32(Target(0));
+            }
+            """;
+
+        static (byte[] TypeMap, ushort FirstLocalTypeMapIndex)
+            GetTargetMaps(string source, string moduleIdentity)
+        {
+            var compilation = Compilation.Create(SyntaxTree.Parse(source),
+                new CompilationOptions {
+                    LayoutCoreRegistration =
+                        LayoutCoreRegistrationTestData.Create(),
+                });
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = compilation.Program
+                ?? throw new InvalidOperationException(
+                    "A successful compilation must contain a bound program.");
+            var artifact = TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, SchemaIdentity, 1);
+            var index = TrRmArtifactIndex.ForLocalAggregateLayoutDraft(
+                artifact);
+            var tables
+                = TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                        index);
+            var targetRow = 0;
+            for (var row = 1; row <= tables.Methods.Count; row++)
+            {
+                if (tables.Methods.GetName(row) == "Target")
+                {
+                    targetRow = row;
+                    break;
+                }
+            }
+            Assert.That(targetRow, Is.GreaterThan(0));
+            var body = tables.Bodies.GetRegisterBody(
+                tables.Methods.GetBodyRow(targetRow), tables.Contracts.Count);
+            return (body.TypeMap.ToArray(),
+                BinaryPrimitives.ReadUInt16LittleEndian(
+                    body.HomeMap[2..]));
+        }
+
+        var target = GetTargetMaps(targetSource,
+            "l1-type-map-first-use-baseline");
+        var withUnreferencedType = GetTargetMaps(
+            sourceWithUnreferencedType,
+            "l1-type-map-unreferenced-type");
+
+        Assert.That(target.FirstLocalTypeMapIndex, Is.Zero);
+        Assert.That(withUnreferencedType.FirstLocalTypeMapIndex, Is.Zero);
+        Assert.That(withUnreferencedType.TypeMap,
+            Is.EqualTo(target.TypeMap));
+    }
+
+    [Test]
     public void RejectsL1FixedArrayExtentThatOverflowsTargetNuint()
     {
             const string source = """
