@@ -55,13 +55,13 @@ internal static class NativeCoreManifestReader
     private const string NativeCallableName = "Terrum.Interop.NativeCallable";
     private const string NativeCallConvName = "Terrum.Interop.NativeCallConv";
 
-    private static readonly byte[] s_utf8Signature = [0xEF, 0xBB, 0xBF];
-    private static readonly UTF8Encoding s_strictUtf8 = new(false, true);
+    internal static readonly byte[] s_utf8Signature = [0xEF, 0xBB, 0xBF];
+    internal static readonly UTF8Encoding s_strictUtf8 = new(false, true);
 
-    private readonly record struct ParsedDefault(
+    internal readonly record struct ParsedDefault(
         string Kind, CoreDeclarationIdentity? Member);
 
-    private readonly record struct ParsedArgument(
+    internal readonly record struct ParsedArgument(
         string? Name, string Kind, CoreDeclarationIdentity? EnumType,
         bool IsRequired, bool AllowsPositional, bool AllowsNamed,
         ImmutableHashSet<string> Contexts, ParsedDefault? Default);
@@ -179,7 +179,7 @@ internal static class NativeCoreManifestReader
         }
     }
 
-    private static CoreEnumDefinition ReadEnum(JsonElement element,
+    internal static CoreEnumDefinition ReadEnum(JsonElement element,
         string manifestPath, string path, string expectedName,
         (string Name, int Value)[] expectedMembers)
     {
@@ -415,7 +415,7 @@ internal static class NativeCoreManifestReader
             && actual.Contexts.SetEquals(expected.Contexts)
             && actual.Default == expected.Default;
 
-    private static CoreNativeAttributeArgument ToCoreArgument(
+    internal static CoreNativeAttributeArgument ToCoreArgument(
         ParsedArgument argument)
     {
         var kind = argument.Kind switch {
@@ -485,7 +485,7 @@ internal static class NativeCoreManifestReader
                 Set("fnptr-type-use"), null),
         ];
 
-    private static ParsedArgument ReadArgument(JsonElement element,
+    internal static ParsedArgument ReadArgument(JsonElement element,
         string manifestPath, string path)
     {
         var value = RequireObject(element, manifestPath, path, "name", "kind",
@@ -565,7 +565,7 @@ internal static class NativeCoreManifestReader
     private static ImmutableHashSet<string> Set(params string[] values)
         => values.ToImmutableHashSet(StringComparer.Ordinal);
 
-    private static ImmutableArray<CoreProviderModuleOrigin> ReadOrigins(
+    internal static ImmutableArray<CoreProviderModuleOrigin> ReadOrigins(
         JsonElement element, string manifestPath)
     {
         if (element.ValueKind != JsonValueKind.Array
@@ -613,7 +613,7 @@ internal static class NativeCoreManifestReader
         return origins.MoveToImmutable();
     }
 
-    private static CoreDeclarationIdentity ReadIdentity(JsonElement element,
+    internal static CoreDeclarationIdentity ReadIdentity(JsonElement element,
         string manifestPath, string path)
     {
         var value = RequireObject(element, manifestPath, path,
@@ -638,7 +638,7 @@ internal static class NativeCoreManifestReader
         => element.ValueKind == JsonValueKind.Null
             ? null : ReadIdentity(element, manifestPath, path);
 
-    private static ImmutableHashSet<string> ReadStringSet(
+    internal static ImmutableHashSet<string> ReadStringSet(
         JsonElement element, string manifestPath, string path)
     {
         if (element.ValueKind != JsonValueKind.Array)
@@ -697,7 +697,7 @@ internal static class NativeCoreManifestReader
         }
     }
 
-    private static JsonElement RequireObject(JsonElement element,
+    internal static JsonElement RequireObject(JsonElement element,
         string manifestPath, string path, params string[] expectedProperties)
     {
         if (element.ValueKind != JsonValueKind.Object)
@@ -722,7 +722,7 @@ internal static class NativeCoreManifestReader
         return element;
     }
 
-    private static JsonElement Property(JsonElement element, string name,
+    internal static JsonElement Property(JsonElement element, string name,
         string manifestPath, string path)
     {
         if (!element.TryGetProperty(name, out var property))
@@ -733,7 +733,7 @@ internal static class NativeCoreManifestReader
         return property;
     }
 
-    private static string ReadText(JsonElement element, string manifestPath,
+    internal static string ReadText(JsonElement element, string manifestPath,
         string path)
     {
         if (element.ValueKind != JsonValueKind.String
@@ -747,7 +747,7 @@ internal static class NativeCoreManifestReader
         return value;
     }
 
-    private static string ReadQualifiedName(JsonElement element,
+    internal static string ReadQualifiedName(JsonElement element,
         string manifestPath, string path)
     {
         var value = ReadText(element, manifestPath, path);
@@ -804,7 +804,7 @@ internal static class NativeCoreManifestReader
         return value;
     }
 
-    private static uint ReadUInt32(JsonElement element, string manifestPath,
+    internal static uint ReadUInt32(JsonElement element, string manifestPath,
         string path)
     {
         var raw = element.ValueKind == JsonValueKind.Number
@@ -819,7 +819,7 @@ internal static class NativeCoreManifestReader
         return value;
     }
 
-    private static int ReadInt32(JsonElement element, string manifestPath,
+    internal static int ReadInt32(JsonElement element, string manifestPath,
         string path)
     {
         var raw = element.ValueKind == JsonValueKind.Number
@@ -834,7 +834,7 @@ internal static class NativeCoreManifestReader
         return value;
     }
 
-    private static bool ReadBoolean(JsonElement element, string manifestPath,
+    internal static bool ReadBoolean(JsonElement element, string manifestPath,
         string path)
     {
         if (element.ValueKind is not (JsonValueKind.True
@@ -845,7 +845,7 @@ internal static class NativeCoreManifestReader
         return element.GetBoolean();
     }
 
-    private static void ValidateJsonText(JsonElement element,
+    internal static void ValidateJsonText(JsonElement element,
         string manifestPath, string path)
     {
         switch (element.ValueKind)
@@ -917,7 +917,7 @@ internal static class NativeCoreManifestReader
         }
     }
 
-    private static FormatException Invalid(string manifestPath, string path,
+    internal static FormatException Invalid(string manifestPath, string path,
         string message)
-        => new($"Invalid native Core manifest '{manifestPath}' at {path}: {message}.");
+        => new($"Invalid Core manifest '{manifestPath}' at {path}: {message}.");
 }

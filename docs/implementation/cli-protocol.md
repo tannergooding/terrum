@@ -198,6 +198,17 @@ This follows the unapproved
 composition and output-preservation coverage; this is not `terrum.cli/1`
 approval or a source-free Core provider protocol.
 
+The same source commands also accept one
+`--native-output-core-manifest <path>` for the independent E/O registration.
+Its exact version-1 input composes NativeOutputCondition and NativeOutput
+declarations with selected NativeCore and Layout declarations in one checked
+provider-binding snapshot; it does not extend NativeCore manifest v1 or add
+foreign-interface CLI admission. `compile-trrm` requires every selected Core
+manifest's using-Module identity to match `--identity`. Other command forms
+reject this option before consuming input. This follows the unapproved
+[NativeOutput CLI proposal](../proposals/native-output-cli-registration.md);
+it does not amend `terrum.cli/1`.
+
 ## Provisional source layout registration
 
 The source `analyze`, `build`, `build-native-import`, `build-library`, `jit`,

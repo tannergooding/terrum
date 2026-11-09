@@ -72,15 +72,20 @@ internal sealed partial class CliTests
         var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-layout-");
         var manifest = Path.Combine(directory, "layout.json");
         var nativeManifest = Path.Combine(directory, "native-core.json");
+        var nativeOutputManifest = Path.Combine(directory,
+            "native-output-core.json");
         try
         {
             await File.WriteAllTextAsync(nativeManifest,
                 CreateNativeCoreManifest()).ConfigureAwait(false);
             await File.WriteAllTextAsync(manifest,
                 CreateLayoutCoreManifest()).ConfigureAwait(false);
+            await File.WriteAllTextAsync(nativeOutputManifest,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(false);
             var (exitCode, result, error) = await RunAsync([], "build-native-import", sample, "--source", interop,
                 "--source", windowsInterop, "-o", output, "--runtime", runtimePolicy,
                 "--native-core-manifest", nativeManifest,
+                "--native-output-core-manifest", nativeOutputManifest,
                 "--layout-core-manifest", manifest, "--json").ConfigureAwait(false);
             Assert.That(exitCode, Is.EqualTo(0), result + error);
             Assert.That(error, Is.Empty);

@@ -65,6 +65,10 @@ dummy export, partial admitted schema or new Export argument is selected here.
 Existing CLI `--export`/`--export-all-public` controls keep their independent
 host-emission meaning; they are not source NativeExport registration.
 
+The independent NativeOutput E/O registration is specified by the separate
+[NativeOutput CLI proposal](native-output-cli-registration.md). It does not
+add fields or roles to this NativeCore manifest version.
+
 ## Exact option and command contract
 
 The spelling is case-sensitive. Consume exactly one following argv element,

@@ -56,15 +56,20 @@ internal sealed partial class CliTests
         var directory = TestArtifactPaths.CreateDirectory(
             "terrum-native-core-manifest-");
         var manifestPath = Path.Combine(directory, "native.json");
+        var nativeOutputManifestPath = Path.Combine(directory,
+            "native-output.json");
         try
         {
             await File.WriteAllTextAsync(manifestPath,
                 CreateNativeCoreManifest()).ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputManifestPath,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(true);
             var importSource = Encoding.UTF8.GetBytes(NativeCoreImportSource);
 
             var (analyzed, analyzeOutput, analyzeError) = await RunAsync(
                 importSource, "analyze", "-", "--native-core-manifest",
-                manifestPath, "--json").ConfigureAwait(true);
+                manifestPath, "--native-output-core-manifest",
+                nativeOutputManifestPath, "--json").ConfigureAwait(true);
             Assert.That(analyzed, Is.Zero, analyzeOutput + analyzeError);
             Assert.That(analyzeError, Is.Empty);
             using (var result = JsonDocument.Parse(analyzeOutput))
@@ -77,6 +82,7 @@ internal sealed partial class CliTests
             var (builtImport, importOutput, importError) = await RunAsync(
                 importSource, "build-native-import", "-",
                 "--native-core-manifest", manifestPath,
+                "--native-output-core-manifest", nativeOutputManifestPath,
                 "-o", executablePath, "--runtime", "fail-fast",
                 "--json").ConfigureAwait(true);
             Assert.That(builtImport, Is.Zero, importOutput + importError);
@@ -88,6 +94,7 @@ internal sealed partial class CliTests
             var (built, buildOutput, buildError) = await RunAsync(
                 Encoding.UTF8.GetBytes(NativeCoreCallableSource), "build", "-",
                 "--native-core-manifest", manifestPath,
+                "--native-output-core-manifest", nativeOutputManifestPath,
                 "-o", executableProgramPath, "--runtime", "fail-fast",
                 "--json").ConfigureAwait(true);
             Assert.That(built, Is.Zero, buildOutput + buildError);
@@ -97,6 +104,7 @@ internal sealed partial class CliTests
             var (builtLibrary, libraryOutput, libraryError) = await RunAsync(
                 Encoding.UTF8.GetBytes(NativeCoreCallableSource),
                 "build-library", "-", "--native-core-manifest", manifestPath,
+                "--native-output-core-manifest", nativeOutputManifestPath,
                 "--export", "Identity", "-o", libraryPath,
                 "--runtime", "fail-fast", "--json").ConfigureAwait(true);
             Assert.That(builtLibrary, Is.Zero,
@@ -116,6 +124,7 @@ internal sealed partial class CliTests
             var (jitResult, jitOutput, jitError) = await RunAsync(
                 Encoding.UTF8.GetBytes(NativeCoreCallableSource), "jit", "-",
                 "--native-core-manifest", manifestPath,
+                "--native-output-core-manifest", nativeOutputManifestPath,
                 "--runtime", "fail-fast").ConfigureAwait(true);
             Assert.That(jitResult, Is.Zero, jitOutput + jitError);
 
@@ -125,12 +134,70 @@ internal sealed partial class CliTests
                 "sample.consumer", "-o", trrmPath, "--runtime",
                 "fail-fast", "--trrm-schema",
                 "trrm/1-draft-foreign-invocation-contracts-1",
-                "--native-core-manifest", manifestPath, "--library", "--json")
+                "--native-core-manifest", manifestPath,
+                "--native-output-core-manifest",
+                nativeOutputManifestPath, "--library", "--json")
                 .ConfigureAwait(true);
             Assert.That(compiledTrRm, Is.Zero, trrmOutput + trrmError);
             Assert.That(trrmError, Is.Empty);
             Assert.That(File.Exists(trrmPath), Is.True);
             Assert.That(new FileInfo(trrmPath).Length, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CoreManifestFamiliesComposeInEveryOptionOrderAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-core-manifest-three-way-order-");
+        var layoutPath = Path.Combine(directory, "layout.json");
+        var nativePath = Path.Combine(directory, "native.json");
+        var nativeOutputPath = Path.Combine(directory, "native-output.json");
+        var source = Encoding.UTF8.GetBytes("int32 Main() { return 0; }");
+        var selections = new (string Option, string Path)[] {
+            ("--layout-core-manifest", layoutPath),
+            ("--native-core-manifest", nativePath),
+            ("--native-output-core-manifest", nativeOutputPath),
+        };
+        int[][] orders = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        try
+        {
+            await File.WriteAllTextAsync(layoutPath,
+                CreateLayoutCoreManifest()).ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativePath,
+                CreateNativeCoreManifest()).ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputPath,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(true);
+
+            foreach (var order in orders)
+            {
+                var arguments = new List<string> { "analyze", "-" };
+                foreach (var index in order)
+                {
+                    var selection = selections[index];
+                    arguments.Add(selection.Option);
+                    arguments.Add(selection.Path);
+                }
+                arguments.Add("--json");
+
+                var (exit, output, error) = await RunAsync(source,
+                    [.. arguments]).ConfigureAwait(true);
+                Assert.That(exit, Is.Zero,
+                    $"{string.Join(' ', arguments)}: {output}{error}");
+                Assert.That(error, Is.Empty);
+            }
         }
         finally
         {
@@ -659,6 +726,150 @@ internal sealed partial class CliTests
     }
 
     [Test]
+    public async Task NativeOutputCoreManifestAdmitsOutputOnlyConfigurationAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-native-output-core-manifest-only-");
+        var manifestPath = Path.Combine(directory, "native-output.json");
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return 0; }"),
+                "analyze", "-", "--native-output-core-manifest",
+                manifestPath, "--json").ConfigureAwait(true);
+            Assert.That(exit, Is.Zero, output + error);
+            Assert.That(error, Is.Empty);
+            using var result = JsonDocument.Parse(output);
+            Assert.That(result.RootElement.GetProperty("success").GetBoolean(),
+                Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task NativeOutputCoreManifestRequiresCompileTrRmIdentityAgreementAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-native-output-core-manifest-identity-");
+        var manifestPath = Path.Combine(directory, "native-output.json");
+        var outputPath = Path.Combine(directory, "sentinel.trrm");
+        var sentinel = Encoding.ASCII.GetBytes("prior-output");
+        try
+        {
+            await File.WriteAllTextAsync(manifestPath,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(outputPath, sentinel)
+                .ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return 0; }"),
+                "compile-trrm", "-", "--identity", "other.consumer",
+                "-o", outputPath, "--runtime", "fail-fast",
+                "--native-output-core-manifest", manifestPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(exit, Is.EqualTo(2), output + error);
+            AssertInputDiagnosticCode(output, "TRM2000");
+            Assert.That(await File.ReadAllBytesAsync(outputPath)
+                .ConfigureAwait(true), Is.EqualTo(sentinel));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task NativeOutputCoreManifestRejectsInvalidAndConflictingInputsAsync()
+    {
+        var directory = TestArtifactPaths.CreateDirectory(
+            "terrum-native-output-core-manifest-invalid-");
+        var nativePath = Path.Combine(directory, "native.json");
+        var outputPath = Path.Combine(directory, "native-output.json");
+        var malformedSource = new byte[] { 0xFF };
+        try
+        {
+            await File.WriteAllTextAsync(nativePath,
+                CreateNativeCoreManifest()).ConfigureAwait(true);
+            await File.WriteAllTextAsync(outputPath,
+                CreateNativeOutputCoreManifest(
+                    coreAuthorityIdentity: "other-authority"))
+                .ConfigureAwait(true);
+            var invalidCases = new (string Name, Action<JsonObject> Mutate)[] {
+                ("schema", static root => root["schema"]
+                    = "terrumc.native-output-core-manifest/2"),
+                ("enum-value", static root => root["outputConditions"]!
+                    ["members"]![1]!["value"] = 2),
+                ("target", static root => root["nativeOutput"]!
+                    ["targets"]!.AsArray().RemoveAt(0)),
+                ("argument", static root => root["nativeOutput"]!
+                    ["arguments"]![0]!["allowsPositional"] = true),
+                ("unused-provider", static root => {
+                    var providers = root["providers"]!.AsArray();
+                    providers.Add(providers[0]!.DeepClone());
+                }),
+            };
+            foreach (var (name, mutate) in invalidCases)
+            {
+                var invalidOutputPath = Path.Combine(directory,
+                    $"invalid-native-output-{name}.json");
+                var invalidRoot = JsonNode.Parse(
+                    CreateNativeOutputCoreManifest())!.AsObject();
+                mutate(invalidRoot);
+                await File.WriteAllTextAsync(invalidOutputPath,
+                    invalidRoot.ToJsonString()).ConfigureAwait(true);
+
+                var (invalidExit, invalidResult, invalidError)
+                    = await RunAsync(malformedSource, "analyze", "-",
+                        "--native-output-core-manifest", invalidOutputPath,
+                        "--json").ConfigureAwait(true);
+                Assert.That(invalidExit, Is.EqualTo(2),
+                    invalidResult + invalidError);
+                AssertInputDiagnosticCode(invalidResult, "TRM2001");
+                Assert.That(invalidResult,
+                    Does.Contain(Path.GetFileName(invalidOutputPath)));
+            }
+
+            var (conflictExit, conflictResult, conflictError) =
+                await RunAsync(malformedSource, "analyze", "-",
+                    "--native-core-manifest", nativePath,
+                    "--native-output-core-manifest", outputPath, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(conflictExit, Is.EqualTo(2),
+                conflictResult + conflictError);
+            AssertInputDiagnosticCode(conflictResult, "TRM2001");
+            Assert.That(conflictResult, Does.Contain("authority"));
+
+            var originConflictPath = Path.Combine(directory,
+                "native-output-origin-conflict.json");
+            await File.WriteAllTextAsync(originConflictPath,
+                CreateNativeOutputCoreManifest(
+                    providerIdentity: "sample.native-core",
+                    revisionIdentity: "conflicting-provider-revision"))
+                .ConfigureAwait(true);
+            var (originConflictExit, originConflictResult,
+                originConflictError) = await RunAsync(malformedSource,
+                    "analyze", "-", "--native-core-manifest", nativePath,
+                    "--native-output-core-manifest", originConflictPath,
+                    "--json").ConfigureAwait(true);
+            Assert.That(originConflictExit, Is.EqualTo(2),
+                originConflictResult + originConflictError);
+            AssertInputDiagnosticCode(originConflictResult, "TRM2001");
+            Assert.That(originConflictResult, Does.Contain("provider origin"));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task NativeCoreManifestReadsInOptionOrderAndRejectsAliasesAsync()
     {
         var directory = TestArtifactPaths.CreateDirectory(
@@ -667,6 +878,10 @@ internal sealed partial class CliTests
         var invalidNativePath = Path.Combine(directory,
             "invalid-native.json");
         var layoutPath = Path.Combine(directory, "layout.json");
+        var nativeOutputPath = Path.Combine(directory,
+            "native-output.json");
+        var invalidNativeOutputPath = Path.Combine(directory,
+            "invalid-native-output.json");
         var aliasOutputPath = Path.Combine(directory, "manifest-alias.exe");
         var source = Encoding.UTF8.GetBytes("int32 Main() { return 0; }");
         var malformedSource = new byte[] { 0xFF };
@@ -678,6 +893,11 @@ internal sealed partial class CliTests
                 "{\"schema\":\"invalid-layout\"}").ConfigureAwait(true);
             await File.WriteAllTextAsync(invalidNativePath,
                 "{\"schema\":\"invalid-native\"}").ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputPath,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(true);
+            await File.WriteAllTextAsync(invalidNativeOutputPath,
+                "{\"schema\":\"invalid-native-output\"}")
+                .ConfigureAwait(true);
             var manifestContents = await File.ReadAllBytesAsync(nativePath)
                 .ConfigureAwait(true);
             if (OperatingSystem.IsWindows())
@@ -723,6 +943,51 @@ internal sealed partial class CliTests
                 AssertInputDiagnosticCode(trRmAliasOutput, "TRM2002");
                 Assert.That(await File.ReadAllBytesAsync(nativePath)
                     .ConfigureAwait(true), Is.EqualTo(manifestContents));
+
+                var aliasNativeOutputPath = Path.Combine(directory,
+                    "native-output-alias.exe");
+                Assert.That(CreateHardLink(aliasNativeOutputPath,
+                    nativeOutputPath, IntPtr.Zero), Is.True);
+                var (outputAliasExit, outputAliasResult, outputAliasError)
+                    = await RunAsync(source, "build", "-",
+                        "--native-output-core-manifest", nativeOutputPath,
+                        "-o", aliasNativeOutputPath, "--runtime",
+                        "fail-fast", "--json").ConfigureAwait(true);
+                Assert.That(outputAliasExit, Is.EqualTo(2),
+                    outputAliasResult + outputAliasError);
+                AssertInputDiagnosticCode(outputAliasResult, "TRM2002");
+
+                var aliasNativeOutputSourcePath = Path.Combine(directory,
+                    "native-output-alias.terrum");
+                Assert.That(CreateHardLink(aliasNativeOutputSourcePath,
+                    nativeOutputPath, IntPtr.Zero), Is.True);
+                var (outputSourceAliasExit, outputSourceAliasResult,
+                    outputSourceAliasError) = await RunAsync([],
+                        "analyze", aliasNativeOutputSourcePath,
+                        "--native-output-core-manifest", nativeOutputPath,
+                        "--json").ConfigureAwait(true);
+                Assert.That(outputSourceAliasExit, Is.EqualTo(2),
+                    outputSourceAliasResult + outputSourceAliasError);
+                AssertInputDiagnosticCode(outputSourceAliasResult,
+                    "TRM2002");
+
+                var aliasNativeOutputTrRmPath = Path.Combine(directory,
+                    "native-output-alias.trrm");
+                Assert.That(CreateHardLink(aliasNativeOutputTrRmPath,
+                    nativeOutputPath, IntPtr.Zero), Is.True);
+                var (outputTrRmAliasExit, outputTrRmAliasResult,
+                    outputTrRmAliasError) = await RunAsync(source,
+                        "compile-trrm", "-", "--identity",
+                        "sample.consumer", "-o", aliasNativeOutputTrRmPath,
+                        "--runtime", "fail-fast",
+                        "--trrm-schema",
+                        "trrm/1-draft-foreign-invocation-contracts-1",
+                        "--native-output-core-manifest", nativeOutputPath,
+                        "--json").ConfigureAwait(true);
+                Assert.That(outputTrRmAliasExit, Is.EqualTo(2),
+                    outputTrRmAliasResult + outputTrRmAliasError);
+                AssertInputDiagnosticCode(outputTrRmAliasResult,
+                    "TRM2002");
             }
 
             var (sameManifestExit, sameManifestOutput, sameManifestError) =
@@ -733,6 +998,17 @@ internal sealed partial class CliTests
             Assert.That(sameManifestExit, Is.EqualTo(2),
                 sameManifestOutput + sameManifestError);
             AssertInputDiagnosticCode(sameManifestOutput, "TRM2002");
+
+            var (sameNativeOutputManifestExit, sameNativeOutputManifestOutput,
+                sameNativeOutputManifestError) = await RunAsync(source,
+                    "analyze", "-", "--native-core-manifest", nativePath,
+                    "--native-output-core-manifest", nativePath, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(sameNativeOutputManifestExit, Is.EqualTo(2),
+                sameNativeOutputManifestOutput
+                    + sameNativeOutputManifestError);
+            AssertInputDiagnosticCode(sameNativeOutputManifestOutput,
+                "TRM2002");
 
             var abiAliasPath = Path.Combine(directory, "native-library.dll");
             var (abiAliasExit, abiAliasOutput, abiAliasError) = await RunAsync(
@@ -756,6 +1032,18 @@ internal sealed partial class CliTests
             Assert.That(nativeFirstOutput,
                 Does.Contain(Path.GetFileName(invalidNativePath)));
 
+            var (nativeOutputFirstExit, nativeOutputFirstOutput,
+                nativeOutputFirstError) = await RunAsync(malformedSource,
+                    "analyze", "-",
+                    "--native-output-core-manifest", invalidNativeOutputPath,
+                    "--native-core-manifest", nativePath,
+                    "--layout-core-manifest", layoutPath, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(nativeOutputFirstExit, Is.EqualTo(2),
+                nativeOutputFirstOutput + nativeOutputFirstError);
+            Assert.That(nativeOutputFirstOutput,
+                Does.Contain(Path.GetFileName(invalidNativeOutputPath)));
+
             var (layoutFirstExit, layoutFirstOutput, layoutFirstError) =
                 await RunAsync(malformedSource, "analyze", "-",
                     "--layout-core-manifest", layoutPath,
@@ -764,6 +1052,17 @@ internal sealed partial class CliTests
             Assert.That(layoutFirstExit, Is.EqualTo(2),
                 layoutFirstOutput + layoutFirstError);
             Assert.That(layoutFirstOutput,
+                Does.Contain(Path.GetFileName(layoutPath)));
+
+            var (layoutFirstWithOutputExit, layoutFirstWithOutputOutput,
+                layoutFirstWithOutputError) = await RunAsync(malformedSource,
+                    "analyze", "-", "--layout-core-manifest", layoutPath,
+                    "--native-core-manifest", nativePath,
+                    "--native-output-core-manifest", nativeOutputPath,
+                    "--json").ConfigureAwait(true);
+            Assert.That(layoutFirstWithOutputExit, Is.EqualTo(2),
+                layoutFirstWithOutputOutput + layoutFirstWithOutputError);
+            Assert.That(layoutFirstWithOutputOutput,
                 Does.Contain(Path.GetFileName(layoutPath)));
         }
         finally
@@ -779,11 +1078,15 @@ internal sealed partial class CliTests
         var directory = TestArtifactPaths.CreateDirectory(
             "terrum-native-core-manifest-excluded-");
         var manifestPath = Path.Combine(directory, "native.json");
+        var nativeOutputManifestPath = Path.Combine(directory,
+            "native-output.json");
         var malformedSource = new byte[] { 0xFF };
         try
         {
             await File.WriteAllTextAsync(manifestPath,
                 CreateNativeCoreManifest()).ConfigureAwait(true);
+            await File.WriteAllTextAsync(nativeOutputManifestPath,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(true);
             string[] output = ["-o", Path.Combine(directory, "output.bin")];
             string[] runtime = ["--runtime", "fail-fast"];
             string[] manifest = ["--native-core-manifest", manifestPath,
@@ -854,6 +1157,21 @@ internal sealed partial class CliTests
                 Assert.That(exit, Is.EqualTo(2),
                     $"{string.Join(' ', arguments)}: {result}{error}");
                 AssertInputDiagnosticCode(result, "TRM2000");
+
+                var outputManifestArguments = arguments.ToArray();
+                var manifestIndex = Array.IndexOf(outputManifestArguments,
+                    "--native-core-manifest");
+                outputManifestArguments[manifestIndex]
+                    = "--native-output-core-manifest";
+                outputManifestArguments[manifestIndex + 1]
+                    = nativeOutputManifestPath;
+                var (outputExit, outputResult, outputError) = await RunAsync(
+                    malformedSource, outputManifestArguments)
+                    .ConfigureAwait(true);
+                Assert.That(outputExit, Is.EqualTo(2),
+                    $"{string.Join(' ', outputManifestArguments)}: "
+                        + outputResult + outputError);
+                AssertInputDiagnosticCode(outputResult, "TRM2000");
             }
         }
         finally
@@ -1029,6 +1347,94 @@ internal sealed partial class CliTests
                 "Terrum.Interop.NativeCallConv", "native-callconv",
                 "immediate-fnptr-type-use", nativeCallConvArguments,
                 ["fnptr-type-use"]),
+        });
+    }
+
+    internal static string CreateNativeOutputCoreManifest(
+        string usingModuleIdentity = "sample.consumer",
+        string coreAuthorityIdentity = "test-layout-authority",
+        string providerIdentity = "sample.native-output-core",
+        string revisionIdentity = "native-output-provider-revision-1",
+        string providerSchemaIdentity = "native-output-registration-schema")
+    {
+        object Identity(string exportKey, string kind)
+        {
+            return new { providerIdentity, exportKey, kind };
+        }
+
+        var outputConditionsIdentity = Identity("NativeOutputCondition",
+            "enum-type");
+        object Member(string name, int value)
+        {
+            var exportKey = $"NativeOutputCondition.{name}";
+            return new {
+                identity = Identity(exportKey, "enum-member"),
+                declaringEnum = outputConditionsIdentity,
+                declarationKey = $"member-key/{exportKey}",
+                name,
+                value,
+                isPublic = true,
+            };
+        }
+
+        var outputConditions = new {
+            identity = outputConditionsIdentity,
+            qualifiedName = "Terrum.Interop.NativeOutputCondition",
+            underlyingType = "int32",
+            members = new[] {
+                Member("NonZero", 0),
+                Member("NonNegative", 1),
+            },
+            genericArity = 0,
+            isPublic = true,
+            isPrimary = true,
+            isFlags = false,
+            blittableTargetRequirement = 0,
+        };
+        var contexts = new[] {
+            "direct-import-parameter",
+            "foreign-interface-method-parameter",
+        };
+        var argument = new {
+            name = "When",
+            kind = "enum",
+            enumType = outputConditionsIdentity,
+            isRequired = true,
+            allowsPositional = false,
+            allowsNamed = true,
+            contexts,
+            @default = (object?)null,
+        };
+        var nativeOutput = new {
+            identity = Identity("NativeOutput", "attribute-schema"),
+            qualifiedName = "Terrum.Interop.NativeOutput",
+            arguments = new[] { argument },
+            placement = "primary-callable-contract",
+            targets = contexts,
+            genericArity = 0,
+            isPublic = true,
+            isPrimary = true,
+            isRepeatable = false,
+        };
+        return JsonSerializer.Serialize(new {
+            schema = "terrumc.native-output-core-manifest/1",
+            coreAuthorityIdentity,
+            usingModuleIdentity,
+            providers = new[] {
+                new {
+                    moduleIdentity = providerIdentity,
+                    revisionIdentity,
+                    schema = new {
+                        identity = providerSchemaIdentity,
+                        revision = 1u,
+                    },
+                    governingSemanticEdition = 1u,
+                    targetRequirement = 0u,
+                    runtimePolicy = 0u,
+                },
+            },
+            outputConditions,
+            nativeOutput,
         });
     }
 

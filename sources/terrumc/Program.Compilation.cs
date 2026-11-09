@@ -18,9 +18,17 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
+    private enum CoreManifestKind
+    {
+        Layout,
+        Native,
+        NativeOutput,
+    }
+
     private readonly record struct CoreManifestDefinitions(
         LayoutCoreManifestDefinition? Layout,
-        NativeCoreManifestDefinition? Native);
+        NativeCoreManifestDefinition? Native,
+        NativeOutputCoreManifestDefinition? NativeOutput);
 
     private static int RunCompilation(string[] args, bool json)
     {
@@ -37,6 +45,7 @@ internal static partial class Program
         string? nativeLoweringAgreement;
         LayoutCoreRegistrationSet? layoutCoreRegistration = null;
         NativeCoreRegistrationSet? nativeCoreRegistration = null;
+        NativeOutputCoreRegistrationSet? nativeOutputCoreRegistration = null;
         try
         {
             if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath,
@@ -44,7 +53,8 @@ internal static partial class Program
                 out var sourceName, out frontendCommand, out exportAllPublic, out abiOutputPath,
                 out nativeLoweringAgreement, out var layoutCoreManifestPath,
                 out var nativeCoreManifestPath,
-                out var nativeCoreManifestFirst))
+                out var nativeOutputCoreManifestPath,
+                out var coreManifestOrder))
             {
                 WriteInputError(json, "TRM2000", Usage);
 
@@ -82,6 +92,9 @@ internal static partial class Program
                     || (nativeCoreManifestPath is not null
                         && PathsAlias(layoutCoreManifestPath,
                             nativeCoreManifestPath))
+                    || (nativeOutputCoreManifestPath is not null
+                        && PathsAlias(layoutCoreManifestPath,
+                            nativeOutputCoreManifestPath))
                     || paths.Any(path => path != "-"
                         && PathsAlias(layoutCoreManifestPath, path)))
                 {
@@ -95,6 +108,12 @@ internal static partial class Program
                         && PathsAlias(nativeCoreManifestPath, outputPath))
                     || (abiOutputPath is not null
                         && PathsAlias(nativeCoreManifestPath, abiOutputPath))
+                    || (layoutCoreManifestPath is not null
+                        && PathsAlias(nativeCoreManifestPath,
+                            layoutCoreManifestPath))
+                    || (nativeOutputCoreManifestPath is not null
+                        && PathsAlias(nativeCoreManifestPath,
+                            nativeOutputCoreManifestPath))
                     || paths.Any(path => path != "-"
                         && PathsAlias(nativeCoreManifestPath, path))))
             {
@@ -102,15 +121,37 @@ internal static partial class Program
                     "The native Core manifest must be distinct from every source and output.");
                 return 2;
             }
+            if (nativeOutputCoreManifestPath is not null
+                && ((outputPath is not null
+                        && PathsAlias(nativeOutputCoreManifestPath,
+                            outputPath))
+                    || (abiOutputPath is not null
+                        && PathsAlias(nativeOutputCoreManifestPath,
+                            abiOutputPath))
+                    || (layoutCoreManifestPath is not null
+                        && PathsAlias(nativeOutputCoreManifestPath,
+                            layoutCoreManifestPath))
+                    || (nativeCoreManifestPath is not null
+                        && PathsAlias(nativeOutputCoreManifestPath,
+                            nativeCoreManifestPath))
+                    || paths.Any(path => path != "-"
+                        && PathsAlias(nativeOutputCoreManifestPath, path))))
+            {
+                WriteInputError(json, "TRM2002",
+                    "The NativeOutput Core manifest must be distinct from every source and output.");
+                return 2;
+            }
 
             var definitions = ReadCoreManifestDefinitions(
                 layoutCoreManifestPath, nativeCoreManifestPath,
-                nativeCoreManifestFirst);
+                nativeOutputCoreManifestPath, coreManifestOrder);
             var registrations = CoreManifestRegistrationComposer.Create(
                 definitions.Layout, definitions.Native,
-                layoutCoreManifestPath, nativeCoreManifestPath);
+                definitions.NativeOutput, layoutCoreManifestPath,
+                nativeCoreManifestPath, nativeOutputCoreManifestPath);
             layoutCoreRegistration = registrations.Layout;
             nativeCoreRegistration = registrations.Native;
+            nativeOutputCoreRegistration = registrations.NativeOutput;
 
             var trees = ImmutableArray.CreateBuilder<SyntaxTree>(paths.Count);
             for (var sourceIndex = 0; sourceIndex < paths.Count; sourceIndex++)
@@ -133,43 +174,43 @@ internal static partial class Program
         return CompileTrees(args[0], snapshots, outputPath, json, [.. exports],
             runtimePolicy, coreLibrary, sourceGrant, abiOutputPath, sourceArithmeticProfile,
             exportAllPublic, frontendCommand, nativeLoweringAgreement,
-            layoutCoreRegistration, nativeCoreRegistration);
+            layoutCoreRegistration, nativeCoreRegistration,
+            nativeOutputCoreRegistration);
     }
 
     private static CoreManifestDefinitions ReadCoreManifestDefinitions(
-        string? layoutPath, string? nativePath, bool nativeFirst)
+        string? layoutPath, string? nativePath, string? nativeOutputPath,
+        List<CoreManifestKind> order)
     {
         LayoutCoreManifestDefinition? layoutDefinition = null;
         NativeCoreManifestDefinition? nativeDefinition = null;
-        if (nativeFirst)
+        NativeOutputCoreManifestDefinition? nativeOutputDefinition = null;
+        foreach (var kind in order)
         {
-            if (nativePath is not null)
+            switch (kind)
             {
-                nativeDefinition = NativeCoreManifestReader.ReadDefinition(
-                    nativePath);
-            }
-            if (layoutPath is not null)
-            {
-                layoutDefinition = LayoutCoreManifestReader.ReadDefinition(
-                    layoutPath);
-            }
-        }
-        else
-        {
-            if (layoutPath is not null)
-            {
-                layoutDefinition = LayoutCoreManifestReader.ReadDefinition(
-                    layoutPath);
-            }
-            if (nativePath is not null)
-            {
-                nativeDefinition = NativeCoreManifestReader.ReadDefinition(
-                    nativePath);
+                case CoreManifestKind.Layout when layoutPath is not null:
+                    layoutDefinition
+                        = LayoutCoreManifestReader.ReadDefinition(layoutPath);
+                    break;
+                case CoreManifestKind.Native when nativePath is not null:
+                    nativeDefinition
+                        = NativeCoreManifestReader.ReadDefinition(nativePath);
+                    break;
+                case CoreManifestKind.NativeOutput
+                    when nativeOutputPath is not null:
+                    nativeOutputDefinition
+                        = NativeOutputCoreManifestReader.ReadDefinition(
+                            nativeOutputPath);
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        "A selected Core manifest path was not recorded exactly once.");
             }
         }
 
         return new CoreManifestDefinitions(layoutDefinition,
-            nativeDefinition);
+            nativeDefinition, nativeOutputDefinition);
     }
 
     private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports,
@@ -180,7 +221,8 @@ internal static partial class Program
         out string? nativeLoweringAgreement,
         out string? layoutCoreManifestPath,
         out string? nativeCoreManifestPath,
-        out bool nativeCoreManifestFirst)
+        out string? nativeOutputCoreManifestPath,
+        out List<CoreManifestKind> coreManifestOrder)
     {
         paths = [];
         exports = [];
@@ -191,7 +233,8 @@ internal static partial class Program
         nativeLoweringAgreement = null;
         layoutCoreManifestPath = null;
         nativeCoreManifestPath = null;
-        nativeCoreManifestFirst = false;
+        nativeOutputCoreManifestPath = null;
+        coreManifestOrder = [];
         runtimePolicy = NativeRuntimePolicy.FailFast;
         sourceArithmeticProfile = SourceArithmeticProfile.Development;
         coreLibrary = false;
@@ -295,10 +338,7 @@ internal static partial class Program
                     {
                         return false;
                     }
-                    if (nativeCoreManifestPath is null)
-                    {
-                        nativeCoreManifestFirst = false;
-                    }
+                    coreManifestOrder.Add(CoreManifestKind.Layout);
                     break;
                 case "--native-core-manifest" when
                     (args[0] is "analyze" or "build" or "build-native-import"
@@ -310,7 +350,20 @@ internal static partial class Program
                     {
                         return false;
                     }
-                    nativeCoreManifestFirst = layoutCoreManifestPath is null;
+                    coreManifestOrder.Add(CoreManifestKind.Native);
+                    break;
+                case "--native-output-core-manifest" when
+                    (args[0] is "analyze" or "build" or "build-native-import"
+                        or "build-library" or "jit")
+                    && nativeOutputCoreManifestPath is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    if (!TryGetFullPath(value,
+                        out nativeOutputCoreManifestPath))
+                    {
+                        return false;
+                    }
+                    coreManifestOrder.Add(CoreManifestKind.NativeOutput);
                     break;
                 default:
                     return false;
@@ -324,6 +377,8 @@ internal static partial class Program
             && (!exportAllPublic || (args[0] == "build-library" && !coreLibrary && !sourceGrant))
             && (layoutCoreManifestPath is null || frontendCommand is null)
             && (nativeCoreManifestPath is null || frontendCommand is null)
+            && (nativeOutputCoreManifestPath is null
+                || frontendCommand is null)
             && (nativeLoweringAgreement is null
                 || (!coreLibrary && !sourceGrant && frontendCommand is null))
             && (args[0] == "analyze"
@@ -338,7 +393,9 @@ internal static partial class Program
         bool exportAllPublic = false, string? frontendCommand = null,
         string? nativeLoweringAgreement = null,
         LayoutCoreRegistrationSet? layoutCoreRegistration = null,
-        NativeCoreRegistrationSet? nativeCoreRegistration = null)
+        NativeCoreRegistrationSet? nativeCoreRegistration = null,
+        NativeOutputCoreRegistrationSet?
+            nativeOutputCoreRegistration = null)
     {
         var build = outputPath is not null;
         var library = command == "build-library" || coreLibrary;
@@ -353,6 +410,7 @@ internal static partial class Program
             NativeLoweringAgreement = nativeLoweringAgreement,
             LayoutCoreRegistration = layoutCoreRegistration,
             NativeCoreRegistration = nativeCoreRegistration,
+            NativeOutputCoreRegistration = nativeOutputCoreRegistration,
         };
         var compilation = nativeImports
             ? Compilation.CreateWithNativeImports(trees, options)

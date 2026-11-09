@@ -141,15 +141,21 @@ internal sealed partial class CliTests
         var directory = Path.Combine(RepositoryRoot(), "samples", "Win32Dx11Triangle");
         var nativeManifest = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-dx11-native-core-{Guid.NewGuid():N}.json");
+        var nativeOutputManifest = Path.Combine(
+            TestArtifactPaths.DirectoryPath,
+            $"terrum-dx11-native-output-core-{Guid.NewGuid():N}.json");
         try
         {
             await File.WriteAllTextAsync(nativeManifest,
                 CreateNativeCoreManifest()).ConfigureAwait(false);
+            await File.WriteAllTextAsync(nativeOutputManifest,
+                CreateNativeOutputCoreManifest()).ConfigureAwait(false);
             var (exit, output, error) = await RunAsync([], "build-native-import",
                 Path.Combine(directory, sourceName),
                 "--source", Path.Combine(directory, "dx11-api.terrum"),
                 "--source", Path.Combine(directory, "win32-api.terrum"),
                 "--native-core-manifest", nativeManifest,
+                "--native-output-core-manifest", nativeOutputManifest,
                 "-o", path, "--runtime", "checked-exceptions", "--json")
                 .ConfigureAwait(false);
             Assert.That(exit, Is.Zero, output + error);
@@ -160,6 +166,8 @@ internal sealed partial class CliTests
         finally
         {
             await TestFileCleanup.DeleteWithRetryAsync(nativeManifest)
+                .ConfigureAwait(false);
+            await TestFileCleanup.DeleteWithRetryAsync(nativeOutputManifest)
                 .ConfigureAwait(false);
         }
     }

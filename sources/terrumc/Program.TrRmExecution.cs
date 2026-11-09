@@ -45,9 +45,11 @@ internal static partial class Program
         string? moduleIdentity = null;
         string? layoutCoreManifestPath = null;
         string? nativeCoreManifestPath = null;
-        var nativeCoreManifestFirst = false;
+        string? nativeOutputCoreManifestPath = null;
+        var coreManifestOrder = new List<CoreManifestKind>();
         LayoutCoreRegistrationSet? layoutCoreRegistration = null;
         NativeCoreRegistrationSet? nativeCoreRegistration = null;
+        NativeOutputCoreRegistrationSet? nativeOutputCoreRegistration = null;
         var library = false;
         var runtime = false;
         var hasArithmeticProfile = false;
@@ -151,10 +153,7 @@ internal static partial class Program
                             StringComparison.Ordinal)
                         && TryGetFullPath(value, out var manifestFullPath):
                         layoutCoreManifestPath = manifestFullPath;
-                        if (nativeCoreManifestPath is null)
-                        {
-                            nativeCoreManifestFirst = false;
-                        }
+                        coreManifestOrder.Add(CoreManifestKind.Layout);
                         break;
                     case "--native-core-manifest" when command == "compile-trrm"
                         && nativeCoreManifestPath is null
@@ -163,7 +162,18 @@ internal static partial class Program
                             StringComparison.Ordinal)
                         && TryGetFullPath(value, out var nativeManifestFullPath):
                         nativeCoreManifestPath = nativeManifestFullPath;
-                        nativeCoreManifestFirst = layoutCoreManifestPath is null;
+                        coreManifestOrder.Add(CoreManifestKind.Native);
+                        break;
+                    case "--native-output-core-manifest"
+                        when command == "compile-trrm"
+                        && nativeOutputCoreManifestPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-', StringComparison.Ordinal)
+                        && TryGetFullPath(value,
+                            out var nativeOutputManifestFullPath):
+                        nativeOutputCoreManifestPath
+                            = nativeOutputManifestFullPath;
+                        coreManifestOrder.Add(CoreManifestKind.NativeOutput);
                         break;
                     case "--export" when command == "build-trrm-library" && uniqueExports.Add(value):
                         exports.Add(value);
@@ -300,7 +310,8 @@ internal static partial class Program
                 return 2;
             }
             if (layoutCoreManifestPath is not null
-                || nativeCoreManifestPath is not null)
+                || nativeCoreManifestPath is not null
+                || nativeOutputCoreManifestPath is not null)
             {
                 if ((layoutCoreManifestPath is not null
                         && ((output is not null
@@ -310,12 +321,33 @@ internal static partial class Program
                     || (nativeCoreManifestPath is not null
                         && ((output is not null
                                 && PathsAlias(nativeCoreManifestPath, output))
+                            || (layoutCoreManifestPath is not null
+                                && PathsAlias(nativeCoreManifestPath,
+                                    layoutCoreManifestPath))
+                            || (nativeOutputCoreManifestPath is not null
+                                && PathsAlias(nativeCoreManifestPath,
+                                    nativeOutputCoreManifestPath))
                             || paths.Any(path => path != "-"
                                 && PathsAlias(nativeCoreManifestPath, path))))
                     || (layoutCoreManifestPath is not null
                         && nativeCoreManifestPath is not null
                         && PathsAlias(layoutCoreManifestPath,
-                            nativeCoreManifestPath)))
+                            nativeCoreManifestPath))
+                    || (nativeOutputCoreManifestPath is not null
+                        && ((output is not null
+                                && PathsAlias(
+                                    nativeOutputCoreManifestPath, output))
+                            || (layoutCoreManifestPath is not null
+                                && PathsAlias(
+                                    nativeOutputCoreManifestPath,
+                                    layoutCoreManifestPath))
+                            || (nativeCoreManifestPath is not null
+                                && PathsAlias(
+                                    nativeOutputCoreManifestPath,
+                                    nativeCoreManifestPath))
+                            || paths.Any(path => path != "-"
+                                && PathsAlias(
+                                    nativeOutputCoreManifestPath, path)))))
                 {
                     WriteInputError(json, "TRM2002",
                         "Core manifests must be distinct from one another, the source and artifact output.");
@@ -327,7 +359,7 @@ internal static partial class Program
                         "Missing compile-trrm identity.");
                 var definitions = ReadCoreManifestDefinitions(
                     layoutCoreManifestPath, nativeCoreManifestPath,
-                    nativeCoreManifestFirst);
+                    nativeOutputCoreManifestPath, coreManifestOrder);
                 if ((definitions.Layout is LayoutCoreManifestDefinition
                         layoutDefinition
                         && !StringComparer.Ordinal.Equals(
@@ -337,6 +369,12 @@ internal static partial class Program
                         NativeCoreManifestDefinition nativeDefinition
                         && !StringComparer.Ordinal.Equals(
                             nativeDefinition.UsingModuleIdentity,
+                            usingModuleIdentity))
+                    || (definitions.NativeOutput is
+                        NativeOutputCoreManifestDefinition
+                            nativeOutputDefinition
+                        && !StringComparer.Ordinal.Equals(
+                            nativeOutputDefinition.UsingModuleIdentity,
                             usingModuleIdentity)))
                 {
                     WriteInputError(json, "TRM2000",
@@ -345,9 +383,12 @@ internal static partial class Program
                 }
                 var registrations = CoreManifestRegistrationComposer.Create(
                     definitions.Layout, definitions.Native,
-                    layoutCoreManifestPath, nativeCoreManifestPath);
+                    definitions.NativeOutput, layoutCoreManifestPath,
+                    nativeCoreManifestPath, nativeOutputCoreManifestPath);
                 layoutCoreRegistration = registrations.Layout;
                 nativeCoreRegistration = registrations.Native;
+                nativeOutputCoreRegistration
+                    = registrations.NativeOutput;
             }
 
             byte[] artifact;
@@ -364,6 +405,8 @@ internal static partial class Program
                     RuntimePolicy = BoundRuntimePolicy.FailFast,
                     LayoutCoreRegistration = layoutCoreRegistration,
                     NativeCoreRegistration = nativeCoreRegistration,
+                    NativeOutputCoreRegistration
+                        = nativeOutputCoreRegistration,
                 };
                 var compilation = library
                     ? snapshots.Length == 1 ? Compilation.CreateLibrary(snapshots[0], options)

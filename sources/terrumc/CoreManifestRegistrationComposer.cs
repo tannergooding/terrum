@@ -3,37 +3,53 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.Tools;
 
 internal sealed record CoreManifestRegistrationComposition(
     LayoutCoreRegistrationSet? Layout,
-    NativeCoreRegistrationSet? Native);
+    NativeCoreRegistrationSet? Native,
+    NativeOutputCoreRegistrationSet? NativeOutput);
 
 internal static class CoreManifestRegistrationComposer
 {
     internal static CoreManifestRegistrationComposition Create(
         LayoutCoreManifestDefinition? layout,
         NativeCoreManifestDefinition? native,
-        string? layoutPath, string? nativePath)
+        NativeOutputCoreManifestDefinition? nativeOutput,
+        string? layoutPath, string? nativePath, string? nativeOutputPath)
     {
-        if (layout is null && native is null)
+        if (layout is null && native is null && nativeOutput is null)
         {
-            return new CoreManifestRegistrationComposition(null, null);
+            return new CoreManifestRegistrationComposition(null, null, null);
         }
 
         var usingModuleIdentity = layout?.UsingModuleIdentity
-            ?? native!.UsingModuleIdentity;
-        if (layout is not null && native is not null
-            && (layout.CoreAuthorityIdentity != native.CoreAuthorityIdentity
-                || layout.UsingModuleIdentity != native.UsingModuleIdentity))
+            ?? native?.UsingModuleIdentity
+            ?? nativeOutput!.UsingModuleIdentity;
+        var coreAuthorityIdentity = layout?.CoreAuthorityIdentity
+            ?? native?.CoreAuthorityIdentity
+            ?? nativeOutput!.CoreAuthorityIdentity;
+        if ((layout is not null
+                && (layout.CoreAuthorityIdentity != coreAuthorityIdentity
+                    || layout.UsingModuleIdentity != usingModuleIdentity))
+            || (native is not null
+                && (native.CoreAuthorityIdentity != coreAuthorityIdentity
+                    || native.UsingModuleIdentity != usingModuleIdentity))
+            || (nativeOutput is not null
+                && (nativeOutput.CoreAuthorityIdentity
+                    != coreAuthorityIdentity
+                    || nativeOutput.UsingModuleIdentity
+                    != usingModuleIdentity)))
         {
-            throw Invalid(layoutPath, nativePath,
+            throw Invalid(layoutPath, nativePath, nativeOutputPath,
                 "authority and usingModuleIdentity must match exactly");
         }
 
-        var origins = MergeOrigins(layout, native, layoutPath, nativePath);
+        var origins = MergeOrigins(layout, native, nativeOutput,
+            layoutPath, nativePath, nativeOutputPath);
         var declarations = ImmutableArray.CreateBuilder<
             CoreProviderDeclarationSnapshot>();
         if (layout is not null)
@@ -44,6 +60,10 @@ internal static class CoreManifestRegistrationComposer
         {
             declarations.AddRange(native.Declarations);
         }
+        if (nativeOutput is not null)
+        {
+            declarations.AddRange(nativeOutput.Declarations);
+        }
 
         try
         {
@@ -51,24 +71,28 @@ internal static class CoreManifestRegistrationComposer
                 origins, declarations.ToImmutable());
             return new CoreManifestRegistrationComposition(
                 layout?.CreateRegistration(bindings),
-                native?.CreateRegistration(bindings));
+                native?.CreateRegistration(bindings),
+                nativeOutput?.CreateRegistration(bindings));
         }
         catch (ArgumentException exception)
         {
-            throw Invalid(layoutPath, nativePath, exception.Message);
+            throw Invalid(layoutPath, nativePath, nativeOutputPath,
+                exception.Message);
         }
     }
 
     private static ImmutableArray<CoreProviderModuleOrigin> MergeOrigins(
         LayoutCoreManifestDefinition? layout,
         NativeCoreManifestDefinition? native,
-        string? layoutPath, string? nativePath)
+        NativeOutputCoreManifestDefinition? nativeOutput,
+        string? layoutPath, string? nativePath, string? nativeOutputPath)
     {
         var origins = ImmutableArray.CreateBuilder<CoreProviderModuleOrigin>();
         var originsByModule = new Dictionary<string, CoreProviderModuleOrigin>(
             StringComparer.Ordinal);
         Add(layout?.Origins ?? []);
         Add(native?.Origins ?? []);
+        Add(nativeOutput?.Origins ?? []);
         return origins.ToImmutable();
 
         void Add(ImmutableArray<CoreProviderModuleOrigin> selected)
@@ -81,6 +105,7 @@ internal static class CoreManifestRegistrationComposer
                     if (previous != origin)
                     {
                         throw Invalid(layoutPath, nativePath,
+                            nativeOutputPath,
                             $"provider origin '{origin.ModuleIdentity}' differs between the selected manifests");
                     }
                     continue;
@@ -93,11 +118,12 @@ internal static class CoreManifestRegistrationComposer
     }
 
     private static FormatException Invalid(string? layoutPath,
-        string? nativePath, string message)
+        string? nativePath, string? nativeOutputPath, string message)
     {
-        var path = layoutPath is not null && nativePath is not null
-            ? $"'{layoutPath}' and '{nativePath}'"
-            : $"'{layoutPath ?? nativePath ?? "<manifest>"}'";
+        var paths = new[] { layoutPath, nativePath, nativeOutputPath }
+            .Where(static path => path is not null)
+            .Select(static path => $"'{path}'");
+        var path = string.Join(" and ", paths);
         return new FormatException(
             $"Invalid combined Core manifest selection {path}: {message}.");
     }

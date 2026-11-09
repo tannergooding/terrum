@@ -249,5 +249,8 @@ registration alone must not claim foreign dispatch or execution support.
 No further design choice remains within this bounded recommendation.
 Actual authorized providers, export/member keys, revisions/schema selections
 and complete expectations remain mandatory host inputs, not guessed defaults.
-CLI output-registration delivery and foreign dispatch/persistence remain
-separate scopes; writing this proposal does not approve or implement them.
+CLI output-registration delivery is separately recommended in the
+[NativeOutput CLI proposal](native-output-cli-registration.md); it preserves
+NativeCore manifest v1 and does not provide foreign-interface CLI admission.
+Foreign dispatch and persistence remain separate scopes; writing this proposal
+does not approve or implement them.
