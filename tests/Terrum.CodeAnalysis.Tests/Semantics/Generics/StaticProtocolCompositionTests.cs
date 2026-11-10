@@ -34,7 +34,7 @@ internal sealed class StaticProtocolCompositionTests
         """;
 
     private const string Helper = """
-        U Double<U>(U value, bool twice) where U : Addition<U, U, U>, [Copy] {
+        U Double<U>(U value, bool twice) where U : Addition<U, U, U> {
             if (twice) { return value + value; }
             return value;
         }
@@ -48,8 +48,8 @@ internal sealed class StaticProtocolCompositionTests
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
             }
-            T Identity<T>(T value) where T : [Copy] { return value; }
-            U Forward<U>(U value) where U : [Copy] { return Identity(value); }
+            T Identity<T>(T value)  { return value; }
+            U Forward<U>(U value)  { return Identity(value); }
             int32 Main() { return Forward(new Value(42)).Number; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -71,7 +71,7 @@ internal sealed class StaticProtocolCompositionTests
     public void ForwardHelperCallsUseDeclaredSubsetAndRenamedTypeParameter(bool instantiate)
     {
         var compilation = Compile("""
-            T Compose<T>(T value) where T : Addition<T, T, T>, Multiplication<T, T, T>, [Copy] {
+            T Compose<T>(T value) where T : Addition<T, T, T>, Multiplication<T, T, T> {
                 var doubled = Double<T>(value, true);
                 return Double<T>(doubled, false) * value;
             }
@@ -106,7 +106,7 @@ internal sealed class StaticProtocolCompositionTests
     {
         foreach (var instantiate in new[] { false, true })
         {
-            var compilation = Compile("T Compose<T>(T value) where T : " + constraint + ", [Copy] {"
+            var compilation = Compile("T Compose<T>(T value) where T : " + constraint + " {"
                 + body + "}" + Helper, instantiate);
             Assert.That(compilation.HasErrors, Is.True);
             Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
@@ -118,7 +118,7 @@ internal sealed class StaticProtocolCompositionTests
     public void UnusedHelperBodyCannotBorrowCallersStrongerConstraints()
     {
         var compilation = Compile("""
-            T Compose<T>(T value) where T : Addition<T, T, T>, Multiplication<T, T, T>, [Copy] {
+            T Compose<T>(T value) where T : Addition<T, T, T>, Multiplication<T, T, T> {
                 return Double<T>(value, true);
             }
             """ + Helper.Replace("value + value", "value * value", StringComparison.Ordinal), instantiate: false);
@@ -131,10 +131,10 @@ internal sealed class StaticProtocolCompositionTests
             interface Addition<A, B, C> {
                  static C operator +(A left, B right);
             }
-             T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
+             T Compose<T>(T value) where T : Addition<T, T, T> {
                 return Identity<T>(value);
             }
-            U Identity<U>(U value) where U : [Copy] { return value; }
+            U Identity<U>(U value)  { return value; }
             int32 Main() { return 0; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -149,7 +149,7 @@ internal sealed class StaticProtocolCompositionTests
             using Contracts;
             using Helpers;
             namespace Callers;
-            T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
+            T Compose<T>(T value) where T : Addition<T, T, T> {
                 return Double<T>(value, true);
             }
             int32 Main() { return 0; }
@@ -172,7 +172,7 @@ internal sealed class StaticProtocolCompositionTests
             using Contracts;
             using Helpers;
             namespace Callers;
-            T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
+            T Compose<T>(T value) where T : Addition<T, T, T> {
                 return Double(value, true);
             }
             int32 Main() { return Compose(new Value(3)).Number; }
@@ -181,7 +181,7 @@ internal sealed class StaticProtocolCompositionTests
             using Contracts;
             using Leaves;
             namespace Helpers;
-            U Double<U>(U value, bool twice) where U : Addition<U, U, U>, [Copy] {
+            U Double<U>(U value, bool twice) where U : Addition<U, U, U> {
                 if (twice) { return Identity(value + value); }
                 return Identity(value);
             }
@@ -199,7 +199,7 @@ internal sealed class StaticProtocolCompositionTests
             SyntaxTree.Parse("""
                 using Contracts;
                 namespace Leaves;
-                V Identity<V>(V value) where V : [Copy] { return value; }
+                V Identity<V>(V value)  { return value; }
                 """),
         ]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -224,48 +224,57 @@ internal sealed class StaticProtocolCompositionTests
                 using Contracts;
                 using One;
                 using Two;
-                T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
+                T Compose<T>(T value) where T : Addition<T, T, T> {
                     return Double<T>(value, true);
                 }
                 int32 Main() { return 0; }
                 """),
         ]);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == "TRM3011"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase("return value + value;")]
     [TestCase("return Double<T>(value, true);")]
     public void CopyAloneDoesNotGrantOperatorsOrOperatorConstrainedHelpers(string body)
     {
-        var compilation = Compile("T Compose<T>(T value) where T : [Copy] {" + body + "}" + Helper,
+        var compilation = Compile("T Compose<T>(T value)  {" + body + "}" + Helper,
             instantiate: true);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
     [TestCase("")]
     [TestCase("where T : Addition<T, T, T>")]
-    public void GenericHelpersStillRequireTheCopyProperty(string constraints)
+    public void GenericHelpersUseTheDefaultCopyDomain(string constraints)
     {
         var compilation = Compile("T Compose<T>(T value) " + constraints + " { return value; }",
             instantiate: true);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
-        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var definition = global::System.Linq.Enumerable.Single(
+            compilation.Program!.GenericMethodDefinitions,
+            static method => method.Name == "Compose");
+        Assert.That(definition.Formals[0].OwnershipDomain, Is.EqualTo(1));
+        Assert.That(definition.Formals[0].NullabilityDomain, Is.EqualTo(1));
     }
 
     [Test]
-    public void CopyOnlyHelperRejectsUniqueConcreteValues()
+    public void DefaultDomainHelperRejectsUniqueConcreteValues()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
             }
-            T Identity<T>(T value) where T : [Copy] { return value; }
+            T Identity<T>(T value)  { return value; }
             int32 Main() {
                 Owner value = new Owner(42);
                 return Identity<Owner>(move value).Value;
             }
             """));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            diagnostic => diagnostic.Code == "TRM3011"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
     }
     [TestCase(false,false)]
@@ -278,12 +287,12 @@ internal sealed class StaticProtocolCompositionTests
                 : "int32 Main() { return Forward(new Value(42)).Number; }"
             : "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(Protocols + Value + """
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 var fixedValue = SelectSecond<T, Value>(value, new Value(1));
                 return SelectSecond<Value, T>(fixedValue + fixedValue, value);
             }
             U SelectSecond<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             """ + entry));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => {
@@ -309,11 +318,11 @@ internal sealed class StaticProtocolCompositionTests
                 public Inner Item;
                 public Outer(Inner item) { Item = item; }
             }
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 return Second<Outer, T>(new Outer(new Inner(1)), value);
             }
             U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             int32 Main() { return Forward(int32(42)); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -343,14 +352,14 @@ internal sealed class StaticProtocolCompositionTests
                 return true;
             }
              float32 CopyFloat(float32 value) { return value; }
-             T Forward<T>(T value) where T : [Copy] {
+             T Forward<T>(T value)  {
                 if (!TryCreatePair(init var pair)) { return value; }
                 if (!TryCreatePairOut(out var copiedPair)) { return value; }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)
                     || copiedPair.Wide != float64(2)) { return value; }
                 return Identity(value);
             }
-             U Identity<U>(U value) where U : [Copy] { return value; }
+             U Identity<U>(U value)  { return value; }
             int32 Main() { return Forward(int32(42)); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -382,7 +391,7 @@ internal sealed class StaticProtocolCompositionTests
                 }
                 public float32 Read() { return _value; }
             }
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 require Box.TryCreate(out var box);
                 if (box.Read() != float32(1)) { return value; }
                 return value;
@@ -406,7 +415,7 @@ internal sealed class StaticProtocolCompositionTests
                 }
                 public float32 Read() { return float32(_value); }
             }
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 if (!Box.TryCreate(out var box)) { return value; }
                 if (box.Read() != float32(1)) { return value; }
                 return value;
@@ -430,9 +439,9 @@ internal sealed class StaticProtocolCompositionTests
             ? "return Combine<Value,T>(new Value(1), value);"
             : $"return Combine<{selected},T>(new {selected}(1), value);";
         var compilation = Compilation.Create(SyntaxTree.Parse(protocol + declaration + $$"""
-            T Forward<T>(T value) where T : [Copy] { {{body}} }
+            T Forward<T>(T value)  { {{body}} }
             U Combine<A, U>(A first, U second)
-                where A : Addition<A, A, A>, [Copy] where U : [Copy] { return second; }
+                where A : Addition<A, A, A>  { return second; }
             int32 Main() { return 0; }
             """));
         if (selected == "Value")
@@ -450,11 +459,11 @@ internal sealed class StaticProtocolCompositionTests
     public void ConcreteWitnessCannotJustifyAnOperationOnAnUnrelatedTypeParameter()
     {
         var compilation = Compile("""
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 return Combine<T, Value>(value, new Value(1));
             }
             A Combine<A, U>(A first, U second)
-                where A : Addition<A, A, A>, [Copy] where U : [Copy] { return first; }
+                where A : Addition<A, A, A>  { return first; }
             """, instantiate: true);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
         Assert.That(compilation.Program, Is.Null);
@@ -467,11 +476,11 @@ internal sealed class StaticProtocolCompositionTests
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
             }
-             T Forward<T>(T value) where T : [Copy] {
+             T Forward<T>(T value)  {
                 return Second<Value, T>(new Value(1), value);
             }
              U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             int32 Main() { return 0; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -487,7 +496,7 @@ internal sealed class StaticProtocolCompositionTests
                 .Append(" { public int32 Value; }");
         }
         _ = source.Append("""
-            T Identity<T>(T value) where T : [Copy] { return value; }
+            T Identity<T>(T value)  { return value; }
             int32 Main() { return 0; }
             """);
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
@@ -504,7 +513,7 @@ internal sealed class StaticProtocolCompositionTests
                 .Append("() { return 0; }");
         }
         _ = source.Append("""
-            T Identity<T>(T value) where T : [Copy] { return value; }
+            T Identity<T>(T value)  { return value; }
             int32 Main() { return 0; }
             """);
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
@@ -536,12 +545,12 @@ internal sealed class StaticProtocolCompositionTests
                 public static Outer Create() { return new Outer(new Value(1)); }
             }
             {{factory}}
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 {{local}}
                 return Second({{first}}, value);
             }
             U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             int32 Main() { return Forward(int32(42)); }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -563,11 +572,11 @@ internal sealed class StaticProtocolCompositionTests
                  public Value(int32 number) { Number = number; }
             }
             Value Create() { return new Value(1); }
-             T Forward<T>(T value) where T : [Copy] {
+             T Forward<T>(T value)  {
                 return Second(Create(), value);
             }
              U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
+                  { return second; }
             int32 Main() { return 0; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -596,10 +605,10 @@ internal sealed class StaticProtocolCompositionTests
                 public static Outer Create() { return new Outer(new Value(1)); }
                 public Value Get() { return Item; }
             }
-            A Identity<A>(A item) where A : [Copy] { return item; }
+            A Identity<A>(A item)  { return item; }
             U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
-            T Forward<T>(T value) where T : [Copy] {
+                  { return second; }
+            T Forward<T>(T value)  {
                 {{preceding}}
                 var first = Outer.Create();
                 var created = Identity(first);
@@ -640,7 +649,7 @@ internal sealed class StaticProtocolCompositionTests
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
             }
-            int32 Read<T>(T value) where T : [Copy] { {{body}} }
+            int32 Read<T>(T value)  { {{body}} }
             {{entry}}
             """));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
@@ -657,7 +666,7 @@ internal sealed class StaticProtocolCompositionTests
                 public T(int32 number) { Number = number; }
                 public static int32 Read() { return 1; }
             }
-            int32 Probe<T>(T value) where T : [Copy] {
+            int32 Probe<T>(T value)  {
                 return new Model.T(41).Number + Model.T.Read();
             }
             int32 Main() { return Probe(int32(1)); }
@@ -683,8 +692,8 @@ internal sealed class StaticProtocolCompositionTests
                 public mut void Set(write First next) { Next = next; }
             }
             U Select<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
-            T Forward<T>(T value) where T : [Copy] {
+                  { return second; }
+            T Forward<T>(T value)  {
                 require First.TryCreate(out var first);
                 require Second.TryCreate(out var second);
                 first.Set(second);
@@ -728,9 +737,9 @@ internal sealed class StaticProtocolCompositionTests
                 public mut int32 Value;
                 public Cell(int32 value) { Value = value; }
             }
-            U Second<A, U>(A first, U second)
-                where A : [Copy] where U : [Copy] { return second; }
-            T Forward<T>(T value) where T : [Copy] {
+            U Second<A, U>(A first, U second) where A : null?
+                  { return second; }
+            T Forward<T>(T value)  {
                 {{operation}}
                 return value;
             }
@@ -757,7 +766,7 @@ internal sealed class StaticProtocolCompositionTests
                 public int32 Value;
                 public T(int32 value) { Value = value; }
             }
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 require T.TryCreate(42, out var cell);
                 return value;
             }
@@ -785,7 +794,7 @@ internal sealed class StaticProtocolCompositionTests
                 public Cell(int32 value) { Value = value; Secret = value; }
                 public mut void Set(int32 value) { Value = value; }
             }
-            T Forward<T>(T value) where T : [Copy] {
+            T Forward<T>(T value)  {
                 require Cell.TryCreate(42, out var cell);
                 {{operation}}
                 return value;
@@ -804,7 +813,7 @@ internal sealed class StaticProtocolCompositionTests
                 public Cell(int32 value) { Value = value; }
                 public int32 Read() { return Value; }
             }
-             T Forward<T>(T value) where T : [Copy] {
+             T Forward<T>(T value)  {
                 if (Cell.TryCreate(1, out var cell)) {
                     var read = cell.Read();
                 }
@@ -819,10 +828,10 @@ internal sealed class StaticProtocolCompositionTests
     public void RecursiveHelpersReuseClosedSpecializations(bool mutual)
     {
         var source = """
-            T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
+            T Compose<T>(T value) where T : Addition<T, T, T> {
                 return Repeat<T>(value, 3);
             }
-            U Repeat<U>(U value, uint32 count) where U : Addition<U, U, U>, [Copy] {
+            U Repeat<U>(U value, uint32 count) where U : Addition<U, U, U> {
                 if (count == 0) { return value; }
                 return Repeat<U>(value + value, count - 1);
             }
@@ -831,7 +840,7 @@ internal sealed class StaticProtocolCompositionTests
         {
             source = source.Replace("return Repeat<U>", "return Again<U>", StringComparison.Ordinal)
                 + """
-                V Again<V>(V value, uint32 count) where V : Addition<V, V, V>, [Copy] {
+                V Again<V>(V value, uint32 count) where V : Addition<V, V, V> {
                     return Repeat<V>(value, count);
                 }
                 """;
@@ -854,7 +863,7 @@ internal sealed class StaticProtocolCompositionTests
         for (var i = 0; i < templates; i++)
         {
             _ = source.Append("T Step").Append(i.ToString(CultureInfo.InvariantCulture))
-                .Append("<T>(T value) where T : Addition<T, T, T>, [Copy] { return ");
+                .Append("<T>(T value) where T : Addition<T, T, T> { return ");
             if (i == templates - 1)
             {
                 _ = source.Append("value");

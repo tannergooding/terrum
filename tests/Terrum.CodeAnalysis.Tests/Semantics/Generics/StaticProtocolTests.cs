@@ -18,6 +18,8 @@ namespace Terrum.CodeAnalysis.Tests.Semantics.Generics;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class StaticProtocolTests
 {
+    private static readonly int[] s_expectedGenericSourceOrdinals = [0, 1];
+    private static readonly int[] s_defaultTypeDependencies = [0];
     private static readonly string s_sample = File.ReadAllText(
         Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..")),
             "samples", "LanguageFeatures", "StaticProtocols", "static-protocol-quadratic.terrum"));
@@ -73,8 +75,7 @@ internal sealed class StaticProtocolTests
     [TestCase("operator *(Meters left, Meters right)","NotMultiply(Meters left, Meters right)","TRM3007")]
     [TestCase("operator *(Meters left, Meters right)","operator *(Meters left, int32 right)","TRM3007")]
     [TestCase("struct Meters","unique struct Meters","TRM3007")]
-    [TestCase("Addition<T, T, T>, Multiplication<T, T, T>, [Copy]","Addition<T, T, T>, [Copy]","TRM3007")]
-    [TestCase("T EvaluateQuadratic<T>","public T EvaluateQuadratic<T>","TRM3007")]
+    [TestCase("Addition<T, T, T>, Multiplication<T, T, T>","Addition<T, T, T>","TRM3007")]
     [TestCase("Addition<Meters, Meters, Meters>","Addition<Meters, Seconds, Meters>","TRM3007")]
     [TestCase("Addition<Meters, Meters, Meters>","Addition.NotAddition<Meters, Meters, Meters>","TRM3007")]
     [TestCase("Addition<Meters, Meters, Meters>","Addition<Meters, Meters, Meters>?","TRM3007")]
@@ -95,6 +96,741 @@ internal sealed class StaticProtocolTests
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == expected),Is.True);
         Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void PublicGenericDefinitionsRetainCheckedBodiesAndRequirements()
+    {
+        var source = s_sample.Replace("T EvaluateQuadratic<T>",
+            "public T EvaluateQuadratic<T>", StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        Assert.That(program.GenericMethodOperatorProtocols, Has.Length.EqualTo(2));
+        var definition = global::System.Linq.Enumerable.Single(
+            program.GenericMethodDefinitions,
+            static method => method.Name == "EvaluateQuadratic");
+        Assert.That(definition.IsPublic, Is.True);
+        Assert.That(definition.Formals, Has.Length.EqualTo(1));
+        Assert.That(definition.Formals[0].Name, Is.EqualTo("T"));
+        Assert.That(definition.Formals[0].OwnershipDomain, Is.EqualTo(1));
+        Assert.That(definition.Formals[0].NullabilityDomain, Is.EqualTo(1));
+        Assert.That(definition.Formals[0].Requirements,
+            Has.Length.EqualTo(2));
+        Assert.That(definition.Formals[0].Requirements.All(requirement =>
+                requirement.ProtocolOrdinal
+                    < program.GenericMethodOperatorProtocols.Length
+                && program.GenericMethodOperatorProtocols[
+                    requirement.ProtocolOrdinal].Name == requirement.Protocol
+                && program.GenericMethodOperatorProtocols[
+                    requirement.ProtocolOrdinal].Operator
+                    == requirement.Operator),
+            Is.True);
+        Assert.That(program.GenericMethodOperatorProtocols.All(protocol =>
+                protocol.SourceInputOrdinal == 0
+                && !protocol.HasSelf
+                && !protocol.RequiresUnsafeCaller),
+            Is.True);
+        var malformedProtocolProgram = program with {
+            GenericMethodOperatorProtocols = [
+                .. program.GenericMethodOperatorProtocols.Select(
+                    (protocol, index) => index == 0
+                        ? protocol with { SourceInputOrdinal = -1 }
+                        : protocol),
+            ],
+        };
+        Assert.That(SemanticVerifier.TryVerifySource(
+            malformedProtocolProgram, out _, out _, out _, out _),
+            Is.False);
+        var function = definition.ProofProgram.Functions[
+            definition.FunctionIndex];
+        Assert.That(function.IsExternal, Is.False);
+        Assert.That(function.Body.Statements, Is.Not.Empty);
+        var specializations = program.Functions.Where(static item =>
+            item.Name.StartsWith("EvaluateQuadratic<",
+                StringComparison.Ordinal)).ToArray();
+        Assert.That(specializations, Has.Length.EqualTo(2));
+        Assert.That(specializations.All(item =>
+                item.GenericMethodInstantiation is
+                    BoundGenericMethodInstantiation instantiation
+                && instantiation.DefinitionOrdinal
+                    == definition.DefinitionOrdinal
+                && instantiation.TypeArguments.Length == 1),
+            Is.True);
+        var main = program.Functions.Single(static item =>
+            item.Name == "Main");
+        var calls = new System.Collections.Generic.List<
+            BoundGenericMethodInstantiation>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundCall {
+                        GenericMethodCall: BoundGenericMethodInstantiation call,
+                    })
+                {
+                    calls.Add(call);
+                }
+            }), Is.True);
+        Assert.That(calls, Has.Count.EqualTo(2));
+        Assert.That(calls.All(call => call.DefinitionOrdinal
+                == definition.DefinitionOrdinal
+            && call.TypeArguments.Length == 1), Is.True);
+        Assert.That(calls.Select(static call => call.TypeArguments[0])
+            .Distinct().Count(), Is.EqualTo(2));
+        var remappedType = calls[0].TypeArguments[0];
+        var remapType = new Func<PrimitiveType, PrimitiveType>(type =>
+            type == remappedType ? PrimitiveType.UInt32 : type);
+        var rewrittenMain = BoundTreeTraversal.RewriteTypes(main, remapType);
+        BoundGenericMethodInstantiation? rewrittenCall = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            rewrittenMain.Body, expression =>
+            {
+                if (expression is BoundCall {
+                        GenericMethodCall: BoundGenericMethodInstantiation call,
+                    } && call.DefinitionOrdinal
+                        == definition.DefinitionOrdinal
+                    && call.TypeArguments[0] == PrimitiveType.UInt32)
+                {
+                    rewrittenCall = call;
+                }
+            }), Is.True);
+        Assert.That(rewrittenCall, Is.Not.Null);
+        var specialization = specializations.Single(item =>
+            item.GenericMethodInstantiation!.TypeArguments[0]
+                == remappedType);
+        var rewrittenSpecialization = BoundTreeTraversal.RewriteTypes(
+            specialization, remapType);
+        Assert.That(rewrittenSpecialization.GenericMethodInstantiation!
+                .TypeArguments[0],
+            Is.EqualTo(PrimitiveType.UInt32));
+    }
+
+    [Test]
+    public void CopyIsNotAnExplicitGenericConstraint()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public T Identity<T>(T value) where T : [Copy] {
+                return value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3007"), Is.True);
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public async Task GenericMethodTypeDefaultsApplyInFormalOrderAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Pair<T> { public T Value; }
+
+            public int32 Accumulate<T = int32, U = T, V = Pair<T>,
+                W = ref<T>>(int32 value) {
+                return value;
+            }
+
+            int32 Main() {
+                return Accumulate(42) + Accumulate<uint32>(1);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = global::System.Linq.Enumerable.Single(
+            program.GenericMethodDefinitions);
+        Assert.That(definition.Formals.Select(static formal =>
+                formal.Name),
+            Is.EqualTo(["T", "U", "V", "W"]));
+        Assert.That(definition.Formals[0].TypeDefault!.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Concrete));
+        Assert.That(definition.Formals[0].TypeDefault!.Term.ConcreteType,
+            Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(definition.Formals[0].TypeDefault!.FormalDependencies,
+            Is.Empty);
+        Assert.That(definition.Formals[1].TypeDefault!.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.Formal));
+        Assert.That(definition.Formals[1].TypeDefault!.Term.FormalOrdinal,
+            Is.Zero);
+        Assert.That(definition.Formals[1].TypeDefault!.FormalDependencies,
+            Is.EqualTo(s_defaultTypeDependencies));
+        Assert.That(definition.Formals[2].TypeDefault!.FormalDependencies,
+            Is.EqualTo(s_defaultTypeDependencies));
+        Assert.That(definition.Formals[2].TypeDefault!.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.SourceGeneric));
+        Assert.That(definition.Formals[2].TypeDefault!.Term
+                .SourceGenericTypeDefinitionIndex,
+            Is.EqualTo(program.SourceGenericTypeDefinitions.Single()
+                .DefinitionIndex));
+        Assert.That(definition.Formals[2].TypeDefault!.Term.TypeArguments,
+            Has.Length.EqualTo(1));
+        Assert.That(definition.Formals[2].TypeDefault!.Term.TypeArguments[0]
+                .FormalOrdinal,
+            Is.Zero);
+        Assert.That(definition.ProofProgram.SourceGenericTypeInstances,
+            Is.Empty);
+        Assert.That(definition.Formals[3].TypeDefault!.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.CheckedReference));
+        Assert.That(definition.Formals[3].TypeDefault!.Term.TypeArguments[0]
+                .FormalOrdinal,
+            Is.Zero);
+        Assert.That(definition.Formals[3].TypeDefault!.FormalDependencies,
+            Is.EqualTo(s_defaultTypeDependencies));
+        var signature = global::System.Linq.Enumerable.Single(
+            program.GenericMethodSignatures);
+        Assert.That(signature.Formals.Select(static formal =>
+                formal.HasTypeDefault),
+            Is.EqualTo([true, true, true, true]));
+        Assert.That(signature.Formals[0].DefaultTypeParameterDependencies,
+            Is.Empty);
+        Assert.That(signature.Formals[1].DefaultTypeParameterDependencies,
+            Is.EqualTo(s_defaultTypeDependencies));
+        Assert.That(signature.Formals[2].DefaultTypeParameterDependencies,
+            Is.EqualTo(s_defaultTypeDependencies));
+        Assert.That(signature.Formals[3].DefaultTypeParameterDependencies,
+            Is.EqualTo(s_defaultTypeDependencies));
+        var malformedSignature = signature with {
+            Formals = [
+                .. signature.Formals.Select((formal, ordinal) =>
+                    ordinal == 1
+                        ? formal with {
+                            DefaultTypeParameterDependencies = [],
+                        }
+                        : formal),
+            ],
+        };
+        var malformedProgram = program with {
+            GenericMethodSignatures = [malformedSignature],
+        };
+        Assert.That(SemanticVerifier.TryVerifySource(malformedProgram,
+            out _, out _, out _, out _), Is.False);
+        var malformedSourceGenericDefault =
+            definition.Formals[2].TypeDefault! with {
+                Term = definition.Formals[2].TypeDefault!.Term with {
+                    SourceGenericTypeDefinitionIndex = int.MaxValue,
+                },
+            };
+        var malformedDefinition = definition with {
+            Formals = [
+                .. definition.Formals.Select((formal, ordinal) =>
+                    ordinal == 2
+                        ? formal with {
+                            TypeDefault = malformedSourceGenericDefault,
+                        }
+                        : formal),
+            ],
+        };
+        var malformedTypeTermProgram = program with {
+            GenericMethodDefinitions = [malformedDefinition],
+        };
+        Assert.That(SemanticVerifier.TryVerifySource(
+            malformedTypeTermProgram, out _, out _, out _, out _),
+            Is.False);
+        var main = program.Functions.Single(static function =>
+            function.Name == "Main");
+        var calls = new System.Collections.Generic.List<
+            BoundGenericMethodInstantiation>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundCall {
+                        GenericMethodCall: BoundGenericMethodInstantiation call,
+                    })
+                {
+                    calls.Add(call);
+                }
+            }), Is.True);
+        Assert.That(calls, Has.Count.EqualTo(2));
+        Assert.That(HasExpectedCallArguments(PrimitiveType.Int32), Is.True);
+        Assert.That(HasExpectedCallArguments(PrimitiveType.UInt32), Is.True);
+        Assert.That(await RunAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(43));
+
+        bool HasExpectedCallArguments(PrimitiveType type)
+        {
+            return calls.Any(call => call.TypeArguments.Length == 4
+                && call.TypeArguments[0] == type
+                && call.TypeArguments[1] == type
+                && program.SourceGenericTypeInstances.Any(instance =>
+                    instance.TypeArguments.Length == 1
+                    && instance.TypeArguments[0] == type
+                    && (PrimitiveType)(100 + instance.StructureIndex)
+                        == call.TypeArguments[2])
+                && CheckedReferenceTypes.IsType(call.TypeArguments[3]));
+        }
+    }
+
+    [Test]
+    public async Task GenericMethodPointerDefaultRetainsBlittableFormalEvidenceAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Read<T, U = ptr<T>>(int32 value)
+                where T : [Blittable] {
+                return value;
+            }
+            int32 Main() { return Read<int32>(42); }
+            """), new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        Assert.That(definition.Formals[0].RequiresBlittable, Is.True);
+        Assert.That(definition.Formals[1].TypeDefault!.Term.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.NativePointer));
+        Assert.That(definition.Formals[1].TypeDefault!.Term.TypeArguments[0]
+                .FormalOrdinal,
+            Is.Zero);
+        Assert.That(await RunAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(42));
+    }
+
+    [Test]
+    public async Task GenericMethodFixedArrayDefaultRetainsBlittableEvidenceAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Read<T, U = [T; 2]>(int32 value)
+                where T : [Blittable] {
+                return value;
+            }
+            int32 Main() { return Read<int32>(42); }
+            """), new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        var arrayTerm = definition.Formals[1].TypeDefault!.Term;
+        Assert.That(definition.Formals[0].RequiresBlittable, Is.True);
+        Assert.That(arrayTerm.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.NativeFixedArray));
+        Assert.That(arrayTerm.ElementCount, Is.EqualTo(2));
+        Assert.That(arrayTerm.TypeArguments.Single().FormalOrdinal,
+            Is.Zero);
+        Assert.That(await RunAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(42));
+    }
+
+    [Test]
+    public async Task GenericMethodFunctionPointerDefaultRetainsBlittableEvidenceAsync()
+    {
+        var nativeCoreRegistration
+            = NativeCoreRegistrationTests.CreateRegistration();
+        var layoutCoreRegistration
+            = LayoutCoreRegistrationTestData.CreateForBindings(
+                nativeCoreRegistration.ModuleBindings,
+                LayoutCoreRegistrationTestData.CreateDeclarations(
+                    "core.native"));
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            public int32 Read<T, U =
+                [NativeCallConv(NativeCallingConvention.Cdecl)] fnptr<ptr<T>, void>>(int32 value)
+                where T : [Blittable] {
+                return value;
+            }
+            int32 Main() { return Read<int32>(42); }
+            """), new CompilationOptions {
+            LayoutCoreRegistration = layoutCoreRegistration,
+            NativeCoreRegistration = nativeCoreRegistration,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        var functionPointerTerm = definition.Formals[1].TypeDefault!.Term;
+        Assert.That(functionPointerTerm.Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.NativeFunctionPointer));
+        Assert.That(functionPointerTerm.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+        Assert.That(functionPointerTerm.ParameterCount, Is.EqualTo(1));
+        Assert.That(functionPointerTerm.TypeArguments[0].Kind,
+            Is.EqualTo(BoundGenericMethodTypeTermKind.NativePointer));
+        Assert.That(functionPointerTerm.TypeArguments[1].AllowsVoid, Is.True);
+        var malformedTerm = functionPointerTerm with {
+            ParameterCount = 0,
+        };
+        var malformedDefinition = definition with {
+            Formals = [
+                .. definition.Formals.Select((formal, ordinal) =>
+                    ordinal == 1
+                        ? formal with {
+                            TypeDefault = formal.TypeDefault! with {
+                                Term = malformedTerm,
+                            },
+                        }
+                        : formal),
+            ],
+        };
+        Assert.That(SemanticVerifier.TryVerifySource(program with {
+            GenericMethodDefinitions = [malformedDefinition],
+        }, out _, out _, out _, out _), Is.False);
+        Assert.That(await RunAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(42));
+    }
+
+    [Test]
+    public void GenericMethodFunctionPointerRejectsUnprovenParameterKinds()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Read<T, U = fnptr<T, void>>(int32 value)
+                where T : [Blittable] {
+                return value;
+            }
+            int32 Main() { return Read<int32>(42); }
+            """), new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3007"), Is.True);
+    }
+
+    [Test]
+    public void GenericMethodPointerDefaultRequiresBlittableEvidence()
+    {
+        var missingEvidence = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Read<T, U = ptr<T>>(int32 value) {
+                return value;
+            }
+            int32 Main() { return Read<int32>(42); }
+            """));
+        Assert.That(missingEvidence.HasErrors, Is.True);
+        Assert.That(missingEvidence.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3007"), Is.True);
+
+        var invalidActual = Compilation.Create(SyntaxTree.Parse("""
+            struct NotBlittable { public int32 Value; }
+            public int32 Read<T, U = ptr<T>>(int32 value)
+                where T : [Blittable] {
+                return value;
+            }
+            int32 Main() { return Read<NotBlittable>(42); }
+            """), new CompilationOptions {
+            LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(invalidActual.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("Blittable constraint",
+                    StringComparison.Ordinal)), Is.True);
+    }
+
+    [Test]
+    public void GenericMethodDefaultsAndCallsRespectNonnullFormalDomains()
+    {
+        var nullableDefault = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Read<T = int32, U = T?>(int32 value) {
+                return value;
+            }
+            int32 Main() { return Read(42); }
+            """));
+        Assert.That(nullableDefault.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3007"), Is.True);
+
+        var nullableActual = Compilation.Create(SyntaxTree.Parse("""
+            class Node { public int32 Value; public Node() { Value = 0; } }
+            public int32 Take<T>(T value) { return 0; }
+            int32 Main() { return Take<Node?>(null); }
+            """));
+        Assert.That(nullableActual.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("nullability domain",
+                    StringComparison.Ordinal)), Is.True);
+    }
+
+    [Test]
+    public void GenericMethodNullableDomainAcceptsOptionalActuals()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Node { public int32 Value; public Node() { Value = 0; } }
+            public T Echo<T>(T value) where T : null? {
+                return value;
+            }
+            int32 Main() {
+                Node? value = null;
+                Node? echoed = Echo<Node?>(value);
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definition = program.GenericMethodDefinitions.Single();
+        Assert.That(definition.Formals[0].NullabilityDomain, Is.EqualTo(2));
+        var main = program.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundGenericMethodInstantiation? call = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundCall {
+                        GenericMethodCall: BoundGenericMethodInstantiation
+                            instantiation,
+                    })
+                {
+                    call = instantiation;
+                }
+            }), Is.True);
+        Assert.That(call, Is.Not.Null);
+        Assert.That(ManagedClassTypes.IsOptional(
+            call!.TypeArguments.Single()), Is.True);
+    }
+
+    [Test]
+    public async Task GenericMethodWriteRequirementConstrainsActualAndDefaultAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Use<T, U = write T>(int32 value)
+                where T : write
+                where U : write {
+                return value;
+            }
+            int32 Main() {
+                return Use<write ptr<int32>>(42);
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var definition = compilation.Program!.GenericMethodDefinitions
+            .Single();
+        Assert.That(definition.Formals.Select(static formal =>
+                formal.RequiresWritable),
+            Is.EqualTo([true, true]));
+        Assert.That(definition.Formals[1].TypeDefault!.Term.IsWritable,
+            Is.True);
+        Assert.That(await RunAsync(NativeEmitter.Emit(compilation.Program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(42));
+
+        var invalid = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Use<T>(int32 value) where T : write {
+                return value;
+            }
+            int32 Main() { return Use<ptr<int32>>(42); }
+            """));
+        Assert.That(invalid.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("write requirement",
+                    StringComparison.Ordinal)), Is.True);
+    }
+
+    [Test]
+    public async Task GenericMethodOwnershipDomainsAcceptCopyAndUniqueActualsAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+            }
+            public int32 UniqueOnly<T>(int32 value) where T : unique {
+                return value;
+            }
+            public int32 UniqueDefault<T = Owner>(int32 value)
+                where T : unique {
+                return value;
+            }
+            public T ForwardUnique<T>(T value) where T : unique {
+                return move value;
+            }
+            public int32 Either<T>(int32 value) where T : unique? {
+                return value;
+            }
+            int32 Main() {
+                Owner source = new Owner(2);
+                Owner forwarded = ForwardUnique<Owner>(move source);
+                return UniqueOnly<Owner>(40)
+                    + UniqueDefault(0)
+                    + Either<int32>(1)
+                    + Either<Owner>(1)
+                    + forwarded.Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var definitions = program.GenericMethodDefinitions
+            .ToDictionary(static definition => definition.Name,
+                StringComparer.Ordinal);
+        Assert.That(definitions["UniqueOnly"].Formals[0].OwnershipDomain,
+            Is.EqualTo(2));
+        Assert.That(definitions["UniqueDefault"].Formals[0].TypeDefault!.Term
+                .ConcreteType,
+            Is.EqualTo((PrimitiveType)(100
+                + program.Structures.Select((structure, index) =>
+                    (structure, index))
+                .Single(static item => item.structure.Name == "Owner")
+                .index)));
+        Assert.That(definitions["Either"].Formals[0].OwnershipDomain,
+            Is.EqualTo(3));
+        Assert.That(await RunAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(44));
+
+        var invalid = Compilation.Create(SyntaxTree.Parse("""
+            public int32 UniqueOnly<T>(int32 value) where T : unique {
+                return value;
+            }
+            int32 Main() { return UniqueOnly<int32>(42); }
+            """));
+        Assert.That(invalid.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("ownership domain",
+                    StringComparison.Ordinal)), Is.True);
+
+        var unrefinedMove = Compilation.Create(SyntaxTree.Parse("""
+            public T Forward<T>(T value) where T : unique? {
+                return move value;
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(unrefinedMove.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3007"
+                && diagnostic.Message.Contains("type-property refinement",
+                    StringComparison.Ordinal)), Is.True);
+    }
+
+    [TestCase("T = T")]
+    [TestCase("T = U, U = int32")]
+    public void RejectsCyclicOrForwardGenericTypeDefaults(string formals)
+    {
+        var source = "public int32 Use<" + formals
+            + ">(int32 value) { return value; }"
+            + "int32 Main() { return Use(1); }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(
+            compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3007"), Is.True);
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public async Task ExplicitGenericInferenceHoleDoesNotSelectDefaultAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public T Echo<T = int32>(T value) { return value; }
+
+            int32 Main() {
+                uint32 value = 5;
+                return Echo<_>(value) == value ? 1 : 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var main = program.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundGenericMethodInstantiation? call = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundCall {
+                        GenericMethodCall: BoundGenericMethodInstantiation instantiation,
+                    })
+                {
+                    call = instantiation;
+                }
+            }), Is.True);
+        Assert.That(call, Is.Not.Null);
+        Assert.That(call!.TypeArguments.Single(),
+            Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(await RunAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task ExplicitDefaultSelectsGenericTypeDefaultAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public T Echo<T = int32>(T value) { return value; }
+            int32 Main() { return Echo<default>(9); }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var main = program.Functions.Single(static function =>
+            function.Name == "Main");
+        BoundGenericMethodInstantiation? call = null;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundCall {
+                        GenericMethodCall: BoundGenericMethodInstantiation instantiation,
+                    })
+                {
+                    call = instantiation;
+                }
+            }), Is.True);
+        Assert.That(call, Is.Not.Null);
+        Assert.That(call!.TypeArguments.Single(),
+            Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(await RunAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.FailFast)).ConfigureAwait(true),
+            Is.EqualTo(9));
+    }
+
+    [Test]
+    public void ExplicitGenericInferenceHoleCannotFallBackToDefault()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public int32 Unused<T = int32>(int32 value) {
+                return value;
+            }
+            int32 Main() { return Unused<_>(1); }
+            """));
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(
+            compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3011"), Is.True);
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void PublicGenericReferenceResultsRetainDependencyOrdinals()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(left), nameof(right))]
+            public ref<T> Select<T>(ref<T> left, ref<T> right,
+                bool useLeft) {
+                return useLeft ? left : right;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var definition = global::System.Linq.Enumerable.Single(
+            compilation.Program!.GenericMethodDefinitions);
+        Assert.That(definition.IsPublic, Is.True);
+        var function = definition.ProofProgram.Functions[
+            definition.FunctionIndex];
+        var dependency = global::System.Linq.Enumerable.Single(
+            function.DependencyContracts);
+        Assert.That(dependency.Relation,
+            Is.EqualTo(BoundDependencyRelation.DependsOn));
+        Assert.That(dependency.Destination,
+            Is.EqualTo(BoundDependencyDestination.Result));
+        Assert.That(dependency.Sources.Select(
+                static source => source.FormalOrdinal),
+            Is.EqualTo(s_expectedGenericSourceOrdinals));
     }
 
     [Test]
@@ -178,7 +914,7 @@ internal sealed class StaticProtocolTests
                 .Append(" operator +(").Append(name).Append(" left, ").Append(name)
                 .Append(" right) { return new ").Append(name).Append("(left.Value + right.Value); } }");
         }
-        _ = extra.Append("T Double<T>(T x) where T : Addition<T, T, T>, [Copy] { return x + x; } int32 Main() {");
+        _ = extra.Append("T Double<T>(T x) where T : Addition<T, T, T> { return x + x; } int32 Main() {");
         for (var i = 0; i < instantiations; i++)
         {
             var name = "Measure" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
