@@ -33,7 +33,8 @@ public readonly ref struct TrRmConstantSourceTableReader
     public TrRmConstantSourceTableReader(ReadOnlySpan<byte> section, int recordCount,
         int frozenValueNodeCount, int constantExecutionCount, int targetValueBindingCount)
         : this(section, recordCount, frozenValueNodeCount,
-            constantExecutionCount, targetValueBindingCount, null)
+            constantExecutionCount, targetValueBindingCount, 0, 0,
+            TrRmArtifactSchema.Standard, null)
     {
     }
 
@@ -41,9 +42,22 @@ public readonly ref struct TrRmConstantSourceTableReader
         int recordCount, int frozenValueNodeCount, int constantExecutionCount,
         int targetValueBindingCount,
         TrRmA3LayoutResourceLedger? resourceLedger)
+        : this(section, recordCount, frozenValueNodeCount,
+            constantExecutionCount, targetValueBindingCount, 0, 0,
+            TrRmArtifactSchema.Standard, resourceLedger)
+    {
+    }
+
+    internal TrRmConstantSourceTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int frozenValueNodeCount, int constantExecutionCount,
+        int targetValueBindingCount, int genericParamCount,
+        int constantTemplateCount, TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (!ValidCount(recordCount) || !ValidCount(frozenValueNodeCount)
             || !ValidCount(constantExecutionCount) || !ValidCount(targetValueBindingCount)
+            || !ValidCount(genericParamCount)
+            || !ValidCount(constantTemplateCount)
             || (long)recordCount * RowSize != section.Length)
         {
             throw InvalidConstantSource();
@@ -62,6 +76,10 @@ public readonly ref struct TrRmConstantSourceTableReader
                 1 => frozenValueNodeCount,
                 2 => constantExecutionCount,
                 3 => targetValueBindingCount,
+                4 when schema.UsesGenericConstantMethods()
+                    => genericParamCount,
+                5 when schema.UsesGenericConstantMethods()
+                    => constantTemplateCount,
                 _ => -1,
             };
             if (selectedCount < 0 || payload is 0 or > 0xFF_FFFF
@@ -121,6 +139,13 @@ public static class TrRmConstantSourceTableWriter
     /// <returns>The encoded ConstantSource section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmConstantSourceRow> rows,
         int frozenValueNodeCount, int constantExecutionCount, int targetValueBindingCount)
+        => Encode(rows, frozenValueNodeCount, constantExecutionCount,
+            targetValueBindingCount, 0, 0, TrRmArtifactSchema.Standard);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmConstantSourceRow> rows,
+        int frozenValueNodeCount, int constantExecutionCount,
+        int targetValueBindingCount, int genericParamCount,
+        int constantTemplateCount, TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count > 0xFF_FFFF)
@@ -139,7 +164,9 @@ public static class TrRmConstantSourceTableWriter
         }
 
         _ = new TrRmConstantSourceTableReader(result, rows.Count,
-            frozenValueNodeCount, constantExecutionCount, targetValueBindingCount);
+            frozenValueNodeCount, constantExecutionCount,
+            targetValueBindingCount, genericParamCount, constantTemplateCount,
+            schema);
         return result;
     }
 }

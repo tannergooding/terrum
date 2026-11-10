@@ -32,6 +32,62 @@ internal sealed class TrRmConstantSourceTableTests
     }
 
     [Test]
+    public void CG1ConstantSourcesUseFormalAndTemplateRowNamespaces()
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.GenericConstantMethodsDraft;
+        var rows = new[]
+        {
+            new TrRmConstantSourceRow(4, 1),
+            new TrRmConstantSourceRow(5, 1),
+        };
+        var bytes = TrRmConstantSourceTableWriter.Encode(rows, 0, 0, 0,
+            genericParamCount: 1, constantTemplateCount: 1,
+            schema: schema);
+        var sources = new TrRmConstantSourceTableReader(bytes, 2, 0, 0, 0,
+            genericParamCount: 1, constantTemplateCount: 1,
+            schema: schema);
+
+        Assert.That((sources.GetKind(1), sources.GetPayloadReference(1)),
+            Is.EqualTo((4u, 1u)));
+        Assert.That((sources.GetKind(2), sources.GetPayloadReference(2)),
+            Is.EqualTo((5u, 1u)));
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmConstantSourceTableWriter.Encode(rows, 0, 0, 0,
+                genericParamCount: 1, constantTemplateCount: 1,
+                schema: TrRmArtifactSchema.GenericMethodCallsDraft));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmConstantSourceTableWriter.Encode([
+                new TrRmConstantSourceRow(4, 2),
+            ], 0, 0, 0, genericParamCount: 1,
+                constantTemplateCount: 1, schema: schema));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmConstantSourceTableWriter.Encode([
+                new TrRmConstantSourceRow(5, 1),
+            ], 0, 0, 0, genericParamCount: 1,
+                constantTemplateCount: 0, schema: schema));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            Encode(new TrRmConstantSourceRow(4, 1), 0, 0, 0));
+
+        static void ReadInvalidSource(byte[] sourceBytes,
+            int genericParamCount, int constantTemplateCount,
+            TrRmArtifactSchema selectedSchema)
+        {
+            _ = new TrRmConstantSourceTableReader(sourceBytes,
+                1, 0, 0, 0, genericParamCount, constantTemplateCount,
+                selectedSchema);
+        }
+
+        var validRowBytes = TrRmConstantSourceTableWriter.Encode([
+            new TrRmConstantSourceRow(4, 1),
+        ], 0, 0, 0, genericParamCount: 1, constantTemplateCount: 0,
+            schema: schema);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ReadInvalidSource(validRowBytes, 0, 0, schema));
+    }
+
+    [Test]
     public void ConstantSourceReaderChargesRowsAtTheExactWorkBoundary()
     {
         var bytes = TrRmConstantSourceTableWriter.Encode([
