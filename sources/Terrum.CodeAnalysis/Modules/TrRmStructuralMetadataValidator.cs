@@ -1533,6 +1533,8 @@ public static class TrRmStructuralMetadataValidator
         var generics = new TrRmGenericParamTableReader(genericParamBytes, genericParamCount,
             strings, types, methods, signatures, typeSpecs, constraintCount,
             selectedConstantSourceCount, selectedA3LayoutResourceLedger);
+        ValidateGenericConstantFeatureAssignments(features, modules, types,
+            methods, generics, index.Schema);
         var interfaces = default(TrRmInterfaceDefTableReader);
         var associatedTypeDefs = default(TrRmAssociatedTypeDefTableReader);
         var interfaceWitnesses = default(TrRmInterfaceWitnessTableReader);
@@ -2314,6 +2316,43 @@ public static class TrRmStructuralMetadataValidator
                     methods.GetOwnerModule(method),
                     TrRmFeatureTableReader.GenericMethodCallsFeatureId,
                     schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
+    }
+
+    internal static void ValidateGenericConstantFeatureAssignments(
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmGenericParamTableReader genericParams,
+        TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesGenericConstantMethods())
+        {
+            return;
+        }
+
+        var resourceLedger = features.ResourceLedger;
+        for (var formal = 1; formal <= genericParams.Count; formal++)
+        {
+            resourceLedger?.ConsumeWork();
+            if (genericParams.GetFormalKind(formal) != 2)
+            {
+                continue;
+            }
+
+            var owner = genericParams.GetOwnerDefId(formal);
+            var ownerRow = checked((int)(owner & 0x00FF_FFFF));
+            var ownerModule = (byte)(owner >> 24) switch
+            {
+                0x13 => types.GetOwnerModule(ownerRow),
+                0x16 => methods.GetOwnerModule(ownerRow),
+                _ => throw InvalidMetadata(),
+            };
+            if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                ownerModule, TrRmFeatureTableReader.ConstantGenericTermsFeatureId,
+                schema))
             {
                 throw InvalidMetadata();
             }

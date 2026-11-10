@@ -147,6 +147,194 @@ internal sealed class TrRmGenericParamTableWriterTests
     }
 
     [Test]
+    public void ConstantMethodFormalsRequireFeature24WithoutReplacingFeature23()
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.GenericConstantMethodsDraft;
+        var featureRows = new[]
+        {
+            TrRmFeatureRow.LayoutQueries,
+            TrRmFeatureRow.TypedFrozenValues,
+            TrRmFeatureRow.GenericMethodCallsCandidate,
+            TrRmFeatureRow.ConstantGenericTermsCandidate,
+        };
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var features = new TrRmFeatureTableReader(featureBytes,
+            featureRows.Length, schema);
+        var names = new TrRmStringTableReader(Names(), 6);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1, 1,
+                featureRows.Length),
+        ], names, 0, 1, 1, 0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, names,
+            0, 1, 1, 0, featureRows.Length);
+        var types = new TrRmTypeDefTableReader(Type(), 1, names, modules,
+            0, 2, 1, 0, schema);
+        var typeSpecs = new TrRmTypeSpecTableReader(Spec(), 1, 1, 0, 2, 0,
+            schema, methodDefCount: 1);
+        var signatures = new TrRmMethodSigTableReader(Signature(), 1,
+            typeSpecs, 0, 2);
+        var methods = new TrRmMethodDefTableReader(Method(), 1, names,
+            modules, types, signatures, 0, 0);
+        var constantMethodFormal = MethodFormal with {
+            FormalKind = 2,
+            OwnershipDomain = 0,
+            NullabilityDomain = 0,
+            ConstantTypeSpecRef = 1,
+        };
+        var genericParamBytes = TrRmGenericParamTableWriter.Encode([
+            TypeFormal, constantMethodFormal,
+        ], names, types, methods, signatures, typeSpecs, 1);
+        var genericParams = new TrRmGenericParamTableReader(
+            genericParamBytes, 2, names, types, methods, signatures,
+            typeSpecs, 1);
+
+        TrRmStructuralMetadataValidator.ValidateGenericMethodFeatureAssignments(
+            features, modules, methods, signatures, schema);
+        TrRmStructuralMetadataValidator.ValidateGenericConstantFeatureAssignments(
+            features, modules, types, methods, genericParams, schema);
+
+        var withoutFeature24 = new[]
+        {
+            TrRmFeatureRow.LayoutQueries,
+            TrRmFeatureRow.TypedFrozenValues,
+            TrRmFeatureRow.GenericMethodCallsCandidate,
+        };
+        var withoutFeature24Bytes = TrRmFeatureTableWriter.Encode(
+            withoutFeature24, schema);
+        var withoutFeature24Features = new TrRmFeatureTableReader(
+            withoutFeature24Bytes, withoutFeature24.Length, schema);
+        var withoutFeature24ModuleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1, 1,
+                withoutFeature24.Length),
+        ], names, 0, 1, 1, 0, withoutFeature24.Length);
+        var withoutFeature24Modules = new TrRmModuleTableReader(
+            withoutFeature24ModuleBytes, 1, names, 0, 1, 1, 0,
+            withoutFeature24.Length);
+        var withoutFeature24Types = new TrRmTypeDefTableReader(Type(), 1,
+            names, withoutFeature24Modules, 0, 2, 1, 0, schema);
+        var withoutFeature24Methods = new TrRmMethodDefTableReader(Method(),
+            1, names, withoutFeature24Modules, withoutFeature24Types,
+            signatures, 0, 0);
+        var withoutFeature24Formals = new TrRmGenericParamTableReader(
+            genericParamBytes, 2, names, withoutFeature24Types,
+            withoutFeature24Methods, signatures, typeSpecs, 1);
+        TrRmStructuralMetadataValidator.ValidateGenericMethodFeatureAssignments(
+            withoutFeature24Features, withoutFeature24Modules,
+            withoutFeature24Methods, signatures, schema);
+        var rejected = false;
+        try
+        {
+            TrRmStructuralMetadataValidator
+                .ValidateGenericConstantFeatureAssignments(
+                    withoutFeature24Features, withoutFeature24Modules,
+                    withoutFeature24Types, withoutFeature24Methods,
+                    withoutFeature24Formals, schema);
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+        Assert.That(rejected, Is.True);
+
+        TrRmFeatureRow[] withoutFeature23 = [
+            TrRmFeatureRow.LayoutQueries,
+            TrRmFeatureRow.TypedFrozenValues,
+            TrRmFeatureRow.ConstantGenericTermsCandidate,
+        ];
+        var withoutFeature23Bytes = TrRmFeatureTableWriter.Encode(
+            withoutFeature23, schema);
+        var withoutFeature23Features = new TrRmFeatureTableReader(
+            withoutFeature23Bytes, withoutFeature23.Length, schema);
+        var withoutFeature23ModuleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1, 1,
+                withoutFeature23.Length),
+        ], names, 0, 1, 1, 0, withoutFeature23.Length);
+        var withoutFeature23Modules = new TrRmModuleTableReader(
+            withoutFeature23ModuleBytes, 1, names, 0, 1, 1, 0,
+            withoutFeature23.Length);
+        var withoutFeature23Types = new TrRmTypeDefTableReader(Type(), 1,
+            names, withoutFeature23Modules, 0, 2, 1, 0, schema);
+        var withoutFeature23Methods = new TrRmMethodDefTableReader(Method(),
+            1, names, withoutFeature23Modules, withoutFeature23Types,
+            signatures, 0, 0);
+        var withoutFeature23Formals = new TrRmGenericParamTableReader(
+            genericParamBytes, 2, names, withoutFeature23Types,
+            withoutFeature23Methods, signatures, typeSpecs, 1);
+        TrRmStructuralMetadataValidator.ValidateGenericConstantFeatureAssignments(
+            withoutFeature23Features, withoutFeature23Modules,
+            withoutFeature23Types, withoutFeature23Methods,
+            withoutFeature23Formals, schema);
+        rejected = false;
+        try
+        {
+            TrRmStructuralMetadataValidator
+                .ValidateGenericMethodFeatureAssignments(
+                    withoutFeature23Features, withoutFeature23Modules,
+                    withoutFeature23Methods, signatures, schema);
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+        Assert.That(rejected, Is.True);
+    }
+
+    [Test]
+    public void TypeDefConstantFormalRequiresFeature24ButNotFeature23()
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.GenericConstantMethodsDraft;
+        TrRmFeatureRow[] featureRows = [
+            TrRmFeatureRow.ConstantGenericTermsCandidate,
+        ];
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var features = new TrRmFeatureTableReader(featureBytes, 1, schema);
+        var names = new TrRmStringTableReader(Names(), 6);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1, 1, 1),
+        ], names, 0, 1, 0, 0, 1);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, names,
+            0, 1, 0, 0, 1);
+        var types = new TrRmTypeDefTableReader(Type(), 1, names, modules,
+            0, 1, 1, 0, schema);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0, schema);
+        _ = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+        ], types, targetProfiles, 0);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], 1, 0, 1, 0, schema);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
+            1, 0, 1, 0, schema);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(1, 0, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            typeSpecs, 0, 0);
+        var methods = new TrRmMethodDefTableReader([], 0, names, modules,
+            types, signatures, 0, 0);
+        var formal = TypeFormal with {
+            ConstraintFirst = 0,
+            ConstraintCount = 0,
+            FormalKind = 2,
+            OwnershipDomain = 0,
+            NullabilityDomain = 0,
+            ConstantTypeSpecRef = 1,
+        };
+        var formalBytes = TrRmGenericParamTableWriter.Encode([formal],
+            names, types, methods, signatures, typeSpecs, 0);
+        var genericParams = new TrRmGenericParamTableReader(formalBytes, 1,
+            names, types, methods, signatures, typeSpecs, 0);
+
+        TrRmStructuralMetadataValidator.ValidateGenericConstantFeatureAssignments(
+            features, modules, types, methods, genericParams, schema);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.GenericMethodCallsFeatureId, schema),
+            Is.False);
+    }
+
+    [Test]
     public void RejectsUnownedOrMalformedFormalsAndConstraints()
     {
         _ = Assert.Throws<ArgumentOutOfRangeException>(() => EncodeFormals([]));
