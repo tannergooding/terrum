@@ -1199,6 +1199,8 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0053, out var enumDefBytes, out var enumDefCount);
         _ = index.TryGetSection(0x0054, out var enumMemberDefBytes,
             out var enumMemberDefCount);
+        _ = index.TryGetSection(0x0065, out var transparentConstantDomainBytes,
+            out var transparentConstantDomainCount);
         _ = index.TryGetSection(0x0014, out var fieldDefBytes, out var fieldDefCount);
         _ = index.TryGetSection(0x0024, out var interfaceMethodBytes,
             out var interfaceMethodCount);
@@ -1481,6 +1483,10 @@ public static class TrRmStructuralMetadataValidator
         var fields = fieldDefCount == 0 ? default
             : new TrRmFieldDefTableReader(fieldDefBytes, fieldDefCount, strings, types,
                 typeSpecs, selectedA3LayoutResourceLedger);
+        ValidateGenericConstantCarrierFeatureAssignments(enumDefBytes,
+            enumDefCount, transparentConstantDomainBytes,
+            transparentConstantDomainCount, types, fields, typeSpecs, layouts,
+            features, modules, index.Schema, selectedA3LayoutResourceLedger);
         var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
             layoutFieldCount, layouts, types, fields,
             selectedA3LayoutResourceLedger);
@@ -2353,6 +2359,137 @@ public static class TrRmStructuralMetadataValidator
             if (!TrRmFeatureManifestValidator.Requires(features, modules,
                 ownerModule, TrRmFeatureTableReader.ConstantGenericTermsFeatureId,
                 schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
+    }
+
+    internal static void ValidateGenericConstantCarrierFeatureAssignments(
+        ReadOnlySpan<byte> enumDefBytes, int enumDefCount,
+        ReadOnlySpan<byte> transparentConstantDomainBytes,
+        int transparentConstantDomainCount,
+        TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
+        TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        if (!schema.UsesGenericConstantMethods())
+        {
+            return;
+        }
+
+        if (enumDefCount is < 0 or > 0xFF_FFFF
+            || (long)enumDefCount * 20 != enumDefBytes.Length
+            || transparentConstantDomainCount is < 0 or > 0xFF_FFFF
+            || (long)transparentConstantDomainCount * 12
+                != transparentConstantDomainBytes.Length)
+        {
+            throw InvalidMetadata();
+        }
+
+        var ledger = resourceLedger ?? features.ResourceLedger;
+        ledger?.ConsumeWork(checked((ulong)types.Count + 1UL));
+        var enumDefinitions = new bool[types.Count + 1];
+        for (var row = 1; row <= enumDefCount; row++)
+        {
+            ledger?.ConsumeWork(2);
+            var owner = BinaryPrimitives.ReadUInt32LittleEndian(
+                enumDefBytes.Slice((row - 1) * 20, sizeof(uint)));
+            if (owner == 0 || owner > (uint)types.Count
+                || types.GetKind(checked((int)owner)) != 4
+                || enumDefinitions[checked((int)owner)])
+            {
+                throw InvalidMetadata();
+            }
+
+            var ownerType = checked((int)owner);
+            enumDefinitions[ownerType] = true;
+            var module = types.GetOwnerModule(ownerType);
+            if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                module, 18, schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
+
+        for (var type = 1; type <= types.Count; type++)
+        {
+            ledger?.ConsumeWork();
+            if ((types.GetKind(type) == 4) != enumDefinitions[type])
+            {
+                throw InvalidMetadata();
+            }
+        }
+
+        ledger?.ConsumeWork(checked((ulong)types.Count + 1UL));
+        var wrapperDomains = new bool[types.Count + 1];
+        for (var row = 1; row <= transparentConstantDomainCount; row++)
+        {
+            ledger?.ConsumeWork(5);
+            var data = transparentConstantDomainBytes.Slice(
+                (row - 1) * 12, 12);
+            var owner = BinaryPrimitives.ReadUInt32LittleEndian(data);
+            var carrierTypeSpec = BinaryPrimitives.ReadUInt32LittleEndian(
+                data[4..]);
+            var carrierField = BinaryPrimitives.ReadUInt32LittleEndian(
+                data[8..]);
+            if (owner == 0 || owner > (uint)types.Count
+                || types.GetKind(checked((int)owner)) == 4
+                || wrapperDomains[checked((int)owner)]
+                || carrierField == 0 || carrierField > (uint)fields.Count)
+            {
+                throw InvalidMetadata();
+            }
+
+            var ownerType = checked((int)owner);
+            _ = typeSpecs.GetTypeSpecRef(carrierTypeSpec);
+            var field = checked((int)carrierField);
+            var (fieldStart, fieldEnd) = types.GetFieldRange(ownerType);
+            if (field < fieldStart || field >= fieldEnd
+                || fields.GetOwnerTypeDef(field) != ownerType
+                || !typeSpecs.AreEquivalentTypeSpecRefs(carrierTypeSpec,
+                    fields.GetTypeSpecRef(field)))
+            {
+                throw InvalidMetadata();
+            }
+
+            var instanceFieldCount = 0;
+            var soleInstanceField = 0;
+            for (var candidate = fieldStart; candidate < fieldEnd; candidate++)
+            {
+                ledger?.ConsumeWork();
+                if ((fields.GetFlags(candidate) & 0x08) == 0)
+                {
+                    instanceFieldCount++;
+                    soleInstanceField = candidate;
+                }
+            }
+
+            if (instanceFieldCount != 1 || soleInstanceField != field)
+            {
+                throw InvalidMetadata();
+            }
+
+            wrapperDomains[ownerType] = true;
+            var module = types.GetOwnerModule(ownerType);
+            if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                module, TrRmFeatureTableReader.ConstantGenericTermsFeatureId,
+                schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
+
+        for (var type = 1; type <= types.Count; type++)
+        {
+            ledger?.ConsumeWork();
+            if (layouts.HasBlittableVariant(type)
+                && !TrRmFeatureManifestValidator.Requires(features, modules,
+                    types.GetOwnerModule(type),
+                    TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+                    schema))
             {
                 throw InvalidMetadata();
             }

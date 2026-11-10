@@ -85,8 +85,10 @@ public readonly ref struct TrRmTypeDefTableReader
             _ = ReadName(row - 1);
             var flags = Read(row - 1, 8);
             var kind = (flags >> 2) & 7;
-            var maximumKind = schema.SupportsNominalEnums() ? 4u : 3u;
-            var flagsMask = (schema.SupportsNominalEnums() ? 0x1Fu : 0x0Fu)
+            var supportsEnumTypeDefs = schema.SupportsNominalEnums()
+                || schema.UsesGenericConstantMethods();
+            var maximumKind = supportsEnumTypeDefs ? 4u : 3u;
+            var flagsMask = (supportsEnumTypeDefs ? 0x1Fu : 0x0Fu)
                 | (schema.SupportsDeclaredCopyEvidence()
                     ? DeclaredCopyFlag : 0)
                 | (schema.SupportsDeclaredUniqueEvidence()
