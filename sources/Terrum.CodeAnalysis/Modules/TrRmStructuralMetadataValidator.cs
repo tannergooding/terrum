@@ -2513,7 +2513,7 @@ public static class TrRmStructuralMetadataValidator
         for (var type = 1; type <= types.Count; type++)
         {
             ledger?.ConsumeWork();
-            if ((types.GetKind(type) == 4) != enumDefinitions[type])
+            if (types.GetKind(type) == 4 != enumDefinitions[type])
             {
                 throw InvalidMetadata();
             }

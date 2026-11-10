@@ -202,7 +202,7 @@ internal sealed class TrRmGenericConstantFeatureMatrixTests
             context.GenericParams, context.Imports, context.ConstantSources,
             context.Features, context.Modules,
             TrRmArtifactSchema.GenericConstantMethodsDraft,
-            new HashSet<int>());
+            []);
 
     private static void ValidateGenericCallUse(Context context, int ownerModule)
     {
@@ -227,7 +227,7 @@ internal sealed class TrRmGenericConstantFeatureMatrixTests
             ownerModule, context.Types, context.TypeSpecs,
             context.GenericParams, context.Imports,
             context.ConstantSources, context.Features, context.Modules,
-            new HashSet<int>());
+            []);
     }
 
     private static Context CreateContext(bool moduleOneFormal,
@@ -347,7 +347,7 @@ internal sealed class TrRmGenericConstantFeatureMatrixTests
                 0, 0, 2, 0, 0, 1, 0));
         }
         var sourceCount = constantSourceKind == 0 ? 0 : 1;
-        var genericParamBytes = genericRows.Count == 0 ? Array.Empty<byte>()
+        var genericParamBytes = genericRows.Count == 0 ? []
             : TrRmGenericParamTableWriter.Encode(genericRows, strings, types,
                 methods, signatures, typeSpecs, 0, sourceCount);
         var genericParams = new TrRmGenericParamTableReader(
@@ -526,7 +526,7 @@ internal sealed class TrRmGenericConstantFeatureMatrixTests
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 
-    private ref struct Context(
+    private readonly ref struct Context(
         TrRmFeatureTableReader features,
         TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types,

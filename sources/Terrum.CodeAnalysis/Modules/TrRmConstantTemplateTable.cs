@@ -123,7 +123,7 @@ internal readonly ref struct TrRmConstantTemplateTableReader
             throw InvalidTemplate();
         }
 
-        if ((_methods.GetBodyRow(methodRow) == 0) != isImport)
+        if (_methods.GetBodyRow(methodRow) == 0 != isImport)
         {
             throw InvalidTemplate();
         }

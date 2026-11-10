@@ -158,7 +158,7 @@ internal sealed class TrRmGenericConstantFeatureUseTests
             context.TypeSpecs, context.Types, context.GenericParams,
             default, context.ConstantSources, context.Features,
             context.Modules, TrRmArtifactSchema.GenericConstantMethodsDraft,
-            new HashSet<int>());
+            []);
     }
 
     private static void ValidateSourceUse(bool includeFeature24,
@@ -191,7 +191,7 @@ internal sealed class TrRmGenericConstantFeatureUseTests
             context.TypeSpecs, context.Types, context.GenericParams, default,
             context.ConstantSources, context.Features, context.Modules,
             TrRmArtifactSchema.GenericConstantMethodsDraft,
-            new HashSet<int>());
+            []);
     }
 
     private static void ValidateBodyTypeMap(bool includeFeature24)
@@ -199,8 +199,8 @@ internal sealed class TrRmGenericConstantFeatureUseTests
         var context = CreateContext(includeFeature24, constantSourceKind: 1);
         var typeMap = new byte[sizeof(uint)];
         Write(typeMap, 0, 0x1100_0003);
-        ValidateBody(context, typeMap, Array.Empty<byte>(),
-            Array.Empty<byte>(), []);
+        ValidateBody(context, typeMap, [],
+            [], []);
     }
 
     private static void ValidateBodyConstantMap(bool includeFeature24,
@@ -210,7 +210,7 @@ internal sealed class TrRmGenericConstantFeatureUseTests
         var constantMap = new byte[2 * sizeof(uint)];
         Write(constantMap, 0, 1);
         Write(constantMap, sizeof(uint), 1);
-        ValidateBody(context, Array.Empty<byte>(), Array.Empty<byte>(),
+        ValidateBody(context, [], [],
             constantMap, []);
     }
 
@@ -227,8 +227,8 @@ internal sealed class TrRmGenericConstantFeatureUseTests
         var target = TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
             1, 0, 0, 0, 0,
             [new TrRmRegisterBodyGenericCallArgument(2, 1)], schema);
-        ValidateBody(context, Array.Empty<byte>(), methodMap,
-            Array.Empty<byte>(),
+        ValidateBody(context, [], methodMap,
+            [],
             [callSite, target]);
     }
 
@@ -257,7 +257,7 @@ internal sealed class TrRmGenericConstantFeatureUseTests
         TrRmGenericConstantFeatureUseValidator.ValidateBody(body, 1,
             context.Types, context.TypeSpecs, context.GenericParams, default,
             context.ConstantSources, context.Features, context.Modules,
-            new HashSet<int>());
+            []);
     }
 
     private static Context CreateContext(bool includeFeature24,
@@ -344,7 +344,7 @@ internal sealed class TrRmGenericConstantFeatureUseTests
         var strings = new TrRmStringTableReader(stringBytes, 4);
         var featureRows = includeFeature24
             ? new[] { TrRmFeatureRow.ConstantGenericTermsCandidate }
-            : Array.Empty<TrRmFeatureRow>();
+            : [];
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
@@ -409,7 +409,7 @@ internal sealed class TrRmGenericConstantFeatureUseTests
         var strings = new TrRmStringTableReader(stringsBytes, 4);
         var featureRows = includeFeature24
             ? new[] { TrRmFeatureRow.ConstantGenericTermsCandidate }
-            : Array.Empty<TrRmFeatureRow>();
+            : [];
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
@@ -438,9 +438,9 @@ internal sealed class TrRmGenericConstantFeatureUseTests
         var constantSources = TrRmConstantSourceTableWriter.Encode([
             new TrRmConstantSourceRow(5, 1),
         ], 0, 0, 0, 0, 1, schema);
-        byte[] constantMap = useTemplate
+        var constantMap = useTemplate
             ? new byte[2 * sizeof(uint)]
-            : Array.Empty<byte>();
+            : [];
         if (useTemplate)
         {
             Write(constantMap, 0, 1);
@@ -482,7 +482,7 @@ internal sealed class TrRmGenericConstantFeatureUseTests
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 
-    private ref struct Context(
+    private readonly ref struct Context(
         TrRmFeatureTableReader features,
         TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types,

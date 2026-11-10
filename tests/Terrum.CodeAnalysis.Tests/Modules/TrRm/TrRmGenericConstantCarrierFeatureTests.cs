@@ -53,7 +53,7 @@ internal sealed class TrRmGenericConstantCarrierFeatureTests
             = TrRmArtifactSchema.GenericConstantMethodsDraft;
         var featureRows = includeFeature18
             ? new[] { new TrRmFeatureRow(18, 1) }
-            : Array.Empty<TrRmFeatureRow>();
+            : [];
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
         var features = new TrRmFeatureTableReader(featureBytes,
             featureRows.Length, schema);
