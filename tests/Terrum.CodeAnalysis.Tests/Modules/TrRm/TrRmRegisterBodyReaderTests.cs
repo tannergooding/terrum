@@ -42,6 +42,104 @@ internal sealed class TrRmRegisterBodyReaderTests
                 TrRmArtifactSchema.Standard));
     }
 
+    [Test]
+    public void ReadsGenericCallTargetOnlyUnderGenericMethodCallsSchema()
+    {
+        const TrRmArtifactSchema schema
+                = TrRmArtifactSchema.GenericMethodCallsDraft;
+        var target = CreateTarget(1, 0, 0, 0, 0, 0, []);
+        var body = CreateBody(target, schema);
+        var reader = new TrRmRegisterBodyReader(body, schema: schema);
+
+        var writtenTarget =
+            TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
+                1, 0, 0, 0, 0, [],
+                TrRmArtifactSchema.GenericMethodCallsDraft);
+        Assert.That(writtenTarget, Has.Length.EqualTo(20));
+        Assert.That(new TrRmRegisterBodyReader(
+                CreateBody(writtenTarget, schema), schema: schema)
+            .GetRecord(2).SequenceEqual(writtenTarget), Is.True);
+        Assert.That(reader.GetRecord(1)[0], Is.EqualTo(0x02));
+        Assert.That(reader.GetRecord(2)[0], Is.EqualTo(0x10));
+        Assert.That(reader.GetRecord(1)[4], Is.EqualTo(4));
+
+        var typeActual = new byte[] { 1, 0, 0, 0, 0x08, 0x00, 0x00, 0xF2 };
+        var typeActualTarget = CreateTarget(1, 0, 0, 0, 0, 1,
+                typeActual);
+        _ = new TrRmRegisterBodyReader(CreateBody(typeActualTarget, schema),
+                schema: schema);
+        var writtenTypeActual =
+            TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
+                1, 0, 0, 0, 0,
+                [new TrRmRegisterBodyGenericCallArgument(
+                    1, 0xF200_0008)],
+                schema);
+        Assert.That(writtenTypeActual, Has.Length.EqualTo(28));
+        _ = new TrRmRegisterBodyReader(CreateBody(writtenTypeActual, schema),
+            schema: schema);
+
+        _ = Assert.Throws<InvalidDataException>(() => CreateBody(
+                CreateTarget(1, 0, 0, 0, 1, 1, typeActual), schema));
+        _ = Assert.Throws<InvalidDataException>(() => CreateBody(
+                CreateTarget(1, 1, 0, 0, 0, 0, []), schema));
+        _ = Assert.Throws<InvalidDataException>(() => CreateBody(
+                CreateTarget(2, 1, 0, 0, 1, 0, []), schema));
+        _ = Assert.Throws<InvalidDataException>(() =>
+                CreateBody(target, schema, targetIndex: 1));
+        _ = Assert.Throws<InvalidDataException>(() =>
+                CreateBody(target, schema, methodMapCount: 0));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                TrRmRegisterBodyRecordWriter.EncodeCallSite(4, 0, 2, 0,
+                    [], []));
+        _ = Assert.Throws<InvalidDataException>(() => CreateBody(
+                [.. target, 0, 0, 0, 0], schema));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
+                1, 0, 0, 0, 0, [],
+                TrRmArtifactSchema.Standard));
+
+        static byte[] CreateTarget(byte role, byte evidenceKind,
+                ushort methodMapIndex, uint ownerTypeSpec, uint evidenceReference,
+                uint argumentCount, byte[] arguments)
+        {
+                var record = new byte[20 + arguments.Length];
+                record[0] = 0x10;
+                record[4] = role;
+                record[5] = evidenceKind;
+                BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(6),
+                    methodMapIndex);
+                BinaryPrimitives.WriteUInt32LittleEndian(record.AsSpan(8),
+                    ownerTypeSpec);
+                BinaryPrimitives.WriteUInt32LittleEndian(record.AsSpan(12),
+                    evidenceReference);
+                BinaryPrimitives.WriteUInt32LittleEndian(record.AsSpan(16),
+                    argumentCount);
+                arguments.CopyTo(record, 20);
+                return record;
+        }
+
+        static byte[] CreateBody(byte[] target,
+                TrRmArtifactSchema selectedSchema, ushort targetIndex = 2,
+                int methodMapCount = 1)
+        {
+                var entryState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+                var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+                    4, 0, targetIndex, 0, [], [], schema: selectedSchema);
+                var methodMap = new byte[methodMapCount * sizeof(uint)];
+                if (methodMapCount != 0)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(methodMap,
+                        0x1600_0001);
+                }
+                byte[] code = [0x90, 1, 0x18, 0];
+                return TrRmRegisterBodyWriter.Encode(default, default,
+                    methodMap, default, default,
+                    [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+                    [entryState, callSite, target], code,
+                    schema: selectedSchema);
+        }
+    }
+
     [TestCase(0x00)]
     [TestCase(0x01)]
     [TestCase(0x02)]

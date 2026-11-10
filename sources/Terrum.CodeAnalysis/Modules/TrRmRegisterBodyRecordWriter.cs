@@ -9,6 +9,9 @@ namespace Terrum.CodeAnalysis.Modules;
 internal readonly record struct TrRmRegisterBodyCallInput(
     byte SelectorKind, byte SourceUse, ushort SelectorIndex);
 
+internal readonly record struct TrRmRegisterBodyGenericCallArgument(
+    byte Kind, uint Reference);
+
 internal static class TrRmRegisterBodyRecordWriter
 {
     private const int RecordHeaderSize = 4;
@@ -322,7 +325,8 @@ internal static class TrRmRegisterBodyRecordWriter
     {
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(preparations);
-        if (targetKind is < 1 or > 3)
+        if ((targetKind is < 1 or > 3)
+            && !(targetKind == 4 && schema.UsesGenericMethodCalls()))
         {
             throw new ArgumentOutOfRangeException(nameof(targetKind));
         }
@@ -400,6 +404,78 @@ internal static class TrRmRegisterBodyRecordWriter
         return result;
     }
 
+    internal static byte[] EncodeGenericCallTarget(byte targetRole,
+        byte evidenceKind, ushort methodMapIndex, uint ownerTypeSpec,
+        uint evidenceReference,
+        IReadOnlyList<TrRmRegisterBodyGenericCallArgument> arguments,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        if (!schema.UsesGenericMethodCalls())
+        {
+            throw new ArgumentException(
+                "The selected schema does not admit generic method calls.",
+                nameof(schema));
+        }
+        if (targetRole is not (1 or 2) || evidenceKind > 3
+            || (targetRole == 1
+                && (evidenceKind != 0 || evidenceReference != 0))
+            || (targetRole == 2
+                && (evidenceKind == 0 || ownerTypeSpec == 0
+                    || evidenceReference == 0))
+            || (evidenceKind == 0 && evidenceReference != 0)
+            || (ownerTypeSpec != 0
+                && !IsPotentialTypeSpecRef(ownerTypeSpec))
+            || evidenceReference > 0x00FF_FFFF
+            || arguments.Count > 0x00FF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetRole));
+        }
+
+        foreach (var argument in arguments)
+        {
+            resourceLedger?.ConsumeWork();
+            if (argument.Reference == 0
+                || argument.Kind is not (1 or 2 or 3)
+                || (argument.Kind == 1
+                    ? !IsPotentialTypeSpecRef(argument.Reference)
+                    : argument.Reference > 0x00FF_FFFF))
+            {
+                throw new ArgumentException(
+                    "Invalid generic method argument reference.",
+                    nameof(arguments));
+            }
+        }
+
+        var payloadLength = 16L + ((long)arguments.Count * 8);
+        if (payloadLength > int.MaxValue - RecordHeaderSize)
+        {
+            throw new ArgumentOutOfRangeException(nameof(arguments));
+        }
+
+        var recordLength = checked((int)(RecordHeaderSize + payloadLength));
+        resourceLedger?.ConsumeWork(checked((ulong)recordLength + 1UL));
+        var result = new byte[recordLength];
+        result[0] = 0x10;
+        var payloadOffset = RecordHeaderSize;
+        result[payloadOffset] = targetRole;
+        result[payloadOffset + 1] = evidenceKind;
+        Write(result, payloadOffset + 2, methodMapIndex);
+        Write(result, payloadOffset + 4, ownerTypeSpec);
+        Write(result, payloadOffset + 8, evidenceReference);
+        Write(result, payloadOffset + 12, checked((uint)arguments.Count));
+        payloadOffset += 16;
+        foreach (var argument in arguments)
+        {
+            result[payloadOffset] = argument.Kind;
+            Write(result, payloadOffset + 4, argument.Reference);
+            payloadOffset += 8;
+        }
+
+        return result;
+    }
+
     internal static byte[] EncodeNativeOutputReservation(
         ushort callSiteRecordIndex, ushort destinationHomeIndex,
         uint formalOrdinal,
@@ -419,4 +495,16 @@ internal static class TrRmRegisterBodyRecordWriter
 
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+
+    private static bool IsPotentialTypeSpecRef(uint typeSpecRef)
+    {
+        var form = (byte)(typeSpecRef >> 24);
+        return form switch
+        {
+            0 => (typeSpecRef & 0x00FF_FFFF) != 0,
+            0xF2 => (typeSpecRef & 0x00FF_FF00) == 0,
+            0xF3 => true,
+            _ => false,
+        };
+    }
 }

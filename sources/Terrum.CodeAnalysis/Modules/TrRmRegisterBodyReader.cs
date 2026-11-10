@@ -59,7 +59,8 @@ internal readonly ref struct TrRmRegisterBodyReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
-                or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                or TrRmArtifactSchema.GenericMethodCallsDraft))
         {
             throw InvalidBody();
         }
@@ -1098,9 +1099,12 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     private void ValidateRecord(ReadOnlySpan<byte> record)
     {
-        var maximumRecordKind = _schema.UsesRegisterExceptionRegions()
-            ? 0x0F
-            : _schema.UsesForeignInvocationStorageAddresses() ? 0x0E : 0x0D;
+        var maximumRecordKind = _schema.UsesGenericMethodCalls()
+            ? 0x10
+            : _schema.UsesRegisterExceptionRegions()
+                ? 0x0F
+                : _schema.UsesForeignInvocationStorageAddresses()
+                    ? 0x0E : 0x0D;
         if (record.Length < RecordHeaderSize || record[0] is < 0x01
             || record[0] > maximumRecordKind
             || record[1] != 0 || ReadUInt16(record, 2) != 0)
@@ -1277,7 +1281,74 @@ internal readonly ref struct TrRmRegisterBodyReader
                     throw InvalidBody();
                 }
                 break;
+            case 0x10:
+                if (!_schema.UsesGenericMethodCalls())
+                {
+                    throw InvalidBody();
+                }
+                ValidateGenericCallTarget(payload);
+                break;
         }
+    }
+
+    private void ValidateGenericCallTarget(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 16
+            || payload[0] is not (1 or 2)
+            || payload[1] > 3
+            || ReadUInt16(payload, 2) >= MethodCount)
+        {
+            throw InvalidBody();
+        }
+
+        var targetRole = payload[0];
+        var evidenceKind = payload[1];
+        var ownerTypeSpec = ReadUInt32(payload, 4);
+        var evidenceReference = ReadUInt32(payload, 8);
+        var argumentCount = ReadUInt32(payload, 12);
+        if ((targetRole == 1
+                && (evidenceKind != 0 || evidenceReference != 0))
+            || (targetRole == 2
+                && (evidenceKind == 0 || ownerTypeSpec == 0
+                    || evidenceReference == 0))
+            || (evidenceKind == 0 && evidenceReference != 0)
+            || (ownerTypeSpec != 0
+                && !IsPotentialTypeSpecRef(ownerTypeSpec))
+            || evidenceReference > 0x00FF_FFFF
+            || argumentCount > 0x00FF_FFFF
+            || 16L + (8L * argumentCount) != payload.Length)
+        {
+            throw InvalidBody();
+        }
+
+        for (var argument = 0; argument < argumentCount; argument++)
+        {
+            _resourceLedger?.ConsumeWork();
+            var offset = checked(16 + (checked((int)argument) * 8));
+            var argumentKind = payload[offset];
+            var flags = payload[offset + 1];
+            var reserved = ReadUInt16(payload, offset + 2);
+            var argumentReference = ReadUInt32(payload, offset + 4);
+            if (flags != 0 || reserved != 0 || argumentReference == 0
+                || argumentKind is not (1 or 2 or 3)
+                || (argumentKind == 1
+                    ? !IsPotentialTypeSpecRef(argumentReference)
+                    : argumentReference > 0x00FF_FFFF))
+            {
+                throw InvalidBody();
+            }
+        }
+    }
+
+    private static bool IsPotentialTypeSpecRef(uint typeSpecRef)
+    {
+        var form = (byte)(typeSpecRef >> 24);
+        return form switch {
+            0 => (typeSpecRef & 0x00FF_FFFF) != 0,
+            0xF2 => (typeSpecRef & 0x00FF_FF00) == 0,
+            0xF3 => true,
+            _ => false,
+        };
     }
 
     private void ValidateStorageAddress(ReadOnlySpan<byte> payload)
@@ -1428,7 +1499,10 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     private void ValidateCallSite(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length < 16 || payload[0] is < 1 or > 3
+        if (payload.Length < 16
+            || ((payload[0] is < 1 or > 3)
+                && !(payload[0] == 4
+                    && _schema.UsesGenericMethodCalls()))
             || payload[1] > 2 || ReadUInt16(payload, 2) != 0)
         {
             throw InvalidBody();
@@ -1441,6 +1515,9 @@ internal readonly ref struct TrRmRegisterBodyReader
         if ((payload[0] == 1 && targetIndex >= MethodCount)
             || (payload[0] == 2 && targetIndex > 13)
             || (payload[0] == 3 && targetIndex >= HomeCount)
+            || (payload[0] == 4
+                && (targetIndex >= _recordCount
+                    || GetRecord(targetIndex)[0] != 0x10))
             || (payload[1] == 1 && resultIndex is > 15 or 14)
             || (payload[1] == 2 && resultIndex >= HomeCount)
             || (payload[1] == 0 && resultIndex != 0)
