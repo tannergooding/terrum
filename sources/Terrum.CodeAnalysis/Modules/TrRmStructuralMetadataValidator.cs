@@ -287,7 +287,8 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.NominalEnumsDraft
                     or TrRmArtifactSchema.RootPinRuntimeDraft
                     or TrRmArtifactSchema.GeneralPredicateGraphsDraft
-                    or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
+                    or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                    or TrRmArtifactSchema.GenericMethodCallsDraft)
                 || methodDefRow <= 0 || methodDefRow > Methods.Count)
             {
                 throw InvalidMetadata();
@@ -1498,6 +1499,8 @@ public static class TrRmStructuralMetadataValidator
         var methods = new TrRmMethodDefTableReader(methodDefBytes, methodDefCount,
             strings, modules, types, signatures, contractCount, bodyCount,
             selectedA3LayoutResourceLedger);
+        ValidateGenericMethodFeatureAssignments(features, modules, methods,
+            signatures, index.Schema);
         var eagerGroups = index.Schema.UsesGeneralPredicateGraphs()
             ? new TrRmEagerGroupTableReader(eagerGroupBytes, eagerGroupCount,
                 typeDefCount, eagerInitializerCount, methodDefCount, index.Schema)
@@ -2288,6 +2291,33 @@ public static class TrRmStructuralMetadataValidator
                 constantExecutionUses, features, modules, index.Schema);
         }
         return executionTables;
+    }
+
+    internal static void ValidateGenericMethodFeatureAssignments(
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesGenericMethodCalls())
+        {
+            return;
+        }
+
+        var resourceLedger = features.ResourceLedger;
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            resourceLedger?.ConsumeWork();
+            var signature = methods.GetSignature(method);
+            if (signatures.GetGenericCount(signature) != 0
+                && !TrRmFeatureManifestValidator.Requires(features, modules,
+                    methods.GetOwnerModule(method),
+                    TrRmFeatureTableReader.GenericMethodCallsFeatureId,
+                    schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
     }
 
     private static void ValidateNominalEnumFeatureAssignments(

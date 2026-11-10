@@ -76,6 +76,77 @@ internal sealed class TrRmGenericParamTableWriterTests
     }
 
     [Test]
+    public void GenericMethodFormalsRequireFeatureInTheirOwningModule()
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.GenericMethodCallsDraft;
+        var featureRows = new[]
+        {
+            TrRmFeatureRow.LayoutQueries,
+            TrRmFeatureRow.TypedFrozenValues,
+            TrRmFeatureRow.GenericMethodCallsCandidate,
+        };
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var features = new TrRmFeatureTableReader(featureBytes,
+            featureRows.Length, schema);
+        var names = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("Widget", 0), ("Build", 0), ("T", 0),
+            ("U", 0), ("Other", 0),
+        ]);
+        var strings = new TrRmStringTableReader(names, 7);
+        var specs = new TrRmTypeSpecTableReader(Spec(), 1, 1, 0, 2, 0,
+            schema);
+        var signatures = new TrRmMethodSigTableReader(Signature(), 1,
+            specs, 0, 2);
+
+        var modulesWithFeature = CreateModules(strings,
+            includeGenericMethodFeature: true);
+        var typesWithFeature = new TrRmTypeDefTableReader(Type(), 1, strings,
+            modulesWithFeature, 0, 2, 1, 0);
+        var methodsWithFeature = new TrRmMethodDefTableReader(Method(), 1,
+            strings, modulesWithFeature, typesWithFeature, signatures, 0, 0);
+        TrRmStructuralMetadataValidator.ValidateGenericMethodFeatureAssignments(
+            features, modulesWithFeature, methodsWithFeature, signatures,
+            schema);
+
+        var modulesWithoutFeature = CreateModules(strings,
+            includeGenericMethodFeature: false);
+        var typesWithoutFeature = new TrRmTypeDefTableReader(Type(), 1,
+            strings, modulesWithoutFeature, 0, 2, 1, 0);
+        var methodsWithoutFeature = new TrRmMethodDefTableReader(Method(), 1,
+            strings, modulesWithoutFeature, typesWithoutFeature, signatures,
+            0, 0);
+        var rejected = false;
+        try
+        {
+            TrRmStructuralMetadataValidator
+                .ValidateGenericMethodFeatureAssignments(features,
+                    modulesWithoutFeature, methodsWithoutFeature, signatures,
+                    schema);
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+        Assert.That(rejected, Is.True);
+
+        static TrRmModuleTableReader CreateModules(
+            TrRmStringTableReader strings, bool includeGenericMethodFeature)
+        {
+            TrRmModuleRow[] rows = includeGenericMethodFeature
+                ? [new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1, 1, 3)]
+                : [
+                    new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1, 1, 2),
+                    new TrRmModuleRow(7, 1, 0, 0, 1, 2, 2, 1, 3, 1),
+                ];
+            var moduleBytes = TrRmModuleTableWriter.Encode(rows, strings,
+                0, 1, 1, 0, 3);
+            return new TrRmModuleTableReader(moduleBytes, rows.Length,
+                strings, 0, 1, 1, 0, 3);
+        }
+    }
+
+    [Test]
     public void RejectsUnownedOrMalformedFormalsAndConstraints()
     {
         _ = Assert.Throws<ArgumentOutOfRangeException>(() => EncodeFormals([]));
