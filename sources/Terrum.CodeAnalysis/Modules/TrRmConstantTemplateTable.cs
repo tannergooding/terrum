@@ -168,7 +168,17 @@ internal readonly ref struct TrRmConstantTemplateTableReader
                     throw InvalidTemplate();
                 }
 
-                _ = _constantSources.GetKind(checked((int)reference));
+                var sourceRow = checked((int)reference);
+                var sourceKind = _constantSources.GetKind(sourceRow);
+                if (sourceKind == 4)
+                {
+                    var formal = checked((int)
+                        _constantSources.GetPayloadReference(sourceRow));
+                    if (_genericParams.GetFormalKind(formal) != 2)
+                    {
+                        throw InvalidTemplate();
+                    }
+                }
             }
 
             if (_genericParams.GetFormalKind(formalRange.Start + (int)ordinal) != kind)

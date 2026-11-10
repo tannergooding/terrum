@@ -13,6 +13,8 @@ public static class TrRmStructuralMetadataValidator
 {
     internal readonly ref struct ValidatedExecutionTables
     {
+        private readonly HashSet<int>[] _genericConstantFeatureTypeSpecRows;
+
         internal ValidatedExecutionTables(TrRmStringTableReader strings,
             TrRmFeatureTableReader features,
             TrRmModuleTableReader modules, TrRmModuleRefTableReader moduleRefs,
@@ -181,6 +183,12 @@ public static class TrRmStructuralMetadataValidator
             Exports = exports;
             Schema = schema;
             A3LayoutResourceLedger = a3LayoutResourceLedger;
+            a3LayoutResourceLedger?.ConsumeWork(
+                checked((ulong)modules.Count + 1UL));
+            _genericConstantFeatureTypeSpecRows
+                = schema.UsesGenericConstantMethods()
+                    ? new HashSet<int>[modules.Count + 1]
+                    : [];
         }
 
         internal TrRmStringTableReader Strings { get; }
@@ -497,6 +505,43 @@ public static class TrRmStructuralMetadataValidator
                 ValidateTypeSpecModuleContext(TextCaptureShapes.GetTypeSpecRef(row),
                     TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
             }
+
+            for (var row = 1; row <= InterfaceConstDefs.Count; row++)
+            {
+                var ownerInterface = InterfaceConstDefs.GetOwnerInterfaceDef(row);
+                var ownerType = Interfaces.GetOwnerTypeDef(ownerInterface);
+                TrRmGenericConstantFeatureUseValidator.ValidateConstantSourceUse(
+                    InterfaceConstDefs.GetConstantSourceRow(row),
+                    TypeDefs.GetOwnerModule(ownerType), ConstantSources,
+                    GenericParams, Features, Modules, Schema);
+            }
+
+            if (Schema.UsesGenericConstantMethods())
+            {
+                for (var method = 1; method <= Methods.Count; method++)
+                {
+                    var bodyRow = Methods.GetBodyRow(method);
+                    if (bodyRow == 0)
+                    {
+                        continue;
+                    }
+
+                    var ownerModule = Methods.GetOwnerModule(method);
+                    var visited = _genericConstantFeatureTypeSpecRows[ownerModule];
+                    if (visited is null)
+                    {
+                        A3LayoutResourceLedger?.ConsumeWork();
+                        visited = new HashSet<int>();
+                        _genericConstantFeatureTypeSpecRows[ownerModule]
+                            = visited;
+                    }
+
+                    var body = Bodies.GetRegisterBody(bodyRow, Contracts.Count);
+                    TrRmGenericConstantFeatureUseValidator.ValidateBody(body,
+                        ownerModule, TypeDefs, TypeSpecs, GenericParams,
+                        Imports, ConstantSources, Features, Modules, visited);
+                }
+            }
         }
 
         private void ValidateTypeSpecModuleContext(uint typeSpecRef, int ownerModule,
@@ -508,6 +553,24 @@ public static class TrRmStructuralMetadataValidator
             }
 
             ValidateFixedArrayLayoutContext(typeSpecRef, ownerModule);
+            if (Schema.UsesGenericConstantMethods())
+            {
+                var constantFeatureVisited
+                    = _genericConstantFeatureTypeSpecRows[ownerModule];
+                if (constantFeatureVisited is null)
+                {
+                    A3LayoutResourceLedger?.ConsumeWork();
+                    constantFeatureVisited = new HashSet<int>();
+                    _genericConstantFeatureTypeSpecRows[ownerModule]
+                        = constantFeatureVisited;
+                }
+
+                TrRmGenericConstantFeatureUseValidator.ValidateTypeSpec(
+                    typeSpecRef, ownerModule, TypeSpecs, TypeDefs,
+                    GenericParams, Imports, ConstantSources, Features,
+                    Modules, Schema, constantFeatureVisited);
+            }
+
             var visited = visitedTypeSpecRows[ownerModule];
             if (visited is null)
             {
@@ -1288,6 +1351,8 @@ public static class TrRmStructuralMetadataValidator
             out var associatedRelationCount);
         _ = index.TryGetSection(0x003F, out var frozenValueNodeBytes,
             out var frozenValueNodeCount);
+        _ = index.TryGetSection(0x0064, out var constantTemplateBytes,
+            out var constantTemplateCount);
         _ = index.TryGetSection(0x0040, out _, out var frozenValueChildCount);
         _ = index.TryGetSection(0x0042, out var constantExecutionBytes,
             out var constantExecutionCount);
@@ -1701,7 +1766,12 @@ public static class TrRmStructuralMetadataValidator
             }
             constantSources = new TrRmConstantSourceTableReader(constantSourceBytes,
                 constantSourceCount, frozenValueNodeCount, constantExecutionCount,
-                targetValueBindingCount, selectedA3LayoutResourceLedger);
+                targetValueBindingCount, genericParamCount,
+                constantTemplateCount, index.Schema,
+                selectedA3LayoutResourceLedger);
+            TrRmGenericConstantFeatureUseValidator.ValidateConstantSourceRows(
+                constantSources, generics, index.Schema,
+                selectedA3LayoutResourceLedger);
             if (index.Schema.UsesGeneralPredicateGraphs())
             {
                 constantExecutionSubstitutions
@@ -1723,6 +1793,15 @@ public static class TrRmStructuralMetadataValidator
                 index.Schema, associatedConstDefs, staticFields,
                 staticFieldContracts, intrinsicRegistrations,
                 selectedA3LayoutResourceLedger);
+            if (index.Schema.UsesGenericConstantMethods()
+                && constantTemplateCount != 0)
+            {
+                _ = new TrRmConstantTemplateTableReader(
+                    constantTemplateBytes, constantTemplateCount, methods,
+                    imports, signatures, generics, typeSpecs, constantSources,
+                    targetProfiles, index.Schema,
+                    selectedA3LayoutResourceLedger);
+            }
             associatedRelations = new TrRmAssociatedRelationTableReader(
                 associatedRelationBytes, associatedRelationCount, typeSpecs,
                 associatedTypeDefs.Count, imports,
@@ -1758,6 +1837,10 @@ public static class TrRmStructuralMetadataValidator
                 }
                 else
                 {
+                    TrRmGenericConstantFeatureUseValidator
+                        .ValidateConstantSourceUse(sourceRow, ownerModule,
+                            constantSources, generics, features, modules,
+                            index.Schema);
                     TrRmConstantSourceValueValidator.ValidateFrozenScalar(
                         sourceRow, generics.GetConstantTypeSpecRef(formal),
                         ownerModule, constantSources, frozenValueNodes, blobs,
@@ -1786,6 +1869,10 @@ public static class TrRmStructuralMetadataValidator
                 }
                 else
                 {
+                    TrRmGenericConstantFeatureUseValidator
+                        .ValidateConstantSourceUse(sourceRow, ownerModule,
+                            constantSources, generics, features, modules,
+                            index.Schema);
                     TrRmConstantSourceValueValidator.ValidateFrozenScalar(
                         sourceRow,
                         interfaceConstDefs.GetConstantTypeSpecRef(row),

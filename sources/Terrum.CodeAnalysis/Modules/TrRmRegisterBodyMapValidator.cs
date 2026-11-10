@@ -128,7 +128,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmFrozenValueNodeTableReader frozenValueNodes,
         TrRmBlobTableReader blobs,
         TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
-        TrRmTargetProfileTableReader targetProfiles)
+        TrRmTargetProfileTableReader targetProfiles,
+        HashSet<int> genericConstantFeatureTypeSpecRows)
     {
         internal TrRmFeatureTableReader Features { get; } = features;
         internal TrRmModuleTableReader Modules { get; } = modules;
@@ -142,6 +143,8 @@ internal static class TrRmRegisterBodyMapValidator
             = fixedArrayLayouts;
         internal TrRmTargetProfileTableReader TargetProfiles { get; }
             = targetProfiles;
+        internal HashSet<int> GenericConstantFeatureTypeSpecRows { get; }
+            = genericConstantFeatureTypeSpecRows;
     }
 
     private readonly record struct PlaceHandleOrigin(
@@ -284,9 +287,13 @@ internal static class TrRmRegisterBodyMapValidator
         ConsumeWork(body);
         var visitedTypeSpecRows = new HashSet<int>();
         ConsumeWork(body);
+        var genericConstantFeatureTypeSpecRows = new HashSet<int>();
         var constantValues = new ConstantSourceValueContext(features, modules,
             types, enumDefs, imports, constantSources, frozenValueNodes, blobs,
-            fixedArrayLayouts, targetProfiles);
+            fixedArrayLayouts, targetProfiles,
+            genericConstantFeatureTypeSpecRows);
+        ValidateGenericConstantCallFeatures(body, ownerModule, types,
+            typeSpecs, genericParams, imports, constantValues);
         ConsumeWork(body);
         ValidateHomeMap(body, methodDefRow, ownerModule, types, methods, signatures,
             parameters, typeSpecs, genericParams, imports, constantValues,
@@ -1086,12 +1093,47 @@ internal static class TrRmRegisterBodyMapValidator
                 throw InvalidMap();
             }
 
+            TrRmGenericConstantFeatureUseValidator.ValidateConstantSourceUse(
+                checked((int)sourceRow), ownerModule,
+                constantValues.ConstantSources, genericParams,
+                constantValues.Features, constantValues.Modules, body.Schema);
             TrRmConstantSourceValueValidator.ValidateFrozenScalar(
                 checked((int)sourceRow), mapTypeSpecRef, ownerModule,
                 constantValues.ConstantSources, constantValues.FrozenValueNodes,
                 constantValues.Blobs, typeSpecs, constantValues.Features,
                 constantValues.Modules, constantValues.TypeDefs,
                 constantValues.EnumDefs, constantValues.Imports);
+        }
+    }
+
+    private static void ValidateGenericConstantCallFeatures(
+        TrRmRegisterBodyReader body, int ownerModule,
+        TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports,
+        ConstantSourceValueContext constantValues)
+    {
+        if (!body.Schema.UsesGenericConstantMethods()
+            || !body.HasGenericCallTargets)
+        {
+            return;
+        }
+
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            ConsumeWork(body);
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x10)
+            {
+                continue;
+            }
+
+            TrRmGenericConstantFeatureUseValidator.ValidateGenericCall(
+                record[4..], ownerModule, typeSpecs, types, genericParams,
+                imports, constantValues.ConstantSources,
+                constantValues.Features, constantValues.Modules, body.Schema,
+                constantValues.GenericConstantFeatureTypeSpecRows);
         }
     }
 
@@ -1134,6 +1176,11 @@ internal static class TrRmRegisterBodyMapValidator
         ConstantSourceValueContext constantValues,
         HashSet<int> visitedTypeSpecRows)
     {
+        TrRmGenericConstantFeatureUseValidator.ValidateTypeSpec(typeSpecRef,
+            ownerModule, typeSpecs, types, genericParams, imports,
+            constantValues.ConstantSources, constantValues.Features,
+            constantValues.Modules, typeSpecs.Schema,
+            constantValues.GenericConstantFeatureTypeSpecRows);
         var typeSpec = typeSpecs.GetTypeSpecRef(typeSpecRef);
         if (!typeSpec.IsRow)
         {
