@@ -28,6 +28,8 @@ internal enum TrRmArtifactSchema
     RootPinRuntimeDraft,
     GeneralPredicateGraphsDraft,
     RegisterExceptionRegionsDraft,
+    GenericMethodCallsDraft,
+    GenericConstantMethodsDraft,
 }
 
 internal static class TrRmArtifactSchemaFacts
@@ -48,6 +50,10 @@ internal static class TrRmArtifactSchemaFacts
 
     internal static bool SupportsNominalEnums(this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.NominalEnumsDraft;
+
+    internal static bool UsesGenericConstantMethods(
+        this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.GenericConstantMethodsDraft;
 
     internal static bool SupportsDeclaredCopyEvidence(
         this TrRmArtifactSchema schema) =>
@@ -71,6 +77,8 @@ internal static class TrRmArtifactSchemaFacts
         schema is TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericConstantMethodsDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
@@ -99,6 +107,11 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool UsesRegisterExceptionRegions(
         this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.RegisterExceptionRegionsDraft;
+
+    internal static bool UsesGenericMethodCalls(
+        this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericConstantMethodsDraft;
 
     internal static bool UsesForeignInvocationContracts(
         this TrRmArtifactSchema schema) =>
@@ -203,7 +216,9 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
-            or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
+            or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+            or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidArtifact();
         }
@@ -261,8 +276,8 @@ public readonly ref struct TrRmArtifactIndex
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
         _schema = schema;
-        ConsumeWork(0x5E + 1);
-        Span<uint> sectionCounts = stackalloc uint[0x5E + 1];
+        ConsumeWork(0x65 + 1);
+        Span<uint> sectionCounts = stackalloc uint[0x65 + 1];
         sectionCounts.Clear();
         var previousKind = 0;
         // Keep directory-ordered payloads allocation-free while retaining support for alternate layouts.
@@ -370,7 +385,7 @@ public readonly ref struct TrRmArtifactIndex
             }
 
             ConsumeWork();
-            if (kind <= 0x005E)
+            if (kind <= 0x0065)
             {
                 ConsumeWork();
                 sectionCounts[kind] = count;
@@ -593,6 +608,14 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForRegisterExceptionRegionsDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.RegisterExceptionRegionsDraft);
+
+    internal static TrRmArtifactIndex ForGenericMethodCallsDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.GenericMethodCallsDraft);
+
+    internal static TrRmArtifactIndex ForGenericConstantMethodsDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.GenericConstantMethodsDraft);
 
     /// <summary>Finds a section by kind without throwing when it is absent.</summary>
     /// <param name="kind">The assigned section kind to find.</param>
@@ -838,8 +861,9 @@ public readonly ref struct TrRmArtifactIndex
     private static bool IsReferenceSlotTableKind(int kind, TrRmArtifactSchema schema)
         => !schema.IsDevelopmentProfile()
             ? kind is >= 0x0001 and <= 0x004B
-                || (schema.SupportsNominalEnums()
-                    && (kind is 0x0053 or 0x0054))
+                || ((schema.SupportsNominalEnums()
+                        || schema.UsesGenericConstantMethods())
+                    && (kind is 0x0053 or 0x0054 or 0x0064 or 0x0065))
                 || (schema.UsesGeneralPredicateGraphs()
                     && (kind is (>= 0x004D and <= 0x0052)
                         or (>= 0x0055 and <= 0x005E)))
@@ -928,7 +952,8 @@ public readonly ref struct TrRmArtifactIndex
             0x0050 => schema.UsesGeneralPredicateGraphs() ? 8 : -1,
             0x0051 => schema.UsesGeneralPredicateGraphs() ? 12 : -1,
             0x0052 => schema.UsesGeneralPredicateGraphs() ? 0 : -1,
-            0x0053 or 0x0054 when schema.SupportsNominalEnums() => 20,
+            0x0053 or 0x0054 when schema.SupportsNominalEnums()
+                || schema.UsesGenericConstantMethods() => 20,
             0x0055 or 0x0056 or 0x0057 when schema.UsesGeneralPredicateGraphs() => 20,
             0x0058 when schema.UsesGeneralPredicateGraphs() => 16,
             0x0059 when schema.UsesGeneralPredicateGraphs() => 8,
@@ -937,6 +962,8 @@ public readonly ref struct TrRmArtifactIndex
             0x005C when schema.UsesGeneralPredicateGraphs() => 24,
             0x005D when schema.UsesGeneralPredicateGraphs() => 16,
             0x005E when schema.UsesGeneralPredicateGraphs() => 8,
+            0x0064 when schema.UsesGenericConstantMethods() => 0,
+            0x0065 when schema.UsesGenericConstantMethods() => 12,
             _ => -1,
         };
     }

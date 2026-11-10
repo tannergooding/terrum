@@ -437,7 +437,9 @@ internal static class TrRmRegisterBodyRecordWriter
         {
             resourceLedger?.ConsumeWork();
             if (argument.Reference == 0
-                || argument.Kind is not (1 or 2 or 3)
+                || (schema.UsesGenericConstantMethods()
+                    ? argument.Kind is not (1 or 2)
+                    : argument.Kind is not (1 or 2 or 3))
                 || (argument.Kind == 1
                     ? !IsPotentialTypeSpecRef(argument.Reference)
                     : argument.Reference > 0x00FF_FFFF))

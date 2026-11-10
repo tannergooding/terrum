@@ -62,7 +62,9 @@ public readonly ref struct TrRmTargetProfileTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
-                or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidProfile();
         }

@@ -79,7 +79,9 @@ public readonly ref struct TrRmTypeSpecTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
-                or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericConstantMethodsDraft)
             || (!schema.IsDevelopmentProfile()
                 && nativeFunctionPointerSignatureCount != 0))
         {

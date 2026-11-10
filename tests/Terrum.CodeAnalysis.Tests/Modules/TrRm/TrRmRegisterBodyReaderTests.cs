@@ -80,6 +80,14 @@ internal sealed class TrRmRegisterBodyReaderTests
         _ = new TrRmRegisterBodyReader(CreateBody(writtenTypeActual, schema),
             schema: schema);
 
+        foreach (var argumentKind in new byte[] { 2, 3 })
+        {
+            var sourceActual = CreateTarget(1, 0, 0, 0, 0, 1,
+                [argumentKind, 0, 0, 0, 1, 0, 0, 0]);
+            _ = new TrRmRegisterBodyReader(CreateBody(sourceActual, schema),
+                schema: schema);
+        }
+
         _ = Assert.Throws<InvalidDataException>(() => CreateBody(
                 CreateTarget(1, 0, 0, 0, 1, 1, typeActual), schema));
         _ = Assert.Throws<InvalidDataException>(() => CreateBody(
@@ -99,6 +107,24 @@ internal sealed class TrRmRegisterBodyReaderTests
             TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
                 1, 0, 0, 0, 0, [],
                 TrRmArtifactSchema.Standard));
+
+        const TrRmArtifactSchema cg1Schema
+            = TrRmArtifactSchema.GenericConstantMethodsDraft;
+        var cg1ConstantTarget =
+            TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
+                1, 0, 0, 0, 0,
+                [new TrRmRegisterBodyGenericCallArgument(2, 1)],
+                cg1Schema);
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(cg1ConstantTarget, cg1Schema), schema: cg1Schema);
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
+                1, 0, 0, 0, 0,
+                [new TrRmRegisterBodyGenericCallArgument(3, 1)],
+                cg1Schema));
+        _ = Assert.Throws<InvalidDataException>(() => CreateBody(
+            CreateTarget(1, 0, 0, 0, 0, 1,
+                [3, 0, 0, 0, 1, 0, 0, 0]), cg1Schema));
 
         static byte[] CreateTarget(byte role, byte evidenceKind,
                 ushort methodMapIndex, uint ownerTypeSpec, uint evidenceReference,

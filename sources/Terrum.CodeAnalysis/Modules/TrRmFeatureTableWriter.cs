@@ -42,7 +42,9 @@ public static class TrRmFeatureTableWriter
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
-            or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
+            or TrRmArtifactSchema.RegisterExceptionRegionsDraft
+            or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidFeature();
         }

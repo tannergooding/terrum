@@ -60,7 +60,8 @@ internal readonly ref struct TrRmRegisterBodyReader
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
-                or TrRmArtifactSchema.GenericMethodCallsDraft))
+                or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidBody();
         }
@@ -1335,7 +1336,9 @@ internal readonly ref struct TrRmRegisterBodyReader
             var reserved = ReadUInt16(payload, offset + 2);
             var argumentReference = ReadUInt32(payload, offset + 4);
             if (flags != 0 || reserved != 0 || argumentReference == 0
-                || argumentKind is not (1 or 2 or 3)
+                || (_schema.UsesGenericConstantMethods()
+                    ? argumentKind is not (1 or 2)
+                    : argumentKind is not (1 or 2 or 3))
                 || (argumentKind == 1
                     ? !IsPotentialTypeSpecRef(argumentReference)
                     : argumentReference > 0x00FF_FFFF))
