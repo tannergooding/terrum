@@ -22,6 +22,48 @@ internal sealed class TrRmGenericConstantFeatureUseTests
     }
 
     [Test]
+    public void SelectedCg1StructuralValidatorEnforcesTypeDefFormalFeature()
+    {
+        var supportedArtifact = CreateTypeDefConstantFormalArtifact(
+            includeFeature24: true);
+        TrRmStructuralMetadataValidator.Validate(
+            TrRmArtifactIndex.ForGenericConstantMethodsDraft(
+                supportedArtifact));
+
+        var missingFeatureArtifact = CreateTypeDefConstantFormalArtifact(
+            includeFeature24: false);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(
+                TrRmArtifactIndex.ForGenericConstantMethodsDraft(
+                    missingFeatureArtifact)));
+    }
+
+    [Test]
+    public void SelectedCg1StructuralValidatorGatesOnlyRetainedTemplateUses()
+    {
+        var unreferencedTemplate = CreateConstantTemplateBodyArtifact(
+            includeFeature24: false, useTemplate: false);
+        TrRmStructuralMetadataValidator.Validate(
+            TrRmArtifactIndex.ForGenericConstantMethodsDraft(
+                unreferencedTemplate));
+
+        var missingFeature = CreateConstantTemplateBodyArtifact(
+            includeFeature24: false, useTemplate: true);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(
+                TrRmArtifactIndex.ForGenericConstantMethodsDraft(
+                    missingFeature)));
+
+        var retainedTemplate = CreateConstantTemplateBodyArtifact(
+            includeFeature24: true, useTemplate: true);
+        TrRmStructuralMetadataValidator.Validate(
+            TrRmArtifactIndex.ForGenericConstantMethodsDraft(
+                retainedTemplate));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(retainedTemplate));
+    }
+
+    [Test]
     public void RetainedConstantSourceTagsRequireFeature24ButUnreferencedRowsDoNot()
     {
         ValidateSourceUse(includeFeature24: true, constantSourceKind: 4);
@@ -289,6 +331,152 @@ internal sealed class TrRmGenericConstantFeatureUseTests
             1, frozenCount, 0, 0, genericParamCount, templateCount, schema);
         return new Context(features, modules, types, typeSpecs, genericParams,
             constantSources);
+    }
+
+    private static byte[] CreateTypeDefConstantFormalArtifact(
+        bool includeFeature24)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.GenericConstantMethodsDraft;
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("Generic", 0), ("P", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 4);
+        var featureRows = includeFeature24
+            ? new[] { TrRmFeatureRow.ConstantGenericTermsCandidate }
+            : Array.Empty<TrRmFeatureRow>();
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
+                featureRows.Length == 0 ? 0 : 1, featureRows.Length),
+        ], strings, 0, 1, 0, 0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 1, 0, 0, featureRows.Length);
+        var typeBytes = TrRmTypeDefTableWriter.Encode([
+            new TrRmTypeDefRow(1, 3, 0x06, 0, 0, 1, 1, 1, 1, 0, 0),
+        ], strings, modules, 0, 1, 1, 0, schema);
+        var types = new TrRmTypeDefTableReader(typeBytes, 1, strings,
+            modules, 0, 1, 1, 0, schema);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], types.Count, 0, 1, 0, schema);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
+            types.Count, 0, 1, 0, schema);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0, schema);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+        ], types, targetProfiles, 0);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(1, 0, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            typeSpecs, 0, 0);
+        var methods = new TrRmMethodDefTableReader([], 0, strings, modules,
+            types, signatures, 0, 0);
+        var genericParamBytes = TrRmGenericParamTableWriter.Encode([
+            new TrRmGenericParamRow(0x1300_0001, 0, 4, 0, 0,
+                2, 0, 0, 1, 0),
+        ], strings, types, methods, signatures, typeSpecs, 0);
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 4, stringBytes),
+        };
+        if (featureRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                (uint)featureRows.Length, featureBytes));
+        }
+
+        sections.AddRange([
+            new(0x0011, 0, 1, typeSpecBytes),
+            new(0x0013, 0, 1, typeBytes),
+            new(0x0015, 0, 1, layoutBytes),
+            new(0x0017, 0, 1, signatureBytes),
+            new(0x0019, 0, 1, genericParamBytes),
+        ]);
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] CreateConstantTemplateBodyArtifact(
+        bool includeFeature24, bool useTemplate)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.GenericConstantMethodsDraft;
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("ConstEval", 0), ("Template", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 4);
+        var featureRows = includeFeature24
+            ? new[] { TrRmFeatureRow.ConstantGenericTermsCandidate }
+            : Array.Empty<TrRmFeatureRow>();
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
+                featureRows.Length == 0 ? 0 : 1, featureRows.Length),
+        ], strings, 0, 0, 1, 0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 1, 0, featureRows.Length);
+        var types = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 0, schema);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], 0, 0, 0, 0, schema, methodDefCount: 1);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1,
+            0, 0, 0, 0, schema, methodDefCount: 1);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(1, 0, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            typeSpecs, 0, 0);
+        var methodBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+        ], strings, modules, types, signatures, 0, 1);
+        var templates = TrRmConstantTemplateTableWriter.Encode([
+            new TrRmConstantTemplateRow(0x1600_0001, 1, 0, []),
+        ], schema);
+        var constantSources = TrRmConstantSourceTableWriter.Encode([
+            new TrRmConstantSourceRow(5, 1),
+        ], 0, 0, 0, 0, 1, schema);
+        byte[] constantMap = useTemplate
+            ? new byte[2 * sizeof(uint)]
+            : Array.Empty<byte>();
+        if (useTemplate)
+        {
+            Write(constantMap, 0, 1);
+            Write(constantMap, sizeof(uint), 1);
+        }
+
+        var entryState = new byte[8];
+        entryState[0] = 1;
+        byte[] code = [0x18, 0];
+        var bodyBytes = TrRmRegisterBodyWriter.Encode(
+            Array.Empty<byte>(), Array.Empty<byte>(), Array.Empty<byte>(),
+            Array.Empty<byte>(), constantMap,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            [entryState], code, schema: schema);
+        var bodySection = TrRmVariableTableWriter.EncodeBodies([bodyBytes]);
+
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 4, stringsBytes),
+        };
+        if (featureRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                (uint)featureRows.Length, featureBytes));
+        }
+
+        sections.AddRange([
+            new(0x0011, 0, 1, typeSpecBytes),
+            new(0x0016, 0, 1, methodBytes),
+            new(0x0017, 0, 1, signatureBytes),
+            new(0x0020, 0, 1, bodySection),
+            new(0x0030, 0, 1, constantSources),
+            new(0x0064, 0, 1, templates),
+        ]);
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static void Write(byte[] bytes, int offset, uint value)

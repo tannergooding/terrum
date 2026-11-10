@@ -741,11 +741,17 @@ public static class TrRmStructuralMetadataValidator
     }
 
     internal static void Validate(TrRmArtifactIndex index)
-        => _ = ValidateCore(index, BodyInspection.None, developmentProfile: false);
+        => _ = ValidateCore(index, BodyInspection.None,
+            developmentProfile: false,
+            genericConstantMethodsDraft:
+                index.Schema.UsesGenericConstantMethods());
 
     internal static ValidatedExecutionTables ValidateAndGetExecutionTables(
         TrRmArtifactIndex index)
-        => ValidateCore(index, BodyInspection.None, developmentProfile: false);
+        => ValidateCore(index, BodyInspection.None,
+            developmentProfile: false,
+            genericConstantMethodsDraft:
+                index.Schema.UsesGenericConstantMethods());
 
     internal static ValidatedExecutionTables ValidateDevelopmentAndGetExecutionTables(
         TrRmArtifactIndex index)
@@ -1182,6 +1188,7 @@ public static class TrRmStructuralMetadataValidator
         bool foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayGenericDraft = false,
         bool registerExceptionRegionsDraft = false,
+        bool genericConstantMethodsDraft = false,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
     {
         var selectedSchema = developmentNativeConventionsDraft
@@ -1227,6 +1234,8 @@ public static class TrRmStructuralMetadataValidator
                         ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
                     : registerExceptionRegionsDraft
                         ? TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                    : genericConstantMethodsDraft
+                        ? TrRmArtifactSchema.GenericConstantMethodsDraft
                         : TrRmArtifactSchema.Standard;
         if (index.Schema != selectedSchema)
         {
