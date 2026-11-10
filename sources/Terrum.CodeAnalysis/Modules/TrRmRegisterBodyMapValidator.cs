@@ -263,6 +263,15 @@ internal static class TrRmRegisterBodyMapValidator
             throw InvalidMap();
         }
 
+        if (body.HasGenericCallTargets
+            && !TrRmFeatureManifestValidator.Requires(features, modules,
+                ownerModule,
+                TrRmFeatureTableReader.GenericMethodCallsFeatureId,
+                body.Schema))
+        {
+            throw InvalidMap();
+        }
+
         if (body.HasRootPinOperations
             && !TrRmFeatureManifestValidator.Requires(features, modules,
                 ownerModule, TrRmFeatureTableReader.RootPinRuntimeFeatureId,

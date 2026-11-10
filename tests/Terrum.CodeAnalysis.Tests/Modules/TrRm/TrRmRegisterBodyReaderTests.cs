@@ -22,6 +22,7 @@ internal sealed class TrRmRegisterBodyReaderTests
         var body = new TrRmRegisterBodyReader(bodyBytes,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
 
+        Assert.That(body.HasGenericCallTargets, Is.False);
         Assert.That(body.GetRecord(1)[0], Is.EqualTo(0x02));
         Assert.That(body.GetRecord(2)[0], Is.EqualTo(0x0C));
 
@@ -51,6 +52,7 @@ internal sealed class TrRmRegisterBodyReaderTests
         var body = CreateBody(target, schema);
         var reader = new TrRmRegisterBodyReader(body, schema: schema);
 
+        Assert.That(reader.HasGenericCallTargets, Is.True);
         var writtenTarget =
             TrRmRegisterBodyRecordWriter.EncodeGenericCallTarget(
                 1, 0, 0, 0, 0, [],

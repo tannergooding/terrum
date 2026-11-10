@@ -166,11 +166,15 @@ internal readonly ref struct TrRmRegisterBodyReader
             }
         }
 
+        var hasGenericCallTargets = false;
         for (var record = 0; record < _recordCount; record++)
         {
             resourceLedger?.ConsumeWork();
-            ValidateRecord(GetRecord(record));
+            var recordBytes = GetRecord(record);
+            hasGenericCallTargets |= recordBytes[0] == 0x10;
+            ValidateRecord(recordBytes);
         }
+        HasGenericCallTargets = hasGenericCallTargets;
         ValidateNativeOutputReservationRecords();
         ValidateExceptionDirectoryRecords();
         ValidateBlocks();
@@ -183,6 +187,7 @@ internal readonly ref struct TrRmRegisterBodyReader
     internal int FieldCount { get; }
     internal int ConstantCount { get; }
     internal TrRmArtifactSchema Schema => _schema;
+    internal bool HasGenericCallTargets { get; }
     internal TrRmA3LayoutResourceLedger? ResourceLedger => _resourceLedger;
     internal int BlockCount { get; }
     internal int RecordCount => _recordCount;
