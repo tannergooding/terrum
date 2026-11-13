@@ -42,6 +42,32 @@ internal sealed class TrRmPublishedPredicateSelectorTests
                 includeOutputFeature: false));
     }
 
+    [Test]
+    public void StandardInitOutputStatesUseTheBoundedPublishedPredicateFeature()
+    {
+        var artifact = CreateStandardInitOutputArtifact();
+        TrRmStructuralMetadataValidator.Validate(artifact);
+
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes,
+            out var moduleCount), Is.True);
+        Assert.That(index.TryGetSection(0x0002, out var stringBytes,
+            out var stringCount), Is.True);
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes,
+            out var featureCount), Is.True);
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
+            strings, 0, 0, 1, 0, featureCount);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.PublishedPredicatesFeatureId), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.TypedFrozenValuesFeatureId), Is.False);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.NominalUnionMetadataFeatureId), Is.False);
+    }
+
     private static void Validate(Fixture fixture,
         TrRmA3LayoutResourceLedger resourceLedger)
     {
@@ -159,6 +185,99 @@ internal sealed class TrRmPublishedPredicateSelectorTests
         return new Fixture(stringBytes, modulesBytes, featureBytes,
             typeSpecBytes, signatureBytes, methodsBytes, contractBytes,
             graphBytes, footprintBytes, readRootBytes, nodeBytes, operandBytes);
+    }
+
+    private static byte[] CreateStandardInitOutputArtifact()
+    {
+        const TrRmArtifactSchema schema = TrRmArtifactSchema.Standard;
+        var stringsRows = new (string Text, int Encoding)[] {
+            ("", 0), ("Module", 0), ("TryFill", 0),
+        };
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows(stringsRows);
+        var strings = new TrRmStringTableReader(stringsBytes, stringsRows.Length);
+        var featureBytes = TrRmFeatureTableWriter.Encode([
+            TrRmFeatureRow.PublishedPredicates,
+        ], schema);
+        var modulesBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
+                FeatureFirst: 1, FeatureCount: 1),
+        ], strings, 0, 0, 1, 0, 1);
+        var modules = new TrRmModuleTableReader(modulesBytes, 1, strings,
+            0, 0, 1, 0, 1);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(1),
+            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.InitializationReference(2, isWritable: false),
+        ], 0, 0, 0, 0, schema, methodDefCount: 1);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 3,
+            0, 0, 0, 0, schema, 1);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 4, schema);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(1, 0, 1, 1, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            typeSpecs, 1, 0);
+        var parameterRows = new[] { new TrRmParamRow(1, 0, 3, 0) };
+        var parameterBytes = TrRmParamTableWriter.Encode(parameterRows,
+            signatures, typeSpecs, schema);
+        var parameters = new TrRmParamTableReader(parameterBytes, 1,
+            signatures, typeSpecs, schema);
+        var contractRows = new[] {
+            PredicateGraphContract(0, 1),
+            PredicateGraphContract(1, 2),
+            NativeOutputState(0, 1, 1),
+            NativeOutputState(0, 2, 0),
+        };
+        var methodsBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 1,
+                contractRows.Length, 0),
+        ], strings, modules, typeDefs, signatures, contractRows.Length, 0);
+        var methods = new TrRmMethodDefTableReader(methodsBytes, 1, strings,
+            modules, typeDefs, signatures, contractRows.Length, 0);
+        var features = new TrRmFeatureTableReader(featureBytes, 1, schema);
+        var contractsBytes = TrRmContractTableWriter.EncodeWithPredicateGraphs(
+            contractRows, typeDefs, methods, signatures, parameters,
+            typeSpecs, features, modules, predicateGraphCount: 2);
+        var graphBytes = TrRmPredicateGraphTableWriter.Encode([
+            new TrRmPredicateGraphRow(1, 1),
+            new TrRmPredicateGraphRow(2, 2),
+        ], 2, 2);
+        var footprintBytes = TrRmPredicateReadFootprintTableWriter.Encode([
+            new TrRmPredicateReadFootprintRow(1, 1, 0, 0),
+            new TrRmPredicateReadFootprintRow(2, 1, 0, 0),
+        ], 2, 0);
+        var rootBytes = TrRmPredicateReadRootTableWriter.Encode([
+            new TrRmPredicateReadRootRow(5, 0),
+            new TrRmPredicateReadRootRow(5, 0),
+        ], 0, 0, schema);
+        var nodeBytes = TrRmPredicateNodeTableWriter.Encode([
+            new TrRmPredicateNodeRow(1, 0xF200_0001, 1, 1),
+            new TrRmPredicateNodeRow(2, 0xF200_0001, 2, 1),
+        ], 2, typeSpecs, schema);
+        var operandCounts = new TrRmPredicateTableRowCounts(
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        var operandBytes = TrRmPredicateNodeOperandTableWriter.Encode([
+            new TrRmPredicateNodeOperandRow(1, 1),
+            new TrRmPredicateNodeOperandRow(1, 2),
+        ], operandCounts, schema);
+
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, modulesBytes),
+            new TrRmSection(0x0002, 0,
+                checked((uint)stringsRows.Length), stringsBytes),
+            new TrRmSection(0x0004, 0, 1, featureBytes),
+            new TrRmSection(0x0011, 0, 3, typeSpecBytes),
+            new TrRmSection(0x0016, 0, 1, methodsBytes),
+            new TrRmSection(0x0017, 0, 1, signatureBytes),
+            new TrRmSection(0x0018, 0, 1, parameterBytes),
+            new TrRmSection(0x001B, 0, 4, contractsBytes),
+            new TrRmSection(0x0037, 0, 2, graphBytes),
+            new TrRmSection(0x0038, 0, 2, footprintBytes),
+            new TrRmSection(0x0039, 0, 2, rootBytes),
+            new TrRmSection(0x003B, 0, 2, nodeBytes),
+            new TrRmSection(0x003C, 0, 2, operandBytes),
+        ], schema);
     }
 
     private static byte[] ValidateNativeOutput(NativeOutputFixture fixture)

@@ -543,9 +543,7 @@ internal static class TrRmFeatureManifestValidator
             8 => 3,
             3 or 5 or 6 or 12 => 2,
             4 => 1,
-            10 when schema.UsesForeignInvocationContracts()
-                || schema.UsesGeneralPredicateGraphs() => 0,
-            10 => 1,
+            10 => 0,
             11 when !schema.UsesScalarFrozenValues() => 1,
             17 when schema.UsesGeneralPredicateGraphs() => 1,
             18 when schema.SupportsNominalEnums()
@@ -569,8 +567,6 @@ internal static class TrRmFeatureManifestValidator
             },
             3 or 5 or 6 => index == 0 ? 1u : 2u,
             4 => 3,
-            10 when !schema.UsesForeignInvocationContracts()
-                && !schema.UsesGeneralPredicateGraphs() => 11,
             11 when !schema.UsesScalarFrozenValues() => 9,
             12 when schema.UsesGeneralPredicateGraphs()
                 => index == 0 ? 11u : 17u,
