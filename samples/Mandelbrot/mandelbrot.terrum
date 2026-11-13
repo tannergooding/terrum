@@ -9,9 +9,11 @@ public static int32 Main(Span<TextSpan> args)
 
     if (args.Length != 0)
     {
+        init int32 parsedWidth;
+        init int32 parsedHeight;
         if (args.Length != 2 ||
-            !int32.TryParse(args[0], init var parsedWidth) ||
-            !int32.TryParse(args[1], init var parsedHeight) ||
+            !int32.TryParse(args[0], ref init parsedWidth) ||
+            !int32.TryParse(args[1], ref init parsedHeight) ||
             parsedWidth < 2 || parsedWidth > 4096 ||
             parsedHeight < 2 || parsedHeight > 4096)
         {

@@ -36,7 +36,7 @@ public static class SpanAlgorithms
     // Missing is a bool, not a sentinel. The comparer may be an inline struct:
     // constrained invocation never boxes it or snapshots source storage.
     public static bool TryIndexOf<T, TComparer>(
-        Span<T> source, ref<T> value, write ref<TComparer> comparer, init ref<nuint> index)
+        Span<T> source, ref<T> value, write ref<TComparer> comparer, ref<init nuint> index)
         where TComparer : IEqualityComparer<T>;
 
     // Destination capacity is checked before invoking any callback. Source and

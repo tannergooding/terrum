@@ -12,16 +12,19 @@ public enum CalculateStatus : int32
 
 public static int32 Main(Span<TextSpan> args)
 {
+    init int32 left;
+    init int32 right;
     if (args.Length != 3 ||
-        !int32.TryParse(args[0], init var left) ||
-        !int32.TryParse(args[2], init var right))
+        !int32.TryParse(args[0], ref init left) ||
+        !int32.TryParse(args[2], ref init right))
     {
         Terminal.WriteLine("usage: calculator <int32> <+|-|*|/|%> <int32>", output: TerminalOutput.Error);
 
         return 2;
     }
 
-    var status = TryCalculate(left, args[1], right, init var result);
+    init int32 result;
+    var status = TryCalculate(left, args[1], right, ref init result);
 
     if (status == CalculateStatus.Success)
     {
@@ -42,11 +45,12 @@ public static int32 Main(Span<TextSpan> args)
 }
 
 [OutputWhen(nameof(result), CalculateStatus.Success)]
-public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32 right, init ref<int32> result)
+public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32 right, ref<init int32> result)
 {
     if (operation.EqualsOrdinal('+'))
     {
-        if (int32.TryAdd(left, right, init var sum))
+        init int32 sum;
+        if (int32.TryAdd(left, right, ref init sum))
         {
             *result = sum;
 
@@ -58,7 +62,8 @@ public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32
 
     if (operation.EqualsOrdinal('-'))
     {
-        if (int32.TrySubtract(left, right, init var difference))
+        init int32 difference;
+        if (int32.TrySubtract(left, right, ref init difference))
         {
             *result = difference;
 
@@ -70,7 +75,8 @@ public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32
 
     if (operation.EqualsOrdinal('*'))
     {
-        if (int32.TryMultiply(left, right, init var product))
+        init int32 product;
+        if (int32.TryMultiply(left, right, ref init product))
         {
             *result = product;
 

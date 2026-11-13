@@ -63,7 +63,8 @@ public static float32 AddAndSum(
 
     TensorPrimitives.Add(left, right, destination);
 
-    if (TensorViews.TryAsDenseSpan(destination, init var dense))
+    init Span<float32> dense;
+    if (TensorViews.TryAsDenseSpan(destination, ref init dense))
     {
         return TensorPrimitives.Sum(dense);
     }

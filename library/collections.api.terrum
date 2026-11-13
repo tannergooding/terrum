@@ -27,7 +27,7 @@ public mut class List<T>
 
     public nuint Count => _count;
 
-    public bool TryGet(nuint index, init ref<T> value)
+    public bool TryGet(nuint index, ref<init T> value)
     {
         _access.RequireRead();
 
@@ -65,7 +65,7 @@ public mut class List<T>
     public mut ListWriteAccess<T> GetWriteAccess();
 
     [ViewOf(Access.Write, To = nameof(access))]
-    public mut bool TryGetWriteAccess(init ref<ListWriteAccess<T>> access);
+    public mut bool TryGetWriteAccess(ref<init ListWriteAccess<T>> access);
 
     private mut void EnsureCapacity(nuint capacity);
 }
@@ -77,7 +77,7 @@ public mut unique struct ListBuilder<T>
 
     public mut bool TryAdd(T value);
 
-    public mut bool TryBuild(init ref<write List<T>> value);
+    public mut bool TryBuild(ref<init write List<T>> value);
 }
 
 public mut unique struct ListWriteAccess<T>
@@ -168,7 +168,7 @@ public mut unique struct LinkedListBuilder<T>
 
     public mut bool TryAdd(T value);
 
-    public mut bool TryBuild(init ref<write LinkedList<T>> value);
+    public mut bool TryBuild(ref<init write LinkedList<T>> value);
 }
 
 // This cursor yields a Copy value; lending/consuming item protocols are

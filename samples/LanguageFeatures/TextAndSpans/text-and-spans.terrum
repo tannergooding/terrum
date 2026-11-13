@@ -19,9 +19,11 @@ public static int32 Main()
     TextSpan<char8> typed = "hello";
     TextSpan erased = typed.AsTextSpan();
     TextSpan<void> sameErasedMember = erased;
+    init TextSpan<char8> projected;
+    init TextSpan<char16> wrongEncoding;
     if (erased.IsEmpty || !erased.EqualsOrdinal(typed.AsTextSpan()) ||
-        !erased.TryProject<char8>(init var projected) ||
-        erased.TryProject<char16>(init var wrongEncoding))
+        !erased.TryProject<char8>(ref init projected) ||
+        erased.TryProject<char16>(ref init wrongEncoding))
     {
         Terminal.WriteLine("Expected checked projection of the original encoding.",
             output: TerminalOutput.Error);
@@ -44,10 +46,14 @@ public static int32 Main()
     // only typed views expose a code-unit span. There is no Span<void>.
     Terminal.WriteLine(sameErasedMember);
 
-    if (!int32.TryParse("1", init var one) ||
-        int32.TryParse("\u0661", init var arabicIndic) ||
-        int32.TryParse("\uFF11", init var fullWidth) ||
-        int32.TryParse("\u22121", init var unicodeMinus))
+    init int32 one;
+    init int32 arabicIndic;
+    init int32 fullWidth;
+    init int32 unicodeMinus;
+    if (!int32.TryParse("1", ref init one) ||
+        int32.TryParse("\u0661", ref init arabicIndic) ||
+        int32.TryParse("\uFF11", ref init fullWidth) ||
+        int32.TryParse("\u22121", ref init unicodeMinus))
     {
         Terminal.WriteLine("Expected ordinal-plus-invariant numeric parsing.", output: TerminalOutput.Error);
 

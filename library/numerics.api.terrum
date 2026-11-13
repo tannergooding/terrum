@@ -13,7 +13,7 @@ public interface IParsable<TSelf>
 {
     // Malformed input is an expected false result; an assertion caller may
     // lift the declared conditional output with `require`.
-    static bool TryParse(TextSpan text, init ref<TSelf> value);
+    static bool TryParse(TextSpan text, ref<init TSelf> value);
 }
 
 public interface IFormattable
@@ -101,27 +101,27 @@ public struct int32
     }
 
     [Literal(LiteralKind.Integer), ConstEval]
-    public static bool TryParse(TextSpan text, init ref<int32> value);
+    public static bool TryParse(TextSpan text, ref<init int32> value);
 
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 
-    public static bool TryAdd(int32 left, int32 right, init ref<int32> result)
+    public static bool TryAdd(int32 left, int32 right, ref<init int32> result)
     {
-        return TryNarrow(int64(left) + int64(right), init *result);
+        return TryNarrow(int64(left) + int64(right), ref init *result);
     }
 
-    public static bool TrySubtract(int32 left, int32 right, init ref<int32> result)
+    public static bool TrySubtract(int32 left, int32 right, ref<init int32> result)
     {
-        return TryNarrow(int64(left) - int64(right), init *result);
+        return TryNarrow(int64(left) - int64(right), ref init *result);
     }
 
-    public static bool TryMultiply(int32 left, int32 right, init ref<int32> result)
+    public static bool TryMultiply(int32 left, int32 right, ref<init int32> result)
     {
-        return TryNarrow(int64(left) * int64(right), init *result);
+        return TryNarrow(int64(left) * int64(right), ref init *result);
     }
 
-    private static bool TryNarrow(int64 value, init ref<int32> result)
+    private static bool TryNarrow(int64 value, ref<init int32> result)
     {
         if (value < int64(MinValue) || value > int64(MaxValue))
         {
@@ -172,7 +172,7 @@ public struct float32
 
     public static uint32 ToBits(float32 value);
 
-    public static bool TryParse(TextSpan text, init ref<float32> value);
+    public static bool TryParse(TextSpan text, ref<init float32> value);
 
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
@@ -196,7 +196,7 @@ public struct decimal32
 
     public int32 GetKeyHashCode();
 
-    public static bool TryParse(TextSpan text, init ref<decimal32> value);
+    public static bool TryParse(TextSpan text, ref<init decimal32> value);
 
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;

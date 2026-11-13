@@ -36,12 +36,14 @@ public static int32 Main()
 
     write List<int32?> optionalValues = new List<int32?>();
     optionalValues.Add(null);
-    if (optionalValues.TryGet(0, init var present))
+    init int32? present;
+    if (optionalValues.TryGet(0, ref init present))
     {
         Terminal.WriteLine(present is null ? "present, absent payload" : "present payload");
     }
 
-    if (!optionalValues.TryGet(1, init var missing))
+    init int32? missing;
+    if (!optionalValues.TryGet(1, ref init missing))
     {
         Terminal.WriteLine("missing element");
         // missing is uninitialized here; reading it would be a diagnostic.

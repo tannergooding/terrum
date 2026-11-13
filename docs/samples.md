@@ -54,7 +54,7 @@ Use the built DLL for JSON protocols so build output cannot contaminate them.
 
 The [native profile](implementation/native.md) owns support details. Runnable
 examples use the implemented legacy `bool`/`out` profile where required; it is
-distinct from canonical vacancy-only `init ref<T>` contracts. Do not
+distinct from canonical `ref<init T>` contracts. Do not
 mechanically rewrite runnable sources into unsupported target forms.
 The implemented numeric subset also accepts contextual decimal, hexadecimal
 and binary integer literals with digit separators; based literals use the
@@ -145,7 +145,7 @@ choices nor establishes compiler support.
 | [Hello world](../samples/HelloWorld/hello-world.terrum) | `void Main`, text output, exit 0 |
 | [Async hello](../samples/HelloWorld/hello-async.terrum) | `MainAsync`, rooted arguments through completion and cleanup |
 | [Mandelbrot](../samples/Mandelbrot/mandelbrot.terrum) | Strict float32, explicit conversions, PBM; dimensions checked, points bounded after 64 updates rather than proven set membership |
-| [Calculator](../samples/Calculator/calculator.terrum) | Checked int32 and conditional `init ref<int32>` publication; reject Unicode digit/operator lookalikes rather than normalizing them |
+| [Calculator](../samples/Calculator/calculator.terrum) | Checked int32 and conditional `ref<init int32>` publication; reject Unicode digit/operator lookalikes rather than normalizing them |
 | [Collections](../samples/LanguageFeatures/Collections/collections.terrum) | Builders, guarded writable spans, node identity, and present-null versus missing |
 | [Random composition](../samples/LanguageFeatures/Generics/random-composition.terrum) | Generic constructor inference and concrete interface dispatch without payload copying; those facilities remain unsupported |
 | [Values/ownership](../samples/LanguageFeatures/Ownership/types-and-ownership.terrum) | Copy values, shared readonly/write handles, moved unique classes, optionals, and an explicitly unresolved inline-payload ownership sketch |
@@ -156,14 +156,15 @@ choices nor establishes compiler support.
 
 Existing reference variables denote descriptors: form one with `ref place`,
 pass an existing descriptor directly, and use `->` or explicit dereference
-for referent access. Initialization destinations write through `*destination`
-and forward with `init *destination`. `mut` permits rebinding; `write` grants
-referent access. `init ref<T>` and `init value` are approved target forms for
-vacancy-only destinations. Inline destination declarations follow the accepted
-source argument rules, not an extra sketch-only parameter mode. Legacy
-`out`/`ref` call patterns are not target invocation syntax; the executable
-profile retains legacy `bool`/`out` beside distinct `bool`/`init ref<T>`
-contracts. See [references](specs/language/references.md).
+for referent access. A `ref<init T>` destination is formed with
+`ref init place`, writes through `*destination`, and forwards with
+`ref init *destination`. `mut` permits rebinding; `write` grants
+referent access. Vacant locals use `init T name` or inferred `init var name`;
+calls pass them with `ref init name`. Forwarding uses `ref init *destination`.
+Parameter-only `init ref<T>` and inline `init var` call arguments are not
+admitted. Some executable samples still use the separate legacy `bool`/`out`
+native-output profile; it is not the checked `ref<init T>` contract. See
+[references](specs/language/references.md).
 
 ## Test-owned inputs
 

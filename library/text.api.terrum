@@ -30,9 +30,9 @@ public mut unique class TextBuilder<TCodeUnit>
     public mut bool TryAppend(TextSpan source);
     public mut bool TryAppendScalar(UnicodeScalar value);
 
-    public static bool TryBuild(TextBuilder<TCodeUnit> builder, init ref<Text> result);
-    public mut bool TryDrain(init ref<Text> result);
-    public bool TryCopy(init ref<Text> result);
+    public static bool TryBuild(TextBuilder<TCodeUnit> builder, ref<init Text> result);
+    public mut bool TryDrain(ref<init Text> result);
+    public bool TryCopy(ref<init Text> result);
     public mut void Clear();
 }
 
@@ -54,9 +54,9 @@ public mut unique struct TextBuilder<TCodeUnit, TAllocator>
     public mut bool TryAppendScalar(UnicodeScalar value);
 
     public static bool TryBuild(TextBuilder<TCodeUnit, TAllocator> builder,
-        init ref<OwnedText<TCodeUnit>> result);
-    public mut bool TryDrain(init ref<OwnedText<TCodeUnit>> result);
-    public mut bool TryCopy(init ref<OwnedText<TCodeUnit>> result);
+        ref<init OwnedText<TCodeUnit>> result);
+    public mut bool TryDrain(ref<init OwnedText<TCodeUnit>> result);
+    public mut bool TryCopy(ref<init OwnedText<TCodeUnit>> result);
     public mut void Clear();
 }
 
