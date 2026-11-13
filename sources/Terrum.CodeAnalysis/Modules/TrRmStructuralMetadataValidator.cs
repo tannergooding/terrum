@@ -1953,7 +1953,8 @@ public static class TrRmStructuralMetadataValidator
         {
             predicateSelectorKinds = index.Schema.UsesGeneralPredicateGraphs()
                 ? TrRmGeneralPredicateGraphValidator.Validate(index.Schema,
-                    features, modules, methods, signatures, contracts, typeSpecs,
+                    features, modules, methods, signatures, parameters,
+                    contracts, typeSpecs,
                     types, enumDefs, generics, imports, frozenValueNodes, blobs,
                     immutableData,
                     predicateGraphs, predicateReadFootprints, predicateReadRoots,

@@ -55,7 +55,18 @@ through `0x004B`, including standard SourceMap Body slots; semantic table
 binding and general standard execution remain incomplete. Separate exact,
 unapproved F/F+S selections now consume and emit bounded NativeAddress and
 scalar local-storage CallSite Bodies; this does not widen the default
-Development route or establish general standard register-Body execution. The structural validator
+Development route or establish general standard register-Body execution. The
+separate unapproved `trrm/1-draft-init-reference-bodies-1` profile now
+round-trips scalar `ref<init T>` stores, direct-Home DD and source-use-5 calls,
+plus a bounded three-block Boolean output/caller branch. Same-profile source
+MethodDef binding/re-emission and FailFast native-library execution are
+covered; Span, explicit OutputState clauses, general CFG joins, dependency
+graphs, provider-linked execution and CheckedExceptions remain open.
+The separate `GeneralPredicateGraphsDraft` consumer structurally accepts
+general phase-3 OutputState graphs only for checked initialization destinations
+under Feature 17/1; source projection/emission, semantic proof and graph
+execution remain open.
+The structural validator
 currently reads standard `InterfaceDef` and `AssociatedTypeDef` rows and
 checks their owner, self-formal, range, name and complete default-type shape.
 The internal, unapproved

@@ -618,6 +618,49 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
     }
 
     [Test]
+    public void GeneralPhaseThreeOutputSelectorsRequireFeatureAndCheckedDestination()
+    {
+        var artifact = CreatePredicateGraphArtifact(0x11,
+            capturedTypePattern: false, duplicateBinder: false,
+            omitBinder: false, generalOutputSelector: true);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(artifact));
+        Assert.That(tables.Contracts.GetOutputStateContracts(1),
+            Is.EqualTo([new TrRmOutputStateContract(1, 1, 1)]));
+
+        var missingFeature = CreatePredicateGraphArtifact(0x11,
+            capturedTypePattern: false, duplicateBinder: false,
+            omitBinder: false, generalOutputSelector: true,
+            includeGeneralPredicateGraphsFeature: false);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
+                        missingFeature)));
+
+        var unreferencedGraph = CreatePredicateGraphArtifact(0x11,
+            capturedTypePattern: false, duplicateBinder: false,
+            omitBinder: false, generalOutputSelector: true,
+            includeGeneralOutputState: false);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
+                        unreferencedGraph)));
+
+        var outputReadingGraph = CreatePredicateGraphArtifact(0x10,
+            capturedTypePattern: false, duplicateBinder: false,
+            omitBinder: false, generalOutputSelector: true,
+            generalOutputSelectorReadsOutput: true);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
+                        outputReadingGraph)));
+    }
+
+    [Test]
     public void RequiresOnePositiveBindingSiteForEveryCapture()
     {
         var boundTypePattern = CreateCapturedTypePatternGraphArtifact(
@@ -739,7 +782,11 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         bool includePredicateTypeConstantExecution = false,
         bool includeConstantSubstitutionCycle = false,
         bool includeDirectPredicateCall = false,
-        bool anchorDirectPredicateCallTarget = false)
+        bool anchorDirectPredicateCallTarget = false,
+        bool generalOutputSelector = false,
+        bool includeGeneralOutputState = true,
+        bool includeGeneralPredicateGraphsFeature = true,
+        bool generalOutputSelectorReadsOutput = false)
     {
         var stringBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("Owner", 0), ("Predicate", 0),
@@ -747,9 +794,16 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         ]);
         var strings = new TrRmStringTableReader(stringBytes, 8);
         var featureRows = new List<TrRmFeatureRow> {
-            TrRmFeatureRow.GeneralPredicateGraphsCandidate,
             TrRmFeatureRow.LayoutQueries,
         };
+        if (includeGeneralPredicateGraphsFeature)
+        {
+            featureRows.Add(TrRmFeatureRow.GeneralPredicateGraphsCandidate);
+        }
+        if (generalOutputSelector)
+        {
+            featureRows.Add(TrRmFeatureRow.PublishedPredicates);
+        }
         if (anchorDirectPredicateCallTarget)
         {
             featureRows.Add(TrRmFeatureRow.NativeBoundaryContracts);
@@ -776,7 +830,10 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         var modules = new TrRmModuleTableReader(
             moduleBytes, 1, strings, includeConstantExecution ? 1 : 0,
             typeDefCount, 2, 0, featureCount);
-        var contractCount = 3 + (duplicateInitializationDemand ? 1 : 0);
+        var predicateContractCount = generalOutputSelector
+            && includeGeneralOutputState ? 2 : 1;
+        var contractCount = predicateContractCount + 2
+            + (duplicateInitializationDemand ? 1 : 0);
         var typeDefRows = new List<TrRmTypeDefRow> {
             new TrRmTypeDefRow(1, 3, 4, 0, 0, 0, 0, 1, 1, 0, 0),
         };
@@ -818,6 +875,13 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         {
             typeSpecRows.Add(TrRmTypeSpecTableWriter.PredicateCapturedType(1));
         }
+        if (generalOutputSelector)
+        {
+            typeSpecRows.Add(
+                TrRmTypeSpecTableWriter.InitializationReference(
+                    generalOutputSelectorReadsOutput
+                        ? 0xF200_0001 : 0xF200_0008));
+        }
         var typeSpecBytes = typeSpecRows.Count == 0
             ? []
             : TrRmTypeSpecTableWriter.Encode(typeSpecRows,
@@ -831,15 +895,39 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
                 genericParamCount, nativeFunctionPointerSignatureCount: 0,
                 schema: s_schema, methodDefCount: 2,
                 predicateCaptureCount: capturedTypePattern ? 1 : 0);
+        var parameterCount = generalOutputSelector ? 2 : 0;
         var signatureBytes = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(0xF200_0001, 0xF200_0008, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0001, 0xF200_0008,
+                parameterCount == 0 ? 0 : 1, parameterCount, 0, 0),
             new TrRmMethodSigRow(0xF200_0001, 0, 0, 0, 0, 0),
-        ], typeSpecs, paramCount: 0, genericParamCount: 0);
+        ], typeSpecs, parameterCount, genericParamCount: 0);
         var signatures = new TrRmMethodSigTableReader(
-            signatureBytes, 2, typeSpecs, 0, 0);
+            signatureBytes, 2, typeSpecs, parameterCount, 0);
+        var parameterBytes = generalOutputSelector
+            ? new byte[parameterCount * 16] : [];
+        if (generalOutputSelector)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(parameterBytes, 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(8), 0xF200_0001);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(20), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                parameterBytes.AsSpan(24), (uint)typeSpecRows.Count);
+        }
+        var parameters = generalOutputSelector
+            ? new TrRmParamTableReader(parameterBytes, parameterCount,
+                signatures, typeSpecs, s_schema)
+            : default;
         var methodBytes = TrRmMethodDefTableWriter.Encode([
-            new TrRmMethodDefRow(1, 4, 1, 0, 1, 1, 0),
-            new TrRmMethodDefRow(1, 6, 2, 0, 2, contractCount - 1, 0),
+            new TrRmMethodDefRow(1, 4, 1, 0, 1, predicateContractCount, 0),
+            new TrRmMethodDefRow(1, 6, 2, 0,
+                predicateContractCount + 1,
+                contractCount - predicateContractCount, 0),
         ], strings, modules, typeDefs, signatures, contractCount, bodyCount: 0);
         var methods = new TrRmMethodDefTableReader(
             methodBytes, 2, strings, modules, typeDefs, signatures,
@@ -879,7 +967,7 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
             2, s_schema);
         var constantSources = default(TrRmConstantSourceTableReader);
         var contractPayload = new byte[12];
-        contractPayload[0] = 1;
+        contractPayload[0] = generalOutputSelector ? (byte)3 : (byte)1;
         BinaryPrimitives.WriteUInt32LittleEndian(contractPayload.AsSpan(8), 1);
         byte[] initializationRolePayload = [
             initializationRoleTag, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
@@ -887,23 +975,36 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         byte[] initializationDemandPayload = [1, 0, 0, 0, 0, 0, 0, 0];
         var contractRows = new List<TrRmContractRow> {
             new TrRmContractRow(0x1600_0001, 0x0B, contractPayload),
-            new TrRmContractRow(0x1600_0002, 0x13, initializationRolePayload),
-            new TrRmContractRow(0x1600_0002, 0x14, initializationDemandPayload),
         };
+        if (generalOutputSelector && includeGeneralOutputState)
+        {
+            var outputStatePayload = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(outputStatePayload, 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                outputStatePayload.AsSpan(4), 1);
+            outputStatePayload[8] = 1;
+            contractRows.Add(new TrRmContractRow(0x1600_0001, 0x0002,
+                outputStatePayload));
+        }
+        contractRows.Add(new TrRmContractRow(
+            0x1600_0002, 0x13, initializationRolePayload));
+        contractRows.Add(new TrRmContractRow(
+            0x1600_0002, 0x14, initializationDemandPayload));
         if (duplicateInitializationDemand)
         {
             contractRows.Add(new TrRmContractRow(
                 0x1600_0002, 0x14, initializationDemandPayload));
         }
         var contracts = TrRmContractTableWriter.EncodeGeneralPredicateGraphsDraft(
-            contractRows, typeDefs, methods, signatures, default, typeSpecs,
+            contractRows, typeDefs, methods, signatures, parameters, typeSpecs,
             fieldPathCount: 0, features: new TrRmFeatureTableReader(
                 featureBytes, featureCount, s_schema), modules,
             predicateGraphCount: 1, eagerGroups: eagerGroups,
             staticFields: staticFields, staticFieldContracts: staticFieldContracts,
             eagerInitializers: eagerInitializers, lazyUnits: lazyUnits);
         var contractReader = new TrRmContractTableReader(contracts,
-            contractRows.Count, typeDefs, methods, signatures, default, typeSpecs,
+            contractRows.Count, typeDefs, methods, signatures, parameters,
+            typeSpecs,
             fieldPathCount: 0,
             features: new TrRmFeatureTableReader(
                 featureBytes, featureCount, s_schema),
@@ -1066,18 +1167,29 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         var graphBytes = TrRmPredicateGraphTableWriter.Encode([
             new TrRmPredicateGraphRow(graphRootNode, 1),
         ], nodeCount: capturedTypePattern ? 3 : 1, readFootprintCount: 1);
+        var footprintRootCount = capturedTypePattern || generalOutputSelector
+            ? 1 : 0;
         var footprintBytes = TrRmPredicateReadFootprintTableWriter.Encode([
-            capturedTypePattern
+            capturedTypePattern || generalOutputSelector
                 ? new TrRmPredicateReadFootprintRow(1, 1, 0, 0)
                 : new TrRmPredicateReadFootprintRow(0, 0,
                     includeDirectPredicateCall ? 1 : 0, dependencyCount),
-        ], rootCount: capturedTypePattern ? 1 : 0, dependencyCount);
+        ], rootCount: footprintRootCount, dependencyCount);
         var readRootBytes = capturedTypePattern
             ? TrRmPredicateReadRootTableWriter.Encode([
                 new TrRmPredicateReadRootRow(1, 0),
             ], immutableDataCount: 0, captureCount: 1, s_schema)
+            : generalOutputSelector
+                ? TrRmPredicateReadRootTableWriter.Encode([
+                    generalOutputSelectorReadsOutput
+                        ? new TrRmPredicateReadRootRow(4, 1)
+                        : new TrRmPredicateReadRootRow(2, 0),
+                ], immutableDataCount: 0, captureCount: 0, s_schema)
             : [];
-        var typeUseBytes = capturedTypePattern
+        var typeUseBytes = generalOutputSelector
+            ? TrRmPredicateTypeUseTableWriter.Encode(
+                Array.Empty<TrRmPredicateTypeUseRow>(), typeSpecs, s_schema)
+            : capturedTypePattern
             ? TrRmPredicateTypeUseTableWriter.Encode([
                 new TrRmPredicateTypeUseRow(
                     includePredicateTypeConstantExecution ? 2u : 0xF200_0008),
@@ -1123,11 +1235,17 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
                 typeUseCount: 2, s_schema);
         }
         var operandCounts = new TrRmPredicateTableRowCounts(
-            capturedTypePattern ? 1 : 0, 0, capturedTypePattern ? 1 : 0,
+            capturedTypePattern || generalOutputSelector ? 1 : 0, 0,
+            capturedTypePattern ? 1 : 0,
             0, includeDirectPredicateCall ? 1 : 0,
-            capturedTypePattern ? 0 : 2, 0, 0, 0, 0,
+            capturedTypePattern || generalOutputSelector ? 0 : 2,
+            0, 0, 0, 0,
             capturedTypePattern ? 2 : 0);
-        var operandBytes = capturedTypePattern
+        var operandBytes = generalOutputSelector
+            ? TrRmPredicateNodeOperandTableWriter.Encode([
+                new TrRmPredicateNodeOperandRow(1, 1),
+            ], operandCounts, s_schema)
+            : capturedTypePattern
             ? TrRmPredicateNodeOperandTableWriter.Encode([
                 new TrRmPredicateNodeOperandRow(1, 1),
                 new TrRmPredicateNodeOperandRow(11, 1),
@@ -1140,7 +1258,11 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
                 new TrRmPredicateNodeOperandRow(6, 1),
                 new TrRmPredicateNodeOperandRow(6, 2),
             ], operandCounts, s_schema);
-        var nodeBytes = capturedTypePattern
+        var nodeBytes = generalOutputSelector
+            ? TrRmPredicateNodeTableWriter.Encode([
+                new TrRmPredicateNodeRow(nodeKind, 0xF200_0001, 1, 1),
+            ], 1, typeSpecs, s_schema)
+            : capturedTypePattern
             ? TrRmPredicateNodeTableWriter.Encode([
                 new TrRmPredicateNodeRow(0x11, 0xF200_0008, 1, 1),
                 new TrRmPredicateNodeRow(0x49, 0xF200_0001, 2, 1),
@@ -1179,6 +1301,11 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
             new TrRmSection(0x0056, 0, 1, staticFieldContractBytes),
             new TrRmSection(0x0057, 0, 1, eagerGroupBytes),
         };
+        if (generalOutputSelector)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                (uint)parameterCount, parameterBytes));
+        }
         if (includeConstantExecution)
         {
             sections.Add(new TrRmSection(0x0019, 0, 1, genericParamBytes));
@@ -1206,13 +1333,17 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
             sections.Add(new TrRmSection(0x001C, 0, 1, importsBytes));
             sections.Add(new TrRmSection(0x005D, 0, 2, intrinsicRegistrationBytes));
         }
-        if (capturedTypePattern)
+        if (capturedTypePattern || generalOutputSelector)
         {
-            sections.Add(new TrRmSection(0x0039, 0, 1, readRootBytes));
-            sections.Add(new TrRmSection(0x003D, 0, 2, childEdgeBytes));
-            sections.Add(new TrRmSection(0x003E, 0, 1, captureBytes));
-            sections.Add(new TrRmSection(0x0052, 0,
-                duplicateBinder ? 3u : 2u, typePatternBytes));
+            sections.Add(new TrRmSection(0x0039, 0,
+                (uint)footprintRootCount, readRootBytes));
+            if (capturedTypePattern)
+            {
+                sections.Add(new TrRmSection(0x003D, 0, 2, childEdgeBytes));
+                sections.Add(new TrRmSection(0x003E, 0, 1, captureBytes));
+                sections.Add(new TrRmSection(0x0052, 0,
+                    duplicateBinder ? 3u : 2u, typePatternBytes));
+            }
         }
 
         if (typeSpecRows.Count != 0)
@@ -1231,9 +1362,14 @@ internal sealed class TrRmGeneralPredicateGraphTableTests
         sections.Add(new TrRmSection(0x003B, 0,
             capturedTypePattern ? 3u : 1u, nodeBytes));
         sections.Add(new TrRmSection(0x003C, 0,
-            capturedTypePattern ? 2u : includeDirectPredicateCall ? 1u : 2u,
+            capturedTypePattern ? 2u
+                : generalOutputSelector ? 1u
+                : includeDirectPredicateCall ? 1u : 2u,
             operandBytes));
-        sections.Add(new TrRmSection(0x004F, 0, 2, typeUseBytes));
+        if (!generalOutputSelector)
+        {
+            sections.Add(new TrRmSection(0x004F, 0, 2, typeUseBytes));
+        }
         if (includeDirectPredicateCall)
         {
             sections.Add(new TrRmSection(0x004E, 0, 1, callBytes));

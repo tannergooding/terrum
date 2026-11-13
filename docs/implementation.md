@@ -388,13 +388,33 @@ read root, the six assigned selector kinds and owner result type, with no child
 edges, captures or dependencies. It preserves those clauses on
 DoesNotReturn methods and rejects duplicate or conflicting overlapping
 normal-outcome states for one output; it does not execute the selector.
+Within the separate unapproved `GeneralPredicateGraphsDraft` candidate, the
+structural consumer now also admits general phase-3 graphs under Feature 17/1
+for `OutputState` rows targeting checked initialization destinations. It
+requires each such graph to be referenced, and rejects output-root reads,
+raw `NativeOutput` cells and function-pointer anchors. This does not add
+source `ensure` projection or emission, semantic re-proof, runtime graph
+evaluation, or Standard-profile support.
 The code provisionally uses the unapproved
 [predicate Feature composition](proposals/predicate-feature-composition.md)
 direction: Feature 10/1 has no unconditional Feature 11/9 prerequisite, and
-the proposal limits its semantics to bounded phase-3 selectors. General
-predicate graphs and phase-1/2 semantics remain unsupported. The normative
-registry still records the pending `10 -> 11 -> 9` chain; this divergence is
-not a conformance claim or a compatibility mapping.
+the separate
+[checked-output selector proposal](proposals/checked-output-outcome-selectors.md)
+limits general phase-3 selectors to that exact candidate profile. Standard
+phase-1/2 declaration-predicate persistence and execution remain unsupported.
+The normative registry still records the pending `10 -> 11 -> 9` chain; this
+divergence is not a conformance claim or a compatibility mapping.
+The separate, unapproved `trrm/1-draft-init-reference-bodies-1` profile
+currently emits and consumes one-block scalar `ref<init T>` stores, direct
+local-Home DD and source-use-5 calls, plus a bounded three-block Boolean
+provider/caller shape. Source production now emits Feature `10/1`
+`OutputState` rows and bounded true/complete, false/vacant PredicateGraphs;
+same-profile imports compare and preserve that mapping through source-free
+re-emission. The loaded same-module branch path executes under FailFast.
+Authored/nondefault OutputState predicates, Span, hidden preparation, general
+CFG joins, provider dependency graphs, provider-linked execution and
+CheckedExceptions remain open. This provisional implementation does not
+approve the profile.
 Standard NativeImport/Export field validation recognizes these function-
 pointer values. Feature 1 is enforced for anchors; Feature 2 closure now
 traverses wrappers and type arguments of constructed values in MethodSig

@@ -12,7 +12,8 @@ internal static class TrRmGeneralPredicateGraphValidator
         TrRmArtifactSchema schema,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
-        TrRmContractTableReader contracts, TrRmTypeSpecTableReader typeSpecs,
+        TrRmParamTableReader parameters, TrRmContractTableReader contracts,
+        TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader typeDefs,
         TrRmEnumDefTableReader enumDefs,
         TrRmGenericParamTableReader genericParams,
@@ -75,6 +76,15 @@ internal static class TrRmGeneralPredicateGraphValidator
                     : TrRmFeatureTableReader.GeneralPredicateGraphsFeatureId;
                 RequireFeature(features, modules, methods.GetOwnerModule(method),
                     requiredFeature, schema);
+                var rootNode = graphs.GetRootNodeRow(graph);
+                if (clause.PhaseTag == 3
+                    && nodes.GetNodeKind(rootNode) > 6)
+                {
+                    RequireFeature(features, modules,
+                        methods.GetOwnerModule(method),
+                        TrRmFeatureTableReader.GeneralPredicateGraphsFeatureId,
+                        schema);
+                }
             }
         }
 
@@ -317,7 +327,8 @@ internal static class TrRmGeneralPredicateGraphValidator
             }
         }
 
-        ValidateOutputSelectors(selectorKinds, methods, contracts);
+        ValidateOutputSelectors(selectorKinds, graphPhases, anchorMethods,
+            methods, signatures, parameters, typeSpecs, contracts);
         return selectorKinds;
     }
 
@@ -399,8 +410,12 @@ internal static class TrRmGeneralPredicateGraphValidator
                 && identity >= (uint)parameterCount;
             var invalidReceiverRoot = kind == 1
                 && signatures.GetReceiverTypeSpec(methodSignature) == 0;
-            var invalidResultRoot = kind == 5 && phase != 2;
+            var invalidResultRoot = kind == 5 && phase == 1;
             if (invalidInputRoot || invalidReceiverRoot || invalidResultRoot)
+            {
+                return false;
+            }
+            if (phase == 3 && kind == 4)
             {
                 return false;
             }
@@ -419,7 +434,7 @@ internal static class TrRmGeneralPredicateGraphValidator
         }
 
         var selectorKind = nodes.GetNodeKind(rootNode);
-        if (phase == 3)
+        if (phase == 3 && selectorKind is >= 1 and <= 6)
         {
             if (nodeCount != 1 || selectorKind is < 1 or > 6
                 || rootCount != 1 || dependencyCount != 0
@@ -437,6 +452,10 @@ internal static class TrRmGeneralPredicateGraphValidator
                 && HasSupportedOwnerResult(selectorKind,
                     signatures.GetResultTypeSpec(methodSignature), typeSpecs);
         }
+        if (phase == 3 && selectorKind is < 0x10 or > 0x36)
+        {
+            return false;
+        }
 
         var isExpressionKind = selectorKind is >= 0x10 and <= 0x36;
         if (!isExpressionKind)
@@ -453,7 +472,8 @@ internal static class TrRmGeneralPredicateGraphValidator
 
             var nodeKind = nodes.GetNodeKind(node);
             var childCount = edges.GetChildCount(node);
-            if (!ValidateNodeShape(node, nodeKind, childCount, nodes, operands,
+            if ((phase == 3 && nodeKind is >= 1 and <= 6)
+                || !ValidateNodeShape(node, nodeKind, childCount, nodes, operands,
                     calls, graph, operations, typeUses,
                     controls, typePatterns, captures))
             {
@@ -1239,15 +1259,26 @@ internal static class TrRmGeneralPredicateGraphValidator
         };
 
     private static void ValidateOutputSelectors(byte[] selectorKinds,
-        TrRmMethodDefTableReader methods, TrRmContractTableReader contracts)
+        byte[] graphPhases, byte[] anchorMethods,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmContractTableReader contracts)
     {
+        var referencedGraphs = new byte[selectorKinds.Length];
         for (var method = 1; method <= methods.Count; method++)
         {
             var outputs = contracts.GetOutputStateContracts(method);
+            var signature = methods.GetSignature(method);
+            var (parameterFirst, parameterCount)
+                = signatures.GetParamRange(signature);
             for (var first = 0; first < outputs.Length; first++)
             {
                 var firstOutput = outputs[first];
                 var firstKind = GetOutputSelectorKind(firstOutput);
+                ValidateGeneralOutput(firstOutput, firstKind,
+                    graphPhases, anchorMethods, parameters, typeSpecs,
+                    parameterFirst, parameterCount, method, referencedGraphs);
                 for (var second = first + 1; second < outputs.Length; second++)
                 {
                     var secondOutput = outputs[second];
@@ -1257,9 +1288,11 @@ internal static class TrRmGeneralPredicateGraphValidator
                     }
 
                     var secondKind = GetOutputSelectorKind(secondOutput);
-                    if (firstKind == secondKind
+                    if (firstKind <= 6 && secondKind <= 6
+                        && (firstKind == secondKind
                         || (firstOutput.State != secondOutput.State
-                            && SelectorsOverlap(firstKind, secondKind)))
+                            && SelectorsOverlap((byte)firstKind,
+                                (byte)secondKind))))
                     {
                         throw InvalidGraph();
                     }
@@ -1278,6 +1311,40 @@ internal static class TrRmGeneralPredicateGraphValidator
 
             return selectorKinds[graph];
         }
+
+        for (var graph = 1; graph < selectorKinds.Length; graph++)
+        {
+            if (graphPhases[graph] == 3 && selectorKinds[graph] > 6
+                && referencedGraphs[graph] == 0)
+            {
+                throw InvalidGraph();
+            }
+        }
+    }
+
+    private static void ValidateGeneralOutput(
+        TrRmOutputStateContract output, byte selectorKind,
+        byte[] graphPhases, byte[] anchorMethods,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
+        int parameterFirst, int parameterCount, int method,
+        byte[] referencedGraphs)
+    {
+        var graph = output.PredicateGraphRow;
+        if (selectorKind <= 6)
+        {
+            return;
+        }
+
+        if (graphPhases[graph] != 3 || anchorMethods[method] != 0
+            || output.ParameterOrdinal >= (uint)parameterCount
+            || !typeSpecs.IsInitializationDestinationType(
+                parameters.GetTypeSpec(parameterFirst
+                    + checked((int)output.ParameterOrdinal))))
+        {
+            throw InvalidGraph();
+        }
+
+        referencedGraphs[graph] = 1;
     }
 
     private static bool SelectorsOverlap(byte left, byte right)
