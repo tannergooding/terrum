@@ -154,11 +154,19 @@ construction/runtime promotion. The provisional enum-identity implementation
 now preserves an uncalled `NativeImport` with a private-enum `NativeParameter`
 pointee through private reference, set and graph remapping; a changed selected
 provider snapshot rejects. Broader enum closure, malformed/replacement cases,
-and CLI/package/runtime route qualification remain open.
+and private native-package/set/graph/runtime qualification remain open; the
+separate provisional `compile-module` identity route is bounded below.
 The private 106/-2 producer/reference also round-trips a bounded raw-Union
 fixed-array field root with explicit nominal identity inputs; ordinary
 non-Union array-derived locals and nested backing outside the selected profile
 remain rejected.
+`compile-module` also has a provisional, unapproved
+`--private-identity-manifest` route through the public
+`PrivateModuleIdentityInputs.CreateFromSelectors` API. It transports explicit
+definition, import, Core-member and source-enum inputs without changing
+private-module bytes. Producer Core imports require an explicitly selected
+Core registration; consumer imports remain tied to positional producer
+exports. See the [CLI proposal](../proposals/private-module-cli-identity-inputs.md).
 Revision-103 artifacts preserve descriptive nominal
 array fields and their nested/pointer/fnptr closure through writing, reading,
 ordinary linking, sets, graphs and source-free execution; bodyless provider
@@ -187,8 +195,23 @@ ConstantSource row reference.
 FieldDef Import/Export rows now resolve through the typed C# definition
 resolver, require owner TypeDef Imports for expected fields, and reject
 republication of field or owner stubs; public owner/field visibility and key
-uniqueness are checked. Complete field type, access, substitution and
-Layout/TargetProfile compatibility remain in query/layout work.
+uniqueness are checked. Under the exact Standard LayoutQueries schema, provider
+binding now resolves the owner TypeDef and FieldDef through their retained
+Import/Export keys, checks the provider field's owner-relative ordinal, and
+compares complete owner/field types, generic formal positions, flags and every
+retained Layout variant. The bound program retains provider snapshots and
+edges; unchanged `EmitStandard` preserves the exact root artifact, and direct
+FieldMap, FieldPath and TargetLayoutDependencyField uses cannot bypass the
+FieldDef Import for a stub under an imported owner. Focused provider,
+FieldPath, layout-dependency and re-emission regressions pass. This does not
+implement `DE` query evaluation or FieldPath type-substitution and immediate-
+owner checking.
+The provisional Standard LayoutQueries reference composer merges selected
+query-only views by actual Module/TypeDef identity. A separate Pair and Leaf
+selection exercises a nested imported FieldPath through emission,
+source-free loading and NativeJit; conflicting snapshots reject in either
+input order, including unchanged parent bytes with a changed dependency
+snapshot. Broader provider graphs and provider replacement remain open.
 Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute
@@ -563,36 +586,52 @@ dotnet $cli link-module artifacts\bin\modules\consumer.trm artifacts\bin\modules
 The self-hosted sources below use `[Layout]`/`[Blittable]`. Their private
 producer/consumer compilation therefore needs an explicitly host-provisioned
 version-1 Layout Core manifest; there is no repository default or production
-provider selection. The same manifest selects only the current source
-compilation context and is not retained in the `.trm` artifact. Native
-`compile-native`/set/graph commands do not accept it.
+provider selection. The layout manifest selects only the current source
+compilation context and is not retained in `.trm`. These sources also need a
+separate `--private-identity-manifest` for explicit nominal keys and provider
+expectations. That CLI route remains unapproved and provisional under the
+[private identity CLI proposal](../proposals/private-module-cli-identity-inputs.md);
+the manifest hashes the exact file inputs and does not change `.trm`. Each
+invocation's using-Module identity must match its layout manifest, so distinct
+producer/consumer identities use distinct layout manifests. Native
+`compile-native`/set/graph commands do not accept either option.
 
 The actual compiler candidates can be built separately from their tests:
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
-$layoutManifest = 'artifacts\config\layout-core.json' # host-provisioned configuration
-dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\CharacterFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o artifacts\bin\modules\compiler-values.trm --layout-core-manifest $layoutManifest
-dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Text\RangeTests.terrum artifacts\bin\modules\compiler-values.trm --source samples\ModuleReplacement\range-entry.terrum -o artifacts\bin\modules\range-tests.trm --layout-core-manifest $layoutManifest
+$producerLayoutManifest = 'artifacts\config\compiler-values-layout.json' # host-provisioned
+$consumerLayoutManifest = 'artifacts\config\range-tests-layout.json' # host-provisioned
+$producerIdentityManifest = 'artifacts\config\compiler-values-identity.json' # exact source bytes and explicit type keys
+$consumerIdentityManifest = 'artifacts\config\range-tests-identity.json' # exact source/provider bytes and proxy keys
+dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\CharacterFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o artifacts\bin\modules\compiler-values.trm --layout-core-manifest $producerLayoutManifest --private-identity-manifest $producerIdentityManifest
+dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Text\RangeTests.terrum artifacts\bin\modules\compiler-values.trm --source samples\ModuleReplacement\range-entry.terrum -o artifacts\bin\modules\range-tests.trm --layout-core-manifest $consumerLayoutManifest --private-identity-manifest $consumerIdentityManifest
 dotnet $cli run-module artifacts\bin\modules\range-tests.trm artifacts\bin\modules\compiler-values.trm --runtime fail-fast # exits 0
 ```
 
 `Token` also compiles separately from its tests. Its nested `SourceRange` makes
 the value twelve bytes, exercising indirect arguments and results rather than
-the scalar-register-only profile:
+the scalar-register-only profile. This invocation uses separate, host-
+provisioned layout and private-identity manifests for its producer and
+consumer:
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
-$layoutManifest = 'artifacts\config\layout-core.json' # host-provisioned configuration
-dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\bin\modules\token-values.trm --layout-core-manifest $layoutManifest
-dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Lexing\TokenTests.terrum artifacts\bin\modules\token-values.trm --source samples\ModuleReplacement\token-entry.terrum -o artifacts\bin\modules\token-tests.trm --layout-core-manifest $layoutManifest
+$tokenProducerLayoutManifest = 'artifacts\config\token-values-layout.json' # host-provisioned
+$tokenConsumerLayoutManifest = 'artifacts\config\token-tests-layout.json' # host-provisioned
+$tokenProducerIdentityManifest = 'artifacts\config\token-values-identity.json' # exact source bytes and explicit type keys
+$tokenConsumerIdentityManifest = 'artifacts\config\token-tests-identity.json' # exact source/provider bytes and proxy keys
+dotnet $cli compile-module producer sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\Terrum.CodeAnalysis.Terrum\Lexing\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\bin\modules\token-values.trm --layout-core-manifest $tokenProducerLayoutManifest --private-identity-manifest $tokenProducerIdentityManifest
+dotnet $cli compile-module consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Lexing\TokenTests.terrum artifacts\bin\modules\token-values.trm --source samples\ModuleReplacement\token-entry.terrum -o artifacts\bin\modules\token-tests.trm --layout-core-manifest $tokenConsumerLayoutManifest --private-identity-manifest $tokenConsumerIdentityManifest
 dotnet $cli run-module artifacts\bin\modules\token-tests.trm artifacts\bin\modules\token-values.trm --runtime fail-fast # exits 0
 ```
 
 The bounded `ComponentTestRunner` composes the range, character-fact, UTF-16,
 token, checked 32-/64-bit arithmetic, wide-integer, integer-math,
 integer-saturation, integer-wrapping, checked-conversion and 32-/64-bit
-bit-operation checks against one independently compiled producer:
+bit-operation checks against one independently compiled producer. These
+nominal sources require host-provisioned layout and private-identity manifests
+for each exact ordered source set:
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
@@ -755,6 +794,10 @@ $componentExports = @(
     'Terrum.CodeAnalysis.Numerics64.IsPow2UInt64',
     'Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64'
 )
+$componentProducerLayoutManifest = 'artifacts\config\component-values-layout.json' # host-provisioned
+$componentConsumerLayoutManifest = 'artifacts\config\component-tests-layout.json' # host-provisioned
+$componentProducerIdentityManifest = 'artifacts\config\component-values-identity.json' # exact producer sources and keys
+$componentConsumerIdentityManifest = 'artifacts\config\component-tests-identity.json' # exact consumer sources/provider and proxy keys
 $producerArgs = @('compile-module', 'producer', $componentSources[0], $componentExports[0])
 for ($index = 1; $index -lt $componentSources.Count; $index++) {
     $producerArgs += @('--source', $componentSources[$index])
@@ -762,7 +805,9 @@ for ($index = 1; $index -lt $componentSources.Count; $index++) {
 for ($index = 1; $index -lt $componentExports.Count; $index++) {
     $producerArgs += @('--export', $componentExports[$index])
 }
-$producerArgs += @('-o', 'artifacts\bin\modules\component-values.trm')
+$producerArgs += @('-o', 'artifacts\bin\modules\component-values.trm',
+    '--layout-core-manifest', $componentProducerLayoutManifest,
+    '--private-identity-manifest', $componentProducerIdentityManifest)
 dotnet $cli @producerArgs
 
 $componentTests = @(
@@ -784,7 +829,9 @@ $consumerArgs = @('compile-module', 'consumer', $componentTests[0], 'artifacts\b
 for ($index = 1; $index -lt $componentTests.Count; $index++) {
     $consumerArgs += @('--source', $componentTests[$index])
 }
-$consumerArgs += @('-o', 'artifacts\bin\modules\component-tests.trm')
+$consumerArgs += @('-o', 'artifacts\bin\modules\component-tests.trm',
+    '--layout-core-manifest', $componentConsumerLayoutManifest,
+    '--private-identity-manifest', $componentConsumerIdentityManifest)
 dotnet $cli @consumerArgs
 dotnet $cli run-module artifacts\bin\modules\component-tests.trm artifacts\bin\modules\component-values.trm --runtime fail-fast # exits 0
 dotnet $cli link-module artifacts\bin\modules\component-tests.trm artifacts\bin\modules\component-values.trm -o artifacts\bin\modules\component-tests.exe --runtime fail-fast
@@ -905,21 +952,30 @@ open.
 For the managed `Snapshot` consumer, compile both compatible providers and one
 consumer artifact per policy. `run-module` services that same consumer
 artifact with either provider. `link-module` instead emits a fresh executable
-for each provider; it does not patch a previously linked PE:
+for each provider; it does not patch a previously linked PE. The
+host-provisioned manifests below must bind the exact source lists and
+provider/consumer identities; regenerate the consumer identity input for
+each policy-specific original artifact hash.
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
 $cli = 'artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll'
+$providerLayoutManifest = 'artifacts\config\snapshot-provider-layout.json' # host-provisioned
+$consumerLayoutManifest = 'artifacts\config\snapshot-consumer-layout.json' # host-provisioned
+$originalIdentityManifest = 'artifacts\config\snapshot-original-identity.json' # exact source bytes and explicit keys
+$replacementIdentityManifest = 'artifacts\config\snapshot-managed-identity.json' # same Module/keys, exact replacement sources
 foreach ($policy in 'fail-fast', 'checked-exceptions') {
     $suffix = $policy -replace '-', ''
     $original = "artifacts\bin\modules\snapshot-original-$suffix.trm"
     $replacement = "artifacts\bin\modules\snapshot-managed-$suffix.trm"
     $consumer = "artifacts\bin\modules\snapshot-consumer-$suffix.trm"
+    $consumerIdentityManifest = "artifacts\config\snapshot-consumer-$suffix.identity.json"
     $originalExe = "artifacts\bin\modules\snapshot-original-$suffix.exe"
     $replacementExe = "artifacts\bin\modules\snapshot-managed-$suffix.exe"
-    dotnet $cli compile-module producer samples\DependencyGraphServicing\copy-contract-original.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
-    dotnet $cli compile-module producer samples\DependencyGraphServicing\copy-contract-managed.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
-    dotnet $cli compile-module consumer samples\ModuleReplacement\managed-copy-consumer.terrum $original -o $consumer --runtime $policy
+    # Generate the consumer manifest for these exact source and $original bytes.
+    dotnet $cli compile-module producer samples\DependencyGraphServicing\copy-contract-original.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy --layout-core-manifest $providerLayoutManifest --private-identity-manifest $originalIdentityManifest
+    dotnet $cli compile-module producer samples\DependencyGraphServicing\copy-contract-managed.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy --layout-core-manifest $providerLayoutManifest --private-identity-manifest $replacementIdentityManifest
+    dotnet $cli compile-module consumer samples\ModuleReplacement\managed-copy-consumer.terrum $original -o $consumer --runtime $policy --layout-core-manifest $consumerLayoutManifest --private-identity-manifest $consumerIdentityManifest
     dotnet $cli run-module $consumer $original --runtime $policy # exits 42
     dotnet $cli run-module $consumer $replacement --runtime $policy # exits 44
     dotnet $cli link-module $consumer $original -o $originalExe --runtime $policy

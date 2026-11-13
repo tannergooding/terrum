@@ -241,6 +241,18 @@ the frontend probe follows the separate unapproved
 [frontend-component extension](../proposals/frontend-component-source-layout-registration.md).
 These implementation paths do not change the selected `terrum.cli/1` protocol.
 
+The private `compile-module producer`/`consumer` commands also accept one
+`--private-identity-manifest <path>` under the separate unapproved
+[private identity CLI proposal](../proposals/private-module-cli-identity-inputs.md).
+This bounded, strict file input supplies explicit nominal selectors and keys,
+Core enum-member identities, source-enum maps, and hashes of the exact source
+and positional producer bytes; it does not add fields to `.trm`. If both
+manifests are supplied, their using-Module identities must match and satisfy
+both domains. Producer imports may select only checked Core enums from an
+explicit Core registration; consumer imports must resolve to owned exports in
+the positional producer artifact. The option is rejected by other commands
+and does not extend `terrum.cli/1`.
+
 ## Provisional normal-backing agreement selection
 
 The source `analyze`, `build`, `build-native-import` and `jit` commands accept

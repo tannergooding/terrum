@@ -38,25 +38,46 @@ public sealed record PrivateEnumMemberAssignment(
     CoreDeclarationIdentity MemberIdentity,
     string MemberDeclarationKey);
 
+/// <summary>Assigns private producer identities and member keys to a source enum.</summary>
+/// <param name="QualifiedName">The exact qualified name in the selected bound program.</param>
+/// <param name="LocalDeclarationKey">The source-local declaration key.</param>
+/// <param name="IsExported">Whether the definition is a public provider declaration.</param>
+/// <param name="MemberDeclarationKeys">The explicit complete member-key map in declaration order.</param>
+public sealed record PrivateSourceEnumDefinitionAssignment(
+    string QualifiedName, string LocalDeclarationKey, bool IsExported,
+    ImmutableArray<string> MemberDeclarationKeys);
+
 /// <summary>
 /// Captures explicit nominal origins for one checked private-module producer or consumer.
 /// </summary>
-public sealed class PrivateModuleIdentityInputs
+public sealed partial class PrivateModuleIdentityInputs
 {
     private static readonly UTF8Encoding s_strictUtf8 = new(false, true);
+
+    private sealed record SourceEnumCapture(PrimitiveType Type,
+        BoundEnumDefinition Definition,
+        PrivateSourceEnumDefinitionAssignment Assignment);
 
     private PrivateModuleIdentityInputs(BoundProgram program,
         string usingModuleIdentity,
         ImmutableArray<PrivateNominalDefinition> definitions,
         ImmutableArray<PrivateNominalImport> imports,
-        ImmutableArray<PrivateEnumMemberAssignment> enumMembers)
+        ImmutableArray<PrivateEnumMemberAssignment> enumMembers,
+        ImmutableArray<PrivateSourceEnumDefinitionAssignment>
+            sourceEnumDefinitions,
+        ImmutableArray<SourceEnumCapture> sourceEnumCaptures)
     {
         Program = program;
         UsingModuleIdentity = usingModuleIdentity;
         Definitions = definitions;
         Imports = imports;
         EnumMembers = enumMembers;
+        SourceEnumDefinitions = sourceEnumDefinitions;
+        _sourceEnumCaptures = sourceEnumCaptures;
     }
+
+    private readonly ImmutableArray<SourceEnumCapture>
+        _sourceEnumCaptures;
 
     internal BoundProgram Program { get; }
 
@@ -71,6 +92,10 @@ public sealed class PrivateModuleIdentityInputs
 
     /// <summary>Gets the exact Core enum-member assignments.</summary>
     public ImmutableArray<PrivateEnumMemberAssignment> EnumMembers { get; }
+
+    /// <summary>Gets the explicit source-enum declaration and member-key assignments.</summary>
+    public ImmutableArray<PrivateSourceEnumDefinitionAssignment>
+        SourceEnumDefinitions { get; }
 
     /// <summary>Captures validated nominal identities for a checked program snapshot.</summary>
     /// <param name="program">The exact bound-program snapshot to which the inputs apply.</param>
@@ -97,13 +122,33 @@ public sealed class PrivateModuleIdentityInputs
         string usingModuleIdentity,
         IReadOnlyList<PrivateNominalDefinition> definitions,
         IReadOnlyList<PrivateNominalImport> imports,
-        IReadOnlyList<PrivateEnumMemberAssignment> enumMembers)
+        IReadOnlyList<PrivateEnumMemberAssignment> enumMembers) =>
+        Create(program, usingModuleIdentity, definitions, imports,
+            enumMembers, []);
+
+    /// <summary>Captures validated Core and source enum identities for one checked program snapshot.</summary>
+    /// <param name="program">The exact bound-program snapshot to which the inputs apply.</param>
+    /// <param name="usingModuleIdentity">The logical identity of the using Module.</param>
+    /// <param name="definitions">Owned nominal definitions and their local keys.</param>
+    /// <param name="imports">Imported nominal declarations and selected provider keys.</param>
+    /// <param name="enumMembers">Complete Core identities for selected nominal enum members.</param>
+    /// <param name="sourceEnumDefinitions">Complete source enum identity and member-key assignments.</param>
+    /// <returns>The validated identity inputs bound to <paramref name="program"/>.</returns>
+    public static PrivateModuleIdentityInputs Create(
+        BoundProgram program,
+        string usingModuleIdentity,
+        IReadOnlyList<PrivateNominalDefinition> definitions,
+        IReadOnlyList<PrivateNominalImport> imports,
+        IReadOnlyList<PrivateEnumMemberAssignment> enumMembers,
+        IReadOnlyList<PrivateSourceEnumDefinitionAssignment>
+            sourceEnumDefinitions)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(usingModuleIdentity);
         ArgumentNullException.ThrowIfNull(definitions);
         ArgumentNullException.ThrowIfNull(imports);
         ArgumentNullException.ThrowIfNull(enumMembers);
+        ArgumentNullException.ThrowIfNull(sourceEnumDefinitions);
         if (!IsValidModuleIdentity(usingModuleIdentity))
         {
             throw new ArgumentException(
@@ -118,6 +163,13 @@ public sealed class PrivateModuleIdentityInputs
         var enumMemberAssignments
             = ImmutableArray.CreateBuilder<PrivateEnumMemberAssignment>(
                 enumMembers.Count);
+        var sourceEnumAssignments
+            = ImmutableArray.CreateBuilder<
+                PrivateSourceEnumDefinitionAssignment>(
+                sourceEnumDefinitions.Count);
+        var sourceEnumCaptures
+            = ImmutableArray.CreateBuilder<SourceEnumCapture>(
+                sourceEnumDefinitions.Count);
         var assignedTypes = new HashSet<PrimitiveType>();
         var localKeys = new HashSet<string>(StringComparer.Ordinal);
 
@@ -195,12 +247,17 @@ public sealed class PrivateModuleIdentityInputs
             imported.Add(import with { });
         }
 
+        ValidateSourceEnumDefinitions(program, sourceEnumDefinitions,
+            assignedTypes, localKeys, sourceEnumAssignments,
+            sourceEnumCaptures);
         ValidateEnumMemberAssignments(program, usingModuleIdentity,
             owned, imported, enumMembers, enumMemberAssignments);
 
         return new PrivateModuleIdentityInputs(program, usingModuleIdentity,
             owned.MoveToImmutable(), imported.MoveToImmutable(),
-            enumMemberAssignments.MoveToImmutable());
+            enumMemberAssignments.MoveToImmutable(),
+            sourceEnumAssignments.MoveToImmutable(),
+            sourceEnumCaptures.MoveToImmutable());
     }
 
     internal bool IsFor(BoundProgram program) =>
@@ -215,8 +272,171 @@ public sealed class PrivateModuleIdentityInputs
                 "Private nominal identity inputs were captured for another bound-program snapshot.",
                 nameof(sourceProgram));
         }
-        return new PrivateModuleIdentityInputs(reboundProgram,
-            UsingModuleIdentity, Definitions, Imports, EnumMembers);
+        foreach (var capture in _sourceEnumCaptures)
+        {
+            var matches = reboundProgram.EnumDefinitions.Select(
+                    (definition, index) => (definition, index))
+                .Where(item => item.definition.Identity
+                        is BoundEnumDeclarationIdentity.Source source
+                    && ReferenceEquals(source.Value,
+                        ((BoundEnumDeclarationIdentity.Source)
+                            capture.Definition.Identity).Value))
+                .ToArray();
+            if (matches.Length != 1
+                || matches[0].index != BoundEnumTypes.Index(capture.Type)
+                || !BoundEnumTypes.AreEquivalent(capture.Definition,
+                    matches[0].definition))
+            {
+                throw new ArgumentException(
+                    "A source enum projection cannot be rebound to a different declaration snapshot.",
+                    nameof(reboundProgram));
+            }
+        }
+        return Create(reboundProgram, UsingModuleIdentity, Definitions,
+            Imports, EnumMembers, SourceEnumDefinitions);
+    }
+
+    internal ImmutableArray<(PrimitiveType Type,
+        PrivateSourceEnumDefinitionAssignment Assignment)>
+        SourceEnumAssignments
+            => [.. _sourceEnumCaptures.Select(static capture =>
+                (capture.Type, capture.Assignment))];
+
+    internal bool TryGetSourceEnumAssignment(
+        BoundSourceEnumDeclarationHandle declaration,
+        out PrivateSourceEnumDefinitionAssignment assignment)
+    {
+        foreach (var capture in _sourceEnumCaptures)
+        {
+            if (capture.Definition.Identity
+                    is BoundEnumDeclarationIdentity.Source source
+                && ReferenceEquals(source.Value, declaration))
+            {
+                assignment = capture.Assignment;
+                return true;
+            }
+        }
+        assignment = null!;
+        return false;
+    }
+
+    private static void ValidateSourceEnumDefinitions(
+        BoundProgram program,
+        IReadOnlyList<PrivateSourceEnumDefinitionAssignment> assignments,
+        HashSet<PrimitiveType> assignedTypes, HashSet<string> localKeys,
+        ImmutableArray<PrivateSourceEnumDefinitionAssignment>.Builder retained,
+        ImmutableArray<SourceEnumCapture>.Builder captures)
+    {
+        if (assignments.Count == 0)
+        {
+            return;
+        }
+        if (!BoundEnumTypes.IsValidTable(program.EnumDefinitions))
+        {
+            throw new ArgumentException(
+                "The bound program has an invalid enum identity table.",
+                nameof(program));
+        }
+
+        foreach (var assignment in assignments)
+        {
+            if (assignment is null
+                || string.IsNullOrWhiteSpace(assignment.QualifiedName)
+                || !IsValidDeclarationKey(
+                    assignment.LocalDeclarationKey)
+                || !localKeys.Add(assignment.LocalDeclarationKey)
+                || assignment.MemberDeclarationKeys.IsDefault)
+            {
+                throw new ArgumentException(
+                    "A source enum identity assignment is invalid or conflicts with another local key.",
+                    nameof(assignments));
+            }
+
+            var matches = program.EnumDefinitions.Select(
+                    (definition, index) => (definition, index))
+                .Where(item => item.definition.Identity
+                        is BoundEnumDeclarationIdentity.Source source
+                    && source.Value.QualifiedName
+                        == assignment.QualifiedName
+                    && source.Value.IsPublic
+                    && !source.Value.IsFileLocal
+                    && item.definition.IsPublic
+                    && item.definition.IsPrimary)
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                throw new ArgumentException(
+                    "A source enum identity assignment must select one public namespace-level source declaration.",
+                    nameof(assignments));
+            }
+
+            var (definition, index) = matches[0];
+            var type = BoundEnumTypes.Type(index);
+            if (!assignedTypes.Add(type))
+            {
+                throw new ArgumentException(
+                    "A source enum declaration already has another nominal identity assignment.",
+                    nameof(assignments));
+            }
+            if (definition.UnderlyingType != PrimitiveType.Int32
+                || definition.BlittableTargetRequirement is not (0
+                    or FixedLayoutStorage.WindowsX64TargetRequirement)
+                || definition.ModuleImport is not null)
+            {
+                throw new ModuleContractException(
+                    "The private enum carrier supports only public source enums with an int32 base and supported representation facts.");
+            }
+            if (assignment.IsExported && !definition.IsPublic)
+            {
+                throw new ArgumentException(
+                    "An exported source enum assignment requires a public declaration.",
+                    nameof(assignments));
+            }
+            if (assignment.MemberDeclarationKeys.Length
+                != definition.Members.Length)
+            {
+                throw new ArgumentException(
+                    "A source enum member-key assignment must cover every member in declaration order.",
+                    nameof(assignments));
+            }
+
+            var sourceIdentity
+                = (BoundEnumDeclarationIdentity.Source)
+                    definition.Identity;
+            var memberKeys = new HashSet<string>(StringComparer.Ordinal);
+            var memberIdentities
+                = new HashSet<BoundEnumMemberIdentity>();
+            for (var memberIndex = 0;
+                memberIndex < definition.Members.Length;
+                memberIndex++)
+            {
+                var member = definition.Members[memberIndex];
+                var key = assignment.MemberDeclarationKeys[memberIndex];
+                if (member.Identity
+                        is not BoundEnumMemberIdentity.Source sourceMember
+                    || !ReferenceEquals(sourceMember.Value.Owner,
+                        sourceIdentity.Value)
+                    || !sourceMember.Value.IsValid
+                    || member.DeclarationKey is not null
+                    || !IsValidEnumMemberKey(key)
+                    || !memberKeys.Add(key)
+                    || !memberIdentities.Add(member.Identity))
+                {
+                    throw new ArgumentException(
+                        "A source enum member key does not identify a unique checked member of its selected declaration.",
+                        nameof(assignments));
+                }
+            }
+
+            var captured = assignment with {
+                MemberDeclarationKeys = [
+                    .. assignment.MemberDeclarationKeys,
+                ],
+            };
+            retained.Add(captured);
+            captures.Add(new SourceEnumCapture(type, definition,
+                captured));
+        }
     }
 
     internal static bool IsValidModuleIdentity(string? identity)

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System;
 using System.Linq;
+using System.Numerics;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -14,6 +15,364 @@ namespace Terrum.CodeAnalysis.Tests.Modules;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class PrivateNominalEnumTests
 {
+    private static readonly string[] s_sourceEnumNames = [
+        "Shade", "Signal", "Empty",
+    ];
+    private static readonly string[] s_sourceEnumMemberKeys = [
+        "member.shared", "member.other", "member.blue",
+    ];
+    private static readonly BigInteger[] s_sourceEnumMemberValues = [
+        7, 7, 19,
+    ];
+
+    [Test]
+    public void SourceEnumKeysProjectCompletePrivateSnapshotsWithoutMutatingSource()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Shade : int32 {
+                Red = 7,
+                Duplicate = 7,
+                Blue = 19
+            }
+            public enum Signal : int32 { On = 1 }
+            public enum Empty : int32 { }
+            public Shade GetShade() { return Shade.Red; }
+            public Signal GetSignal() { return Signal.On; }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var sourceShade = program.EnumDefinitions.Single(
+            static definition => definition.Name == "Shade");
+        Assert.That(sourceShade.Identity,
+            Is.TypeOf<BoundEnumDeclarationIdentity.Source>());
+        Assert.That(sourceShade.Members.All(static member =>
+            member.DeclarationKey is null), Is.True);
+
+        var inputs = PrivateModuleIdentityInputs.Create(program,
+            "SourceProvider", [], [], [], [
+                new PrivateSourceEnumDefinitionAssignment("Shade",
+                    "type.shade", true,
+                    ["member.shared", "member.other", "member.blue"]),
+                new PrivateSourceEnumDefinitionAssignment("Signal",
+                    "type.signal", true, ["member.shared"]),
+                new PrivateSourceEnumDefinitionAssignment("Empty",
+                    "type.empty", true, []),
+            ]);
+        var producer = ModuleCompiler.CreateProducer(program,
+            ["GetShade", "GetSignal"], inputs);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var definitions = reference.EnumDefinitions.ToDictionary(
+            static definition => definition.Name, StringComparer.Ordinal);
+
+        Assert.That(definitions.Keys,
+            Is.EquivalentTo(s_sourceEnumNames));
+        Assert.That(definitions.Values.All(static definition =>
+            definition.Identity
+                is BoundEnumDeclarationIdentity.Private), Is.True);
+        Assert.That(definitions["Shade"].Members.Select(
+                static member => member.DeclarationKey),
+            Is.EqualTo(s_sourceEnumMemberKeys));
+        Assert.That(definitions["Shade"].Members.Select(
+                static member => member.Value),
+            Is.EqualTo(s_sourceEnumMemberValues));
+        Assert.That(definitions["Signal"].Members.Single()
+            .DeclarationKey, Is.EqualTo("member.shared"));
+        Assert.That(definitions["Empty"].Members, Is.Empty);
+        Assert.That(program.EnumDefinitions.Single(
+                static definition => definition.Name == "Shade")
+                .Members.All(static member =>
+                    member.DeclarationKey is null), Is.True);
+    }
+
+    [Test]
+    public void SourceEnumPrivateProjectionRequiresCompleteExplicitMaps()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Shade : int32 { Red = 7, Blue = 19 }
+            public Shade GetShade() { return Shade.Red; }
+            public Shade ReadShadeArray() {
+                mut [Shade; 2] values = [Shade.Red, Shade.Blue];
+                values[0] = Shade.Blue;
+                return values[0];
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(program, ["GetShade"]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(program, "SourceProvider",
+                [], [], [], [
+                    new PrivateSourceEnumDefinitionAssignment("Shade",
+                        "type.shade", true, ["only.one"]),
+                ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(program, "SourceProvider",
+                [], [], [], [
+                    new PrivateSourceEnumDefinitionAssignment("Shade",
+                        "type.shade", true, ["same", "same"]),
+                ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(program, "SourceProvider",
+                [], [], [], [
+                    new PrivateSourceEnumDefinitionAssignment("ShadeAlias",
+                        "type.shade", true, ["member.red", "member.blue"]),
+                ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(program, "SourceProvider",
+                [], [], [], [
+                    new PrivateSourceEnumDefinitionAssignment("Shade",
+                        "type.shade", true, default),
+                ]));
+        var completeAssignment
+            = new PrivateSourceEnumDefinitionAssignment("Shade",
+                "type.shade", true, ["member.red", "member.blue"]);
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(program, "SourceProvider",
+                [], [], [], [
+                    completeAssignment,
+                    completeAssignment with {
+                        LocalDeclarationKey = "type.duplicate",
+                    },
+                ]));
+
+        var staleCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public enum Shade : int32 { Red = 7, Blue = 19 }
+                public Shade GetShade() { return Shade.Red; }
+                int32 Main() { return 0; }
+                """));
+        Assert.That(staleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                staleCompilation.Diagnostics));
+        var staleInputs = PrivateModuleIdentityInputs.Create(program,
+            "SourceProvider", [], [], [], [completeAssignment]);
+        _ = Assert.Throws<ArgumentException>(() =>
+            ModuleCompiler.CreateProducer(staleCompilation.Program!,
+                ["GetShade"], staleInputs));
+
+        var sourceEnumType = BoundEnumTypes.Type(
+            program.EnumDefinitions.Select((definition, index) =>
+                (definition, index))
+                .Single(static item => item.definition.Name == "Shade")
+                .index);
+        var fakeCoreEnum = new CoreDeclarationIdentity("SourceProvider",
+            "Shade", CoreDeclarationKind.EnumType);
+        var fakeCoreMember = new CoreDeclarationIdentity("SourceProvider",
+            "Shade.Red", CoreDeclarationKind.EnumMember);
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(program, "SourceProvider",
+                [], [], [
+                    new PrivateEnumMemberAssignment(sourceEnumType,
+                        fakeCoreEnum, 0, fakeCoreMember, "member.red"),
+                ], [completeAssignment]));
+
+        var fileLocal = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            file enum LocalShade : int32 { Red = 7 }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(fileLocal.HasErrors, Is.False,
+            string.Join(Environment.NewLine, fileLocal.Diagnostics));
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(fileLocal.Program!,
+                "SourceProvider", [], [], [], [
+                    new PrivateSourceEnumDefinitionAssignment("LocalShade",
+                        "type.local-shade", true, ["member.red"]),
+                ]));
+        var internalEnum = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            internal enum Hidden : int32 { Value = 1 }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(internalEnum.HasErrors, Is.False,
+            string.Join(Environment.NewLine, internalEnum.Diagnostics));
+        _ = Assert.Throws<ArgumentException>(() =>
+            PrivateModuleIdentityInputs.Create(internalEnum.Program!,
+                "SourceProvider", [], [], [], [
+                    new PrivateSourceEnumDefinitionAssignment("Hidden",
+                        "type.hidden", false, ["member.value"]),
+                ]));
+    }
+
+    [Test]
+    public void WideSourceEnumsRemainValidButAreNotPrivatelyPublished()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Wide : uint64 { Large = 4294967296 }
+            public Wide GetWide() { return Wide.Large; }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var definition = program.EnumDefinitions.Single(
+            static item => item.Name == "Wide");
+        Assert.That(definition.Members.Single().Value,
+            Is.EqualTo(new BigInteger(4_294_967_296UL)));
+
+        _ = Assert.Throws<ModuleContractException>(() =>
+            PrivateModuleIdentityInputs.Create(program, "SourceProvider",
+                [], [], [], [
+                    new PrivateSourceEnumDefinitionAssignment("Wide",
+                        "type.wide", true, ["member.large"]),
+                ]));
+    }
+
+    [Test]
+    public void SourceEnumPrivateProjectionRemapsAcrossConsumersSetsAndNativePackages()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Shade : int32 { Red = 7, Blue = 19 }
+            public Shade GetShade() { return Shade.Red; }
+            public Shade ReadShadeArray() {
+                mut [Shade; 2] values = [Shade.Red, Shade.Blue];
+                values[0] = Shade.Blue;
+                return values[0];
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var sourceArrayType = NativeFixedArrayTypes.Type(0);
+        Assert.That(NativeFixedArrayContract.TryGetLayout(sourceArrayType,
+            program, out var sourceArrayLayout), Is.True);
+        Assert.That(NativeFixedArrayContract.IsRevision100RuntimeArrayLayout(
+            sourceArrayLayout, program.Structures,
+            program.NativeFixedArrayTypes, program.NativePointerTypes,
+            program.NativeFunctionPointerSignatures,
+            program.EnumDefinitions), Is.True);
+        var assignments = new[] {
+            new PrivateSourceEnumDefinitionAssignment("Shade",
+                "type.shade", true, ["member.red", "member.blue"]),
+        };
+        var producerInputs = PrivateModuleIdentityInputs.Create(program,
+            "SourceProvider", [], [], [], assignments);
+        var producer = ModuleCompiler.CreateProducer(program,
+            ["GetShade", "ReadShadeArray"], producerInputs);
+        var providerReference = ModuleCompiler.CreateReference(producer);
+        var neutralCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Neutral() { return 0; }"));
+        Assert.That(neutralCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                neutralCompilation.Diagnostics));
+        var neutralProducer = ModuleCompiler.CreateProducer(
+            neutralCompilation.Program!, ["Neutral"]);
+        var neutralReference = ModuleCompiler.CreateReference(neutralProducer);
+
+        var referenceSet = ModuleCompiler.CreateReferenceSetFromReferences(
+            [neutralReference, providerReference]);
+        var graphReference = ModuleCompiler.MergeGraphReferences(
+            [neutralReference, providerReference]);
+        foreach (var reference in new[] {
+            providerReference, referenceSet, graphReference,
+        })
+        {
+            var definition = reference.EnumDefinitions.Single(
+                static item => item.Name == "Shade");
+            Assert.That(definition.Identity,
+                Is.TypeOf<BoundEnumDeclarationIdentity.Private>());
+            Assert.That(definition.Members.Select(
+                    static member => member.DeclarationKey),
+                Is.EqualTo(["member.red", "member.blue"]));
+        }
+
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                public Shade CopyShade() { return Shade.Red; }
+                public enum LocalShade : int32 { Local = 2 }
+                public LocalShade GetLocalShade() {
+                    return LocalShade.Local;
+                }
+                int32 Main() { return 0; }
+                """), providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var shadeType = BoundEnumTypes.Type(
+            consumerProgram.EnumDefinitions
+                .Select((definition, index) => (definition, index))
+                .Single(static item => item.definition.Name == "Shade")
+                .index);
+        var consumerInputs = PrivateModuleIdentityInputs.Create(
+            consumerProgram, "SourceConsumer", [], [
+                new PrivateNominalImport(shadeType, "proxy.shade",
+                    "SourceProvider", "type.shade"),
+            ], [], [
+                new PrivateSourceEnumDefinitionAssignment("LocalShade",
+                    "type.local-shade", true, ["member.local"]),
+            ]);
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram,
+            producer, consumerInputs);
+        Assert.DoesNotThrow(() => ModuleCompiler.Link(consumer, producer));
+
+        var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public enum Shade : int32 { Red = 7, Blue = 20 }
+            public Shade GetShade() { return Shade.Red; }
+            public Shade ReadShadeArray() {
+                mut [Shade; 2] values = [Shade.Red, Shade.Blue];
+                values[0] = Shade.Blue;
+                return values[0];
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(changedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                changedCompilation.Diagnostics));
+        var changedProducer = ModuleCompiler.CreateProducer(
+            changedCompilation.Program!, ["GetShade", "ReadShadeArray"],
+            PrivateModuleIdentityInputs.Create(
+                changedCompilation.Program!, "SourceProvider", [], [],
+                [], assignments));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.Link(consumer, changedProducer));
+
+        var reindexedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public enum Unrelated : int32 { Value = 0 }
+                public enum Shade : int32 { Red = 7, Blue = 19 }
+                public Shade GetShade() { return Shade.Red; }
+                public Shade ReadShadeArray() {
+                    mut [Shade; 2] values = [Shade.Red, Shade.Blue];
+                    values[0] = Shade.Blue;
+                    return values[0];
+                }
+                int32 Main() { return 0; }
+                """));
+        Assert.That(reindexedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reindexedCompilation.Diagnostics));
+        var reindexedProgram = reindexedCompilation.Program!;
+        var reindexedInputs = PrivateModuleIdentityInputs.Create(
+            reindexedProgram, "SourceProvider", [], [], [], assignments);
+        var reindexedProducer = ModuleCompiler.CreateProducer(
+            reindexedProgram, ["GetShade", "ReadShadeArray"],
+            reindexedInputs);
+        Assert.DoesNotThrow(() =>
+            ModuleCompiler.Link(consumer, reindexedProducer));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program,
+            ["GetShade", "ReadShadeArray"], "SourceProvider",
+            NativeRuntimePolicy.FailFast,
+            producerInputs);
+        _ = NativeModuleCompiler.CreateConsumer(consumerProgram,
+            nativeProducer, NativeRuntimePolicy.FailFast, consumerInputs);
+        var nativeReference = NativeModuleCompiler.CreateReference(
+            nativeProducer);
+        var nativeShade = nativeReference.EnumDefinitions.Single(
+            static item => item.Name == "Shade");
+        Assert.That(nativeShade.Identity,
+            Is.TypeOf<BoundEnumDeclarationIdentity.Private>());
+        Assert.That(nativeShade.Members.Select(
+                static member => member.DeclarationKey),
+            Is.EqualTo(["member.red", "member.blue"]));
+    }
+
     [Test]
     public void PrivateEnumDirectoryRoundTripsAndBindsWithoutCoreTokens()
     {
@@ -67,21 +426,28 @@ internal sealed class PrivateNominalEnumTests
             Has.Length.EqualTo(1));
 
         var colorType = BoundEnumTypes.Type(0);
-        var sizeType = BoundEnumTypes.Type(1);
-        var inputs = PrivateModuleIdentityInputs.Create(
+        var inputs = PrivateModuleIdentityInputs.CreateFromSelectors(
             compilation.Program!, "PrivateModule", [],
             [
-                new PrivateNominalImport(sizeType, "types.size.proxy",
-                    "CoreNative", "Size"),
-                new PrivateNominalImport(colorType, "types.color.proxy",
-                    "CoreNative", "Color"),
+                new PrivateNominalImportSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Enum, "Size"),
+                    "types.size.proxy", "CoreNative", "Size"),
+                new PrivateNominalImportSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Enum, "Color"),
+                    "types.color.proxy", "CoreNative", "Color"),
             ],
             [
-                new PrivateEnumMemberAssignment(sizeType, sizeIdentity, 0,
-                    sizeMemberIdentity, "member.small"),
-                new PrivateEnumMemberAssignment(colorType, colorIdentity, 0,
-                    colorMemberIdentity, "member.red"),
-            ]);
+                new PrivateEnumMemberSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Enum, "Size"),
+                    sizeIdentity, 0, sizeMemberIdentity, "member.small"),
+                new PrivateEnumMemberSelection(
+                    new PrivateNominalDeclarationSelector(
+                        PrivateNominalDeclarationKind.Enum, "Color"),
+                    colorIdentity, 0, colorMemberIdentity, "member.red"),
+            ], []);
         var producer = ModuleCompiler.CreateProducer(compilation.Program!,
             ["GetColor", "GetSize", "AcceptPointer", "UsePointer"], inputs);
         var persistedReference = ModuleCompiler.CreateReference(producer);
@@ -652,7 +1018,10 @@ internal sealed class PrivateNominalEnumTests
                         return new PrivateEnumMemberAssignment(
                             BoundEnumTypes.Type(index),
                             enumIdentity.Value, ordinal,
-                            memberIdentity.Value, member.DeclarationKey);
+                            memberIdentity.Value,
+                            member.DeclarationKey
+                                ?? throw new InvalidOperationException(
+                                    "A Core enum member has no declaration key."));
                     });
                 }).ToArray();
         var inputs = PrivateModuleIdentityInputs.Create(program,

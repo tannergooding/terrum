@@ -34,7 +34,7 @@ internal static partial class Program
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output,
                     out var runtimePolicy, out var sourceArithmeticProfile, out var coreLibrary,
-                    out _))
+                    out _, out _))
                 {
                     WriteInputError(json, "TRM2000", NativeModuleUsage);
                     return 2;

@@ -17,8 +17,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--corelib] [--json]; "
-        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--json]; "
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--corelib] [--json]; "
+        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--layout-core-manifest <path>] [--private-identity-manifest <path>] [--json]; "
         + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -42,12 +42,14 @@ internal static partial class Program
             var selectedPolicy = NativeRuntimePolicy.FailFast;
             var sourceArithmeticProfile = SourceArithmeticProfile.Development;
             LayoutCoreRegistrationSet? layoutCoreRegistration = null;
+            LoadedLayoutCoreManifest? layoutCoreManifest = null;
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output,
                     out selectedPolicy, out sourceArithmeticProfile, out var coreLibrary,
-                    out var layoutCoreManifestPath))
+                    out var layoutCoreManifestPath,
+                    out var privateIdentityManifestPath))
                 {
                     WriteInputError(json, "TRM2000", ModuleUsage);
                     return 2;
@@ -76,6 +78,35 @@ internal static partial class Program
                         return 2;
                     }
                 }
+                if (privateIdentityManifestPath is not null)
+                {
+                    try
+                    {
+                        if (PathsAlias(privateIdentityManifestPath, output)
+                            || paths.Any(path => path != "-"
+                                && PathsAlias(privateIdentityManifestPath,
+                                    path))
+                            || (args[1] == "consumer"
+                                && PathsAlias(privateIdentityManifestPath,
+                                    args[3]))
+                            || (layoutCoreManifestPath is not null
+                                && PathsAlias(privateIdentityManifestPath,
+                                    layoutCoreManifestPath)))
+                        {
+                            WriteInputError(json, "TRM2002",
+                                "The private identity manifest must be distinct from every source, producer artifact, layout manifest and output.");
+                            return 2;
+                        }
+                    }
+                    catch (Exception exception) when (exception is IOException
+                        or UnauthorizedAccessException or ArgumentException
+                        or NotSupportedException)
+                    {
+                        WriteInputError(json, "TRM2002",
+                            $"Could not validate private identity manifest path identity: {exception.Message}");
+                        return 2;
+                    }
+                }
 
                 if (paths.Any(path => path != "-" && PathsAlias(output, path))
                     || ((args[1] == "consumer") && PathsAlias(output, args[3]))
@@ -84,14 +115,43 @@ internal static partial class Program
                     throw new ModuleFormatException("Module output must be a distinct .trm artifact.");
                 }
 
-                if (layoutCoreManifestPath is not null)
+                PrivateModuleIdentityManifest? privateIdentityManifest = null;
+                if (privateIdentityManifestPath is not null)
                 {
-
                     try
                     {
-                        layoutCoreRegistration
-                            = LayoutCoreManifestReader.Read(
-                                layoutCoreManifestPath).Registration;
+                        privateIdentityManifest
+                            = PrivateModuleIdentityManifestReader.Read(
+                                privateIdentityManifestPath,
+                                producer: args[1] == "producer",
+                                sourceCount: paths.Count);
+                    }
+                    catch (Exception exception) when (exception is IOException
+                        or UnauthorizedAccessException
+                        or System.Text.DecoderFallbackException
+                        or ArgumentException or NotSupportedException
+                        or FormatException or JsonException)
+                    {
+                        WriteInputError(json, "TRM2001", exception.Message);
+                        return 2;
+                    }
+                }
+
+                if (layoutCoreManifestPath is not null)
+                {
+                    try
+                    {
+                        layoutCoreManifest = LayoutCoreManifestReader.Read(
+                            layoutCoreManifestPath);
+                        layoutCoreRegistration = layoutCoreManifest.Registration;
+                        if (privateIdentityManifest is not null
+                            && layoutCoreManifest.UsingModuleIdentity
+                                != privateIdentityManifest.UsingModuleIdentity)
+                        {
+                            WriteInputError(json, "TRM2001",
+                                "The private identity and layout Core manifests must select the same using Module identity.");
+                            return 2;
+                        }
                     }
                     catch (Exception exception) when (exception is IOException
                         or UnauthorizedAccessException
@@ -103,8 +163,27 @@ internal static partial class Program
                         return 2;
                     }
                 }
-                var snapshots = ReadModuleSources(paths);
+                var snapshots = ReadModuleSources(paths,
+                    out var sourceSha256);
+                if (privateIdentityManifest is not null
+                    && !sourceSha256.SequenceEqual(
+                        privateIdentityManifest.SourceSha256,
+                        StringComparer.Ordinal))
+                {
+                    WriteInputError(json, "TRM2001",
+                        "A source file does not match the captured private identity manifest snapshot.");
+                    return 2;
+                }
                 var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
+                if (privateIdentityManifest is not null
+                    && reference is not null
+                    && Convert.ToHexString(SHA256.HashData(reference))
+                        != privateIdentityManifest.ReferenceProducerSha256)
+                {
+                    WriteInputError(json, "TRM2001",
+                        "The producer artifact does not match the captured private identity manifest snapshot.");
+                    return 2;
+                }
                 var declarations = reference is null ? null : ModuleCompiler.CreateReference(reference);
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
@@ -126,10 +205,41 @@ internal static partial class Program
                 {
                     throw new InvalidOperationException("A successful compilation must contain a bound program.");
                 }
+                PrivateModuleIdentityInputs? identityInputs = null;
+                if (privateIdentityManifest is not null)
+                {
+                    try
+                    {
+                        identityInputs
+                            = PrivateModuleIdentityInputs.CreateFromSelectors(
+                                program,
+                                privateIdentityManifest.UsingModuleIdentity,
+                                privateIdentityManifest.Definitions,
+                                privateIdentityManifest.Imports,
+                                privateIdentityManifest.EnumMembers,
+                                privateIdentityManifest.SourceEnumDefinitions);
+                    }
+                    catch (ArgumentException exception)
+                    {
+                        WriteInputError(json, "TRM2001", exception.Message);
+                        return 2;
+                    }
+                }
                 result = args[1] switch {
-                    "producer" => ModuleCompiler.CreateProducer(program, exports),
+                    "producer" when identityInputs is null
+                        => ModuleCompiler.CreateProducer(program, exports),
+                    "producer" => ModuleCompiler.CreateProducer(program,
+                        exports, identityInputs
+                            ?? throw new InvalidOperationException(
+                                "Producer identity inputs are missing.")),
+                    "consumer" when identityInputs is null
+                        => ModuleCompiler.CreateConsumer(program,
+                            reference ?? throw new InvalidOperationException("Consumer reference is missing.")),
                     "consumer" => ModuleCompiler.CreateConsumer(program,
-                        reference ?? throw new InvalidOperationException("Consumer reference is missing.")),
+                        reference ?? throw new InvalidOperationException("Consumer reference is missing."),
+                        identityInputs
+                            ?? throw new InvalidOperationException(
+                                "Consumer identity inputs are missing.")),
                     _ => throw new InvalidOperationException("Unknown module kind."),
                 };
                 profile = ModuleCompiler.GetNativeProfileVersion(result, args[1] == "consumer");
@@ -193,7 +303,8 @@ internal static partial class Program
     private static bool TryReadModuleOptions(string[] args, int count, out List<string> sources,
         out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy,
         out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary,
-        out string? layoutCoreManifestPath)
+        out string? layoutCoreManifestPath,
+        out string? privateIdentityManifestPath)
     {
         sources = [args[2]];
         var native = args[0] == "compile-native";
@@ -203,6 +314,7 @@ internal static partial class Program
         sourceArithmeticProfile = SourceArithmeticProfile.Development;
         coreLibrary = false;
         layoutCoreManifestPath = null;
+        privateIdentityManifestPath = null;
         var hasOutput = false;
         var hasRuntime = false;
         var hasArithmeticProfile = false;
@@ -251,6 +363,17 @@ internal static partial class Program
                     && value.Length != 0 && value != "-"
                     && !value.StartsWith('-', StringComparison.Ordinal):
                     if (!TryGetFullPath(value, out layoutCoreManifestPath))
+                    {
+                        return false;
+                    }
+                    break;
+                case "--private-identity-manifest" when args[0]
+                        == "compile-module"
+                    && privateIdentityManifestPath is null
+                    && value.Length != 0 && value != "-"
+                    && !value.StartsWith('-', StringComparison.Ordinal):
+                    if (!TryGetFullPath(value,
+                        out privateIdentityManifestPath))
                     {
                         return false;
                     }
@@ -304,13 +427,20 @@ internal static partial class Program
         return bytes;
     }
 
-    private static ImmutableArray<SyntaxTree> ReadModuleSources(List<string> paths)
+    private static ImmutableArray<SyntaxTree> ReadModuleSources(
+        List<string> paths)
+        => ReadModuleSources(paths, out _);
+
+    private static ImmutableArray<SyntaxTree> ReadModuleSources(
+        List<string> paths, out ImmutableArray<string> sourceSha256)
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>(paths.Count);
+        var sourceHashes = ImmutableArray.CreateBuilder<string>(paths.Count);
         var sourceBytes = 0;
         foreach (var path in paths)
         {
-            var source = ReadModuleSource(path);
+            var (source, sha256) = ReadModuleSource(path);
+            sourceHashes.Add(sha256);
             sourceBytes += Encoding.UTF8.GetByteCount(source);
             if (sourceBytes > 4 * 1024 * 1024)
             {
@@ -319,17 +449,21 @@ internal static partial class Program
             trees.Add(SyntaxTree.Parse(source, path));
         }
 
+        sourceSha256 = sourceHashes.MoveToImmutable();
         return trees.MoveToImmutable();
     }
 
-    private static string ReadModuleSource(string path)
+    private static (string Source, string Sha256) ReadModuleSource(string path)
     {
         if (path == "-")
         {
             throw new ArgumentException("Module source must be a bounded file path, not stdin.");
         }
         var bytes = ReadModuleFile(path);
+        var sha256 = Convert.ToHexString(SHA256.HashData(bytes));
         var text = new UTF8Encoding(false, true).GetString(bytes);
-        return text.StartsWith('\uFEFF', StringComparison.Ordinal) ? text[1..] : text;
+        var source = text.StartsWith('\uFEFF', StringComparison.Ordinal)
+            ? text[1..] : text;
+        return (source, sha256);
     }
 }

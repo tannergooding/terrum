@@ -38,6 +38,31 @@ internal sealed class ModuleTests
             "FieldPathProvider", definitions, []);
     }
 
+    private static string CreatePrivateIdentityManifest(
+        string usingModuleIdentity, IReadOnlyList<string> sourcePaths,
+        string? producerPath, IReadOnlyList<object> definitions,
+        IReadOnlyList<object> imports, IReadOnlyList<object> enumMembers,
+        IReadOnlyList<object> sourceEnumDefinitions)
+    {
+        var sourceSha256 = sourcePaths.Select(path =>
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))))
+            .ToArray();
+        var referenceProducerSha256 = producerPath is null
+            ? null
+            : Convert.ToHexString(
+                SHA256.HashData(File.ReadAllBytes(producerPath)));
+        return JsonSerializer.Serialize(new {
+            schemaVersion = 1,
+            usingModuleIdentity,
+            sourceSha256,
+            referenceProducerSha256,
+            definitions,
+            imports,
+            enumMembers,
+            sourceEnumDefinitions,
+        });
+    }
+
     [Test]
     public async Task InternalAliasesEraseBeforeModulePublicationAsync()
     {
@@ -3733,8 +3758,10 @@ internal sealed class ModuleTests
             var positionConsumer = SyntaxTree.Parse($$"""
                 using Terrum.CodeAnalysis;
                 int32 Main() {
+                    init int32 line;
+                    init int32 column;
                     if (!TryGetSourceDiagnosticLocation({{position}},
-                        init var line, init var column)) { return -1; }
+                        ref init line, ref init column)) { return -1; }
                     return line * 256 + column;
                 }
                 """, "source-diagnostic-location-position-consumer.terrum");
@@ -3781,14 +3808,15 @@ internal sealed class ModuleTests
             }
 
             public bool TryCreate(int32 start, int32 length,
-                init ref<Pair> result) {
+                ref<init Pair> result) {
                 if (start < 0 || length < 0) { return false; }
-                result = new Pair(start, length);
+                *result = new Pair(start, length);
                 return true;
             }
 
             int32 Main() {
-                bool created = TryCreate(-1, 0, init var pair);
+                init Pair pair;
+                bool created = TryCreate(-1, 0, ref init pair);
                 return {{read}};
             }
             """));
@@ -3807,16 +3835,26 @@ internal sealed class ModuleTests
         var producer = prefix + "-producer.trm";
         var consumer = prefix + "-consumer.trm";
         var image = prefix + ".exe";
-        var layoutManifest = prefix + "-layout.json";
+        var producerLayoutManifest = prefix + "-producer-layout.json";
+        var consumerLayoutManifest = prefix + "-consumer-layout.json";
+        var producerIdentityManifest = prefix + "-producer-identity.json";
+        var consumerIdentityManifest = prefix + "-consumer-identity.json";
         try
         {
-            await File.WriteAllTextAsync(layoutManifest,
-                CliTests.CreateLayoutCoreManifest("sample.self-host"))
+            await File.WriteAllTextAsync(producerLayoutManifest,
+                CliTests.CreateLayoutCoreManifest("SelfHostProducer"))
                 .ConfigureAwait(true);
+            await File.WriteAllTextAsync(consumerLayoutManifest,
+                CliTests.CreateLayoutCoreManifest("SelfHostConsumer"))
+                .ConfigureAwait(true);
+            var producerSource = TerrumProjectPaths.RepositoryFile(root,
+                "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum");
+            var producerAdditionalSource = TerrumProjectPaths.SourceFile(root,
+                Path.Combine("Lexing",
+                    tokens ? "Token.terrum" : "CharacterFacts.terrum"));
             var arguments = new List<string> { "compile-module", "producer",
-                TerrumProjectPaths.RepositoryFile(root, "sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
-                "--source", TerrumProjectPaths.SourceFile(root,
-                    Path.Combine("Lexing", tokens ? "Token.terrum" : "CharacterFacts.terrum")),
+                producerSource, "Terrum.CodeAnalysis.SourceRange.TryCreate",
+                "--source", producerAdditionalSource,
                 "--export", "Terrum.CodeAnalysis.SourceRange.GetEnd",
                 "--export", "Terrum.CodeAnalysis.SourceRange.#get:End",
             };
@@ -3824,16 +3862,107 @@ internal sealed class ModuleTests
                 : ["--export", "Terrum.CodeAnalysis.IsAsciiDigit", "--export", "Terrum.CodeAnalysis.IsLineBreak",
                     "--export", "Terrum.CodeAnalysis.GetDecimalDigit"]);
             arguments.AddRange(["-o", producer, "--layout-core-manifest",
-                layoutManifest]);
+                producerLayoutManifest]);
+            var producerDefinitions = new List<object> {
+                new {
+                    kind = "struct",
+                    qualifiedName = "Terrum.CodeAnalysis.SourceRange",
+                    localDeclarationKey = "types.source-range",
+                    isExported = true,
+                },
+            };
+            if (tokens)
+            {
+                producerDefinitions.Add(new {
+                    kind = "struct",
+                    qualifiedName = "Terrum.CodeAnalysis.Token",
+                    localDeclarationKey = "types.token",
+                    isExported = true,
+                });
+            }
+            await File.WriteAllTextAsync(producerIdentityManifest,
+                CreatePrivateIdentityManifest("SelfHostProducer",
+                    [producerSource, producerAdditionalSource], null,
+                    producerDefinitions, [], [], []))
+                .ConfigureAwait(true);
+            arguments.AddRange(["--private-identity-manifest",
+                producerIdentityManifest]);
             var (libraryExit, libraryError) = await RunCliAsync([.. arguments]).ConfigureAwait(true);
-            Assert.That(libraryExit, Is.EqualTo(0));
+            Assert.That(libraryExit, Is.EqualTo(0), libraryError);
             Assert.That(libraryError, Is.Empty);
+            var consumerSource = TerrumProjectPaths.TestFile(root,
+                Path.Combine(tokens ? "Lexing" : "Text",
+                    tokens ? "TokenTests.terrum" : "RangeTests.terrum"));
+            var consumerAdditionalSource = Path.Combine(root, "samples",
+                "ModuleReplacement",
+                tokens ? "token-entry.terrum" : "range-entry.terrum");
+            static object CreateImport(string qualifiedName,
+                string localDeclarationKey, string selectedModuleIdentity,
+                string selectedExportKey)
+                => new {
+                    kind = "struct",
+                    qualifiedName,
+                    localDeclarationKey,
+                    selectedModuleIdentity,
+                    selectedExportKey,
+                };
+            var consumerImports = new List<object> {
+                CreateImport("Terrum.CodeAnalysis.SourceRange",
+                    "proxies.source-range", "SelfHostProducer",
+                    "types.source-range"),
+            };
+            if (tokens)
+            {
+                consumerImports.Add(CreateImport(
+                    "Terrum.CodeAnalysis.Token", "proxies.token",
+                    "SelfHostProducer", "types.token"));
+            }
+            var wrongConsumerImports = new List<object> {
+                CreateImport("Terrum.CodeAnalysis.SourceRange",
+                    "proxies.source-range", "WrongProvider",
+                    "types.source-range"),
+            };
+            if (tokens)
+            {
+                wrongConsumerImports.Add(CreateImport(
+                    "Terrum.CodeAnalysis.Token", "proxies.token",
+                    "WrongProvider", "types.token"));
+            }
+            var originalConsumer = new byte[] { 0x54, 0x52, 0x4D };
+            await File.WriteAllBytesAsync(consumer, originalConsumer)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(consumerIdentityManifest,
+                CreatePrivateIdentityManifest("SelfHostConsumer",
+                    [consumerSource, consumerAdditionalSource], producer,
+                    [], wrongConsumerImports, [], []))
+                .ConfigureAwait(true);
+            var (invalidConsumerExit, invalidConsumerError,
+                invalidConsumerOutput) = await RunCliWithOutputAsync(
+                    "compile-module", "consumer", consumerSource, producer,
+                    "--source", consumerAdditionalSource, "-o", consumer,
+                    "--layout-core-manifest", consumerLayoutManifest,
+                    "--private-identity-manifest", consumerIdentityManifest,
+                    "--json").ConfigureAwait(true);
+            Assert.That(invalidConsumerExit, Is.EqualTo(2));
+            Assert.That(invalidConsumerError, Is.Empty);
+            using (var document = JsonDocument.Parse(invalidConsumerOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(consumer)
+                .ConfigureAwait(true), Is.EqualTo(originalConsumer));
+
+            await File.WriteAllTextAsync(consumerIdentityManifest,
+                CreatePrivateIdentityManifest("SelfHostConsumer",
+                    [consumerSource, consumerAdditionalSource], producer,
+                    [], consumerImports, [], []))
+                .ConfigureAwait(true);
             var (consumerExit, consumerError) = await RunCliAsync("compile-module", "consumer",
-                TerrumProjectPaths.TestFile(root,
-                    Path.Combine(tokens ? "Lexing" : "Text", tokens ? "TokenTests.terrum" : "RangeTests.terrum")), producer,
-                "--source", Path.Combine(root, "samples", "ModuleReplacement",
-                    tokens ? "token-entry.terrum" : "range-entry.terrum"),
-                "-o", consumer, "--layout-core-manifest", layoutManifest)
+                consumerSource, producer,
+                "--source", consumerAdditionalSource,
+                "-o", consumer, "--layout-core-manifest", consumerLayoutManifest,
+                "--private-identity-manifest", consumerIdentityManifest)
                 .ConfigureAwait(true);
             Assert.That(consumerExit, Is.EqualTo(0));
             Assert.That(consumerError, Is.Empty);
@@ -3844,10 +3973,20 @@ internal sealed class ModuleTests
         }
         finally
         {
-            File.Delete(producer);
-            File.Delete(consumer);
-            File.Delete(image);
-            File.Delete(layoutManifest);
+            await TestFileCleanup.DeleteWithRetryAsync(producer)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumer)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(image)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(
+                producerLayoutManifest).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(
+                consumerLayoutManifest).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(
+                producerIdentityManifest).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(
+                consumerIdentityManifest).ConfigureAwait(true);
         }
     }
 
@@ -3894,6 +4033,289 @@ internal sealed class ModuleTests
             File.Delete(first);
             File.Delete(second);
             File.Delete(artifact);
+        }
+    }
+
+    [Test]
+    public async Task CliPrivateIdentityManifestRejectsStaleDuplicateAndAliasedInputsAsync()
+    {
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"module-private-identity-{Guid.NewGuid():N}");
+        var source = prefix + ".terrum";
+        var manifest = prefix + ".json";
+        var artifact = prefix + ".trm";
+        var nativeArtifact = prefix + ".trmn";
+        try
+        {
+            await File.WriteAllTextAsync(source,
+                "public int32 Get() { return 7; }").ConfigureAwait(true);
+            var originalArtifact = new byte[] { 0x54, 0x52, 0x4D };
+            await File.WriteAllBytesAsync(artifact, originalArtifact)
+                .ConfigureAwait(true);
+            var staleManifest = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                usingModuleIdentity = "SnapshotTest",
+                sourceSha256 = new[] {
+                    new string('0', 64),
+                },
+                referenceProducerSha256 = (string?)null,
+                definitions = Array.Empty<object>(),
+                imports = Array.Empty<object>(),
+                enumMembers = Array.Empty<object>(),
+                sourceEnumDefinitions = Array.Empty<object>(),
+            });
+            await File.WriteAllTextAsync(manifest, staleManifest)
+                .ConfigureAwait(true);
+            var (staleExit, staleError, staleOutput)
+                = await RunCliWithOutputAsync("compile-module", "producer",
+                    source, "Get", "-o", artifact,
+                    "--private-identity-manifest", manifest, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(staleExit, Is.EqualTo(2));
+            Assert.That(staleError, Is.Empty);
+            using (var document = JsonDocument.Parse(staleOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true), Is.EqualTo(originalArtifact));
+
+            var sourceSha256 = Convert.ToHexString(
+                SHA256.HashData(await File.ReadAllBytesAsync(source)
+                    .ConfigureAwait(true)));
+            var validManifest = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                usingModuleIdentity = "SnapshotTest",
+                sourceSha256 = new[] { sourceSha256 },
+                referenceProducerSha256 = (string?)null,
+                definitions = Array.Empty<object>(),
+                imports = Array.Empty<object>(),
+                enumMembers = Array.Empty<object>(),
+                sourceEnumDefinitions = Array.Empty<object>(),
+            });
+            var duplicateManifest = validManifest.Replace(
+                "\"schemaVersion\":1",
+                "\"schemaVersion\":1,\"schemaVersion\":1",
+                StringComparison.Ordinal);
+            await File.WriteAllTextAsync(manifest, duplicateManifest)
+                .ConfigureAwait(true);
+            var (duplicateExit, duplicateError, duplicateOutput)
+                = await RunCliWithOutputAsync("compile-module", "producer",
+                    source, "Get", "-o", artifact,
+                    "--private-identity-manifest", manifest, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(duplicateExit, Is.EqualTo(2));
+            Assert.That(duplicateError, Is.Empty);
+            using (var document = JsonDocument.Parse(duplicateOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true), Is.EqualTo(originalArtifact));
+
+            await File.WriteAllTextAsync(artifact, validManifest)
+                .ConfigureAwait(true);
+            var aliasedOutput = await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true);
+            var (aliasExit, aliasError, aliasOutput)
+                = await RunCliWithOutputAsync("compile-module", "producer",
+                    source, "Get", "-o", artifact,
+                    "--private-identity-manifest", artifact, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(aliasExit, Is.EqualTo(2));
+            Assert.That(aliasError, Is.Empty);
+            using (var document = JsonDocument.Parse(aliasOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true), Is.EqualTo(aliasedOutput));
+
+            var (nativeExit, nativeError, nativeOutput)
+                = await RunCliWithOutputAsync("compile-native", "consumer",
+                    source, "missing.trmn", "-o", nativeArtifact,
+                    "--runtime", "fail-fast",
+                    "--private-identity-manifest", manifest, "--json")
+                    .ConfigureAwait(true);
+            Assert.That(nativeExit, Is.EqualTo(2));
+            Assert.That(nativeError, Is.Empty);
+            using (var document = JsonDocument.Parse(nativeOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(File.Exists(nativeArtifact), Is.False);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(source)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(manifest)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(nativeArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CliPrivateIdentityManifestCarriesCoreEnumMembersAsync()
+    {
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"module-private-core-enum-{Guid.NewGuid():N}");
+        var source = prefix + ".terrum";
+        var layoutManifest = prefix + "-layout.json";
+        var identityManifest = prefix + "-identity.json";
+        var artifact = prefix + ".trm";
+        try
+        {
+            await File.WriteAllTextAsync(source,
+                "public LayoutKind GetLayoutKind() { return LayoutKind.Sequential; }")
+                .ConfigureAwait(true);
+            var layout = CliTests.CreateLayoutCoreManifest("LayoutUser")
+                .Replace("sample.layout-core", "LayoutCore",
+                    StringComparison.Ordinal);
+            await File.WriteAllTextAsync(layoutManifest, layout)
+                .ConfigureAwait(true);
+
+            var enumIdentity = new {
+                providerIdentity = "LayoutCore",
+                exportKey = "LayoutKind",
+                kind = "enum-type",
+            };
+            object CreateMemberSelection(string name, int ordinal)
+                => new {
+                    owner = new {
+                        kind = "enum",
+                        qualifiedName = "LayoutKind",
+                    },
+                    enumIdentity,
+                    memberOrdinal = ordinal,
+                    memberIdentity = new {
+                        providerIdentity = "LayoutCore",
+                        exportKey = $"LayoutKind.{name}",
+                        kind = "enum-member",
+                    },
+                    memberDeclarationKey = $"layout-kind/member/{name}",
+                };
+            var enumMembers = new object[] {
+                CreateMemberSelection("Auto", 0),
+                CreateMemberSelection("Sequential", 1),
+                CreateMemberSelection("Union", 2),
+                CreateMemberSelection("Transparent", 3),
+            };
+            var imports = new object[] {
+                new {
+                    kind = "enum",
+                    qualifiedName = "LayoutKind",
+                    localDeclarationKey = "types.layout-kind.proxy",
+                    selectedModuleIdentity = "LayoutCore",
+                    selectedExportKey = "LayoutKind",
+                },
+            };
+            await File.WriteAllTextAsync(identityManifest,
+                CreatePrivateIdentityManifest("LayoutUser", [source], null,
+                    [], imports, enumMembers, []))
+                .ConfigureAwait(true);
+
+            var (exitCode, error) = await RunCliAsync("compile-module",
+                "producer", source, "GetLayoutKind", "-o", artifact,
+                "--layout-core-manifest", layoutManifest,
+                "--private-identity-manifest", identityManifest)
+                .ConfigureAwait(true);
+            Assert.That(exitCode, Is.EqualTo(0), error);
+            Assert.That(error, Is.Empty);
+
+            var reference = ModuleCompiler.CreateReference(
+                await File.ReadAllBytesAsync(artifact).ConfigureAwait(true));
+            var origin = reference.PrivateNominalTypeOrigins.Single();
+            Assert.That(origin.SelectedModuleIdentity,
+                Is.EqualTo("LayoutCore"));
+            Assert.That(origin.SelectedExportKey,
+                Is.EqualTo("LayoutKind"));
+            Assert.That(reference.EnumDefinitions.Single(
+                    static definition => definition.Name == "LayoutKind")
+                    .Members.Select(static member => member.DeclarationKey),
+                Is.EqualTo([
+                    "layout-kind/member/Auto",
+                    "layout-kind/member/Sequential",
+                    "layout-kind/member/Union",
+                    "layout-kind/member/Transparent",
+                ]));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(source)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(layoutManifest)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(identityManifest)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CliPrivateIdentityManifestCarriesSourceEnumMemberKeysAsync()
+    {
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"module-private-source-enum-{Guid.NewGuid():N}");
+        var source = prefix + ".terrum";
+        var identityManifest = prefix + "-identity.json";
+        var artifact = prefix + ".trm";
+        try
+        {
+            var sourceText = "/* caf\u00E9 */\n"
+                + "public enum Shade : int32 { Red = 1, Blue = 2 }\n"
+                + "public Shade GetShade() { return Shade.Red; }\n";
+            var sourceEncoding = new UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: true);
+            var sourceBytes = sourceEncoding.GetPreamble()
+                .Concat(sourceEncoding.GetBytes(sourceText)).ToArray();
+            await File.WriteAllBytesAsync(source, sourceBytes)
+                .ConfigureAwait(true);
+            var sourceEnumDefinitions = new object[] {
+                new {
+                    qualifiedName = "Shade",
+                    localDeclarationKey = "types.shade",
+                    isExported = true,
+                    memberDeclarationKeys = new[] {
+                        "members.red", "members.blue",
+                    },
+                },
+            };
+            await File.WriteAllTextAsync(identityManifest,
+                CreatePrivateIdentityManifest("SourceEnumProvider",
+                    [source], null, [], [], [], sourceEnumDefinitions))
+                .ConfigureAwait(true);
+
+            var (exitCode, error) = await RunCliAsync("compile-module",
+                "producer", source, "GetShade", "-o", artifact,
+                "--private-identity-manifest", identityManifest)
+                .ConfigureAwait(true);
+            Assert.That(exitCode, Is.EqualTo(0), error);
+            Assert.That(error, Is.Empty);
+
+            var reference = ModuleCompiler.CreateReference(
+                await File.ReadAllBytesAsync(artifact).ConfigureAwait(true));
+            Assert.That(reference.EnumDefinitions.Single(
+                    static definition => definition.Name == "Shade")
+                    .Members.Select(static member => member.DeclarationKey),
+                Is.EqualTo(["members.red", "members.blue"]));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(source)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(identityManifest)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
         }
     }
 
