@@ -219,6 +219,31 @@ internal static class TrRmRegisterBodyRecordWriter
         return result;
     }
 
+    internal static byte[] EncodeObjectConstruction(byte action,
+        byte destinationKind, ushort contextHomeIndex,
+        ushort destinationIndex, TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesObjectConstruction()
+            || action is < 1 or > 3
+            || ((action is 1 or 3)
+                && (destinationKind != 0 || destinationIndex != 0))
+            || (action == 2
+                && (destinationKind is not (1 or 2)
+                    || (destinationKind == 1
+                        && destinationIndex >= 14))))
+        {
+            throw new ArgumentOutOfRangeException(nameof(action));
+        }
+
+        var result = new byte[12];
+        result[0] = 0x11;
+        result[RecordHeaderSize] = action;
+        result[RecordHeaderSize + 1] = destinationKind;
+        Write(result, RecordHeaderSize + 2, contextHomeIndex);
+        Write(result, RecordHeaderSize + 4, destinationIndex);
+        return result;
+    }
+
     internal static byte[] EncodeSemanticStore(byte placeKind,
         byte sourceKind, byte transition, byte sourceUse, ushort placeIndex,
         ushort sourceIndex, TrRmArtifactSchema schema)

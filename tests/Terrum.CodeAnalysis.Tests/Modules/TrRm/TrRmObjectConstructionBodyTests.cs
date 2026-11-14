@@ -46,6 +46,20 @@ internal sealed class TrRmObjectConstructionBodyTests
     }
 
     [Test]
+    public void RejectsMalformedObjectConstructionRecordWriterOperands()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            CreateConstructionRecord(0, 0, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            CreateConstructionRecord(1, 1, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            CreateConstructionRecord(2, 1, 0, 14));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            TrRmRegisterBodyRecordWriter.EncodeObjectConstruction(1,
+                0, 0, 0, TrRmArtifactSchema.C1M1ConstructionDraft));
+    }
+
+    [Test]
     public void ReadsConstructionContextAtTheLastHomeIndex()
     {
         var body = CreateBody(contextHomeIndex: 65535,
@@ -1154,15 +1168,6 @@ internal sealed class TrRmObjectConstructionBodyTests
 
     private static byte[] CreateConstructionRecord(byte action,
         byte destinationKind, ushort contextHome, ushort destination)
-    {
-        var result = new byte[12];
-        result[0] = 0x11;
-        result[4] = action;
-        result[5] = destinationKind;
-        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(6),
-            contextHome);
-        BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(8),
-            destination);
-        return result;
-    }
+        => TrRmRegisterBodyRecordWriter.EncodeObjectConstruction(action,
+            destinationKind, contextHome, destination, Schema);
 }
