@@ -1490,6 +1490,98 @@ internal sealed class TrRmStandardInitializationReferenceBodyTests
         }
     }
 
+    [TestCase(LocalFieldLayoutSchemaIdentity)]
+    [TestCase(GeneralPredicateGraphsSchemaIdentity)]
+    public async Task StandardPointerCellProviderExecutionAsync(
+        string schemaIdentity)
+    {
+        const string providerIdentity = "standard-pointer-cell-exec-provider";
+        const string consumerIdentity = "standard-pointer-cell-exec-consumer";
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public void Publish(ref<init ptr<int32>> output,
+                    ptr<int32> value) {
+                    *output = value;
+                }
+                """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)providerCompilation.Program!, providerIdentity,
+            schemaIdentity, 1);
+        var providerInput = new TrRmStandardArtifactInput(
+            schemaIdentity, providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, []);
+        var consumerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public ptr<int32> Run(ptr<int32> value) {
+                    init ptr<int32> pointer;
+                    Publish(ref init pointer, value);
+                    return pointer;
+                }
+                """),
+            providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            (BoundProgram)consumerCompilation.Program!, consumerIdentity,
+            schemaIdentity, 1);
+        var consumerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerArtifact);
+        var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            consumerInput, consumerIdentity, [providerInput]);
+        var importedPublish = loadedConsumer.Functions.Single(
+            static function => function.Name == "Publish");
+        Assert.That(importedPublish.IsExternal, Is.True);
+        Assert.That(importedPublish.Variables[0].IsInit, Is.True);
+
+        var reemittedConsumer = TrRmExecutableCompiler.EmitStandard(
+            loadedConsumer, consumerIdentity, schemaIdentity, 1);
+        var reemittedConsumerInput = new TrRmStandardArtifactInput(
+            schemaIdentity, reemittedConsumer);
+        var loadedProvider = TrRmExecutableCompiler.LoadStandard(
+            providerInput, providerIdentity, []);
+        var reemittedProvider = TrRmExecutableCompiler.EmitStandard(
+            loadedProvider, providerIdentity, schemaIdentity, 1);
+        var reemittedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, reemittedProvider);
+        _ = TrRmExecutableCompiler.LoadStandard(reemittedConsumerInput,
+            consumerIdentity, [reemittedProviderInput]);
+        var image = NativeModuleCompiler.EmitStandardLibrary(
+            reemittedConsumerInput, consumerIdentity,
+            [reemittedProviderInput], ["Run"],
+            NativeRuntimePolicy.FailFast);
+        var libraryPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-standard-pointer-cell-provider-{Guid.NewGuid():N}.dll");
+        nint library = 0;
+        var backing = Marshal.AllocHGlobal(sizeof(int));
+        try
+        {
+            Marshal.WriteInt32(backing, 42);
+            await File.WriteAllBytesAsync(libraryPath, image)
+                .ConfigureAwait(false);
+            library = NativeLibrary.Load(libraryPath);
+            var run = Marshal.GetDelegateForFunctionPointer<PointerFunction>(
+                NativeLibrary.GetExport(library, "Run"));
+            Assert.That(run(backing), Is.EqualTo(backing));
+            Assert.That(Marshal.ReadInt32(backing), Is.EqualTo(42));
+        }
+        finally
+        {
+            if (library != 0)
+            {
+                NativeLibrary.Free(library);
+            }
+
+            Marshal.FreeHGlobal(backing);
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                .ConfigureAwait(false);
+        }
+    }
+
     [Test]
     public async Task GeneralPredicateGraphsProfilePreservesBoundedInitOutputsAsync()
     {
