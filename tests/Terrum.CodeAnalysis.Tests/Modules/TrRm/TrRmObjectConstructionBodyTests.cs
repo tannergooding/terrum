@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
@@ -129,6 +130,17 @@ internal sealed class TrRmObjectConstructionBodyTests
     }
 
     [Test]
+    public void ValidatesProjectionCallingAnImportedBodylessInitializer()
+    {
+        ValidateProjectionBody([
+            0xED, 0, 1, 0,
+            0xE0, 0, 2, 0,
+            0xED, 0, 4, 0,
+            0xB8, 1,
+        ], includeContextField: true, initializerIsImported: true);
+    }
+
+    [Test]
     public void RequiresClassConstructionFeatureForBodyfulProjection()
     {
         _ = Assert.Throws<InvalidDataException>(() =>
@@ -236,6 +248,178 @@ internal sealed class TrRmObjectConstructionBodyTests
                 0xED, 0, 4, 0,
                 0xB8, 1,
             ], callSiteArgumentHomeIndex: 0));
+    }
+
+    [TestCase(new byte[] { 0x82, 0, 0x18, 0 })]
+    [TestCase(new byte[] { 0xE1, 0xF0, 0, 0, 0x18, 0 })]
+    public void RejectsCompactCallsToAnInitializer(byte[] code)
+    {
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateProjectionBody(code, includeContextField: true));
+    }
+
+    [Test]
+    public void AllowsBorrowingAnOrdinaryClassReceiverAfterPublication()
+    {
+        ValidateProjectionBody([
+            0xED, 0, 1, 0,
+            0xE0, 0, 2, 0,
+            0xED, 0, 4, 0,
+            0xE0, 0, 5, 0,
+            0xB8, 1,
+        ], includeContextField: true,
+            callOrdinaryClassMethod: true);
+    }
+
+    [Test]
+    public void PreservesReceiverFirstCallSiteFormalOrder()
+    {
+        ValidateProjectionBody([
+            0xED, 0, 1, 0,
+            0xE0, 0, 2, 0,
+            0xED, 0, 4, 0,
+            0xE0, 0, 5, 0,
+            0xB8, 1,
+        ], includeContextField: true,
+            callOrdinaryClassMethod: true,
+            ordinaryMethodHasParameter: true);
+    }
+
+    [Test]
+    public void AllowsReadOnlyCallOnWritableClassHandle()
+    {
+        ValidateProjectionBody([
+            0xED, 0, 1, 0,
+            0xE0, 0, 2, 0,
+            0xED, 0, 4, 0,
+            0xE0, 0, 5, 0,
+            0xB8, 1,
+        ], includeContextField: true,
+            callOrdinaryClassMethod: true, mutableClass: true);
+    }
+
+    [Test]
+    public void AllowsWritableCallOnWritableClassHandle()
+    {
+        ValidateProjectionBody([
+            0xED, 0, 1, 0,
+            0xE0, 0, 2, 0,
+            0xED, 0, 4, 0,
+            0xE0, 0, 5, 0,
+            0xB8, 1,
+        ], includeContextField: true,
+            callOrdinaryClassMethod: true,
+            ordinaryReceiverSourceUse: 4, mutableClass: true,
+            ordinaryReceiverWritable: true);
+    }
+
+    [TestCase(new byte[] {
+        0xED, 0, 1, 0,
+        0xE0, 0, 2, 0,
+        0xED, 0, 4, 0,
+        0x13, 0x21,
+        0x82, 0x10,
+        0x17, 0,
+    })]
+    [TestCase(new byte[] {
+        0xED, 0, 1, 0,
+        0xE0, 0, 2, 0,
+        0xED, 0, 4, 0,
+        0x13, 0x21,
+        0xE1, 0xF0, 1, 0,
+        0x17, 0,
+    })]
+    public void AllowsCompactOrdinaryClassReceiverCalls(byte[] code)
+    {
+        ValidateProjectionBody(code, includeContextField: true,
+            callOrdinaryClassMethod: true,
+            compactOrdinaryClassCall: true, publishToRegister: true,
+            ordinaryMethodHasParameter: true);
+    }
+
+    [TestCase(new byte[] {
+        0xED, 0, 1, 0,
+        0xE0, 0, 2, 0,
+        0xED, 0, 4, 0,
+        0x80, 0x10,
+        0x17, 0,
+    })]
+    [TestCase(new byte[] {
+        0xED, 0, 1, 0,
+        0xE0, 0, 2, 0,
+        0xED, 0, 4, 0,
+        0xE1, 0x10, 1, 0,
+        0x17, 1,
+    })]
+    public void TracksCompactClassReceiverCallResults(byte[] code)
+    {
+        ValidateProjectionBody(code, includeContextField: true,
+            callOrdinaryClassMethod: true,
+            compactOrdinaryClassCall: true, publishToRegister: true,
+            ordinaryMethodReturnsClass: true);
+    }
+
+    [Test]
+    public void RejectsWritableMethodOnImmutableClass()
+    {
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateProjectionBody([
+                0xED, 0, 1, 0,
+                0xE0, 0, 2, 0,
+                0xED, 0, 4, 0,
+                0xE0, 0, 5, 0,
+                0xB8, 1,
+            ], includeContextField: true,
+                callOrdinaryClassMethod: true,
+                ordinaryReceiverSourceUse: 4,
+                ordinaryReceiverWritable: true));
+    }
+
+    [TestCase(4)]
+    [TestCase(5)]
+    public void RejectsIncorrectOrdinaryClassReceiverSourceUse(
+        int sourceUse)
+    {
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateProjectionBody([
+                0xED, 0, 1, 0,
+                0xE0, 0, 2, 0,
+                0xED, 0, 4, 0,
+                0xE0, 0, 5, 0,
+                0xB8, 1,
+            ], includeContextField: true,
+                callOrdinaryClassMethod: true,
+                ordinaryReceiverSourceUse: sourceUse));
+    }
+
+    [Test]
+    public void RejectsConstructionContextAsAnOrdinaryReceiver()
+    {
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateProjectionBody([
+                0xED, 0, 1, 0,
+                0xE0, 0, 2, 0,
+                0xED, 0, 4, 0,
+                0xE0, 0, 5, 0,
+                0xB8, 1,
+            ], includeContextField: true,
+                callOrdinaryClassMethod: true,
+                ordinaryReceiverHomeIndex: 0));
+    }
+
+    [Test]
+    public void RejectsTypeMismatchedOrdinaryClassReceiver()
+    {
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateProjectionBody([
+                0xED, 0, 1, 0,
+                0xE0, 0, 2, 0,
+                0xED, 0, 4, 0,
+                0xE0, 0, 5, 0,
+                0xB8, 1,
+            ], includeContextField: true,
+                callOrdinaryClassMethod: true,
+                ordinaryReceiverHomeIndex: 2));
     }
 
     [Test]
@@ -576,7 +760,17 @@ internal sealed class TrRmObjectConstructionBodyTests
         bool constructionContextAtHomeIndexOne = false,
         bool includeConstructionContextStore = false,
         bool includeConstructionAbort = false,
-        bool initializerReceiverAsPlaceTarget = false)
+        bool initializerReceiverAsPlaceTarget = false,
+        bool callOrdinaryClassMethod = false,
+        int ordinaryReceiverSourceUse = 3,
+        int ordinaryReceiverHomeIndex = 1,
+        bool mutableClass = false,
+        bool ordinaryReceiverWritable = false,
+        bool compactOrdinaryClassCall = false,
+        bool publishToRegister = false,
+        bool ordinaryMethodHasParameter = false,
+        bool initializerIsImported = false,
+        bool ordinaryMethodReturnsClass = false)
     {
         var featureRows = new[] {
             TrRmFeatureRow.PublishedPredicates,
@@ -590,8 +784,9 @@ internal sealed class TrRmObjectConstructionBodyTests
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("Module", 0), ("", 0), ("Widget", 0),
             ("Initialize", 0), ("Create", 0), ("Value", 0),
+            ("Touch", 0), ("Provider", 0),
         ]);
-        var strings = new TrRmStringTableReader(stringsBytes, 6);
+        var strings = new TrRmStringTableReader(stringsBytes, 8);
         var featureBytes = TrRmFeatureTableWriter.Encode(featuresToWrite,
             Schema);
         var features = new TrRmFeatureTableReader(featureBytes,
@@ -600,19 +795,51 @@ internal sealed class TrRmObjectConstructionBodyTests
             new TrRmModuleRow(1,
                 TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
                 0, 0, 1, 1, 1, 1, 1, featuresToWrite.Length),
-        ], strings, 0, 1, 2, 0, featuresToWrite.Length);
+        ], strings, initializerIsImported ? 1 : 0, 1,
+            callOrdinaryClassMethod ? 3 : 2, 0,
+            featuresToWrite.Length);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, 1, 2, 0, featuresToWrite.Length);
-        ReadOnlyMemory<byte>[] typeSpecRows = [
+            initializerIsImported ? 1 : 0, 1,
+            callOrdinaryClassMethod ? 3 : 2, 0,
+            featuresToWrite.Length);
+        var moduleRefBytes = initializerIsImported
+            ? TrRmModuleRefTableWriter.Encode([
+                new TrRmModuleRefRow(8,
+                    TrRmModuleTableReader.WindowsX64NativeTargetRequirement,
+                    0),
+            ], strings, modules)
+            : [];
+        var moduleRefs = initializerIsImported
+            ? new TrRmModuleRefTableReader(moduleRefBytes, 1,
+                strings, modules)
+            : default;
+        var typeSpecRows = new List<ReadOnlyMemory<byte>> {
             TrRmTypeSpecTableWriter.Reference(0x02, 1),
-            new byte[] { 0x0C, 0, 0x8A, 1, 0, 0, 0 },
-        ];
+            new byte[] {
+                0x0C, (byte)(mutableClass ? 1 : 0), 0x8A, 1, 0, 0, 0,
+            },
+        };
+        var ordinaryReceiverTypeSpecRef = 2u;
+        if (callOrdinaryClassMethod
+            && mutableClass != ordinaryReceiverWritable)
+        {
+            typeSpecRows.Add(new byte[] {
+                0x0C, (byte)(ordinaryReceiverWritable ? 1 : 0),
+                0x8A, 1, 0, 0, 0,
+            });
+            ordinaryReceiverTypeSpecRef = 3;
+        }
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
-            1, 0, 0, 0, Schema, methodDefCount: 2);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2,
-            1, 0, 0, 0, Schema, methodDefCount: 2);
+            1, 0, 0, 0, Schema,
+            methodDefCount: callOrdinaryClassMethod ? 3 : 2);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Count,
+            1, 0, 0, 0, Schema,
+            methodDefCount: callOrdinaryClassMethod ? 3 : 2);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(1, 3, 0x0A, 1, 1, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(1, 3,
+                mutableClass ? 0x8Au : 0x0Au,
+                1, 1, 0, 0, 0, 0, 0, 0),
         ], strings, modules, 1, 0, 0, 2, Schema);
         var types = new TrRmTypeDefTableReader(typeDefBytes, 1, strings,
             modules, 1, 0, 0, 2, Schema);
@@ -621,25 +848,66 @@ internal sealed class TrRmObjectConstructionBodyTests
             strings, types, typeSpecs);
         var fields = new TrRmFieldDefTableReader(fieldBytes, 1, strings,
             types, typeSpecs);
-        var signatureBytes = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(0xF200_0000, 2,
-                1, 1, 0, 0),
-            new TrRmMethodSigRow(2, 0,
-                2, 1, 0, 0),
-        ], typeSpecs, 2, 0);
-        var signatures = new TrRmMethodSigTableReader(signatureBytes, 2,
-            typeSpecs, 2, 0);
-        var methodBytes = TrRmMethodDefTableWriter.Encode([
-            new TrRmMethodDefRow(1, 4, 1, 0, 1, 1, 1),
-            new TrRmMethodDefRow(1, 5, 2, 0, 2, 1, 2),
-        ], strings, modules, types, signatures, 2, 2);
-        var methods = new TrRmMethodDefTableReader(methodBytes, 2,
-            strings, modules, types, signatures, 2, 2);
-        var parameterBytes = TrRmParamTableWriter.Encode([
-            new TrRmParamRow(1, 0, 0xF200_0008, 0),
-            new TrRmParamRow(2, 0, 0xF200_0008, 0),
-        ], signatures, typeSpecs, Schema);
-        var parameters = new TrRmParamTableReader(parameterBytes, 2,
+        var signatureRows = new List<TrRmMethodSigRow> {
+            new(0xF200_0000, 2, 1, 1, 0, 0),
+            new(2, 0, 2, 1, 0, 0),
+        };
+        if (callOrdinaryClassMethod)
+        {
+            signatureRows.Add(new TrRmMethodSigRow(
+                ordinaryMethodReturnsClass
+                    ? ordinaryReceiverTypeSpecRef : 0xF200_0000,
+                ordinaryReceiverTypeSpecRef,
+                ordinaryMethodHasParameter ? 3 : 0,
+                ordinaryMethodHasParameter ? 1 : 0, 0, 0));
+        }
+        var paramCount = ordinaryMethodHasParameter ? 3 : 2;
+        var signatureBytes = TrRmMethodSigTableWriter.Encode(
+            signatureRows, typeSpecs, paramCount, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes,
+            signatureRows.Count, typeSpecs, paramCount, 0);
+        var methodRows = new List<TrRmMethodDefRow> {
+            new(1, 4, 1, 0, 1, 1,
+                initializerIsImported ? 0 : 1),
+            new(1, 5, 2, 0, 2, 1,
+                initializerIsImported ? 1 : 2),
+        };
+        if (callOrdinaryClassMethod)
+        {
+            methodRows.Add(new TrRmMethodDefRow(1, 7, 3, 0,
+                0, 0, initializerIsImported ? 2 : 3));
+        }
+        var bodyCount = methodRows.Count
+            - (initializerIsImported ? 1 : 0);
+        var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows,
+            strings, modules, types, signatures, 2, bodyCount);
+        var methods = new TrRmMethodDefTableReader(methodBytes,
+            methodRows.Count, strings, modules, types, signatures, 2,
+            bodyCount);
+        var importBytes = initializerIsImported
+            ? TrRmImportTableWriter.Encode([
+                new TrRmImportRow(1, 4, 0x1600_0001),
+            ], strings, moduleRefs, types, methods, default, default,
+                default, fields, features, modules, Schema)
+            : [];
+        var imports = initializerIsImported
+            ? new TrRmImportTableReader(importBytes, 1, strings,
+                moduleRefs, types, methods, default, default, default,
+                fields, features, modules, Schema)
+            : default;
+        var parameterRows = new List<TrRmParamRow> {
+            new(1, 0, 0xF200_0008, 0),
+            new(2, 0, 0xF200_0008, 0),
+        };
+        if (ordinaryMethodHasParameter)
+        {
+            parameterRows.Add(new TrRmParamRow(3, 0,
+                0xF200_0008, 0));
+        }
+        var parameterBytes = TrRmParamTableWriter.Encode(parameterRows,
+            signatures, typeSpecs, Schema);
+        var parameters = new TrRmParamTableReader(parameterBytes,
+            parameterRows.Count,
             signatures, typeSpecs, Schema);
         var initializerPayload = new byte[
             declareInitializedField ? 12 : 8];
@@ -661,12 +929,12 @@ internal sealed class TrRmObjectConstructionBodyTests
         };
         var contractBytes = TrRmContractTableWriter
             .EncodeC1M1Construction2Draft(contractRows, types, methods,
-                signatures, parameters, typeSpecs, fields, default, default,
+                signatures, parameters, typeSpecs, fields, default, imports,
                 features, modules, predicateGraphCount: 0);
         var contracts = new TrRmContractTableReader(contractBytes, 2,
             types, methods, signatures, parameters, typeSpecs,
             fieldPathCount: 0, features, modules, Schema,
-            predicateGraphCount: 0, fields: fields);
+            predicateGraphCount: 0, fields: fields, imports: imports);
         var bodyBytes = initializerBody
             ? CreateInitializerBody(code,
                 initializerReceiverAsPlaceTarget)
@@ -678,13 +946,19 @@ internal sealed class TrRmObjectConstructionBodyTests
                 contextFieldTargetRef, callSiteReturnsClassToContext,
                 constructionContextAtHomeIndexOne,
                 includeConstructionContextStore,
-                includeConstructionAbort);
+                includeConstructionAbort,
+                callOrdinaryClassMethod,
+                ordinaryReceiverSourceUse,
+                ordinaryReceiverHomeIndex, mutableClass,
+                ordinaryReceiverWritable, compactOrdinaryClassCall,
+                publishToRegister, ordinaryMethodHasParameter,
+                initializerIsImported, ordinaryMethodReturnsClass);
         var body = new TrRmRegisterBodyReader(bodyBytes, 2, Schema);
         TrRmRegisterBodyMapValidator.Validate(body, methodDefRow, 1, features, modules,
             types, default, typeSpecs, default, default, methods, signatures,
             parameters, fields, default, default, default, default, default,
-            contracts, default, default, default, default, default, default,
-            default, default);
+            contracts, imports, default, default, moduleRefs, default,
+            default, default, default);
     }
 
     private static byte[] CreateInitializerBody(byte[] code,
@@ -735,7 +1009,17 @@ internal sealed class TrRmObjectConstructionBodyTests
         bool callSiteReturnsClassToContext,
         bool constructionContextAtHomeIndexOne,
         bool includeConstructionContextStore,
-        bool includeConstructionAbort)
+        bool includeConstructionAbort,
+        bool callOrdinaryClassMethod,
+        int ordinaryReceiverSourceUse,
+        int ordinaryReceiverHomeIndex,
+        bool mutableClass,
+        bool ordinaryReceiverWritable,
+        bool compactOrdinaryClassCall,
+        bool publishToRegister,
+        bool ordinaryMethodHasParameter,
+        bool initializerIsImported,
+        bool ordinaryMethodReturnsClass)
     {
         var homes = new byte[24];
         homes[0] = (byte)(constructionContextAtHomeIndexOne ? 3 : 4);
@@ -747,12 +1031,19 @@ internal sealed class TrRmObjectConstructionBodyTests
         BinaryPrimitives.WriteUInt32LittleEndian(typeMap, 0x1100_0002);
         BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(4),
             0xF200_0008);
-        var methodMap = new byte[callSiteReturnsClassToContext ? 8 : 4];
-        BinaryPrimitives.WriteUInt32LittleEndian(methodMap, 0x1600_0001);
+        var methodMap = new byte[
+            callSiteReturnsClassToContext || callOrdinaryClassMethod ? 8 : 4];
+        BinaryPrimitives.WriteUInt32LittleEndian(methodMap,
+            initializerIsImported ? 0x1C00_0001u : 0x1600_0001u);
         if (callSiteReturnsClassToContext)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(
                 methodMap.AsSpan(4), 0x1600_0002);
+        }
+        else if (callOrdinaryClassMethod)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                methodMap.AsSpan(4), 0x1600_0003);
         }
         var entryState = new byte[8];
         entryState[0] = 1;
@@ -781,7 +1072,9 @@ internal sealed class TrRmObjectConstructionBodyTests
             BinaryPrimitives.WriteUInt16LittleEndian(callSitePayload[22..],
                 checked((ushort)callSiteArgumentHomeIndex));
         }
-        var publish = CreateConstructionRecord(2, 2, 0, 1);
+        var publish = CreateConstructionRecord(2,
+            publishToRegister ? (byte)1 : (byte)2, 0,
+            publishToRegister ? (ushort)0 : (ushort)1);
         var records = includeContextField
             ? new ReadOnlyMemory<byte>[] {
                 entryState, begin, callSite,
@@ -824,6 +1117,33 @@ internal sealed class TrRmObjectConstructionBodyTests
         {
             records = [.. records,
                 CreateConstructionRecord(3, 0, 0, 0)];
+        }
+        if (callOrdinaryClassMethod && !compactOrdinaryClassCall)
+        {
+            var ordinaryCallSite = new byte[
+                ordinaryMethodHasParameter ? 28 : 24];
+            ordinaryCallSite[0] = 0x02;
+            var ordinaryCallSitePayload = ordinaryCallSite.AsSpan(4);
+            ordinaryCallSitePayload[0] = 1;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                ordinaryCallSitePayload[4..], 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                ordinaryCallSitePayload[8..],
+                ordinaryMethodHasParameter ? 2u : 1u);
+            ordinaryCallSitePayload[16] = 2;
+            ordinaryCallSitePayload[17]
+                = checked((byte)ordinaryReceiverSourceUse);
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                ordinaryCallSitePayload[18..],
+                checked((ushort)ordinaryReceiverHomeIndex));
+            if (ordinaryMethodHasParameter)
+            {
+                ordinaryCallSitePayload[20] = 2;
+                ordinaryCallSitePayload[21] = 1;
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    ordinaryCallSitePayload[22..], 2);
+            }
+            records = [.. records, ordinaryCallSite];
         }
         return TrRmRegisterBodyWriter.Encode(homes, typeMap, methodMap,
             ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
