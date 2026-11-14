@@ -11,8 +11,17 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal sealed partial class TrRmStandardNativeBindingPlan
 {
-    private BoundProgram CreateLocalAggregateLayoutLoweringProgram()
+    private BoundProgram CreateLocalAggregateLayoutLoweringProgram(
+        bool initializationReferenceLocalFieldLayout = false,
+        bool generalPredicateGraphsInitializationReferenceBodies = false)
     {
+        if (initializationReferenceLocalFieldLayout
+            && generalPredicateGraphsInitializationReferenceBodies)
+        {
+            throw new ArgumentException(
+                "The initialization-reference native schema selections are mutually exclusive.");
+        }
+
         // Reload the owned snapshots, including uncalled Imports, before creating
         // any backend input. The retained semantic Programs are never linked in place.
         var providers = new TrRmStandardArtifactInput[_artifacts.Length - 1];
@@ -43,7 +52,9 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         }
 
         ValidateLocalAggregateLayoutClosure(original, closure);
-        return new LocalAggregateLayoutNativeProgramBuilder(closure).Build();
+        return new LocalAggregateLayoutNativeProgramBuilder(closure,
+            initializationReferenceLocalFieldLayout,
+            generalPredicateGraphsInitializationReferenceBodies).Build();
     }
 
     private void ValidateLocalAggregateLayoutClosure(
@@ -94,12 +105,14 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             var expectedModule = original.Modules[index];
             var actualModule = actual.Modules[index];
             var selection = _modules[index];
-            if (new TrRmStandardModuleSelection(
+            var actualSelection = new TrRmStandardModuleSelection(
                     actualModule.ArtifactIndex, actualModule.ModuleRow,
                     actualModule.Identity, actualModule.TargetRequirement,
                     actualModule.RuntimePolicy, actualModule.EntryMethodDefRow,
-                    actualModule.MethodDefStart, actualModule.MethodDefEnd)
-                    != selection
+                    actualModule.MethodDefStart, actualModule.MethodDefEnd) {
+                GoverningRuleEdition = actualModule.GoverningRuleEdition,
+            };
+            if (actualSelection != selection
                 || (expectedModule with { Program = actualModule.Program,
                     FunctionIndexByMethodRow = actualModule.FunctionIndexByMethodRow,
                     FunctionIndexByImportRow = actualModule.FunctionIndexByImportRow,
@@ -124,6 +137,9 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         private readonly record struct LocalTypeOrigin(ModuleOrigin Module, PrimitiveType Type);
 
         private readonly BoundStandardMethodProviderClosure _closure;
+        private readonly bool _initializationReferenceLocalFieldLayout;
+        private readonly bool
+            _generalPredicateGraphsInitializationReferenceBodies;
         private readonly ModuleOrigin _root;
         private readonly Dictionary<ModuleOrigin, BoundStandardMethodProviderModule> _modules = [];
         private readonly Dictionary<MethodOrigin, int> _methods = [];
@@ -139,11 +155,21 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         private readonly Dictionary<(PrimitiveType ElementType, ulong ElementCount), int> _arrayIndexes = [];
         private readonly List<NativePointerTypeDefinition> _pointers = [];
         private readonly Dictionary<NativePointerTypeDefinition, int> _pointerIndexes = [];
+        private readonly List<CheckedReferenceTypeDefinition>
+            _checkedReferenceTypes = [];
+        private readonly Dictionary<CheckedReferenceTypeDefinition, int>
+            _checkedReferenceTypeIndexes = [];
 
         internal LocalAggregateLayoutNativeProgramBuilder(
-            BoundStandardMethodProviderClosure closure)
+            BoundStandardMethodProviderClosure closure,
+            bool initializationReferenceLocalFieldLayout,
+            bool generalPredicateGraphsInitializationReferenceBodies)
         {
             _closure = closure;
+            _initializationReferenceLocalFieldLayout
+                = initializationReferenceLocalFieldLayout;
+            _generalPredicateGraphsInitializationReferenceBodies
+                = generalPredicateGraphsInitializationReferenceBodies;
             _root = new ModuleOrigin(closure.RootArtifactIndex,
                 closure.RootModuleRow);
         }
@@ -154,15 +180,34 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 static module => module.ArtifactIndex);
             foreach (var artifact in _closure.Artifacts)
             {
-                var tables = TrRmStructuralMetadataValidator
-                    .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
-                        TrRmArtifactIndex.ForLocalAggregateLayoutDraft(
-                            artifact.ArtifactSnapshot.AsSpan()));
+                var artifactIndex
+                    = _generalPredicateGraphsInitializationReferenceBodies
+                    ? TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(
+                        artifact.ArtifactSnapshot.AsSpan())
+                    : _initializationReferenceLocalFieldLayout
+                    ? TrRmArtifactIndex
+                        .ForInitializationReferenceLocalFieldLayoutDraft(
+                            artifact.ArtifactSnapshot.AsSpan())
+                    : TrRmArtifactIndex.ForLocalAggregateLayoutDraft(
+                        artifact.ArtifactSnapshot.AsSpan());
+                var tables
+                    = _generalPredicateGraphsInitializationReferenceBodies
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                            artifactIndex)
+                    : _initializationReferenceLocalFieldLayout
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateAndGetExecutionTables(artifactIndex)
+                    : TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
+                            artifactIndex);
                 foreach (var module in modulesByArtifact[artifact.ArtifactIndex])
                 {
                     var location = Location(module);
                     _modules.Add(location, module);
-                    ValidateProgram(module.Program);
+                    ValidateProgram(module.Program,
+                        _initializationReferenceLocalFieldLayout
+                            || _generalPredicateGraphsInitializationReferenceBodies);
                     var (typeStart, typeEnd) = tables.Modules.GetTypeDefRange(
                         module.ModuleRow);
                     if (typeEnd - typeStart != module.Program.Structures.Length)
@@ -317,6 +362,7 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                 Structures = structures.MoveToImmutable(),
                 NativeFixedArrayTypes = [.. _arrays],
                 NativePointerTypes = [.. _pointers],
+                CheckedReferenceTypes = [.. _checkedReferenceTypes],
                 SourceTypeDeclarations = [],
                 SourceTypePublications = default,
                 StandardMethodProviderClosure = _closure,
@@ -336,12 +382,14 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             BoundStandardMethodProviderModule module)
             => new(module.ArtifactIndex, module.ModuleRow);
 
-        private static void ValidateProgram(BoundProgram program)
+        private static void ValidateProgram(BoundProgram program,
+            bool initializationReferenceLocalFieldLayout)
         {
             if (program.RuntimePolicy != BoundRuntimePolicy.FailFast
                 || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
                 || !program.NativeFunctionPointerSignatures.IsEmpty
-                || !program.CheckedReferenceTypes.IsEmpty
+                || (!initializationReferenceLocalFieldLayout
+                    && !program.CheckedReferenceTypes.IsEmpty)
                 || !program.GenericNominalTypeDefinitions.IsEmpty
                 || !program.GenericNominalTypeInstances.IsEmpty
                 || !program.Interfaces.IsEmpty || !program.EnumDefinitions.IsEmpty
@@ -414,7 +462,9 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             {
                 return mapped;
             }
-            if (!NativePointerTypes.IsType(type)
+            var isCheckedReferenceType = CheckedReferenceTypes.IsType(type);
+            if (!isCheckedReferenceType
+                && !NativePointerTypes.IsType(type)
                 && !NativeFixedArrayTypes.IsType(type))
             {
                 if ((int)type >= 100)
@@ -431,7 +481,40 @@ internal sealed partial class TrRmStandardNativeBindingPlan
                     "The L1 native type map contains an invalid structural type recipe.");
             }
 
-            if (NativeFixedArrayTypes.IsType(type))
+            if (isCheckedReferenceType)
+            {
+                var referenceIndex = CheckedReferenceTypes.Index(type);
+                if ((uint)referenceIndex
+                    >= (uint)module.Program.CheckedReferenceTypes.Length)
+                {
+                    throw new InvalidDataException(
+                        "The B+I native type map contains an unknown checked-reference type.");
+                }
+
+                var definition
+                    = module.Program.CheckedReferenceTypes[referenceIndex] with {
+                        ReferentType = MapType(module,
+                            module.Program.CheckedReferenceTypes[
+                                referenceIndex].ReferentType, depth + 1),
+                    };
+                if (!_checkedReferenceTypeIndexes.TryGetValue(definition,
+                        out var mappedReferenceIndex))
+                {
+                    if (_checkedReferenceTypes.Count
+                        >= SemanticVerifier.MaximumAnalysisVisits)
+                    {
+                        throw new NotSupportedException(
+                            "The joint B+I reference type table exceeds its limit.");
+                    }
+                    mappedReferenceIndex = _checkedReferenceTypes.Count;
+                    _checkedReferenceTypeIndexes.Add(definition,
+                        mappedReferenceIndex);
+                    _checkedReferenceTypes.Add(definition);
+                }
+                mapped = CheckedReferenceTypes.Type(
+                    mappedReferenceIndex);
+            }
+            else if (NativeFixedArrayTypes.IsType(type))
             {
                 var source = module.Program.NativeFixedArrayTypes[
                     NativeFixedArrayTypes.Index(type)];

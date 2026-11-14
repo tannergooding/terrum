@@ -20,7 +20,10 @@ internal enum TrRmStandardNativeOperation
 internal readonly record struct TrRmStandardModuleSelection(
     int ArtifactIndex, int ModuleRow, string Identity,
     uint TargetRequirement, uint RuntimePolicy, int EntryMethodDefRow,
-    int MethodDefStart, int MethodDefEnd);
+    int MethodDefStart, int MethodDefEnd)
+{
+    internal uint GoverningRuleEdition { get; init; }
+}
 
 internal sealed record TrRmStandardNativeProviderBinding(
     string RootTargetName,
@@ -84,6 +87,10 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private const string LocalAggregateLayoutSchemaIdentity
         = "trrm/1-draft-local-aggregate-layout-execution-1";
+    private const string InitializationReferenceLocalFieldLayoutSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-local-field-layout-1";
+    private const string InitializationReferenceGeneralPredicateGraphsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-general-predicate-graphs-1";
     private readonly TrRmA3LayoutResourceLedger? _a3LayoutResourceLedger;
     private readonly ImmutableArray<TrRmStandardTypeProviderBinding>
         _typeProviderBindings;
@@ -253,6 +260,32 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             throw new InvalidDataException(
                 "The L1 native operation requires exact L1 selection for every supplied artifact.");
         }
+        var includesInitializationReferenceLocalFieldLayoutSchema
+            = _schemaIdentities.Contains(
+                InitializationReferenceLocalFieldLayoutSchemaIdentity,
+                StringComparer.Ordinal);
+        var isInitializationReferenceLocalFieldLayoutSchemaSet
+            = IsExactInitializationReferenceLocalFieldLayoutSchemaSet(
+                _schemaIdentities);
+        if (includesInitializationReferenceLocalFieldLayoutSchema
+            && !isInitializationReferenceLocalFieldLayoutSchemaSet)
+        {
+            throw new InvalidDataException(
+                "The initialization-reference local-field native operation requires exact schema selection for every supplied artifact.");
+        }
+        var includesInitializationReferenceGeneralPredicateGraphsSchema
+            = _schemaIdentities.Contains(
+                InitializationReferenceGeneralPredicateGraphsSchemaIdentity,
+                StringComparer.Ordinal);
+        var isInitializationReferenceGeneralPredicateGraphsSchemaSet
+            = IsExactInitializationReferenceGeneralPredicateGraphsSchemaSet(
+                _schemaIdentities);
+        if (includesInitializationReferenceGeneralPredicateGraphsSchema
+            && !isInitializationReferenceGeneralPredicateGraphsSchemaSet)
+        {
+            throw new InvalidDataException(
+                "The initialization-reference general-predicate native operation requires exact schema selection for every supplied artifact.");
+        }
 
         _a3LayoutResourceLedger?.ConsumeWork(
             checked((ulong)_schemaIdentities.Length + 1UL));
@@ -298,6 +331,24 @@ internal sealed partial class TrRmStandardNativeBindingPlan
         {
             throw new InvalidDataException(
                 "The Standard native binding plan lost its selected root Module.");
+        }
+
+        if (isInitializationReferenceLocalFieldLayoutSchemaSet
+            || isInitializationReferenceGeneralPredicateGraphsSchemaSet)
+        {
+            if (!_providerBindings.IsDefaultOrEmpty
+                || !_providerDependencyBindings.IsDefaultOrEmpty)
+            {
+                throw new InvalidDataException(
+                    "The initialization-reference Standard Body profiles do not use native-library bindings.");
+            }
+
+            return (CreateLocalAggregateLayoutLoweringProgram(
+                initializationReferenceLocalFieldLayout:
+                    isInitializationReferenceLocalFieldLayoutSchemaSet,
+                generalPredicateGraphsInitializationReferenceBodies:
+                    isInitializationReferenceGeneralPredicateGraphsSchemaSet),
+                []);
         }
 
         if (TrRmExecutableCompiler.IsExactForeignInvocationSchemaSet(
@@ -612,7 +663,11 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageGenericFixedArraySchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
-                LocalAggregateLayoutSchemaIdentity);
+                LocalAggregateLayoutSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                InitializationReferenceLocalFieldLayoutSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                InitializationReferenceGeneralPredicateGraphsSchemaIdentity);
 
     private static bool IsExactLocalAggregateLayoutSchemaSet(
         IReadOnlyList<string> schemaIdentities)
@@ -620,6 +675,20 @@ internal sealed partial class TrRmStandardNativeBindingPlan
             && schemaIdentities.All(static schemaIdentity =>
                 StringComparer.Ordinal.Equals(schemaIdentity,
                     LocalAggregateLayoutSchemaIdentity));
+
+    private static bool IsExactInitializationReferenceLocalFieldLayoutSchemaSet(
+        IReadOnlyList<string> schemaIdentities)
+        => schemaIdentities.Count != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    InitializationReferenceLocalFieldLayoutSchemaIdentity));
+
+    private static bool IsExactInitializationReferenceGeneralPredicateGraphsSchemaSet(
+        IReadOnlyList<string> schemaIdentities)
+        => schemaIdentities.Count != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    InitializationReferenceGeneralPredicateGraphsSchemaIdentity));
 
     private bool IsFixedArraySchemaIdentity(string? schemaIdentity)
         => AreEqualOrdinal(schemaIdentity,

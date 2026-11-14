@@ -84,15 +84,26 @@ public static partial class TrRmExecutableCompiler
         byte[][] artifacts, string[] schemaIdentities,
         string rootModuleIdentity,
         StandardModuleValidation moduleValidation,
-        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        bool initializationReferenceLocalFieldLayout = false,
+        bool generalPredicateGraphsInitializationReferenceBodies = false)
     {
+        var initializationReferenceBodyProfile
+            = initializationReferenceLocalFieldLayout
+                || generalPredicateGraphsInitializationReferenceBodies;
+        var requiredSchemaIdentity
+            = initializationReferenceLocalFieldLayout
+                ? StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                : generalPredicateGraphsInitializationReferenceBodies
+                    ? StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
+                    : StandardLocalAggregateLayoutSchemaIdentity;
         if (artifacts.Length != schemaIdentities.Length
-            || schemaIdentities.Any(static schemaIdentity =>
+            || schemaIdentities.Any(schemaIdentity =>
                 !StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardLocalAggregateLayoutSchemaIdentity)))
+                    requiredSchemaIdentity)))
         {
             throw Unsupported(
-                "The L1 semantic MethodDef closure requires exact L1 selections for every supplied artifact.");
+                "The semantic MethodDef closure requires one exact selected schema for every supplied artifact.");
         }
 
         var modulesByIdentity
@@ -278,7 +289,8 @@ public static partial class TrRmExecutableCompiler
 
                 var expectedMethodRow = checked((int)(expectedDefinition
                     & 0x00FF_FFFF));
-                ValidateExpectedMethod(tables, module, expectedMethodRow);
+                ValidateExpectedMethod(tables, module, expectedMethodRow,
+                    initializationReferenceBodyProfile);
                 var (expectedTypeSpecs, expectedParameterFlags)
                     = CaptureExpectedMethodSignature(tables,
                         expectedMethodRow);
@@ -388,8 +400,38 @@ public static partial class TrRmExecutableCompiler
                 var providerModule = modulesByLocation[
                     (import.ProviderArtifactIndex,
                         import.ProviderModuleRow)];
-                ValidateActualMethod(providerTables, providerModule,
-                    actualMethodRow);
+                if (initializationReferenceBodyProfile)
+                {
+                    var consumerArtifactIndex
+                        = CreateForeignInvocationIndex(
+                            artifacts[import.ConsumerArtifactIndex],
+                            schemaIdentities[import.ConsumerArtifactIndex]);
+                    var consumerTables = ValidateForeignInvocationArtifact(
+                        consumerArtifactIndex,
+                        schemaIdentities[import.ConsumerArtifactIndex],
+                        createA3ResourceLedger: false);
+                    var validatedMethodRow
+                        = ValidateInitializationReferenceProvider(
+                            consumerTables,
+                            import.ExpectedMethodRow,
+                            consumerTables.Imports.GetBindingForImportRow(
+                                import.ImportRow),
+                            artifacts[import.ProviderArtifactIndex],
+                            import.ProviderModuleRow,
+                            schemaIdentities[import.ProviderArtifactIndex],
+                            a3LayoutResourceLedger: null);
+                    if (validatedMethodRow != actualMethodRow)
+                    {
+                        throw Invalid(
+                            "A B+I MethodDef ExportKey resolves to a different provider row than its checked edge.");
+                    }
+                }
+                else
+                {
+                    ValidateActualMethod(providerTables, providerModule,
+                        actualMethodRow,
+                        initializationReferenceBodyProfile);
+                }
                 AppendMethodSignatureTypePairs(import, providerTables,
                     actualMethodRow, methodTypeSpecPairs);
                 methodEdges.Add(new LocalAggregateMethodProviderEdge(
@@ -456,7 +498,9 @@ public static partial class TrRmExecutableCompiler
                 "The L1 semantic provider closure contains a disconnected supplied Module.");
         }
 
-        if (methodTypeSpecPairs.Count != 0)
+        if (methodTypeSpecPairs.Count != 0
+            && !initializationReferenceLocalFieldLayout
+            && !generalPredicateGraphsInitializationReferenceBodies)
         {
             var rootIndexForMethodTypes
                 = CreateForeignInvocationIndex(artifacts[0],
@@ -496,12 +540,18 @@ public static partial class TrRmExecutableCompiler
                 var selectedImports
                     = moduleImports[(module.ArtifactIndex,
                         module.ModuleRow)];
-                var loadedModule = LoadLocalAggregateLayoutExecution(
-                    moduleIndex, moduleTables, module.ModuleRow,
-                    selectedImports, isRootModule:
-                        module.ArtifactIndex == 0
-                            && module.ModuleRow
-                                == moduleValidation.RootModuleRow);
+                var loadedModule = initializationReferenceLocalFieldLayout
+                    || generalPredicateGraphsInitializationReferenceBodies
+                    ? LoadInitializationReferenceLocalFieldLayoutModule(
+                        artifacts[artifactIndex], moduleTables, module,
+                        selectedImports,
+                        generalPredicateGraphsInitializationReferenceBodies)
+                    : LoadLocalAggregateLayoutExecution(
+                        moduleIndex, moduleTables, module.ModuleRow,
+                        selectedImports, isRootModule:
+                            module.ArtifactIndex == 0
+                                && module.ModuleRow
+                                    == moduleValidation.RootModuleRow);
                 var moduleProgram = RetainLoadedA2SourceTypeFacts(
                     loadedModule.Program, artifacts, schemaIdentities,
                     moduleTables, module.ModuleRow, typeProviderBindings,
@@ -611,9 +661,99 @@ public static partial class TrRmExecutableCompiler
         };
     }
 
+    private static LocalAggregateLayoutLoadedModule
+        LoadInitializationReferenceLocalFieldLayoutModule(
+        byte[] artifact,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        TrRmStandardModuleSelection module,
+        IReadOnlyDictionary<int, BoundModuleImport> selectedImports,
+        bool generalPredicateGraphsInitializationReferenceBodies)
+    {
+        var selectedMethodImports
+            = new Dictionary<int, BoundModuleImport>();
+        foreach (var (importRow, binding) in selectedImports)
+        {
+            if ((tables.Imports.GetExpectedDefinitionForImportRow(importRow)
+                    >> 24) != 0x16)
+            {
+                continue;
+            }
+
+            var expectedMethodRow = checked((int)(
+                tables.Imports.GetExpectedDefinitionForImportRow(importRow)
+                & 0x00FF_FFFF));
+            if (!selectedMethodImports.TryAdd(expectedMethodRow, binding))
+            {
+                throw Invalid(
+                    "A B+I MethodDef Import has duplicate selected bindings.");
+            }
+        }
+
+        var program = LoadDevelopment(artifact,
+            generalPredicateGraphsInitializationReferenceBodies
+                ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                : TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft,
+            standardSchemaIdentity:
+                generalPredicateGraphsInitializationReferenceBodies
+                    ? StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
+                    : StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity,
+            selectedModuleImports: selectedMethodImports,
+            selectedModuleRow: module.ModuleRow);
+        if (program.Functions.Length
+            != module.MethodDefEnd - module.MethodDefStart)
+        {
+            throw Invalid(
+                "The B+I Body loader lost a selected Module's MethodDef range.");
+        }
+
+        var functionIndexByMethodRow = new int[tables.Methods.Count + 1];
+        Array.Fill(functionIndexByMethodRow, -1);
+        var functionIndexByName = program.Functions
+            .Select((function, index) => (function.Name, index))
+            .ToDictionary(static item => item.Name,
+                static item => item.index, StringComparer.Ordinal);
+        for (var methodRow = module.MethodDefStart;
+            methodRow < module.MethodDefEnd; methodRow++)
+        {
+            if (!functionIndexByName.TryGetValue(
+                    tables.Methods.GetName(methodRow), out var functionIndex))
+            {
+                throw Invalid(
+                    "The B+I Body loader lost a selected MethodDef identity.");
+            }
+
+            functionIndexByMethodRow[methodRow] = functionIndex;
+        }
+
+        var functionIndexByImportRow = new int[tables.Imports.Count + 1];
+        Array.Fill(functionIndexByImportRow, -1);
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
+        {
+            var expectedDefinition
+                = tables.Imports.GetExpectedDefinitionForImportRow(importRow);
+            if ((expectedDefinition >> 24) != 0x16
+                || tables.ModuleRefs.GetOwnerModule(
+                    tables.Imports.GetModuleRefForImportRow(importRow))
+                    != module.ModuleRow)
+            {
+                continue;
+            }
+
+            var expectedMethodRow = checked((int)(
+                expectedDefinition & 0x00FF_FFFF));
+            functionIndexByImportRow[importRow]
+                = functionIndexByMethodRow[expectedMethodRow];
+        }
+
+        return new LocalAggregateLayoutLoadedModule(program,
+            functionIndexByMethodRow, functionIndexByImportRow);
+    }
+
     private static void ValidateExpectedMethod(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-        TrRmStandardModuleSelection module, int methodRow)
+        TrRmStandardModuleSelection module, int methodRow,
+        bool initializationReferenceLocalFieldLayout)
     {
         var methodStart = module.MethodDefStart;
         var methodEnd = module.MethodDefEnd;
@@ -629,7 +769,8 @@ public static partial class TrRmExecutableCompiler
                 "An L1 imported MethodDef expectation is not a bodyless local top-level declaration.");
         }
 
-        if (tables.Methods.GetContractRange(methodRow).Count != 0)
+        if (!initializationReferenceLocalFieldLayout
+            && tables.Methods.GetContractRange(methodRow).Count != 0)
         {
             throw Unsupported(
                 "L1 MethodDef provider binding does not admit MethodDef contract rows.");
@@ -638,7 +779,8 @@ public static partial class TrRmExecutableCompiler
 
     private static void ValidateActualMethod(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-        TrRmStandardModuleSelection module, int methodRow)
+        TrRmStandardModuleSelection module, int methodRow,
+        bool initializationReferenceLocalFieldLayout)
     {
         if (methodRow < module.MethodDefStart
             || methodRow >= module.MethodDefEnd
@@ -653,7 +795,8 @@ public static partial class TrRmExecutableCompiler
                 "An L1 MethodDef Export must select a public provider-owned local MethodDef with one Body.");
         }
 
-        if (tables.Methods.GetContractRange(methodRow).Count != 0)
+        if (!initializationReferenceLocalFieldLayout
+            && tables.Methods.GetContractRange(methodRow).Count != 0)
         {
             throw Unsupported(
                 "L1 MethodDef provider binding does not admit MethodDef contract rows.");
