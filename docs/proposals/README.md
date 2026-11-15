@@ -31,6 +31,7 @@ current support or availability.
 | Proposal | Review boundary |
 |---|---|
 | [Core-library reference](core-library-reference.md) | Broad candidate APIs and dependency layers; accepted members/protocols link to the adopted inventory rather than being redefined. |
+| [Stable-backing Span values](span-stable-backing-value-profile.md) | Unapproved candidate: 24/8 normal-backed Windows x64 Span profile; reuses family `0x8A` and intrinsic Write; excludes GC/init, foreign and independent-module routes.|
 | [Windows x64 general optional value layout](windows-x64-optional-value-layout.md) | Unapproved, provisional byte-tag/aligned-payload candidate for already-admitted rootless Copy values and unit; retains transitive explicit alignment and null-absence semantics without selecting stored checked-reference bits, with separate runtime/ABI/persistence gates. |
 | [Decimal division by infinity: zero cohort](decimal-division-infinity-cohort.md) | Provisional minimum-quantum signed-zero rule for finite decimal/infinity division; preserves finite/finite preferred exponents and remains pending normative adoption. |
 | [Explicit char16-to-fixed-integer conversion](char16-fixed-integer-conversions.md) | Unapproved, provisionally actionable ten-pair unsigned-code-unit extraction direction; compares the lossless approved floating bridge and four-pair compatibility amendment, fixes narrow checked boundaries, and preserves character identity and separate persistence/lowering gates. |
