@@ -525,6 +525,9 @@ public readonly ref struct TrRmContractTableReader
                     var predicateOrdinal = Read(data, 12);
                     var predicateGraph = Read(data, 16);
                     var predicateMethod = checked((int)(owner & 0xFF_FFFF));
+                    var requiredPredicateFeature = data[8] == 3
+                        ? TrRmFeatureTableReader.PublishedPredicatesFeatureId
+                        : TrRmFeatureTableReader.GeneralPredicateGraphsFeatureId;
                     if (predicateGraph == 0 || predicateGraph > (uint)predicateGraphCount
                         || !AddState(_predicateGraphReferences,
                             predicateGraph))
@@ -544,7 +547,7 @@ public readonly ref struct TrRmContractTableReader
                     if (!AddState(phaseOrdinals, predicateOrdinal)
                         || !TrRmFeatureManifestValidator.Requires(features, modules,
                             methods.GetOwnerModule(predicateMethod),
-                            TrRmFeatureTableReader.PublishedPredicatesFeatureId, schema))
+                            requiredPredicateFeature, schema))
                     {
                         throw InvalidContract();
                     }

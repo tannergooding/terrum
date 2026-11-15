@@ -146,6 +146,26 @@ internal sealed class TrRmContractTableReaderTests
             includePublishedPredicatesFeature: true,
             expectedPredicateGraphContractCount: 1);
 
+        foreach (var phase in new byte[] { 1, 2 })
+        {
+            var phasePredicate = PredicateGraphContract(phase, 0, 1);
+            _ = Create(Section(phasePredicate), recordCount: 1,
+                declaredCount: 1, typeFirst: 0, typeCount: 0,
+                methodFirst: 1, methodCount: 1, developmentProfile: false,
+                generalPredicateGraphsDraft: true, predicateGraphCount: 1,
+                writeRows: true, expectedPredicateGraphContractCount: 1);
+
+            _ = Assert.Throws<InvalidDataException>(() =>
+                Create(Section(phasePredicate), recordCount: 1,
+                    declaredCount: 1, typeFirst: 0, typeCount: 0,
+                    methodFirst: 1, methodCount: 1,
+                    developmentProfile: false,
+                    generalPredicateGraphsDraft: true,
+                    includeGeneralPredicateGraphsFeature: false,
+                    includePublishedPredicatesFeatureForGeneralGraphs: true,
+                    predicateGraphCount: 1));
+        }
+
         foreach (var phase in new byte[] { 0, 4 })
         {
             var invalidPhase = PredicateGraphContract(phase, 0, 1);
@@ -163,7 +183,7 @@ internal sealed class TrRmContractTableReaderTests
             recordCount: 2, declaredCount: 2,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
             developmentProfile: false, predicateGraphCount: 2,
-            includePublishedPredicatesFeature: true));
+            generalPredicateGraphsDraft: true));
 
         _ = Assert.Throws<InvalidDataException>(() => Create(
             Section(PredicateGraphContract(phase: 1, ordinal: 0, graphRow: 2)),
@@ -848,6 +868,7 @@ internal sealed class TrRmContractTableReaderTests
         uint? expectedNativeParameterExtent = null,
         bool generalPredicateGraphsDraft = false,
         bool includeGeneralPredicateGraphsFeature = true,
+        bool includePublishedPredicatesFeatureForGeneralGraphs = false,
         bool includeConstantExecutionFeature = false,
         bool canonicalizeEvaluationForms = false,
         bool canonicalizeReturnCoverage = false,
@@ -930,10 +951,19 @@ internal sealed class TrRmContractTableReaderTests
             : generalPredicateGraphsDraft
                 ? includeGeneralPredicateGraphsFeature
                     ? includeConstantExecutionFeature
-                        ? [TrRmFeatureRow.GeneralPredicateGraphsCandidate,
-                            TrRmFeatureRow.ConstantExecution]
-                        : [TrRmFeatureRow.GeneralPredicateGraphsCandidate]
-                    : []
+                        ? includePublishedPredicatesFeatureForGeneralGraphs
+                            ? [TrRmFeatureRow.PublishedPredicates,
+                                TrRmFeatureRow.GeneralPredicateGraphsCandidate,
+                                TrRmFeatureRow.ConstantExecution]
+                            : [TrRmFeatureRow.GeneralPredicateGraphsCandidate,
+                                TrRmFeatureRow.ConstantExecution]
+                        : includePublishedPredicatesFeatureForGeneralGraphs
+                            ? [TrRmFeatureRow.PublishedPredicates,
+                                TrRmFeatureRow.GeneralPredicateGraphsCandidate]
+                            : [TrRmFeatureRow.GeneralPredicateGraphsCandidate]
+                    : includePublishedPredicatesFeatureForGeneralGraphs
+                        ? [TrRmFeatureRow.PublishedPredicates]
+                        : []
             : (includeNativeBoundaryFeature, includePublishedPredicatesFeature) switch
                 {
                     (true, true) =>
