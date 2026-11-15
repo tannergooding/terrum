@@ -51,18 +51,38 @@ public static bool TryValidateTypeDefTable(int32 recordCount, int32 moduleCount,
 bool TryValidateTypeDefRow(int32 row, int32 stringCount, int32 stringIndexByteLength,
     int32 fieldCount, int32 genericParamCount, int32 layoutCount, int32 contractCount)
 {
+    init uint32 namespaceRow;
+    init uint32 nameRow;
+    init uint32 flags;
+    init uint32 fieldFirst;
+    init uint32 fieldRangeCount;
+    init uint32 genericFirst;
+    init uint32 genericRangeCount;
+    init uint32 layoutFirst;
+    init uint32 layoutRangeCount;
+    init uint32 contractFirst;
+    init uint32 contractRangeCount;
+    init int32 namespaceStart;
+    init int32 namespaceLength;
+    init int32 namespaceEncoding;
+    init int32 namespaceContentLength;
+    init int32 nameStart;
+    init int32 nameLength;
+    init int32 nameEncoding;
+    init int32 nameContentLength;
+    init int32 namespaceScalarCount;
     int32 rowStart = (row - 1) * 44;
-    if (!TryReadTypeDefTableWord(rowStart, 0, init var namespaceRow)
-        || !TryReadTypeDefTableWord(rowStart, 4, init var nameRow)
-        || !TryReadTypeDefTableWord(rowStart, 8, init var flags)
-        || !TryReadTypeDefTableWord(rowStart, 12, init var fieldFirst)
-        || !TryReadTypeDefTableWord(rowStart, 16, init var fieldRangeCount)
-        || !TryReadTypeDefTableWord(rowStart, 20, init var genericFirst)
-        || !TryReadTypeDefTableWord(rowStart, 24, init var genericRangeCount)
-        || !TryReadTypeDefTableWord(rowStart, 28, init var layoutFirst)
-        || !TryReadTypeDefTableWord(rowStart, 32, init var layoutRangeCount)
-        || !TryReadTypeDefTableWord(rowStart, 36, init var contractFirst)
-        || !TryReadTypeDefTableWord(rowStart, 40, init var contractRangeCount)
+    if (!TryReadTypeDefTableWord(rowStart, 0, ref init namespaceRow)
+        || !TryReadTypeDefTableWord(rowStart, 4, ref init nameRow)
+        || !TryReadTypeDefTableWord(rowStart, 8, ref init flags)
+        || !TryReadTypeDefTableWord(rowStart, 12, ref init fieldFirst)
+        || !TryReadTypeDefTableWord(rowStart, 16, ref init fieldRangeCount)
+        || !TryReadTypeDefTableWord(rowStart, 20, ref init genericFirst)
+        || !TryReadTypeDefTableWord(rowStart, 24, ref init genericRangeCount)
+        || !TryReadTypeDefTableWord(rowStart, 28, ref init layoutFirst)
+        || !TryReadTypeDefTableWord(rowStart, 32, ref init layoutRangeCount)
+        || !TryReadTypeDefTableWord(rowStart, 36, ref init contractFirst)
+        || !TryReadTypeDefTableWord(rowStart, 40, ref init contractRangeCount)
         || namespaceRow == 0 || namespaceRow > 0xFF_FFFF
         || namespaceRow > uint32(stringCount)
         || nameRow == 0 || nameRow > 0xFF_FFFF || nameRow > uint32(stringCount)
@@ -76,13 +96,13 @@ bool TryValidateTypeDefRow(int32 row, int32 stringCount, int32 stringIndexByteLe
     }
 
     if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
-            int32(namespaceRow), init var namespaceStart, init var namespaceLength,
-            init var namespaceEncoding, init var namespaceContentLength)
+            int32(namespaceRow), ref init namespaceStart, ref init namespaceLength,
+            ref init namespaceEncoding, ref init namespaceContentLength)
         || !TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
-            int32(nameRow), init var nameStart, init var nameLength,
-            init var nameEncoding, init var nameContentLength)
+            int32(nameRow), ref init nameStart, ref init nameLength,
+            ref init nameEncoding, ref init nameContentLength)
         || !TryGetStringNamespaceScalarCount(namespaceStart, namespaceLength,
-            init var namespaceScalarCount)
+            ref init namespaceScalarCount)
         || !TryValidateModuleIdentityText(nameStart, nameContentLength, nameEncoding))
     {
         return false;
@@ -115,24 +135,31 @@ bool IsValidTypeDefTableRange(uint32 first, uint32 count, int32 total)
 bool IsValidTypeDefTableCount(int32 count)
     => count >= 0 && count <= 0xFF_FFFF;
 
-bool TryReadTypeDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadTypeDefTableWord(int32 rowStart, int32 offset,
+    ref<init uint32> value)
+    ensure return ? *value is init : true
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.TypeDefs.Length - 44
         || offset < 0 || offset > 40
-        || !TryReadTypeDefTableByte(rowStart + offset, init var first)
-        || !TryReadTypeDefTableByte(rowStart + offset + 1, init var second)
-        || !TryReadTypeDefTableByte(rowStart + offset + 2, init var third)
-        || !TryReadTypeDefTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadTypeDefTableByte(rowStart + offset, ref init first)
+        || !TryReadTypeDefTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadTypeDefTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadTypeDefTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadTypeDefTableByte(int32 offset, init ref<int32> value)
+bool TryReadTypeDefTableByte(int32 offset, ref<init int32> value)
+    ensure return ? *value is init : true
 {
     if (offset < 0 || offset >= Host.TypeDefs.Length)
     {
@@ -145,6 +172,6 @@ bool TryReadTypeDefTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
