@@ -926,16 +926,16 @@ public static partial class TrRmExecutableCompiler
             if (callerFormalOrdinal >= 0)
             {
                 var callerFormal = definition.Formals[callerFormalOrdinal];
-                if ((targetFormal.OwnershipDomain == 1
-                        && callerFormal.OwnershipDomain != 1)
-                    || (targetFormal.OwnershipDomain == 2
-                        && callerFormal.OwnershipDomain != 2)
-                    || (targetFormal.NullabilityDomain == 1
-                        && callerFormal.NullabilityDomain == 2)
-                    || (targetFormal.RequiresWritable
-                        && !callerFormal.RequiresWritable)
-                    || (targetFormal.RequiresBlittable
-                        && !callerFormal.RequiresBlittable)
+                if (!SemanticVerifier
+                        .IsGenericMethodFormalContractSatisfied(
+                            targetFormal.OwnershipDomain,
+                            targetFormal.NullabilityDomain,
+                            targetFormal.RequiresWritable,
+                            targetFormal.RequiresBlittable,
+                            callerFormal.OwnershipDomain,
+                            callerFormal.NullabilityDomain,
+                            callerFormal.RequiresWritable,
+                            callerFormal.RequiresBlittable)
                     || !SatisfiesInterfaceConstraints(
                         ordinal, callerFormal))
                 {

@@ -2157,11 +2157,11 @@ internal static class TrRmRegisterBodyMapValidator
             var actualRequiresBlittable
                 = HasGenericMethodPropertyConstraint(formalRow, 3,
                     genericParams, constraints);
-            if ((targetOwnership == 1 && actualOwnership != 1)
-                || (targetOwnership == 2 && actualOwnership != 2)
-                || (targetNullability == 1 && actualNullability == 2)
-                || (targetRequiresWrite && !actualRequiresWrite)
-                || (targetRequiresBlittable && !actualRequiresBlittable))
+            if (!SemanticVerifier.IsGenericMethodFormalContractSatisfied(
+                    targetOwnership, targetNullability,
+                    targetRequiresWrite, targetRequiresBlittable,
+                    actualOwnership, actualNullability,
+                    actualRequiresWrite, actualRequiresBlittable))
             {
                 throw InvalidMap();
             }
@@ -2178,7 +2178,13 @@ internal static class TrRmRegisterBodyMapValidator
             var targetRequiresWrite
                 = HasGenericMethodPropertyConstraint(targetFormal, 2,
                     genericParams, constraints);
-            if (targetOwnership == 2 || targetRequiresWrite)
+            var targetRequiresBlittable
+                = HasGenericMethodPropertyConstraint(targetFormal, 3,
+                    genericParams, constraints);
+            if (!SemanticVerifier.IsGenericMethodFormalContractSatisfied(
+                    targetOwnership, targetNullability,
+                    targetRequiresWrite, targetRequiresBlittable,
+                    1, 1, false, true))
             {
                 throw InvalidMap();
             }

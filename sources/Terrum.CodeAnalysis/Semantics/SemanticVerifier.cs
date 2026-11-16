@@ -29721,16 +29721,15 @@ public static partial class SemanticVerifier
                 }
 
                 if (!IsValidType(typeArgument, false, program)
-                    || (formal.OwnershipDomain == 1
-                        && callerOwnershipDomain != 1)
-                    || (formal.OwnershipDomain == 2
-                        && callerOwnershipDomain != 2)
-                    || (formal.NullabilityDomain == 1
-                        && callerFormal.NullabilityDomain == 2)
-                    || (formal.RequiresBlittable
-                        && !callerFormal.RequiresBlittable)
-                    || (formal.RequiresWritable
-                        && !callerFormal.RequiresWritable))
+                    || !IsGenericMethodFormalContractSatisfied(
+                        formal.OwnershipDomain,
+                        formal.NullabilityDomain,
+                        formal.RequiresWritable,
+                        formal.RequiresBlittable,
+                        callerOwnershipDomain,
+                        callerFormal.NullabilityDomain,
+                        callerFormal.RequiresWritable,
+                        callerFormal.RequiresBlittable))
                 {
                     return false;
                 }
@@ -31469,6 +31468,24 @@ public static partial class SemanticVerifier
             }
             var mappedIndex
                 = classReference.ExpectedNativePointerMapping[sourceIndex];
+    internal static bool IsGenericMethodFormalContractSatisfied(
+        byte targetOwnershipDomain, byte targetNullabilityDomain,
+        bool targetRequiresWritable, bool targetRequiresBlittable,
+        byte actualOwnershipDomain, byte actualNullabilityDomain,
+        bool actualRequiresWritable, bool actualRequiresBlittable)
+        => targetOwnershipDomain is 1 or 2 or 3
+            && targetNullabilityDomain is 1 or 2
+            && actualOwnershipDomain is 1 or 2 or 3
+            && actualNullabilityDomain is 1 or 2
+            && (targetOwnershipDomain != 1
+                || actualOwnershipDomain == 1)
+            && (targetOwnershipDomain != 2
+                || actualOwnershipDomain == 2)
+            && (targetNullabilityDomain != 1
+                || actualNullabilityDomain == 1)
+            && (!targetRequiresWritable || actualRequiresWritable)
+            && (!targetRequiresBlittable || actualRequiresBlittable);
+
             if (mappedIndex < 0
                 || (uint)mappedIndex
                     >= (uint)program.NativePointerTypes.Length)
