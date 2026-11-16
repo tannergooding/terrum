@@ -21,6 +21,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmTypeDefTableReader typeDefs,
             TrRmEnumDefTableReader enumDefs,
             TrRmEnumMemberDefTableReader enumMembers,
+            TrRmTransparentConstantDomainTableReader transparentConstantDomains,
             TrRmTypeSpecTableReader typeSpecs,
             TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
             TrRmGenericParamTableReader genericParams,
@@ -85,6 +86,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmTargetProfileTableReader targetProfiles,
             TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+            TrRmMethodParameterLabelTableReader methodParameterLabels,
             TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
             TrRmContractTableReader contracts,
             TrRmDevelopmentNativeImportTableReader nativeImports,
@@ -104,6 +106,7 @@ public static class TrRmStructuralMetadataValidator
             TypeDefs = typeDefs;
             EnumDefs = enumDefs;
             EnumMembers = enumMembers;
+            TransparentConstantDomains = transparentConstantDomains;
             TypeSpecs = typeSpecs;
             NativeFunctionPointerAnchors = nativeFunctionPointerAnchors;
             GenericParams = genericParams;
@@ -170,6 +173,7 @@ public static class TrRmStructuralMetadataValidator
             FixedArrayLayouts = fixedArrayLayouts;
             Signatures = signatures;
             Parameters = parameters;
+            MethodParameterLabels = methodParameterLabels;
             Methods = methods;
             Bodies = bodies;
             Contracts = contracts;
@@ -198,6 +202,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTypeDefTableReader TypeDefs { get; }
         internal TrRmEnumDefTableReader EnumDefs { get; }
         internal TrRmEnumMemberDefTableReader EnumMembers { get; }
+        internal TrRmTransparentConstantDomainTableReader
+            TransparentConstantDomains { get; }
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmNativeFunctionPointerAnchorTableReader NativeFunctionPointerAnchors { get; }
         internal TrRmGenericParamTableReader GenericParams { get; }
@@ -264,6 +270,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmFixedArrayLayoutTableReader FixedArrayLayouts { get; }
         internal TrRmMethodSigTableReader Signatures { get; }
         internal TrRmParamTableReader Parameters { get; }
+        internal TrRmMethodParameterLabelTableReader MethodParameterLabels { get; }
         internal TrRmMethodDefTableReader Methods { get; }
         internal TrRmBodyTableReader Bodies { get; }
         internal TrRmContractTableReader Contracts { get; }
@@ -281,6 +288,7 @@ public static class TrRmStructuralMetadataValidator
         internal void ValidateRegisterBodyMapsForMethod(int methodDefRow)
         {
             if (Schema is not (TrRmArtifactSchema.Standard
+                    or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                     or TrRmArtifactSchema.ForeignInvocationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
@@ -295,8 +303,15 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.NominalEnumsDraft
                     or TrRmArtifactSchema.RootPinRuntimeDraft
                     or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                    or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                    or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                     or TrRmArtifactSchema.RegisterExceptionRegionsDraft
-                    or TrRmArtifactSchema.GenericMethodCallsDraft)
+                    or TrRmArtifactSchema.GenericMethodCallsDraft
+                    or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                    or TrRmArtifactSchema.C1Draft
+                    or TrRmArtifactSchema.C1M1Draft
+                    or TrRmArtifactSchema.C1M1ConstructionDraft
+                    or TrRmArtifactSchema.C1M1Construction2Draft)
                 || methodDefRow <= 0 || methodDefRow > Methods.Count)
             {
                 throw InvalidMetadata();
@@ -311,12 +326,14 @@ public static class TrRmStructuralMetadataValidator
             var body = Bodies.GetRegisterBody(bodyRow, Contracts.Count);
             TrRmRegisterBodyMapValidator.Validate(body,
                 methodDefRow, Methods.GetOwnerModule(methodDefRow), Features,
-                Modules, TypeDefs, EnumDefs, TypeSpecs, GenericParams, Methods, Signatures,
-                Parameters, Fields, FieldPaths, InterfaceWitnesses, ConstantSources,
+                Modules, TypeDefs, EnumDefs, TypeSpecs, GenericParams,
+                Constraints, Methods, Signatures, Parameters, Fields,
+                FieldPaths, Interfaces, InterfaceMethods,
+                InterfaceWitnesses, ConstantSources,
                 FrozenValueNodes,
                 Blobs, Contracts, Imports, NativeFunctionPointerAnchors,
                 StandardNativeImports, ModuleRefs, Layouts, FixedArrayLayouts,
-                TargetProfiles);
+                TargetProfiles, TransparentConstantDomains);
         }
 
         internal void ValidateNonBodyTypeSpecModuleContexts()
@@ -583,7 +600,8 @@ public static class TrRmStructuralMetadataValidator
                 typeSpecRef, ownerModule, TypeSpecs, TypeDefs, EnumDefs,
                 GenericParams, Imports, ConstantSources, FrozenValueNodes,
                 Blobs, Features, Modules, visited, ConstantExecutionUses,
-                A3LayoutResourceLedger);
+                A3LayoutResourceLedger, fields: Fields,
+                transparentConstantDomains: TransparentConstantDomains);
         }
 
         private void ValidateFixedArrayLayoutContext(uint typeSpecRef,
@@ -752,6 +770,37 @@ public static class TrRmStructuralMetadataValidator
             developmentProfile: false,
             genericConstantMethodsDraft:
                 index.Schema.UsesGenericConstantMethods());
+
+    internal static ValidatedExecutionTables
+        ValidateInitializationReferencePointerLoadNativeParameterDraftAndGetExecutionTables(
+            TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None,
+            developmentProfile: false,
+            initializationReferencePointerLoadNativeParameterDraft: true);
+
+    internal static ValidatedExecutionTables
+        ValidateInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraftAndGetExecutionTables(
+            TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None,
+            developmentProfile: false,
+            initializationReferenceGeneralPredicatePointerLoadNativeParameterDraft:
+                true);
+
+    internal static ValidatedExecutionTables
+        ValidateGenericMethodCallsDraftAndGetExecutionTables(
+            TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            genericMethodCallsDraft: true);
+
+    internal static ValidatedExecutionTables
+        ValidateC1AndGetExecutionTables(TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            c1Draft: index.Schema == TrRmArtifactSchema.C1Draft,
+            c1m1Draft: index.Schema == TrRmArtifactSchema.C1M1Draft,
+            c1m1ConstructionDraft:
+                index.Schema == TrRmArtifactSchema.C1M1ConstructionDraft,
+            c1m1Construction2Draft:
+                index.Schema == TrRmArtifactSchema.C1M1Construction2Draft);
 
     internal static ValidatedExecutionTables ValidateDevelopmentAndGetExecutionTables(
         TrRmArtifactIndex index)
@@ -1188,10 +1237,31 @@ public static class TrRmStructuralMetadataValidator
         bool foreignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayGenericDraft = false,
         bool registerExceptionRegionsDraft = false,
+        bool genericMethodCallsDraft = false,
         bool genericConstantMethodsDraft = false,
-        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
+        bool c1Draft = false, bool c1m1Draft = false,
+        bool c1m1ConstructionDraft = false,
+        bool c1m1Construction2Draft = false,
+        bool initializationReferencePointerLoadNativeParameterDraft = false,
+        bool initializationReferenceGeneralPredicatePointerLoadNativeParameterDraft =
+            false)
     {
-        var selectedSchema = developmentNativeConventionsDraft
+        var selectedSchema = c1m1Construction2Draft
+            ? TrRmArtifactSchema.C1M1Construction2Draft
+            : c1m1ConstructionDraft
+            ? TrRmArtifactSchema.C1M1ConstructionDraft
+            : c1m1Draft
+            ? TrRmArtifactSchema.C1M1Draft
+            : c1Draft
+            ? TrRmArtifactSchema.C1Draft
+            : initializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
+            ? TrRmArtifactSchema
+                .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
+            : initializationReferencePointerLoadNativeParameterDraft
+            ? TrRmArtifactSchema
+                .InitializationReferencePointerLoadNativeParameterDraft
+            : developmentNativeConventionsDraft
             ? TrRmArtifactSchema.DevelopmentNativeConventionsDraft
             : developmentFunctionPointerEffectsDraft
             ? TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
@@ -1234,9 +1304,17 @@ public static class TrRmStructuralMetadataValidator
                         ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
                     : registerExceptionRegionsDraft
                         ? TrRmArtifactSchema.RegisterExceptionRegionsDraft
+                    : genericMethodCallsDraft
+                        ? (index.Schema.UsesMethodParameterLabels()
+                            ? TrRmArtifactSchema
+                                .GenericMethodCallsParameterLabelsDraft
+                            : TrRmArtifactSchema.GenericMethodCallsDraft)
                     : genericConstantMethodsDraft
-                        ? TrRmArtifactSchema.GenericConstantMethodsDraft
-                        : TrRmArtifactSchema.Standard;
+                                ? TrRmArtifactSchema.GenericConstantMethodsDraft
+                            : index.Schema
+                                == TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                                ? TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                                : TrRmArtifactSchema.Standard;
         if (index.Schema != selectedSchema)
         {
             throw InvalidMetadata();
@@ -1387,6 +1465,8 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0016, out var methodDefBytes, out var methodDefCount);
         _ = index.TryGetSection(0x0017, out var methodSigBytes, out var methodSigCount);
         _ = index.TryGetSection(0x0018, out var paramBytes, out var paramCount);
+        _ = index.TryGetSection(0x0066, out var methodParameterLabelBytes,
+            out var methodParameterLabelCount);
         _ = index.TryGetSection(0x0019, out var genericParamBytes, out var genericParamCount);
         _ = index.TryGetSection(0x001A, out var constraintBytes, out var constraintCount);
         _ = index.TryGetSection(0x001B, out var contractBytes, out var contractCount);
@@ -1420,7 +1500,8 @@ public static class TrRmStructuralMetadataValidator
 
         var bodies = bodyCount == 0 ? default
             : new TrRmBodyTableReader(bodyBytes, bodyCount, index.Schema,
-                selectedA3LayoutResourceLedger);
+                selectedA3LayoutResourceLedger,
+                index.UsesNativePointerLoads);
 
         var strings = new TrRmStringTableReader(stringBytes, stringCount,
             selectedA3LayoutResourceLedger);
@@ -1541,11 +1622,13 @@ public static class TrRmStructuralMetadataValidator
                 }
             }
         }
-        var enumMembers = index.Schema.SupportsNominalEnums()
+        var enumMembers = index.Schema.SupportsNominalEnumDeclarations()
             ? new TrRmEnumMemberDefTableReader(enumMemberDefBytes,
-                enumMemberDefCount, strings, types)
+                enumMemberDefCount, strings, types,
+                index.Schema.UsesGenericConstantMethods()
+                    ? constantSourceCount : 0)
             : default;
-        var enumDefs = index.Schema.SupportsNominalEnums()
+        var enumDefs = index.Schema.SupportsNominalEnumDeclarations()
             ? new TrRmEnumDefTableReader(enumDefBytes, enumDefCount, types,
                 typeSpecs, layouts, targetProfiles, enumMembers)
             : default;
@@ -1561,9 +1644,20 @@ public static class TrRmStructuralMetadataValidator
             enumDefCount, transparentConstantDomainBytes,
             transparentConstantDomainCount, types, fields, typeSpecs, layouts,
             features, modules, index.Schema, selectedA3LayoutResourceLedger);
+        var transparentConstantDomains = index.Schema.UsesGenericConstantMethods()
+            ? new TrRmTransparentConstantDomainTableReader(
+                transparentConstantDomainBytes,
+                transparentConstantDomainCount, types, fields, typeSpecs)
+            : default;
         var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
             layoutFieldCount, layouts, types, fields,
             selectedA3LayoutResourceLedger);
+        if (index.Schema.UsesGenericConstantMethods())
+        {
+            ValidateGenericTransparentLayoutCommitments(
+                transparentConstantDomains, types, layouts, layoutFields,
+                selectedA3LayoutResourceLedger);
+        }
         var fixedArrayLayouts = index.Schema.UsesForeignInvocationStorageFixedArrays()
             ? new TrRmFixedArrayLayoutTableReader(fixedArrayLayoutBytes,
                 fixedArrayLayoutCount, typeSpecs, targetProfiles, features,
@@ -1579,8 +1673,13 @@ public static class TrRmStructuralMetadataValidator
         var methods = new TrRmMethodDefTableReader(methodDefBytes, methodDefCount,
             strings, modules, types, signatures, contractCount, bodyCount,
             selectedA3LayoutResourceLedger);
+        var methodParameterLabels = methodParameterLabelCount == 0 ? default
+            : new TrRmMethodParameterLabelTableReader(
+                methodParameterLabelBytes, methodParameterLabelCount, strings,
+                methods, signatures, index.Schema,
+                selectedA3LayoutResourceLedger);
         ValidateGenericMethodFeatureAssignments(features, modules, methods,
-            signatures, index.Schema);
+            signatures, bodies, index.Schema);
         var eagerGroups = index.Schema.UsesGeneralPredicateGraphs()
             ? new TrRmEagerGroupTableReader(eagerGroupBytes, eagerGroupCount,
                 typeDefCount, eagerInitializerCount, methodDefCount, index.Schema)
@@ -1699,9 +1798,12 @@ public static class TrRmStructuralMetadataValidator
                 predicateCaptureBytes, predicateCaptureCount,
                 predicateGraphCount, typeSpecs,
                 selectedA3LayoutResourceLedger);
+            var predicateSchema = index.Schema
+                    == TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                ? TrRmArtifactSchema.Standard : index.Schema;
             predicateReadRoots = new TrRmPredicateReadRootTableReader(
                 predicateReadRootBytes, predicateReadRootCount,
-                immutableDataCount, predicateCaptureCount, index.Schema,
+                immutableDataCount, predicateCaptureCount, predicateSchema,
                 selectedA3LayoutResourceLedger);
             predicateReadDependencies = new TrRmPredicateReadDependencyTableReader(
                 predicateReadDependencyBytes, predicateReadDependencyCount,
@@ -1710,7 +1812,7 @@ public static class TrRmStructuralMetadataValidator
                 resourceLedger: selectedA3LayoutResourceLedger);
             predicateNodes = new TrRmPredicateNodeTableReader(
                 predicateNodeBytes, predicateNodeCount,
-                predicateNodeOperandCount, typeSpecs, index.Schema,
+                predicateNodeOperandCount, typeSpecs, predicateSchema,
                 selectedA3LayoutResourceLedger);
             var predicateOperandCounts = new TrRmPredicateTableRowCounts(
                 predicateReadRootCount, frozenValueNodeCount, predicateCaptureCount,
@@ -1720,7 +1822,7 @@ public static class TrRmStructuralMetadataValidator
                 predicateTypePatternCount);
             predicateNodeOperands = new TrRmPredicateNodeOperandTableReader(
                 predicateNodeOperandBytes, predicateNodeOperandCount,
-                predicateOperandCounts, index.Schema,
+                predicateOperandCounts, predicateSchema,
                 selectedA3LayoutResourceLedger);
             if (index.Schema.UsesGeneralPredicateGraphs())
             {
@@ -1802,6 +1904,13 @@ public static class TrRmStructuralMetadataValidator
                 index.Schema, associatedConstDefs, staticFields,
                 staticFieldContracts, intrinsicRegistrations,
                 selectedA3LayoutResourceLedger);
+            if (index.Schema.UsesGenericConstantMethods())
+            {
+                ValidateGenericNominalEnumMemberValues(enumDefs,
+                    enumMembers, types, typeSpecs, imports, constantSources,
+                    frozenValueNodes, blobs, features, modules,
+                    selectedA3LayoutResourceLedger);
+            }
             if (index.Schema.UsesGenericConstantMethods()
                 && constantTemplateCount != 0)
             {
@@ -1844,6 +1953,23 @@ public static class TrRmStructuralMetadataValidator
                         checked((int)constantSources.GetPayloadReference(sourceRow)),
                         ownerModule, generics.GetConstantTypeSpecRef(formal)));
                 }
+                else if (constantSources.GetKind(sourceRow) == 4
+                    && index.Schema.UsesGenericConstantMethods())
+                {
+                    TrRmGenericConstantFeatureUseValidator
+                        .ValidateConstantSourceUse(sourceRow, ownerModule,
+                            constantSources, generics, features, modules,
+                            index.Schema);
+                    var sourceFormal = checked((int)
+                        constantSources.GetPayloadReference(sourceRow));
+                    if (generics.GetOwnerDefId(sourceFormal) != owner
+                        || generics.GetFormalKind(sourceFormal) != 2
+                        || generics.GetOrdinal(sourceFormal)
+                            >= generics.GetOrdinal(formal))
+                    {
+                        throw InvalidMetadata();
+                    }
+                }
                 else
                 {
                     TrRmGenericConstantFeatureUseValidator
@@ -1854,7 +1980,8 @@ public static class TrRmStructuralMetadataValidator
                         sourceRow, generics.GetConstantTypeSpecRef(formal),
                         ownerModule, constantSources, frozenValueNodes, blobs,
                         typeSpecs, features, modules, types, enumDefs, imports,
-                        selectedA3LayoutResourceLedger);
+                        selectedA3LayoutResourceLedger, fields,
+                        transparentConstantDomains);
                 }
             }
             for (var row = 1; row <= interfaceConstDefs.Count; row++)
@@ -1887,7 +2014,8 @@ public static class TrRmStructuralMetadataValidator
                         interfaceConstDefs.GetConstantTypeSpecRef(row),
                         ownerModule, constantSources, frozenValueNodes,
                         blobs, typeSpecs, features, modules, types, enumDefs,
-                        imports, selectedA3LayoutResourceLedger);
+                        imports, selectedA3LayoutResourceLedger, fields,
+                        transparentConstantDomains);
                 }
             }
             interfaceWitnesses = new TrRmInterfaceWitnessTableReader(
@@ -1904,6 +2032,10 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmConstraintTableReader(constraintBytes, constraintCount,
                 generics, typeSpecs, associatedRelations,
                 selectedA3LayoutResourceLedger);
+        ValidateGenericMethodBlittableFeatureAssignments(features, modules,
+            types, methods, generics, constraints, index.Schema);
+        ValidateGenericWriteFeatureAssignments(features, modules, types,
+            methods, generics, constraints, index.Schema);
         var contracts = developmentProfile
             ? new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs,
@@ -1913,7 +2045,7 @@ public static class TrRmStructuralMetadataValidator
                 features, modules, index.Schema, predicateGraphs.Count,
                 eagerGroups, staticFields, staticFieldContracts,
                 eagerInitializers, lazyUnits,
-                selectedA3LayoutResourceLedger);
+                selectedA3LayoutResourceLedger, fields, properties, imports);
         if (index.Schema.UsesRawUnionValueCoverage())
         {
             ValidateReturnCoverageProfiles(contracts, targetProfiles,
@@ -2163,6 +2295,14 @@ public static class TrRmStructuralMetadataValidator
             interfaces, associatedTypeDefs, fields, features, modules,
             index.Schema, associatedConstDefs, staticFields, staticFieldContracts,
             intrinsicRegistrations, selectedA3LayoutResourceLedger);
+        if (index.Schema.UsesMethodParameterLabels())
+        {
+            ValidateMethodParameterLabels(methodParameterLabels, strings,
+                features, modules, types, generics, interfaces,
+                interfaceMethods, methods, signatures, parameters, imports,
+                exports);
+        }
+
         var nativeImports = developmentProfile
             ? new TrRmDevelopmentNativeImportTableReader(nativeImportBytes,
                 nativeImportCount, strings, methods, signatures, parameters,
@@ -2191,6 +2331,17 @@ public static class TrRmStructuralMetadataValidator
                 exports, properties, interfaceMethods, standardNativeImports,
                 nativeExports, selectedA3LayoutResourceLedger)
             : default;
+        if (index.Schema.UsesConstructionContracts())
+        {
+            for (var method = 1; method <= methods.Count; method++)
+            {
+                if (contracts.HasConstructionClause(method)
+                    && nativeFunctionPointerAnchors.IsAnchorMethodDef(method))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
         if (!developmentProfile)
         {
             properties.ValidateGetterTypeIdentity(methods, signatures,
@@ -2223,6 +2374,11 @@ public static class TrRmStructuralMetadataValidator
             ValidateForeignInvocationContractOwners(contracts, imports,
                 standardNativeImports, nativeFunctionPointerAnchors, methods);
             ValidateStandardNativeOutputCellImports(contracts,
+                standardNativeImports, nativeFunctionPointerAnchors, methods);
+        }
+        else if (selectedSchema.UsesNativeParameterContracts())
+        {
+            ValidateNativeParameterContractOwners(contracts, imports,
                 standardNativeImports, nativeFunctionPointerAnchors, methods);
         }
         if (developmentProfile)
@@ -2349,7 +2505,8 @@ public static class TrRmStructuralMetadataValidator
         selectedA3LayoutResourceLedger?.ConsumeWork();
         var executionTables = new ValidatedExecutionTables(strings, features,
             modules, moduleRefs,
-            types, enumDefs, enumMembers, typeSpecs,
+            types, enumDefs, enumMembers, transparentConstantDomains,
+            typeSpecs,
             nativeFunctionPointerAnchors,
             generics,
             constraints,
@@ -2376,8 +2533,8 @@ public static class TrRmStructuralMetadataValidator
             staticDependencies, staticAccesses,
             intrinsicRegistrations,
             layouts, layoutFields,
-            targetProfiles, fixedArrayLayouts, signatures, parameters, methods,
-            bodies, contracts, nativeImports,
+            targetProfiles, fixedArrayLayouts, signatures, parameters,
+            methodParameterLabels, methods, bodies, contracts, nativeImports,
             standardNativeImports, nativeExports, nativeCallables,
             nativeFunctionPointerSignatures,
             nativeVTables, imports, exports,
@@ -2425,6 +2582,410 @@ public static class TrRmStructuralMetadataValidator
         }
     }
 
+    internal static void ValidateGenericMethodFeatureAssignments(
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmBodyTableReader bodies, TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesGenericMethodCalls())
+        {
+            return;
+        }
+
+        var requiresFeatureByModule = new bool[modules.Count + 1];
+        var resourceLedger = features.ResourceLedger;
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            resourceLedger?.ConsumeWork();
+            var ownerModule = methods.GetOwnerModule(method);
+            var signature = methods.GetSignature(method);
+            if (signatures.GetGenericCount(signature) != 0)
+            {
+                requiresFeatureByModule[ownerModule] = true;
+            }
+
+            var bodyRow = methods.GetBodyRow(method);
+            if (bodyRow == 0)
+            {
+                continue;
+            }
+
+            var bodyBytes = bodies.GetRow(bodyRow);
+            if (!bodyBytes.IsEmpty && bodyBytes[0] == 0x01
+                && bodies.GetRegisterBody(bodyRow,
+                    methods.ContractCount).HasGenericCallTargets)
+            {
+                requiresFeatureByModule[ownerModule] = true;
+            }
+        }
+
+        for (var module = 1; module <= modules.Count; module++)
+        {
+            resourceLedger?.ConsumeWork();
+            if (TrRmFeatureManifestValidator.Requires(features, modules,
+                    module,
+                    TrRmFeatureTableReader.GenericMethodCallsFeatureId,
+                    schema) != requiresFeatureByModule[module])
+            {
+                throw InvalidMetadata();
+            }
+        }
+    }
+
+    private static void ValidateMethodParameterLabels(
+        TrRmMethodParameterLabelTableReader labels,
+        TrRmStringTableReader strings, TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmImportTableReader imports, TrRmExportTableReader exports)
+    {
+        var methodCount = methods.Count;
+        var labelOwners = new bool[methodCount + 1];
+        for (var interfaceDef = 1;
+            interfaceDef <= interfaces.Count; interfaceDef++)
+        {
+            var typeDef = interfaces.GetOwnerTypeDef(interfaceDef);
+            var typeDefIdentity = 0x1300_0000u | (uint)typeDef;
+            var interfaceIdentity = 0x2000_0000u | (uint)interfaceDef;
+            var isExported = exports.HasExportForTypeDef(typeDef);
+            var isExpected = imports.IsExpectedDefinition(typeDefIdentity)
+                || imports.IsExpectedDefinition(interfaceIdentity);
+            var (_, interfaceMethodCount)
+                = interfaces.GetMethodRange(interfaceDef);
+            if (!isExported && !isExpected)
+            {
+                if (interfaceMethodCount != 0)
+                {
+                    throw new NotSupportedException(
+                        "G1L1 parameter labels require an exported or expected interface declaration view.");
+                }
+
+                continue;
+            }
+
+            var ownerModule = typeDefs.GetOwnerModule(typeDef);
+            if (isExported
+                && !exports.TryGetExportKeyForDefinition(ownerModule,
+                    typeDefIdentity, out _))
+            {
+                throw InvalidMetadata();
+            }
+
+            var typeFlags = typeDefs.GetFlags(typeDef);
+            var (firstField, endField) = typeDefs.GetFieldRange(typeDef);
+            var (baseFirst, baseCount) = interfaces.GetBaseRange(interfaceDef);
+            var (associatedTypeFirst, associatedTypeCount)
+                = interfaces.GetAssociatedTypeRange(interfaceDef);
+            var (associatedConstFirst, associatedConstCount)
+                = interfaces.GetAssociatedConstRange(interfaceDef);
+            var (interfaceConstFirst, interfaceConstCount)
+                = interfaces.GetInterfaceConstRange(interfaceDef);
+            if (typeFlags != (2u | (3u << 2))
+                || firstField != 0 || endField != 0
+                || baseFirst != 0 || baseCount != 0
+                || associatedTypeFirst != 0 || associatedTypeCount != 0
+                || associatedConstFirst != 0 || associatedConstCount != 0
+                || interfaceConstFirst != 0 || interfaceConstCount != 0)
+            {
+                throw InvalidMetadata();
+            }
+
+            var (firstFormal, formalCount)
+                = typeDefs.GetGenericRange(typeDef);
+            for (var formal = firstFormal;
+                formal < firstFormal + formalCount; formal++)
+            {
+                if (genericParams.GetFormalKind(formal) != 1
+                    || genericParams.GetOwnershipDomain(formal) != 1
+                    || genericParams.GetNullabilityDomain(formal) != 1
+                    || genericParams.GetDefaultArgumentRef(formal) != 0)
+                {
+                    throw InvalidMetadata();
+                }
+                if (genericParams.GetConstraintRange(formal).Count != 0)
+                {
+                    throw new NotSupportedException(
+                        "G1L1 parameter labels do not support interface owner formal constraints.");
+                }
+            }
+        }
+
+        for (var method = 1; method <= methodCount; method++)
+        {
+            var signature = methods.GetSignature(method);
+            if (signatures.GetGenericCount(signature) != 0
+                && (exports.HasExportForMethod(method)
+                    || imports.IsExpectedDefinition(
+                        0x1600_0000u | (uint)method)))
+            {
+                if (methods.GetOwnerType(method) != 0)
+                {
+                    throw InvalidMetadata();
+                }
+
+                labelOwners[method] = true;
+            }
+        }
+
+        for (var row = 1; row <= interfaceMethods.Count; row++)
+        {
+            var method = interfaceMethods.GetMethodDefRow(row);
+            var signature = methods.GetSignature(method);
+            if (signatures.GetGenericCount(signature) != 0)
+            {
+                throw InvalidMetadata();
+            }
+
+            var interfaceDef = interfaceMethods.GetOwnerInterfaceDef(row);
+            var typeDef = interfaces.GetOwnerTypeDef(interfaceDef);
+            var typeFlags = typeDefs.GetFlags(typeDef);
+            var (baseFirst, baseCount) = interfaces.GetBaseRange(interfaceDef);
+            var (associatedTypeFirst, associatedTypeCount)
+                = interfaces.GetAssociatedTypeRange(interfaceDef);
+            var (associatedConstFirst, associatedConstCount)
+                = interfaces.GetAssociatedConstRange(interfaceDef);
+            var (interfaceConstFirst, interfaceConstCount)
+                = interfaces.GetInterfaceConstRange(interfaceDef);
+            var (firstField, endField) = typeDefs.GetFieldRange(typeDef);
+            if (!exports.HasExportForTypeDef(typeDef)
+                && !imports.IsExpectedDefinition(
+                    0x1300_0000u | (uint)typeDef)
+                && !imports.IsExpectedDefinition(
+                    0x2000_0000u | (uint)interfaceDef))
+            {
+                throw InvalidMetadata();
+            }
+            if (typeFlags != (2u | (3u << 2))
+                || baseFirst != 0 || baseCount != 0
+                || associatedTypeFirst != 0 || associatedTypeCount != 0
+                || associatedConstFirst != 0 || associatedConstCount != 0
+                || interfaceConstFirst != 0 || interfaceConstCount != 0
+                || firstField != 0 || endField != 0)
+            {
+                throw InvalidMetadata();
+            }
+
+            var (firstTypeFormal, typeFormalCount)
+                = typeDefs.GetGenericRange(typeDef);
+            for (var formal = firstTypeFormal;
+                formal < firstTypeFormal + typeFormalCount; formal++)
+            {
+                if (genericParams.GetFormalKind(formal) != 1
+                    || genericParams.GetOwnershipDomain(formal) != 1
+                    || genericParams.GetNullabilityDomain(formal) != 1
+                    || genericParams.GetDefaultArgumentRef(formal) != 0
+                    || genericParams.GetConstraintRange(formal).Count != 0)
+                {
+                    throw InvalidMetadata();
+                }
+            }
+
+            if (!exports.HasExportForMethod(method)
+                && !imports.IsExpectedDefinition(
+                    0x1600_0000u | (uint)method))
+            {
+                throw InvalidMetadata();
+            }
+            var (_, contractCount) = methods.GetContractRange(method);
+            var (firstParameter, parameterCount)
+                = signatures.GetParamRange(signature);
+            if (methods.GetBodyRow(method) != 0
+                || methods.GetFlags(method) != 2
+                || contractCount != 0)
+            {
+                throw InvalidMetadata();
+            }
+            for (var parameter = 0; parameter < parameterCount; parameter++)
+            {
+                var parameterRow = firstParameter + parameter;
+                if (parameters.GetMode(parameterRow) != 0
+                    || parameters.GetFlags(parameterRow) != 0)
+                {
+                    throw InvalidMetadata();
+                }
+            }
+
+            labelOwners[method] = true;
+        }
+
+        long expectedLabelCount = 0;
+        var hasOwnerByModule = new bool[modules.Count + 1];
+        for (var method = 1; method <= methodCount; method++)
+        {
+            if (!labelOwners[method])
+            {
+                continue;
+            }
+
+            var ownerModule = methods.GetOwnerModule(method);
+            hasOwnerByModule[ownerModule] = true;
+            var signature = methods.GetSignature(method);
+            var (_, parameterCount) = signatures.GetParamRange(signature);
+            expectedLabelCount += parameterCount;
+
+            var declarationNames = new HashSet<string>(
+                StringComparer.Ordinal);
+            var ownerType = methods.GetOwnerType(method);
+            if (ownerType != 0)
+            {
+                var (firstFormal, formalCount)
+                    = typeDefs.GetGenericRange(ownerType);
+                for (var formal = firstFormal;
+                    formal < firstFormal + formalCount; formal++)
+                {
+                    if (!declarationNames.Add(strings.DecodeName(
+                            genericParams.GetNameStringRow(formal))))
+                    {
+                        throw InvalidMetadata();
+                    }
+                }
+            }
+
+            var (firstMethodFormal, methodFormalCount)
+                = signatures.GetGenericRange(signature);
+            for (var formal = firstMethodFormal;
+                formal < firstMethodFormal + methodFormalCount; formal++)
+            {
+                if (!declarationNames.Add(strings.DecodeName(
+                        genericParams.GetNameStringRow(formal))))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                if (!labels.TryGetNameStringRow(method,
+                        checked((uint)ordinal), out var nameStringRow))
+                {
+                    throw InvalidMetadata();
+                }
+
+                var name = strings.DecodeName(nameStringRow);
+                if (!declarationNames.Add(name))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
+
+        if (expectedLabelCount != labels.Count)
+        {
+            throw InvalidMetadata();
+        }
+
+        for (var module = 1; module <= modules.Count; module++)
+        {
+            var hasFeature = TrRmFeatureManifestValidator.Requires(features,
+                modules, module,
+                TrRmFeatureTableReader.MethodParameterLabelsFeatureId,
+                TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+            if (hasOwnerByModule[module] != hasFeature)
+            {
+                throw InvalidMetadata();
+            }
+        }
+    }
+
+    private static void ValidateGenericMethodBlittableFeatureAssignments(
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
+        TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesGenericMethodCalls())
+        {
+            return;
+        }
+
+        for (var formal = 1; formal <= genericParams.Count; formal++)
+        {
+            var (first, count) = genericParams.GetConstraintRange(formal);
+            for (var offset = 0; offset < count; offset++)
+            {
+                var constraintRow = first + offset;
+                if (constraints.GetKind(constraintRow) != 2
+                    || constraints.GetPayload(constraintRow) != 3)
+                {
+                    continue;
+                }
+
+                var owner = genericParams.GetOwnerDefId(formal);
+                var ownerRow = checked((int)(owner & 0x00FF_FFFF));
+                var ownerModule = (byte)(owner >> 24) switch
+                {
+                    0x13 => types.GetOwnerModule(ownerRow),
+                    0x16 => methods.GetOwnerModule(ownerRow),
+                    _ => throw InvalidMetadata(),
+                };
+                if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                        ownerModule,
+                        TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                        schema))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
+    }
+
+    private static void ValidateGenericWriteFeatureAssignments(
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmGenericParamTableReader genericParams,
+        TrRmConstraintTableReader constraints,
+        TrRmArtifactSchema schema)
+    {
+        var resourceLedger = features.ResourceLedger;
+        resourceLedger?.ConsumeWork(checked((ulong)modules.Count + 1UL));
+        var hasWriteByModule = new bool[modules.Count + 1];
+        for (var constraint = 1; constraint <= constraints.Count; constraint++)
+        {
+            resourceLedger?.ConsumeWork();
+            if (constraints.GetKind(constraint) != 2
+                || constraints.GetPayload(constraint) != 2)
+            {
+                continue;
+            }
+
+            var formal = constraints.GetOwnerGenericParam(constraint);
+            if (!schema.UsesGenericWriteRequirements()
+                || genericParams.GetFormalKind(formal) != 1)
+            {
+                throw InvalidMetadata();
+            }
+
+            var owner = genericParams.GetOwnerDefId(formal);
+            var ownerRow = checked((int)(owner & 0x00FF_FFFF));
+            var ownerModule = (byte)(owner >> 24) switch
+            {
+                0x13 => types.GetOwnerModule(ownerRow),
+                0x16 => methods.GetOwnerModule(ownerRow),
+                _ => throw InvalidMetadata(),
+            };
+            hasWriteByModule[ownerModule] = true;
+        }
+
+        for (var module = 1; module <= modules.Count; module++)
+        {
+            resourceLedger?.ConsumeWork();
+            var hasFeature = TrRmFeatureManifestValidator.Requires(features,
+                modules, module,
+                TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+                schema);
+            if (hasWriteByModule[module] != hasFeature)
+            {
+                throw InvalidMetadata();
+            }
+        }
+    }
+
     internal static void ValidateGenericConstantFeatureAssignments(
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
@@ -2458,6 +3019,34 @@ public static class TrRmStructuralMetadataValidator
                 schema))
             {
                 throw InvalidMetadata();
+            }
+        }
+    }
+
+    private static void ValidateGenericTransparentLayoutCommitments(
+        TrRmTransparentConstantDomainTableReader domains,
+        TrRmTypeDefTableReader types,
+        TrRmLayoutTableReader layouts,
+        TrRmLayoutFieldTableReader layoutFields,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        for (var domainRow = 1; domainRow <= domains.Count; domainRow++)
+        {
+            resourceLedger?.ConsumeWork();
+            var owner = domains.GetOwnerTypeDef(domainRow);
+            var carrierField = domains.GetCarrierFieldDef(domainRow);
+            var (first, count) = types.GetLayoutRange(owner);
+            for (var layoutRow = first; layoutRow < first + count; layoutRow++)
+            {
+                resourceLedger?.ConsumeWork(3);
+                var (fieldFirst, fieldCount)
+                    = layouts.GetLayoutFieldRange(layoutRow);
+                if (layouts.GetLayoutKind(layoutRow) != 3
+                    || fieldCount != 1
+                    || layoutFields.GetFieldDef(fieldFirst) != carrierField)
+                {
+                    throw InvalidMetadata();
+                }
             }
         }
     }
@@ -2589,6 +3178,62 @@ public static class TrRmStructuralMetadataValidator
                     schema))
             {
                 throw InvalidMetadata();
+            }
+        }
+    }
+
+    private static void ValidateGenericNominalEnumMemberValues(
+        TrRmEnumDefTableReader enumDefs,
+        TrRmEnumMemberDefTableReader enumMembers,
+        TrRmTypeDefTableReader typeDefs,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmImportTableReader imports,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs,
+        TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        if (!typeSpecs.Schema.UsesGenericConstantMethods())
+        {
+            throw InvalidMetadata();
+        }
+
+        for (var enumRow = 1; enumRow <= enumDefs.Count; enumRow++)
+        {
+            var ownerTypeDef = enumDefs.GetOwnerTypeDef(enumRow);
+            var ownerModule = typeDefs.GetOwnerModule(ownerTypeDef);
+            var (memberFirst, memberCount)
+                = enumDefs.GetMemberRange(enumRow);
+            for (var ordinal = 0; ordinal < memberCount; ordinal++)
+            {
+                resourceLedger?.ConsumeWork();
+                var memberRow = memberFirst + ordinal;
+                var sourceRow = checked((int)
+                    enumMembers.GetValueSourceRef(memberRow));
+                if (constantSources.GetKind(sourceRow) != 1)
+                {
+                    throw InvalidMetadata();
+                }
+
+                var nodeRow = checked((int)
+                    constantSources.GetPayloadReference(sourceRow));
+                var valueTypeSpecRef
+                    = frozenValueNodes.GetTypeSpecRef(nodeRow);
+                var valueType = typeSpecs.GetTypeSpecRef(valueTypeSpecRef);
+                if (!valueType.IsRow || valueType.Form is not (0x02 or 0x03)
+                    || valueType.Qualifiers != 0
+                    || typeSpecs.GetNominalTypeDefRow(valueTypeSpecRef,
+                        typeDefs, imports) != ownerTypeDef)
+                {
+                    throw InvalidMetadata();
+                }
+
+                TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+                    sourceRow, valueTypeSpecRef, ownerModule, constantSources,
+                    frozenValueNodes, blobs, typeSpecs, features, modules,
+                    typeDefs, enumDefs, imports, resourceLedger);
             }
         }
     }
@@ -3014,6 +3659,28 @@ public static class TrRmStructuralMetadataValidator
                 || nativeImports.HasImportForMethod(method)
                 || anchors.IsAnchorMethodDef(method)
                 || imports.IsExpectedDefinition(0x1600_0000u | (uint)method))
+            {
+                continue;
+            }
+
+            throw InvalidMetadata();
+        }
+    }
+
+    private static void ValidateNativeParameterContractOwners(
+        TrRmContractTableReader contracts, TrRmImportTableReader imports,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeFunctionPointerAnchorTableReader anchors,
+        TrRmMethodDefTableReader methods)
+    {
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            if (contracts.GetNativeParameters(method).IsDefaultOrEmpty
+                || (methods.GetBodyRow(method) == 0
+                    && !anchors.IsAnchorMethodDef(method)
+                    && (nativeImports.HasImportForMethod(method)
+                        || imports.IsExpectedDefinition(
+                            0x1600_0000u | (uint)method))))
             {
                 continue;
             }

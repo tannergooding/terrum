@@ -9,6 +9,7 @@ namespace Terrum.CodeAnalysis.Modules;
 internal enum TrRmArtifactSchema
 {
     Standard,
+    InitializationReferenceLocalFieldLayoutDraft,
     Development,
     DevelopmentFunctionPointerEffectsDraft,
     DevelopmentNativeConventionsDraft,
@@ -27,9 +28,16 @@ internal enum TrRmArtifactSchema
     NominalEnumsDraft,
     RootPinRuntimeDraft,
     GeneralPredicateGraphsDraft,
+    InitializationReferencePointerLoadNativeParameterDraft,
+    InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft,
     RegisterExceptionRegionsDraft,
     GenericMethodCallsDraft,
+    GenericMethodCallsParameterLabelsDraft,
     GenericConstantMethodsDraft,
+    C1Draft,
+    C1M1Draft,
+    C1M1ConstructionDraft,
+    C1M1Construction2Draft,
 }
 
 internal static class TrRmArtifactSchemaFacts
@@ -51,6 +59,11 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool SupportsNominalEnums(this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.NominalEnumsDraft;
 
+    internal static bool SupportsNominalEnumDeclarations(
+        this TrRmArtifactSchema schema) =>
+        schema.SupportsNominalEnums()
+            || schema.UsesGenericConstantMethods();
+
     internal static bool UsesGenericConstantMethods(
         this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.GenericConstantMethodsDraft;
@@ -64,6 +77,7 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
             or TrRmArtifactSchema.LocalAggregateLayoutDraft
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
 
     internal static bool SupportsDeclaredUniqueEvidence(
@@ -77,7 +91,14 @@ internal static class TrRmArtifactSchemaFacts
         schema is TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema
+                .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.GenericConstantMethodsDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
@@ -102,7 +123,28 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.LocalAggregateLayoutDraft;
 
     internal static bool UsesGeneralPredicateGraphs(this TrRmArtifactSchema schema) =>
-        schema == TrRmArtifactSchema.GeneralPredicateGraphsDraft;
+        schema is TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema
+                .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft;
+
+    internal static bool SupportsClassDeclarationMutability(
+        this TrRmArtifactSchema schema)
+        => schema is TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft;
+
+    internal static bool UsesConstructionContracts(
+        this TrRmArtifactSchema schema)
+        => schema is TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft;
+
+    internal static bool UsesObjectConstruction(
+        this TrRmArtifactSchema schema)
+        => schema == TrRmArtifactSchema.C1M1Construction2Draft;
 
     internal static bool UsesRegisterExceptionRegions(
         this TrRmArtifactSchema schema) =>
@@ -111,7 +153,21 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool UsesGenericMethodCalls(
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.GenericConstantMethodsDraft;
+
+    internal static bool UsesGenericWriteRequirements(
+        this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+
+    internal static bool UsesMethodParameterLabels(
+        this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
 
     internal static bool UsesForeignInvocationContracts(
         this TrRmArtifactSchema schema) =>
@@ -125,6 +181,14 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
             or TrRmArtifactSchema.LocalAggregateLayoutDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
+    internal static bool UsesNativeParameterContracts(
+        this TrRmArtifactSchema schema) =>
+        schema.UsesForeignInvocationContracts()
+            || schema is TrRmArtifactSchema
+                .InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft;
 
     internal static bool UsesForeignInvocationStorageAddresses(
         this TrRmArtifactSchema schema) =>
@@ -176,10 +240,12 @@ public readonly ref struct TrRmArtifactIndex
     private readonly int _entryCount;
     private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
+    private readonly bool _usesNativePointerLoads;
 
     /// <summary>Gets the number of indexed sections.</summary>
     public int SectionCount => _entryCount;
     internal TrRmArtifactSchema Schema => _schema;
+    internal bool UsesNativePointerLoads => _usesNativePointerLoads;
 
     /// <summary>Validates and indexes a standard TRRM artifact.</summary>
     /// <param name="artifact">The borrowed artifact bytes, which must remain unchanged while this index is in use.</param>
@@ -195,10 +261,32 @@ public readonly ref struct TrRmArtifactIndex
 
     internal TrRmArtifactIndex(ReadOnlySpan<byte> artifact,
         TrRmArtifactSchema schema,
-        TrRmA3LayoutResourceLedger? resourceLedger)
+        TrRmA3LayoutResourceLedger? resourceLedger,
+        bool usesNativePointerLoads = false)
     {
         _resourceLedger = resourceLedger;
+        if (usesNativePointerLoads
+            && schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema
+                    .InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft))
+        {
+            throw InvalidArtifact();
+        }
+        if (schema is (TrRmArtifactSchema
+                .InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft)
+            && !usesNativePointerLoads)
+        {
+            throw InvalidArtifact();
+        }
+
+        _usesNativePointerLoads = usesNativePointerLoads;
         if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
             or TrRmArtifactSchema.CopyOriginDraft
@@ -216,8 +304,15 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidArtifact();
@@ -276,8 +371,8 @@ public readonly ref struct TrRmArtifactIndex
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
         _schema = schema;
-        ConsumeWork(0x65 + 1);
-        Span<uint> sectionCounts = stackalloc uint[0x65 + 1];
+        ConsumeWork(0x66 + 1);
+        Span<uint> sectionCounts = stackalloc uint[0x66 + 1];
         sectionCounts.Clear();
         var previousKind = 0;
         // Keep directory-ordered payloads allocation-free while retaining support for alternate layouts.
@@ -385,7 +480,7 @@ public readonly ref struct TrRmArtifactIndex
             }
 
             ConsumeWork();
-            if (kind <= 0x0065)
+            if (kind <= 0x0066)
             {
                 ConsumeWork();
                 sectionCounts[kind] = count;
@@ -605,6 +700,43 @@ public readonly ref struct TrRmArtifactIndex
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.GeneralPredicateGraphsDraft);
 
+    internal static TrRmArtifactIndex ForNativePointerLoadsDraft(
+        ReadOnlySpan<byte> artifact,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => new(artifact, TrRmArtifactSchema.Standard, resourceLedger,
+            usesNativePointerLoads: true);
+
+    internal static TrRmArtifactIndex
+        ForGeneralPredicateGraphsNativePointerLoadsDraft(
+            ReadOnlySpan<byte> artifact,
+            TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => new(artifact, TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            resourceLedger, usesNativePointerLoads: true);
+
+    internal static TrRmArtifactIndex
+        ForInitializationReferencePointerLoadNativeParameterDraft(
+            ReadOnlySpan<byte> artifact,
+            TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => new(artifact,
+            TrRmArtifactSchema
+                .InitializationReferencePointerLoadNativeParameterDraft,
+            resourceLedger, usesNativePointerLoads: true);
+
+    internal static TrRmArtifactIndex
+        ForInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft(
+            ReadOnlySpan<byte> artifact,
+            TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => new(artifact,
+            TrRmArtifactSchema
+                .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft,
+            resourceLedger, usesNativePointerLoads: true);
+
+    internal static TrRmArtifactIndex
+        ForInitializationReferenceLocalFieldLayoutDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft);
+
     internal static TrRmArtifactIndex ForRegisterExceptionRegionsDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.RegisterExceptionRegionsDraft);
@@ -612,6 +744,26 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForGenericMethodCallsDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.GenericMethodCallsDraft);
+
+    internal static TrRmArtifactIndex
+        ForGenericMethodCallsParameterLabelsDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft);
+
+    internal static TrRmArtifactIndex ForC1Draft(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1Draft);
+
+    internal static TrRmArtifactIndex ForC1M1Draft(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1M1Draft);
+
+    internal static TrRmArtifactIndex ForC1M1ConstructionDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1M1ConstructionDraft);
+
+    internal static TrRmArtifactIndex ForC1M1Construction2Draft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.C1M1Construction2Draft);
 
     internal static TrRmArtifactIndex ForGenericConstantMethodsDraft(
         ReadOnlySpan<byte> artifact)
@@ -938,6 +1090,9 @@ public readonly ref struct TrRmArtifactIndex
             0x003D => 12,
             0x003E => 16,
             0x003F => 24,
+            0x0041 or 0x0042 or 0x0043 or 0x0044 or 0x0046
+                or 0x0047 or 0x0049
+                    when schema.UsesGenericConstantMethods() => -1,
             0x0040 or 0x0041 => 12,
             0x0042 => 80,
             0x0043 or 0x0044 => 8,
@@ -964,6 +1119,7 @@ public readonly ref struct TrRmArtifactIndex
             0x005E when schema.UsesGeneralPredicateGraphs() => 8,
             0x0064 when schema.UsesGenericConstantMethods() => 0,
             0x0065 when schema.UsesGenericConstantMethods() => 12,
+            0x0066 when schema.UsesMethodParameterLabels() => 12,
             _ => -1,
         };
     }

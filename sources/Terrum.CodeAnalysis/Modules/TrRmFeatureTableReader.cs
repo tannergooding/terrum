@@ -89,6 +89,12 @@ public readonly record struct TrRmFeatureRow(uint FeatureId, uint RuleRevision)
         => new(TrRmFeatureTableReader.GenericMethodCallsFeatureId, 1);
     internal static TrRmFeatureRow ConstantGenericTermsCandidate
         => new(TrRmFeatureTableReader.ConstantGenericTermsFeatureId, 1);
+    internal static TrRmFeatureRow ClassConstructionBodiesCandidate
+        => new(TrRmFeatureTableReader.ClassConstructionBodiesFeatureId, 1);
+    internal static TrRmFeatureRow MethodParameterLabelsCandidate
+        => new(TrRmFeatureTableReader.MethodParameterLabelsFeatureId, 1);
+    internal static TrRmFeatureRow GenericWriteRequirementsCandidate
+        => new(TrRmFeatureTableReader.GenericWriteRequirementsFeatureId, 1);
 }
 
 /// <summary>Structurally validates eight-byte Feature rows without assuming row order.</summary>
@@ -130,6 +136,9 @@ public readonly ref struct TrRmFeatureTableReader
     internal const uint RawUnionValueCoverageFeatureId = 22;
     internal const uint GenericMethodCallsFeatureId = 23;
     internal const uint ConstantGenericTermsFeatureId = 24;
+    internal const uint ClassConstructionBodiesFeatureId = 25;
+    internal const uint MethodParameterLabelsFeatureId = 26;
+    internal const uint GenericWriteRequirementsFeatureId = 27;
     /// <summary>The assigned Feature rule revision shared by currently assigned features.</summary>
     public const uint RuleRevision = 1;
 
@@ -158,6 +167,7 @@ public readonly ref struct TrRmFeatureTableReader
         if (recordCount < 0 || recordCount > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
             || schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
                 or TrRmArtifactSchema.Development
                 or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
                 or TrRmArtifactSchema.DevelopmentNativeConventionsDraft
@@ -176,8 +186,15 @@ public readonly ref struct TrRmFeatureTableReader
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft
                 or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.C1Draft
+                or TrRmArtifactSchema.C1M1Draft
+                or TrRmArtifactSchema.C1M1ConstructionDraft
+                or TrRmArtifactSchema.C1M1Construction2Draft
                 or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidFeature();
@@ -268,9 +285,10 @@ public readonly ref struct TrRmFeatureTableReader
             return true;
         }
 
-        if (schema.UsesForeignInvocationContracts()
-            && featureId is NativeOutputCellsCandidateFeatureId
-                or ForeignInvocationContractsCandidateFeatureId)
+        if ((schema.UsesForeignInvocationContracts()
+                && featureId == NativeOutputCellsCandidateFeatureId)
+            || (schema.UsesNativeParameterContracts()
+                && featureId == ForeignInvocationContractsCandidateFeatureId))
         {
             ruleRevision = featureId == NativeOutputCellsCandidateFeatureId
                 ? TrRmProvisionalFeatureRevisions.NativeOutputCellsRuleRevision
@@ -288,6 +306,13 @@ public readonly ref struct TrRmFeatureTableReader
 
         if (schema.UsesRootPinRuntime()
             && featureId == RootPinRuntimeFeatureId)
+        {
+            ruleRevision = 1;
+            return true;
+        }
+
+        if (schema.UsesObjectConstruction()
+            && featureId == ClassConstructionBodiesFeatureId)
         {
             ruleRevision = 1;
             return true;
@@ -321,6 +346,20 @@ public readonly ref struct TrRmFeatureTableReader
             return true;
         }
 
+        if (schema.UsesGenericWriteRequirements()
+            && featureId == GenericWriteRequirementsFeatureId)
+        {
+            ruleRevision = 1;
+            return true;
+        }
+
+        if (schema.UsesMethodParameterLabels()
+            && featureId == MethodParameterLabelsFeatureId)
+        {
+            ruleRevision = 1;
+            return true;
+        }
+
         if (schema.UsesGenericConstantMethods()
             && featureId == ConstantGenericTermsFeatureId)
         {
@@ -329,6 +368,7 @@ public readonly ref struct TrRmFeatureTableReader
         }
 
         if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -344,8 +384,15 @@ public readonly ref struct TrRmFeatureTableReader
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             ruleRevision = 0;
@@ -379,6 +426,8 @@ internal static class TrRmProvisionalFeatureRevisions
 
 internal static class TrRmFeatureManifestValidator
 {
+    private const int FeatureRevisionCount = 28;
+
     internal static void Validate(TrRmFeatureTableReader features,
         TrRmModuleTableReader modules,
         TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
@@ -386,6 +435,7 @@ internal static class TrRmFeatureManifestValidator
         var resourceLedger = features.ResourceLedger;
         resourceLedger?.ConsumeWork();
         if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -401,15 +451,23 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidManifest();
         }
         resourceLedger?.ConsumeWork(1UL
-            + (25UL * (1UL + sizeof(uint))));
-        Span<uint> revisions = stackalloc uint[25];
+            + ((ulong)FeatureRevisionCount
+                * (1UL + sizeof(uint))));
+        Span<uint> revisions = stackalloc uint[FeatureRevisionCount];
         for (var module = 1; module <= modules.Count; module++)
         {
             resourceLedger?.ConsumeWork();
@@ -429,6 +487,7 @@ internal static class TrRmFeatureManifestValidator
         var resourceLedger = features.ResourceLedger;
         resourceLedger?.ConsumeWork();
         if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -444,8 +503,15 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidManifest();
@@ -456,8 +522,9 @@ internal static class TrRmFeatureManifestValidator
             throw InvalidManifest();
         }
         resourceLedger?.ConsumeWork(1UL
-            + (25UL * (1UL + sizeof(uint))));
-        Span<uint> revisions = stackalloc uint[25];
+            + ((ulong)FeatureRevisionCount
+                * (1UL + sizeof(uint))));
+        Span<uint> revisions = stackalloc uint[FeatureRevisionCount];
         ExpandModuleRequirements(features, modules, module, revisions, schema);
         resourceLedger?.ConsumeWork(sizeof(uint) + 2);
         return revisions[(int)featureId] != 0;
@@ -468,7 +535,8 @@ internal static class TrRmFeatureManifestValidator
         TrRmArtifactSchema schema)
     {
         var resourceLedger = features.ResourceLedger;
-        resourceLedger?.ConsumeWork(1UL + (25UL * sizeof(uint)));
+        resourceLedger?.ConsumeWork(1UL
+            + ((ulong)FeatureRevisionCount * sizeof(uint)));
         revisions.Clear();
         resourceLedger?.ConsumeWork((2UL * sizeof(uint)) + 1);
         var (first, count) = modules.GetFeatureRange(module);

@@ -27,6 +27,7 @@ public static class TrRmFeatureTableWriter
         ArgumentNullException.ThrowIfNull(rows);
         resourceLedger?.ConsumeWork();
         if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -42,8 +43,15 @@ public static class TrRmFeatureTableWriter
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+            or TrRmArtifactSchema.InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft
             or TrRmArtifactSchema.RegisterExceptionRegionsDraft
             or TrRmArtifactSchema.GenericMethodCallsDraft
+            or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+            or TrRmArtifactSchema.C1Draft
+            or TrRmArtifactSchema.C1M1Draft
+            or TrRmArtifactSchema.C1M1ConstructionDraft
+            or TrRmArtifactSchema.C1M1Construction2Draft
             or TrRmArtifactSchema.GenericConstantMethodsDraft))
         {
             throw InvalidFeature();

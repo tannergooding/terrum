@@ -377,6 +377,7 @@ internal sealed class TrRmArtifactIndexTests
         Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10), Is.True);
         Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11), Is.True);
         Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 9), Is.True);
+
     }
 
     [Test]
@@ -524,6 +525,7 @@ internal sealed class TrRmArtifactIndexTests
             TrRmFeatureRow.LayoutQueries,
             TrRmFeatureRow.TypedFrozenValues,
             TrRmFeatureRow.GenericMethodCallsCandidate,
+            TrRmFeatureRow.GenericWriteRequirementsCandidate,
         };
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
 
@@ -536,6 +538,36 @@ internal sealed class TrRmArtifactIndexTests
             TrRmFeatureTableReader.GenericMethodCallsFeatureId,
             schema, out var ruleRevision), Is.True);
         Assert.That(ruleRevision, Is.EqualTo(1));
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+            TrRmArtifactSchema.Standard, out _), Is.False);
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+            TrRmArtifactSchema.GenericConstantMethodsDraft, out _), Is.False);
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+            schema, out ruleRevision), Is.True);
+        Assert.That(ruleRevision, Is.EqualTo(1));
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+            TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft,
+            out ruleRevision), Is.True);
+        Assert.That(ruleRevision, Is.EqualTo(1));
+        Assert.That(TrRmFeatureTableReader.TryGetAssignedRuleRevision(
+            TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+            out _), Is.False);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([
+                TrRmFeatureRow.GenericWriteRequirementsCandidate,
+            ], TrRmArtifactSchema.GenericConstantMethodsDraft));
+        var overreportedWriteFeature = FeatureArtifact(1, 1,
+            TrRmFeatureTableWriter.Encode([
+                TrRmFeatureRow.GenericWriteRequirementsCandidate,
+            ], schema));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    new TrRmArtifactIndex(overreportedWriteFeature, schema)));
 
         var artifact = FeatureArtifact(1, (uint)featureRows.Length,
             featureBytes);
@@ -551,13 +583,105 @@ internal sealed class TrRmArtifactIndexTests
             out var selectedFeatureCount), Is.True);
         var strings = new TrRmStringTableReader(stringSection, stringCount);
         var modules = new TrRmModuleTableReader(moduleSection, moduleCount,
-            strings, 0, 0, 0, 3);
+            strings, 0, 0, 0, featureRows.Length);
         var features = new TrRmFeatureTableReader(selectedFeatures,
             selectedFeatureCount, schema);
         TrRmFeatureManifestValidator.Validate(features, modules, schema);
         Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
             1, TrRmFeatureTableReader.GenericMethodCallsFeatureId, schema),
             Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+            schema), Is.True);
+    }
+
+    [Test]
+    public void MethodParameterLabelsRequireG1L1Schema()
+    {
+        var feature = TrRmFeatureRow.MethodParameterLabelsCandidate;
+        var schema
+            = TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft;
+
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.MethodParameterLabelsFeatureId,
+            TrRmArtifactSchema.GenericMethodCallsDraft, out _), Is.False);
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.MethodParameterLabelsFeatureId,
+            schema, out var ruleRevision), Is.True);
+        Assert.That(ruleRevision, Is.EqualTo(1));
+        Assert.That(TrRmFeatureTableWriter.Encode([feature], schema),
+            Has.Length.EqualTo(8));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([feature],
+                TrRmArtifactSchema.GenericMethodCallsDraft));
+    }
+
+    [Test]
+    public void C1AndC1M1RequireTheirComposedFeatureCatalogs()
+    {
+        var featureRows = new[]
+        {
+            TrRmFeatureRow.PublishedPredicates,
+            TrRmFeatureRow.TypedFrozenValues,
+            TrRmFeatureRow.ConstantExecution,
+            TrRmFeatureRow.LayoutQueries,
+            TrRmFeatureRow.GeneralPredicateGraphsCandidate,
+            TrRmFeatureRow.GenericMethodCallsCandidate,
+        };
+        foreach (var schema in new[] {
+            TrRmArtifactSchema.C1Draft,
+            TrRmArtifactSchema.C1M1Draft,
+        })
+        {
+            var featureBytes = TrRmFeatureTableWriter.Encode(featureRows,
+                schema);
+            var artifact = FeatureArtifact(1,
+                (uint)featureRows.Length, featureBytes);
+            var index = schema == TrRmArtifactSchema.C1Draft
+                ? TrRmArtifactIndex.ForC1Draft(artifact)
+                : TrRmArtifactIndex.ForC1M1Draft(artifact);
+            Assert.That(index.Schema, Is.EqualTo(schema));
+            Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+                TrRmFeatureTableReader.GeneralPredicateGraphsFeatureId,
+                schema, out _), Is.True);
+            Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+                TrRmFeatureTableReader.GenericMethodCallsFeatureId,
+                schema, out _), Is.True);
+
+            Assert.That(index.TryGetSection(0x0004, out var featureSection,
+                out var featureCount), Is.True);
+            Assert.That(index.TryGetSection(0x0001, out var moduleSection,
+                out var moduleCount), Is.True);
+            Assert.That(index.TryGetSection(0x0002, out var stringSection,
+                out var stringCount), Is.True);
+            var strings = new TrRmStringTableReader(stringSection,
+                stringCount);
+            var modules = new TrRmModuleTableReader(moduleSection,
+                moduleCount, strings, 0, 0, 0, featureCount);
+            var features = new TrRmFeatureTableReader(featureSection,
+                featureCount, schema);
+            TrRmFeatureManifestValidator.Validate(features, modules,
+                schema);
+            Assert.That(TrRmFeatureManifestValidator.Requires(features,
+                modules, 1, TrRmFeatureTableReader.ConstantExecutionFeatureId,
+                schema), Is.True);
+            Assert.That(TrRmFeatureManifestValidator.Requires(features,
+                modules, 1,
+                TrRmFeatureTableReader.GeneralPredicateGraphsFeatureId,
+                schema), Is.True);
+            Assert.That(TrRmFeatureManifestValidator.Requires(features,
+                modules, 1, TrRmFeatureTableReader.GenericMethodCallsFeatureId,
+                schema), Is.True);
+        }
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([
+                TrRmFeatureRow.GenericMethodCallsCandidate,
+            ], TrRmArtifactSchema.GeneralPredicateGraphsDraft));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([
+                TrRmFeatureRow.GeneralPredicateGraphsCandidate,
+            ], TrRmArtifactSchema.GenericMethodCallsDraft));
     }
 
     [Test]
@@ -613,6 +737,45 @@ internal sealed class TrRmArtifactIndexTests
             TrRmArtifactIndex.ForGenericMethodCallsDraft(artifact));
         _ = Assert.Throws<InvalidDataException>(() =>
             new TrRmArtifactIndex(artifact));
+    }
+
+    [TestCase(0x0041, 12)]
+    [TestCase(0x0042, 80)]
+    [TestCase(0x0043, 8)]
+    [TestCase(0x0044, 8)]
+    [TestCase(0x0046, 20)]
+    [TestCase(0x0047, 24)]
+    [TestCase(0x0049, 16)]
+    public void GenericConstantMethodsDraftRejectsUnselectedBackingSections(
+        int kind, int size)
+    {
+        var sections = CreateArtifactSections(
+            new TrRmSection((ushort)kind, 0, 1, new byte[size]));
+        var standardArtifact = TrRmArtifactWriter.Encode(sections);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactIndex.ForGenericConstantMethodsDraft(standardArtifact));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmArtifactWriter.Encode(sections,
+                TrRmArtifactSchema.GenericConstantMethodsDraft));
+    }
+
+    [Test]
+    public void GenericConstantMethodsDraftRetainsSharedProfileAndPathSections()
+    {
+        var sections = CreateArtifactSections(
+            new TrRmSection(0x0045, 0, 1, new byte[20]),
+            new TrRmSection(0x0048, 0, 1, new byte[8]),
+            new TrRmSection(0x004A, 0, 1, new byte[4]),
+            new TrRmSection(0x004B, 0, 1, new byte[] { 0 }));
+        var artifact = TrRmArtifactWriter.Encode(sections);
+
+        var index =
+            TrRmArtifactIndex.ForGenericConstantMethodsDraft(artifact);
+        Assert.That(index.TryGetSection(0x0045, out _, out _), Is.True);
+        Assert.That(index.TryGetSection(0x0048, out _, out _), Is.True);
+        Assert.That(index.TryGetSection(0x004A, out _, out _), Is.True);
+        Assert.That(index.TryGetSection(0x004B, out _, out _), Is.True);
     }
 
     [Test]
@@ -1207,6 +1370,24 @@ internal sealed class TrRmArtifactIndexTests
         Write(artifact, 64 + 44, 1);
         strings.CopyTo(artifact.AsSpan(112));
         return artifact;
+    }
+
+    private static List<TrRmSection> CreateArtifactSections(
+        params TrRmSection[] additionalSections)
+    {
+        var stringsBytes = TrRmStringTableWriter.EncodeNames([("A", 0)]);
+        var strings = new TrRmStringTableReader(stringsBytes, 1);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 0, 0, 0, 0);
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 1, stringsBytes),
+        };
+        sections.AddRange(additionalSections);
+        sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
+        return sections;
     }
 
     private static bool TryGetA3Section(byte[] artifact,
