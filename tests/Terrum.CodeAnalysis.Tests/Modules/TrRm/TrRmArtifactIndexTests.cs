@@ -544,6 +544,21 @@ internal sealed class TrRmArtifactIndexTests
         Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
             TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
             TrRmArtifactSchema.GenericConstantMethodsDraft, out _), Is.False);
+        foreach (var schemaWithoutWrite in new[] {
+            TrRmArtifactSchema.C1Draft,
+            TrRmArtifactSchema.C1M1Draft,
+            TrRmArtifactSchema.C1M1ConstructionDraft,
+            TrRmArtifactSchema.C1M1Construction2Draft,
+        })
+        {
+            Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+                TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
+                schemaWithoutWrite, out _), Is.False);
+            _ = Assert.Throws<InvalidDataException>(() =>
+                TrRmFeatureTableWriter.Encode([
+                    TrRmFeatureRow.GenericWriteRequirementsCandidate,
+                ], schemaWithoutWrite));
+        }
         Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
             TrRmFeatureTableReader.GenericWriteRequirementsFeatureId,
             schema, out ruleRevision), Is.True);
