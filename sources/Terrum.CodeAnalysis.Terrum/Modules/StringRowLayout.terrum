@@ -2,7 +2,8 @@ namespace Terrum.CodeAnalysis;
 
 // Validates physical row framing only; encoding-specific text validity belongs to reference use sites.
 public static bool TryGetStringRowLayout(int32 start, int32 length,
-    init ref<int32> encoding, init ref<int32> contentByteLength)
+    ref<init int32> encoding, ref<init int32> contentByteLength)
+    ensure return ? (*encoding is init && *contentByteLength is init) : true
 {
     if (start < 0 || length < 8 || start > Host.Rows.Length
         || length > Host.Rows.Length - start)
@@ -57,7 +58,7 @@ public static bool TryGetStringRowLayout(int32 start, int32 length,
         index = index + 1;
     }
 
-    encoding = rowEncoding;
-    contentByteLength = contentLength;
+    *encoding = rowEncoding;
+    *contentByteLength = contentLength;
     return true;
 }

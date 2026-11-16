@@ -41,9 +41,13 @@ public static bool TryValidateMethodDefTable(int32 recordCount,
     mut int32 typeEnd = 0;
     if (recordCount != 0)
     {
+        init int32 firstMethodStart;
+        init int32 firstMethodEnd;
+        init int32 firstTypeStart;
+        init int32 firstTypeEnd;
         if (!TryGetMethodDefModuleRanges(module, moduleCount, typeDefCount,
-            methodDefCount, init var firstMethodStart, init var firstMethodEnd,
-            init var firstTypeStart, init var firstTypeEnd))
+            methodDefCount, ref init firstMethodStart, ref init firstMethodEnd,
+            ref init firstTypeStart, ref init firstTypeEnd))
         {
             return false;
         }
@@ -58,14 +62,18 @@ public static bool TryValidateMethodDefTable(int32 recordCount,
     {
         while (row >= methodEnd)
         {
+            init int32 nextMethodStart;
+            init int32 nextMethodEnd;
+            init int32 nextTypeStart;
+            init int32 nextTypeEnd;
             module = module + 1;
             if (module > moduleCount)
             {
                 return false;
             }
             if (!TryGetMethodDefModuleRanges(module, moduleCount, typeDefCount,
-                    methodDefCount, init var nextMethodStart, init var nextMethodEnd,
-                    init var nextTypeStart, init var nextTypeEnd))
+                    methodDefCount, ref init nextMethodStart, ref init nextMethodEnd,
+                    ref init nextTypeStart, ref init nextTypeEnd))
             {
                 return false;
             }
@@ -97,13 +105,19 @@ public static bool TryValidateMethodDefTable(int32 recordCount,
 
 bool TryGetMethodDefModuleRanges(int32 module, int32 moduleCount,
     int32 typeDefCount, int32 methodDefCount,
-    init ref<int32> methodStart, init ref<int32> methodEnd,
-    init ref<int32> typeStart, init ref<int32> typeEnd)
+    ref<init int32> methodStart, ref<init int32> methodEnd,
+    ref<init int32> typeStart, ref<init int32> typeEnd)
+    ensure return ? (*methodStart is init
+        && *methodEnd is init
+        && *typeStart is init
+        && *typeEnd is init) : true
 {
+    init uint32 firstType;
+    init uint32 firstMethod;
     int32 rowStart = (module - 1) * 48;
     if (module <= 0 || module > moduleCount
-        || !TryReadModuleTableWord(rowStart, 36, init var firstType)
-        || !TryReadModuleTableWord(rowStart, 40, init var firstMethod))
+        || !TryReadModuleTableWord(rowStart, 36, ref init firstType)
+        || !TryReadModuleTableWord(rowStart, 40, ref init firstMethod))
     {
         return false;
     }
@@ -112,8 +126,10 @@ bool TryGetMethodDefModuleRanges(int32 module, int32 moduleCount,
     mut int32 endMethod = methodDefCount + 1;
     if (module < moduleCount)
     {
-        if (!TryReadModuleTableWord(module * 48, 36, init var nextType)
-            || !TryReadModuleTableWord(module * 48, 40, init var nextMethod))
+        init uint32 nextType;
+        init uint32 nextMethod;
+        if (!TryReadModuleTableWord(module * 48, 36, ref init nextType)
+            || !TryReadModuleTableWord(module * 48, 40, ref init nextMethod))
         {
             return false;
         }
@@ -122,28 +138,40 @@ bool TryGetMethodDefModuleRanges(int32 module, int32 moduleCount,
         endMethod = int32(nextMethod);
     }
 
-    methodStart = int32(firstMethod);
-    methodEnd = endMethod;
-    typeStart = int32(firstType);
-    typeEnd = endType;
-    return methodStart > 0 && methodEnd >= methodStart
-        && methodEnd <= methodDefCount + 1
-        && typeStart > 0 && typeEnd >= typeStart
-        && typeEnd <= typeDefCount + 1;
+    *methodStart = int32(firstMethod);
+    *methodEnd = endMethod;
+    *typeStart = int32(firstType);
+    *typeEnd = endType;
+    return *methodStart > 0 && *methodEnd >= *methodStart
+        && *methodEnd <= methodDefCount + 1
+        && *typeStart > 0 && *typeEnd >= *typeStart
+        && *typeEnd <= typeDefCount + 1;
 }
 
 bool TryValidateMethodDefRow(int32 row, int32 stringCount,
     int32 stringIndexByteLength, int32 typeDefCount, int32 typeStart, int32 typeEnd,
     int32 methodSigCount, int32 contractCount, int32 bodyCount)
 {
+    init uint32 owner;
+    init uint32 name;
+    init uint32 signature;
+    init uint32 flags;
+    init uint32 contractFirst;
+    init uint32 contractRangeCount;
+    init uint32 body;
+    init int32 nameOffset;
+    init int32 nameLength;
+    init int32 nameScalarCount;
+    init uint32 genericCount;
+    init uint32 receiver;
     int32 rowStart = (row - 1) * 28;
-    if (!TryReadMethodDefTableWord(rowStart, 0, init var owner)
-        || !TryReadMethodDefTableWord(rowStart, 4, init var name)
-        || !TryReadMethodDefTableWord(rowStart, 8, init var signature)
-        || !TryReadMethodDefTableWord(rowStart, 12, init var flags)
-        || !TryReadMethodDefTableWord(rowStart, 16, init var contractFirst)
-        || !TryReadMethodDefTableWord(rowStart, 20, init var contractRangeCount)
-        || !TryReadMethodDefTableWord(rowStart, 24, init var body)
+    if (!TryReadMethodDefTableWord(rowStart, 0, ref init owner)
+        || !TryReadMethodDefTableWord(rowStart, 4, ref init name)
+        || !TryReadMethodDefTableWord(rowStart, 8, ref init signature)
+        || !TryReadMethodDefTableWord(rowStart, 12, ref init flags)
+        || !TryReadMethodDefTableWord(rowStart, 16, ref init contractFirst)
+        || !TryReadMethodDefTableWord(rowStart, 20, ref init contractRangeCount)
+        || !TryReadMethodDefTableWord(rowStart, 24, ref init body)
         || owner > uint32(typeDefCount)
         || (owner != 0 && (owner < uint32(typeStart) || owner >= uint32(typeEnd)))
         || name == 0 || name > 0xFF_FFFF || name > uint32(stringCount)
@@ -156,18 +184,18 @@ bool TryValidateMethodDefRow(int32 row, int32 stringCount,
     }
 
     if (!TryGetValidatedVariableTableRowExtent(stringCount, 8, 4, int32(name),
-            init var nameOffset, init var nameLength)
+            ref init nameOffset, ref init nameLength)
         || !TryGetStringNameScalarCount(stringIndexByteLength + int32(nameOffset),
-            nameLength, init var nameScalarCount)
+            nameLength, ref init nameScalarCount)
         || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 20,
-            init var genericCount))
+            ref init genericCount))
     {
         return false;
     }
 
     if (owner == 0
         && (!TryReadMethodSignatureWord((int32(signature) - 1) * 24, 4,
-                init var receiver)
+                ref init receiver)
             || receiver != 0))
     {
         return false;
@@ -194,24 +222,30 @@ bool TryValidateMethodDefRow(int32 row, int32 stringCount,
     return true;
 }
 
-bool TryReadMethodDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadMethodDefTableWord(int32 rowStart, int32 offset, ref<init uint32> value)
+    ensure return ? *value is init : true
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Methods.Length - 28
         || offset < 0 || offset > 24
-        || !TryReadMethodDefTableByte(rowStart + offset, init var first)
-        || !TryReadMethodDefTableByte(rowStart + offset + 1, init var second)
-        || !TryReadMethodDefTableByte(rowStart + offset + 2, init var third)
-        || !TryReadMethodDefTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadMethodDefTableByte(rowStart + offset, ref init first)
+        || !TryReadMethodDefTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadMethodDefTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadMethodDefTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadMethodDefTableByte(int32 offset, init ref<int32> value)
+bool TryReadMethodDefTableByte(int32 offset, ref<init int32> value)
+    ensure return ? *value is init : true
 {
     if (offset < 0 || offset >= Host.Methods.Length)
     {
@@ -224,28 +258,34 @@ bool TryReadMethodDefTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
 
-bool TryReadMethodSignatureWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadMethodSignatureWord(int32 rowStart, int32 offset, ref<init uint32> value)
+    ensure return ? *value is init : true
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Signatures.Length - 24
         || offset < 0 || offset > 20
-        || !TryReadMethodSignatureByte(rowStart + offset, init var first)
-        || !TryReadMethodSignatureByte(rowStart + offset + 1, init var second)
-        || !TryReadMethodSignatureByte(rowStart + offset + 2, init var third)
-        || !TryReadMethodSignatureByte(rowStart + offset + 3, init var fourth))
+        || !TryReadMethodSignatureByte(rowStart + offset, ref init first)
+        || !TryReadMethodSignatureByte(rowStart + offset + 1, ref init second)
+        || !TryReadMethodSignatureByte(rowStart + offset + 2, ref init third)
+        || !TryReadMethodSignatureByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadMethodSignatureByte(int32 offset, init ref<int32> value)
+bool TryReadMethodSignatureByte(int32 offset, ref<init int32> value)
+    ensure return ? *value is init : true
 {
     if (offset < 0 || offset >= Host.Signatures.Length)
     {
@@ -258,7 +298,7 @@ bool TryReadMethodSignatureByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
 

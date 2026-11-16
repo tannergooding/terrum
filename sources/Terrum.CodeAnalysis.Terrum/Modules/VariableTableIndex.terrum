@@ -1,6 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
-public static bool TryReadVariableTableOffset(int32 offsetIndex, init ref<uint32> offset)
+public static bool TryReadVariableTableOffset(int32 offsetIndex, ref<init uint32> offset)
+    ensure return ? *offset is init : true
 {
     if (offsetIndex < 0 || offsetIndex >= Host.Rows.Length / 4)
     {
@@ -19,12 +20,14 @@ public static bool TryReadVariableTableOffset(int32 offsetIndex, init ref<uint32
         value = value | (uint32(part) << (byteIndex * 8));
     }
 
-    offset = value;
+    *offset = value;
     return true;
 }
 
 public static bool TryGetVariableTableRowExtent(int32 recordCount, int32 minimumRowBytes,
-    int32 rowAlignment, int32 row, init ref<int32> rowStart, init ref<int32> rowLength)
+    int32 rowAlignment, int32 row, ref<init int32> rowStart,
+    ref<init int32> rowLength)
+    ensure return ? (*rowStart is init && *rowLength is init) : true
 {
     if (recordCount <= 0 || recordCount > 16777215
         || minimumRowBytes < 0 || (rowAlignment != 1 && rowAlignment != 4)
@@ -36,7 +39,7 @@ public static bool TryGetVariableTableRowExtent(int32 recordCount, int32 minimum
     }
 
     return TryGetValidatedVariableTableRowExtent(recordCount, minimumRowBytes,
-        rowAlignment, row, init rowStart, init rowLength);
+        rowAlignment, row, ref init *rowStart, ref init *rowLength);
 }
 
 bool TryValidateVariableTableIndex(int32 recordCount,
@@ -51,8 +54,9 @@ bool TryValidateVariableTableIndex(int32 recordCount,
 
     int32 indexByteLength = (recordCount + 1) * 4;
     int32 dataByteLength = Host.Rows.Length - indexByteLength;
+    init uint32 firstOffset;
     if (dataByteLength < minimumRowBytes
-        || !TryReadVariableTableOffset(0, init var firstOffset)
+        || !TryReadVariableTableOffset(0, ref init firstOffset)
         || firstOffset != 0)
     {
         return false;
@@ -61,7 +65,8 @@ bool TryValidateVariableTableIndex(int32 recordCount,
     mut uint32 previous = firstOffset;
     for (mut int32 currentRow = 1; currentRow <= recordCount; currentRow = currentRow + 1)
     {
-        if (!TryReadVariableTableOffset(currentRow, init var next)
+        init uint32 next;
+        if (!TryReadVariableTableOffset(currentRow, ref init next)
             || next > uint32(dataByteLength)
             || previous > uint32(dataByteLength - minimumRowBytes)
             || next < previous + uint32(minimumRowBytes)
@@ -78,7 +83,8 @@ bool TryValidateVariableTableIndex(int32 recordCount,
 // Use only after validating this exact variable-table index with TryValidateVariableTableIndex.
 bool TryGetValidatedVariableTableRowExtent(int32 recordCount,
     int32 minimumRowBytes, int32 rowAlignment, int32 row,
-    init ref<int32> rowStart, init ref<int32> rowLength)
+    ref<init int32> rowStart, ref<init int32> rowLength)
+    ensure return ? (*rowStart is init && *rowLength is init) : true
 {
     if (recordCount <= 0 || recordCount > 16777215
         || minimumRowBytes < 0 || (rowAlignment != 1 && rowAlignment != 4)
@@ -90,9 +96,11 @@ bool TryGetValidatedVariableTableRowExtent(int32 recordCount,
 
     int32 indexByteLength = (recordCount + 1) * 4;
     int32 dataByteLength = Host.Rows.Length - indexByteLength;
+    init uint32 start;
+    init uint32 end;
     if (dataByteLength < minimumRowBytes
-        || !TryReadVariableTableOffset(row - 1, init var start)
-        || !TryReadVariableTableOffset(row, init var end)
+        || !TryReadVariableTableOffset(row - 1, ref init start)
+        || !TryReadVariableTableOffset(row, ref init end)
         || end > uint32(dataByteLength)
         || start > uint32(dataByteLength - minimumRowBytes)
         || end < start + uint32(minimumRowBytes)
@@ -101,7 +109,7 @@ bool TryGetValidatedVariableTableRowExtent(int32 recordCount,
         return false;
     }
 
-    rowStart = int32(start);
-    rowLength = int32(end - start);
+    *rowStart = int32(start);
+    *rowLength = int32(end - start);
     return true;
 }

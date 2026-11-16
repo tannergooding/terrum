@@ -34,16 +34,22 @@ bool TryValidateMethodSigParamTablesCore(int32 recordCount,
     mut int32 declaredParamCount = 0;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
+        init uint32 result;
+        init uint32 receiver;
+        init uint32 first;
+        init uint32 count;
+        init uint32 genericFirst;
+        init uint32 genericCount;
         int32 rowStart = (row - 1) * 24;
-        if (!TryReadMethodSigParamSignatureWord(rowStart, 0, init var result)
+        if (!TryReadMethodSigParamSignatureWord(rowStart, 0, ref init result)
             || result == 0 || result > uint32(typeSpecCount)
-            || !TryReadMethodSigParamSignatureWord(rowStart, 4, init var receiver)
+            || !TryReadMethodSigParamSignatureWord(rowStart, 4, ref init receiver)
             || receiver > uint32(typeSpecCount)
-            || !TryReadMethodSigParamSignatureWord(rowStart, 8, init var first)
-            || !TryReadMethodSigParamSignatureWord(rowStart, 12, init var count)
+            || !TryReadMethodSigParamSignatureWord(rowStart, 8, ref init first)
+            || !TryReadMethodSigParamSignatureWord(rowStart, 12, ref init count)
             || !IsValidMethodTableRange(first, count, paramCount)
-            || !TryReadMethodSigParamSignatureWord(rowStart, 16, init var genericFirst)
-            || !TryReadMethodSigParamSignatureWord(rowStart, 20, init var genericCount)
+            || !TryReadMethodSigParamSignatureWord(rowStart, 16, ref init genericFirst)
+            || !TryReadMethodSigParamSignatureWord(rowStart, 20, ref init genericCount)
             || !IsValidMethodTableRange(genericFirst, genericCount, genericParamCount)
             || count > uint32(paramCount - declaredParamCount))
         {
@@ -62,8 +68,15 @@ bool TryValidateMethodSigParamTablesCore(int32 recordCount,
     mut uint32 cachedCount = 0;
     for (mut int32 row = 1; row <= paramCount; row = row + 1)
     {
+        init uint32 owner;
+        init uint32 ordinal;
+        init uint32 type;
+        init int32 mode;
+        init int32 flags;
+        init int32 reservedFirst;
+        init int32 reservedSecond;
         int32 rowStart = (row - 1) * 16;
-        if (!TryReadMethodSigParamParameterWord(rowStart, 0, init var owner)
+        if (!TryReadMethodSigParamParameterWord(rowStart, 0, ref init owner)
             || owner == 0 || owner > uint32(recordCount))
         {
             return false;
@@ -71,9 +84,11 @@ bool TryValidateMethodSigParamTablesCore(int32 recordCount,
 
         if (owner != cachedOwner)
         {
+            init uint32 first;
+            init uint32 count;
             int32 signatureStart = (int32(owner) - 1) * 24;
-            if (!TryReadMethodSigParamSignatureWord(signatureStart, 8, init var first)
-                || !TryReadMethodSigParamSignatureWord(signatureStart, 12, init var count))
+            if (!TryReadMethodSigParamSignatureWord(signatureStart, 8, ref init first)
+                || !TryReadMethodSigParamSignatureWord(signatureStart, 12, ref init count))
             {
                 return false;
             }
@@ -84,20 +99,20 @@ bool TryValidateMethodSigParamTablesCore(int32 recordCount,
         }
 
         if (uint32(row) < cachedFirst || uint32(row) >= cachedFirst + cachedCount
-            || !TryReadMethodSigParamParameterWord(rowStart, 4, init var ordinal)
+            || !TryReadMethodSigParamParameterWord(rowStart, 4, ref init ordinal)
             || ordinal != uint32(row) - cachedFirst
-            || !TryReadMethodSigParamParameterWord(rowStart, 8, init var type)
+            || !TryReadMethodSigParamParameterWord(rowStart, 8, ref init type)
             || !TryValidateMethodSigParamType(type, typeSpecCount)
-            || !TryReadMethodSigParamParameterByte(rowStart + 12, init var mode)
+            || !TryReadMethodSigParamParameterByte(rowStart + 12, ref init mode)
             || (developmentProfile ? mode > 4 : mode != 0)
-            || !TryReadMethodSigParamParameterByte(rowStart + 13, init var flags)
+            || !TryReadMethodSigParamParameterByte(rowStart + 13, ref init flags)
             || (developmentProfile
                 ? flags != 0
                 : flags > 1 || (flags == 1
                     && !IsImplicitReadonlyReference(type, typeSpecCount)))
-            || !TryReadMethodSigParamParameterByte(rowStart + 14, init var reservedFirst)
+            || !TryReadMethodSigParamParameterByte(rowStart + 14, ref init reservedFirst)
             || reservedFirst != 0
-            || !TryReadMethodSigParamParameterByte(rowStart + 15, init var reservedSecond)
+            || !TryReadMethodSigParamParameterByte(rowStart + 15, ref init reservedSecond)
             || reservedSecond != 0)
         {
             return false;
@@ -128,11 +143,16 @@ bool IsImplicitReadonlyReference(uint32 typeSpecRef, int32 typeSpecCount)
             && ((typeSpecRef >> 8) & 0xFF) == 0x8B;
     }
 
+    init int32 rowStart;
+    init int32 rowLength;
+    init int32 form;
+    init int32 qualifiers;
+    init int32 familyCode;
     if (typeSpecRef == 0 || typeSpecRef > uint32(typeSpecCount)
         || !TryGetTypeSpecRowExtent(typeSpecCount, int32(typeSpecRef),
-            init var rowStart, init var rowLength)
-        || !TryReadTypeSpecByte(rowStart, rowLength, 0, init var form)
-        || !TryReadTypeSpecByte(rowStart, rowLength, 1, init var qualifiers)
+            ref init rowStart, ref init rowLength)
+        || !TryReadTypeSpecByte(rowStart, rowLength, 0, ref init form)
+        || !TryReadTypeSpecByte(rowStart, rowLength, 1, ref init qualifiers)
         || qualifiers != 0)
     {
         return false;
@@ -145,7 +165,7 @@ bool IsImplicitReadonlyReference(uint32 typeSpecRef, int32 typeSpecCount)
     if ((form == 1 || form == 0x0C)
         && rowLength == (form == 1 ? 4 : 7)
         && TryReadTypeSpecByte(rowStart, rowLength,
-            form == 1 ? 2 : 2, init var familyCode))
+            form == 1 ? 2 : 2, ref init familyCode))
     {
         return familyCode == 0x8B;
     }
@@ -153,23 +173,29 @@ bool IsImplicitReadonlyReference(uint32 typeSpecRef, int32 typeSpecCount)
     return false;
 }
 
-bool TryReadMethodSigParamSignatureWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadMethodSigParamSignatureWord(int32 rowStart, int32 offset, ref<init uint32> value)
+    ensure return ? *value is init : true
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Signatures.Length - 24 || offset < 0 || offset > 20
-        || !TryReadMethodSigParamSignatureByte(rowStart + offset, init var first)
-        || !TryReadMethodSigParamSignatureByte(rowStart + offset + 1, init var second)
-        || !TryReadMethodSigParamSignatureByte(rowStart + offset + 2, init var third)
-        || !TryReadMethodSigParamSignatureByte(rowStart + offset + 3, init var fourth))
+        || !TryReadMethodSigParamSignatureByte(rowStart + offset, ref init first)
+        || !TryReadMethodSigParamSignatureByte(rowStart + offset + 1, ref init second)
+        || !TryReadMethodSigParamSignatureByte(rowStart + offset + 2, ref init third)
+        || !TryReadMethodSigParamSignatureByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadMethodSigParamSignatureByte(int32 offset, init ref<int32> value)
+bool TryReadMethodSigParamSignatureByte(int32 offset, ref<init int32> value)
+    ensure return ? *value is init : true
 {
     if (offset < 0 || offset >= Host.Signatures.Length)
     {
@@ -182,27 +208,33 @@ bool TryReadMethodSigParamSignatureByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
 
-bool TryReadMethodSigParamParameterWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadMethodSigParamParameterWord(int32 rowStart, int32 offset, ref<init uint32> value)
+    ensure return ? *value is init : true
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Params.Length - 16 || offset < 0 || offset > 8
-        || !TryReadMethodSigParamParameterByte(rowStart + offset, init var first)
-        || !TryReadMethodSigParamParameterByte(rowStart + offset + 1, init var second)
-        || !TryReadMethodSigParamParameterByte(rowStart + offset + 2, init var third)
-        || !TryReadMethodSigParamParameterByte(rowStart + offset + 3, init var fourth))
+        || !TryReadMethodSigParamParameterByte(rowStart + offset, ref init first)
+        || !TryReadMethodSigParamParameterByte(rowStart + offset + 1, ref init second)
+        || !TryReadMethodSigParamParameterByte(rowStart + offset + 2, ref init third)
+        || !TryReadMethodSigParamParameterByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadMethodSigParamParameterByte(int32 offset, init ref<int32> value)
+bool TryReadMethodSigParamParameterByte(int32 offset, ref<init int32> value)
+    ensure return ? *value is init : true
 {
     if (offset < 0 || offset >= Host.Params.Length)
     {
@@ -215,7 +247,7 @@ bool TryReadMethodSigParamParameterByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
 

@@ -1,58 +1,75 @@
 namespace Terrum.CodeAnalysis;
 
 public static bool TryGetStringNameScalarCount(int32 rowStart, int32 rowLength,
-    init ref<int32> scalarCount)
+    ref<init int32> scalarCount)
+    ensure return ? *scalarCount is init : true
 {
+    init int32 unusedScalar;
     return TryScanStringRowText(rowStart, rowLength, false, -1,
-        init scalarCount, init var unusedScalar);
+        ref init *scalarCount, ref init unusedScalar);
 }
 
 public static bool TryGetStringNamespaceScalarCount(int32 rowStart, int32 rowLength,
-    init ref<int32> scalarCount)
+    ref<init int32> scalarCount)
+    ensure return ? *scalarCount is init : true
 {
+    init int32 unusedScalar;
     return TryScanStringRowText(rowStart, rowLength, true, -1,
-        init scalarCount, init var unusedScalar);
+        ref init *scalarCount, ref init unusedScalar);
 }
 
 public static bool TryReadStringNameScalarAt(int32 rowStart, int32 rowLength, int32 scalarIndex,
-    init ref<int32> scalar)
+    ref<init int32> scalar)
+    ensure return ? *scalar is init : true
 {
     if (scalarIndex < 0)
     {
         return false;
     }
 
+    init int32 unusedCount;
     return TryScanStringRowText(rowStart, rowLength, false, scalarIndex,
-        init var unusedCount, init scalar);
+        ref init unusedCount, ref init *scalar);
 }
 
 public static bool TryReadStringNamespaceScalarAt(int32 rowStart, int32 rowLength, int32 scalarIndex,
-    init ref<int32> scalar)
+    ref<init int32> scalar)
+    ensure return ? *scalar is init : true
 {
     if (scalarIndex < 0)
     {
         return false;
     }
 
+    init int32 unusedCount;
     return TryScanStringRowText(rowStart, rowLength, true, scalarIndex,
-        init var unusedCount, init scalar);
+        ref init unusedCount, ref init *scalar);
 }
 
 bool TryScanStringRowText(int32 rowStart, int32 rowLength, bool allowEmpty, int32 selectedIndex,
-    init ref<int32> scalarCount, init ref<int32> selectedScalar)
+    ref<init int32> scalarCount, ref<init int32> selectedScalar)
+    ensure return ? (*scalarCount is init && *selectedScalar is init) : true
 {
+    init int32 unusedEncoding;
+    init int32 unusedContentLength;
     return TryAnalyzeStringRowText(rowStart, rowLength, allowEmpty, selectedIndex,
-        init var unusedEncoding, init var unusedContentLength,
-        init scalarCount, init selectedScalar);
+        ref init unusedEncoding, ref init unusedContentLength,
+        ref init *scalarCount, ref init *selectedScalar);
 }
 
 bool TryAnalyzeStringRowText(int32 rowStart, int32 rowLength, bool allowEmpty, int32 selectedIndex,
-    init ref<int32> encodingResult, init ref<int32> contentByteLengthResult,
-    init ref<int32> scalarCount, init ref<int32> selectedScalar)
+    ref<init int32> encodingResult, ref<init int32> contentByteLengthResult,
+    ref<init int32> scalarCount, ref<init int32> selectedScalar)
+    ensure return ? (*encodingResult is init
+        && *contentByteLengthResult is init
+        && *scalarCount is init
+        && *selectedScalar is init) : true
 {
+    init int32 encoding;
+    init int32 contentByteLength;
     if (selectedIndex < -1
         || !TryGetStringRowLayout(rowStart, rowLength,
-            init var encoding, init var contentByteLength))
+            ref init encoding, ref init contentByteLength))
     {
         return false;
     }
@@ -63,8 +80,10 @@ bool TryAnalyzeStringRowText(int32 rowStart, int32 rowLength, bool allowEmpty, i
     mut bool foundSelected = false;
     while (position < contentByteLength)
     {
+        init int32 value;
+        init int32 bytesRead;
         if (!TryDecodeStringRowScalar(rowStart, position, contentByteLength, encoding,
-            init var value, init var bytesRead))
+            ref init value, ref init bytesRead))
         {
             return false;
         }
@@ -89,15 +108,16 @@ bool TryAnalyzeStringRowText(int32 rowStart, int32 rowLength, bool allowEmpty, i
         return false;
     }
 
-    encodingResult = encoding;
-    contentByteLengthResult = contentByteLength;
-    scalarCount = count;
-    selectedScalar = selected;
+    *encodingResult = encoding;
+    *contentByteLengthResult = contentByteLength;
+    *scalarCount = count;
+    *selectedScalar = selected;
     return true;
 }
 
 bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteLength,
-    int32 encoding, init ref<int32> scalar, init ref<int32> bytesRead)
+    int32 encoding, ref<init int32> scalar, ref<init int32> bytesRead)
+    ensure return ? (*scalar is init && *bytesRead is init) : true
 {
     if (rowStart < 0 || position < 0 || position >= contentByteLength
         || rowStart > Host.Rows.Length - 4
@@ -107,11 +127,12 @@ bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteL
     }
 
     return TryDecodeStringRowScalarAtOffset(rowStart + 4 + position,
-        contentByteLength - position, encoding, init scalar, init bytesRead);
+        contentByteLength - position, encoding, ref init *scalar, ref init *bytesRead);
 }
 
 bool TryDecodeStringRowScalarAtOffset(int32 byteOffset, int32 remainingByteLength, int32 encoding,
-    init ref<int32> scalar, init ref<int32> bytesRead)
+    ref<init int32> scalar, ref<init int32> bytesRead)
+    ensure return ? (*scalar is init && *bytesRead is init) : true
 {
     if (byteOffset < 0 || remainingByteLength <= 0 || byteOffset > Host.Rows.Length
         || remainingByteLength > Host.Rows.Length - byteOffset)
@@ -246,8 +267,8 @@ bool TryDecodeStringRowScalarAtOffset(int32 byteOffset, int32 remainingByteLengt
         return false;
     }
 
-    scalar = int32(value);
-    bytesRead = width;
+    *scalar = int32(value);
+    *bytesRead = width;
     return true;
 }
 
