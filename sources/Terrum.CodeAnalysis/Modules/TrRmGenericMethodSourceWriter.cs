@@ -24,6 +24,12 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct GenericImportedInterfaceEmission(
         BoundInterfaceDefinition Definition, BoundModuleImport Import);
 
+    private readonly record struct GenericImportedInterfaceMethodKey(
+        string ProviderIdentity, string TypeExportKey,
+        string QualifiedName, int Arity, int MemberOrdinal,
+        string MethodExportKey, uint TargetRequirement,
+        uint RuntimePolicy);
+
     private static byte[] EmitGenericMethodCallsDraftSource(
         BoundProgram program, string moduleIdentity,
         uint moduleTargetRequirement,
@@ -1058,6 +1064,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<(
             string QualifiedName, int Arity, int MemberOrdinal,
             string DeclarationKey), uint> exportedInterfaceMethodDefRows,
+        IReadOnlyDictionary<GenericImportedInterfaceMethodKey, uint>
+            importedInterfaceMethodImportRows,
         Dictionary<PrimitiveType, uint> formalTypeSpecRows,
         Dictionary<PrimitiveType, uint> builtInTypeSpecRows,
         List<ReadOnlyMemory<byte>> typeSpecRows,
@@ -1083,7 +1091,6 @@ public static partial class TrRmExecutableCompiler
             || !BoundInterfaceContract.AreEquivalent(
                 identity.Requirement.DeclaringInterface,
                 identity.RequestedInterface)
-            || identity.Requirement.DeclaringInterface.ModuleImport is not null
             || (resultVariable < 0
                 ? function.Variables.Length != function.ParameterCount
                 : resultVariable != function.ParameterCount
@@ -1140,30 +1147,66 @@ public static partial class TrRmExecutableCompiler
         var arity
             = identity.Requirement.DeclaringInterface.TypeArguments.Length;
         var matchingInterfaces = program.Interfaces.Where(candidate =>
-            candidate.ModuleImport is null
+            candidate.ModuleImport
+                == identity.Requirement.DeclaringInterface.ModuleImport
             && StringComparer.Ordinal.Equals(candidate.QualifiedName,
                 interfaceName)
             && candidate.Formals.Length == arity).ToArray();
         if (matchingInterfaces.Length != 1
             || (uint)identity.Requirement.MemberOrdinal
-                >= (uint)matchingInterfaces[0].Members.Length
-            || !StringComparer.Ordinal.Equals(
-                matchingInterfaces[0].Members[
-                    identity.Requirement.MemberOrdinal].DeclarationKey,
-                identity.Requirement.DeclarationKey)
-            || matchingInterfaces[0].Members[
-                    identity.Requirement.MemberOrdinal]
-                .RequiresMutableReceiver
-            || !exportedInterfaceTypeSpecRows.ContainsKey(
-                (interfaceName, arity))
-            || !exportedInterfaceMethodDefRows.TryGetValue(
-                (interfaceName, arity,
-                    identity.Requirement.MemberOrdinal,
-                    identity.Requirement.DeclarationKey),
-                out var requirementMethodRow))
+                >= (uint)matchingInterfaces[0].Members.Length)
         {
             throw Unsupported(
-                "A G1 interface requirement has no directly exported InterfaceMethod MethodDef.");
+                "A G1 interface requirement has no exact local or imported InterfaceMethod target.");
+        }
+
+        var matchingInterface = matchingInterfaces[0];
+        var requirementMember = matchingInterface.Members[
+            identity.Requirement.MemberOrdinal];
+        if (!StringComparer.Ordinal.Equals(requirementMember.DeclarationKey,
+                identity.Requirement.DeclarationKey)
+            || requirementMember.RequiresMutableReceiver)
+        {
+            throw Unsupported(
+                "A G1 interface requirement has no exact local or imported InterfaceMethod target.");
+        }
+
+        uint targetMethodToken;
+        if (identity.Requirement.DeclaringInterface.ModuleImport
+            is BoundModuleImport importedInterface)
+        {
+            if (!importedInterfaceMethodImportRows.TryGetValue(
+                    new GenericImportedInterfaceMethodKey(
+                        importedInterface.ProducerIdentity,
+                        importedInterface.ExportKey, interfaceName, arity,
+                        identity.Requirement.MemberOrdinal,
+                        identity.Requirement.DeclarationKey,
+                        importedInterface.TargetRequirement,
+                        importedInterface.RuntimePolicy),
+                    out var importedMethodImportRow))
+            {
+                throw Unsupported(
+                    "A G1 interface requirement has no exact MethodDef Import.");
+            }
+
+            targetMethodToken = 0x1C00_0000u | importedMethodImportRow;
+        }
+        else
+        {
+            if (!exportedInterfaceTypeSpecRows.ContainsKey(
+                    (interfaceName, arity))
+                || !exportedInterfaceMethodDefRows.TryGetValue(
+                    (interfaceName, arity,
+                        identity.Requirement.MemberOrdinal,
+                        identity.Requirement.DeclarationKey),
+                    out var localRequirementMethodRow))
+            {
+                throw Unsupported(
+                    "A G1 interface requirement has no directly exported InterfaceMethod MethodDef.");
+            }
+
+            targetMethodToken = 0x1600_0000u
+                | localRequirementMethodRow;
         }
 
         var implementingFormalOrdinal = -1;
@@ -1326,7 +1369,6 @@ public static partial class TrRmExecutableCompiler
             typeMap.GetIndex(GetBodyTypeToken(function.ReturnType)));
 
         var targetMethodMap = new TrRmRegisterBodyTokenMapBuilder();
-        var targetMethodToken = 0x1600_0000u | requirementMethodRow;
         var targetMethodMapIndex = targetMethodMap.GetIndex(
             targetMethodToken);
         var records = new List<ReadOnlyMemory<byte>>(3);
@@ -1478,6 +1520,8 @@ public static partial class TrRmExecutableCompiler
         }
         var importedInterfaceImportRows
             = ReadImportedInterfaceImportRows(sections, stringRows);
+        var importedInterfaceMethodImportRows
+            = ReadImportedInterfaceMethodImportRows(sections, stringRows);
 
         var methodSection = TryGetSection(sections, 0x0016,
             out var foundMethodSection) ? foundMethodSection : default;
@@ -1695,6 +1739,7 @@ public static partial class TrRmExecutableCompiler
                         definition.ProofProgram.SpanTypes,
                         exportedInterfaceTypeSpecRows,
                         exportedInterfaceMethodDefRows,
+                        importedInterfaceMethodImportRows,
                         formalTypeSpecRows, builtInTypeSpecRows,
                         typeSpecRows, interfaceConstraintRowRefs, schema)
                 : IsDirectGenericMethodMoveReturn(function)
@@ -3699,6 +3744,224 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported(
                     "A G1 interface constraint has ambiguous expected Import views.");
+            }
+        }
+
+        return result;
+    }
+
+    private static Dictionary<GenericImportedInterfaceMethodKey, uint>
+        ReadImportedInterfaceMethodImportRows(
+            IReadOnlyList<TrRmSection> sections,
+            TrRmStringTableReader strings)
+    {
+        var result
+            = new Dictionary<GenericImportedInterfaceMethodKey, uint>();
+        if (!TryGetSection(sections, 0x001C, out var importSection)
+            || !TryGetSection(sections, 0x0025, out var interfaceDefSection)
+            || !TryGetSection(sections, 0x0024,
+                out var interfaceMethodSection))
+        {
+            return result;
+        }
+
+        if (!TryGetSection(sections, 0x0010, out var moduleRefSection)
+            || !TryGetSection(sections, 0x0013, out var typeDefSection)
+            || !TryGetSection(sections, 0x0016, out var methodSection))
+        {
+            throw Invalid(
+                "The G1L1 interface MethodDef Imports have incomplete declaration tables.");
+        }
+
+        var importCount = checked((int)importSection.RecordCount);
+        var moduleRefCount = checked((int)moduleRefSection.RecordCount);
+        var typeDefCount = checked((int)typeDefSection.RecordCount);
+        var methodCount = checked((int)methodSection.RecordCount);
+        var interfaceDefCount
+            = checked((int)interfaceDefSection.RecordCount);
+        var interfaceMethodCount
+            = checked((int)interfaceMethodSection.RecordCount);
+        if (importSection.Bytes.Length != checked(importCount * 12)
+            || moduleRefSection.Bytes.Length
+                != checked(moduleRefCount * 12)
+            || typeDefSection.Bytes.Length != checked(typeDefCount * 44)
+            || methodSection.Bytes.Length != checked(methodCount * 28)
+            || interfaceDefSection.Bytes.Length
+                != checked(interfaceDefCount * 48)
+            || interfaceMethodSection.Bytes.Length
+                != checked(interfaceMethodCount * 12))
+        {
+            throw Invalid(
+                "A G1L1 interface MethodDef Import source table has an invalid extent.");
+        }
+
+        var typeImports = new Dictionary<int, (
+            string ProviderIdentity, string ExportKey, string QualifiedName,
+            int Arity, uint TargetRequirement, uint RuntimePolicy)>();
+        for (var importRow = 1; importRow <= importCount; importRow++)
+        {
+            var import = importSection.Bytes.Span.Slice(
+                (importRow - 1) * 12, 12);
+            var expectedDefinition
+                = BinaryPrimitives.ReadUInt32LittleEndian(import[8..]);
+            if ((expectedDefinition >> 24) != 0x13)
+            {
+                continue;
+            }
+
+            var typeDefRow = checked((int)(expectedDefinition
+                & 0x00FF_FFFF));
+            if (typeDefRow <= 0 || typeDefRow > typeDefCount)
+            {
+                throw Invalid(
+                    "A G1L1 interface MethodDef Import has an invalid expected TypeDef.");
+            }
+
+            var typeDef = typeDefSection.Bytes.Span.Slice(
+                (typeDefRow - 1) * 44, 44);
+            var flags = BinaryPrimitives.ReadUInt32LittleEndian(
+                typeDef[8..]);
+            if (((flags >> 2) & 7) != 3)
+            {
+                continue;
+            }
+
+            var moduleRefRow = ReadInt(import, 0);
+            if (moduleRefRow <= 0 || moduleRefRow > moduleRefCount)
+            {
+                throw Invalid(
+                    "A G1L1 interface TypeDef Import has an invalid ModuleRef.");
+            }
+
+            var moduleRef = moduleRefSection.Bytes.Span.Slice(
+                (moduleRefRow - 1) * 12, 12);
+            var providerIdentity = strings.DecodeName(
+                ReadInt(moduleRef, 0));
+            var namespaceName = strings.DecodeNamespace(
+                ReadInt(typeDef, 0));
+            var name = strings.DecodeName(ReadInt(typeDef, 4));
+            var qualifiedName = namespaceName.Length == 0 ? name
+                : namespaceName + "." + name;
+            var typeImport = (
+                ProviderIdentity: providerIdentity,
+                ExportKey: strings.DecodeName(ReadInt(import, 4)),
+                QualifiedName: qualifiedName,
+                Arity: ReadInt(typeDef, 24),
+                TargetRequirement: BinaryPrimitives
+                    .ReadUInt32LittleEndian(moduleRef[4..]),
+                RuntimePolicy: BinaryPrimitives
+                    .ReadUInt32LittleEndian(moduleRef[8..]));
+            if (!typeImports.TryAdd(typeDefRow, typeImport))
+            {
+                throw Unsupported(
+                    "A G1L1 imported interface TypeDef has ambiguous expected Import views.");
+            }
+        }
+
+        var interfaceDefByTypeDef = new Dictionary<int, int>(
+            interfaceDefCount);
+        for (var interfaceDefRow = 1;
+            interfaceDefRow <= interfaceDefCount; interfaceDefRow++)
+        {
+            var interfaceDef = interfaceDefSection.Bytes.Span.Slice(
+                (interfaceDefRow - 1) * 48, 48);
+            var typeDefRow = ReadInt(interfaceDef, 0);
+            if (!interfaceDefByTypeDef.TryAdd(typeDefRow,
+                    interfaceDefRow))
+            {
+                throw Invalid(
+                    "A G1L1 InterfaceDef has an ambiguous TypeDef owner.");
+            }
+        }
+
+        var interfaceMethodByMethod = new Dictionary<int,
+            (int InterfaceDefRow, int Ordinal)>(interfaceMethodCount);
+        for (var interfaceMethodRow = 1;
+            interfaceMethodRow <= interfaceMethodCount;
+            interfaceMethodRow++)
+        {
+            var interfaceMethod = interfaceMethodSection.Bytes.Span.Slice(
+                (interfaceMethodRow - 1) * 12, 12);
+            var methodRow = ReadInt(interfaceMethod, 8);
+            if (!interfaceMethodByMethod.TryAdd(methodRow,
+                    (ReadInt(interfaceMethod, 0),
+                        ReadInt(interfaceMethod, 4))))
+            {
+                throw Invalid(
+                    "An InterfaceMethod MethodDef has an ambiguous imported member identity.");
+            }
+        }
+
+        for (var importRow = 1; importRow <= importCount; importRow++)
+        {
+            var import = importSection.Bytes.Span.Slice(
+                (importRow - 1) * 12, 12);
+            var expectedDefinition
+                = BinaryPrimitives.ReadUInt32LittleEndian(import[8..]);
+            if ((expectedDefinition >> 24) != 0x16)
+            {
+                continue;
+            }
+
+            var methodRow = checked((int)(expectedDefinition
+                & 0x00FF_FFFF));
+            if (methodRow <= 0 || methodRow > methodCount)
+            {
+                throw Invalid(
+                    "A G1L1 interface MethodDef Import has an invalid expected MethodDef.");
+            }
+
+            var method = methodSection.Bytes.Span.Slice(
+                (methodRow - 1) * 28, 28);
+            var typeDefRow = ReadInt(method, 0);
+            if (!typeImports.TryGetValue(typeDefRow,
+                    out var typeImport))
+            {
+                continue;
+            }
+            if (!interfaceDefByTypeDef.TryGetValue(typeDefRow,
+                    out var interfaceDefRow)
+                || !interfaceMethodByMethod.TryGetValue(methodRow,
+                    out var interfaceMethod)
+                || interfaceMethod.InterfaceDefRow != interfaceDefRow)
+            {
+                throw Invalid(
+                    "An imported interface MethodDef has no direct InterfaceMethod owner.");
+            }
+
+            var moduleRefRow = ReadInt(import, 0);
+            if (moduleRefRow <= 0 || moduleRefRow > moduleRefCount)
+            {
+                throw Invalid(
+                    "An imported interface MethodDef has an invalid ModuleRef.");
+            }
+            var moduleRef = moduleRefSection.Bytes.Span.Slice(
+                (moduleRefRow - 1) * 12, 12);
+            var providerIdentity
+                = strings.DecodeName(ReadInt(moduleRef, 0));
+            var targetRequirement
+                = BinaryPrimitives.ReadUInt32LittleEndian(moduleRef[4..]);
+            var runtimePolicy
+                = BinaryPrimitives.ReadUInt32LittleEndian(moduleRef[8..]);
+            if (!StringComparer.Ordinal.Equals(providerIdentity,
+                    typeImport.ProviderIdentity)
+                || targetRequirement != typeImport.TargetRequirement
+                || runtimePolicy != typeImport.RuntimePolicy)
+            {
+                throw Invalid(
+                    "An imported interface MethodDef selects a different provider than its TypeDef.");
+            }
+
+            var key = new GenericImportedInterfaceMethodKey(
+                typeImport.ProviderIdentity, typeImport.ExportKey,
+                typeImport.QualifiedName, typeImport.Arity,
+                interfaceMethod.Ordinal,
+                strings.DecodeName(ReadInt(import, 4)),
+                typeImport.TargetRequirement, typeImport.RuntimePolicy);
+            if (!result.TryAdd(key, checked((uint)importRow)))
+            {
+                throw Unsupported(
+                    "A G1L1 imported InterfaceMethod has an ambiguous expected Import.");
             }
         }
 

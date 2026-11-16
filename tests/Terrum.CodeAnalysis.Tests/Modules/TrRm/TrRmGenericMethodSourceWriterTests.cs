@@ -2029,6 +2029,59 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void EmitsAndReconstructsG1L1OpenInterfaceRequirementCallsThroughImport()
+    {
+        const string typeExportKey = "example.interface/I";
+        const string readExportKey = "example.interface/I.Read";
+        const string clearExportKey = "example.interface/I.Clear";
+        var providerArtifact = EmitG1InterfaceProvider(
+            "interface.provider", "T", typeExportKey, readExportKey,
+            clearExportKey);
+        var providerInput = new TrRmStandardArtifactInput(
+            GenericMethodCallsSchemaIdentity, providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "interface.provider",
+            Array.Empty<TrRmStandardArtifactInput>());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Consumer {
+                public T ReadVia<T>(T actualValue)
+                    where T : Example.I<T> {
+                    return actualValue.via<Example.I<T>>.Read(actualValue);
+                }
+            }
+            """), providerReference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var method = program.GenericMethodDefinitions.Single();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "interface.consumer", GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), [
+                new(program, method.SourceInputOrdinal, method.Span,
+                    "consumer.method/ReadVia"),
+            ]);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                GenericMethodCallsSchemaIdentity, artifact),
+            "interface.consumer", [providerInput]);
+
+        var imported = reference.GenericMethodImports.Single();
+        var call = (BoundCall)((BoundReturn)imported.ProofFunction.Body
+            .Statements.Single()).Value!;
+        var identity = call.InterfaceCallIdentity!;
+        Assert.That(identity.IsConstraintCall, Is.True);
+        Assert.That(identity.RequestedInterface.ModuleImport!
+            .ProducerIdentity, Is.EqualTo("interface.provider"));
+        Assert.That(identity.Requirement.DeclarationKey,
+            Is.EqualTo(readExportKey));
+        Assert.That(imported.ProofSupportFunctions, Has.Length.EqualTo(1));
+        Assert.That(imported.ProofSupportFunctions[call.Function]
+                .InterfaceRequirement,
+            Is.EqualTo(identity.Requirement));
+    }
+
+    [Test]
     public void RejectsG1L1InterfaceConstraintsWithoutProviderClosure()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
