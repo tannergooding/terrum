@@ -29726,8 +29726,7 @@ public static partial class SemanticVerifier
                     || (formal.OwnershipDomain == 2
                         && callerOwnershipDomain != 2)
                     || (formal.NullabilityDomain == 1
-                        && callerFormal.NullabilityDomain == 2
-                        && !callerFormal.RequiresBlittable)
+                        && callerFormal.NullabilityDomain == 2)
                     || (formal.RequiresBlittable
                         && !callerFormal.RequiresBlittable)
                     || (formal.RequiresWritable

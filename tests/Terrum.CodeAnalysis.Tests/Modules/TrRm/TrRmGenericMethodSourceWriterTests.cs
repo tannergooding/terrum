@@ -2673,6 +2673,57 @@ internal sealed class TrRmGenericMethodSourceWriterTests
     }
 
     [Test]
+    public void RejectsNullableBlittableCallerFormalForNonnullableGenericTarget()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public T Target<T>(T value) { return value; }
+            public U Forward<U>(U value) where U : [Blittable] {
+                return Target<U>(value);
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration =
+                Terrum.CodeAnalysis.Tests.Semantics
+                    .LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var exports = program.GenericMethodDefinitions.Select(definition =>
+            new TrRmSourceGenericMethodExport(program,
+                definition.SourceInputOrdinal, definition.Span,
+                definition.Name)).ToArray();
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "nullable-blittable-forward.provider",
+            GenericMethodCallsSchemaIdentity, 0,
+            Array.Empty<TrRmSourceTypeExport>(), exports);
+        ValidateGenericMethodArtifact(artifact);
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForGenericMethodCallsParameterLabelsDraft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "Forward",
+            out var forwardDefinition), Is.True);
+        var forwardMethod = checked((int)(
+            forwardDefinition & 0x00FF_FFFF));
+        var signature = tables.Methods.GetSignature(forwardMethod);
+        var (formalFirst, formalCount)
+            = tables.Signatures.GetGenericRange(signature);
+        Assert.That(formalCount, Is.EqualTo(1));
+        Assert.That(tables.GenericParams.GetNullabilityDomain(formalFirst),
+            Is.EqualTo(1));
+
+        var nullableBlittableCallerFormal = artifact.ToArray();
+        var formalOffset = checked(GetSectionOffset(
+            nullableBlittableCallerFormal, 0x0019)
+            + ((formalFirst - 1) * 32) + 22);
+        nullableBlittableCallerFormal[formalOffset] = 2;
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateGenericMethodArtifact(nullableBlittableCallerFormal));
+    }
+
+    [Test]
     public void RejectsAdditionalLocalsInGenericForwardingBody()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

@@ -2159,8 +2159,7 @@ internal static class TrRmRegisterBodyMapValidator
                     genericParams, constraints);
             if ((targetOwnership == 1 && actualOwnership != 1)
                 || (targetOwnership == 2 && actualOwnership != 2)
-                || (targetNullability == 1 && actualNullability == 2
-                    && !actualRequiresBlittable)
+                || (targetNullability == 1 && actualNullability == 2)
                 || (targetRequiresWrite && !actualRequiresWrite)
                 || (targetRequiresBlittable && !actualRequiresBlittable))
             {

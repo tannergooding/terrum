@@ -931,8 +931,7 @@ public static partial class TrRmExecutableCompiler
                     || (targetFormal.OwnershipDomain == 2
                         && callerFormal.OwnershipDomain != 2)
                     || (targetFormal.NullabilityDomain == 1
-                        && callerFormal.NullabilityDomain == 2
-                        && !callerFormal.RequiresBlittable)
+                        && callerFormal.NullabilityDomain == 2)
                     || (targetFormal.RequiresWritable
                         && !callerFormal.RequiresWritable)
                     || (targetFormal.RequiresBlittable
