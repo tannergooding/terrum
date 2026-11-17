@@ -758,6 +758,11 @@ public static partial class TrRmExecutableCompiler
             .ToArray();
         var structTypeDefRows = typeDefRows.Where(typeDefRow =>
             rootTables.TypeDefs.GetKind(typeDefRow) == 1).ToArray();
+        var structureIndexByTypeDefRow = structTypeDefRows
+            .Select((typeDefRow, structureIndex) => (typeDefRow,
+                structureIndex))
+            .ToDictionary(static item => item.typeDefRow,
+                static item => item.structureIndex);
         var enumTypeDefCount = typeDefRows.Count(typeDefRow =>
             rootTables.TypeDefs.GetKind(typeDefRow) == 4);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
@@ -796,6 +801,7 @@ public static partial class TrRmExecutableCompiler
                 || rootTables.TypeDefs.GetOwnerModule(typeDefRow)
                     != rootModuleRow
                 || rootTables.TypeDefs.GetKind(typeDefRow) is not (1 or 4)
+                || rootTables.Imports.IsExpectedDefinition(definitionId)
                 || (rootTables.TypeDefs.GetFlags(typeDefRow) & 3) != 2)
             {
                 throw Invalid(
@@ -833,16 +839,50 @@ public static partial class TrRmExecutableCompiler
             var providerTables = GetTables(binding.ProviderArtifactIndex);
             var expectedTypeDefRow = binding.ExpectedTypeDefRow;
             var providerTypeDefRow = binding.ProviderTypeDefRow;
-            if (consumerTables.TypeDefs.GetKind(expectedTypeDefRow) != 4
-                || providerTables.TypeDefs.GetKind(providerTypeDefRow) != 4)
+            var expectedKind
+                = consumerTables.TypeDefs.GetKind(expectedTypeDefRow);
+            var providerKind
+                = providerTables.TypeDefs.GetKind(providerTypeDefRow);
+            if (expectedKind != providerKind)
+            {
+                if (binding.ConsumerArtifactIndex == 0
+                    && binding.ConsumerModuleRow == rootModuleRow)
+                {
+                    throw Invalid(
+                        "An EN1 TypeDef Import changed its declaration kind.");
+                }
+
+                continue;
+            }
+            if (expectedKind == 1)
+            {
+                if (binding.ConsumerArtifactIndex == 0
+                    && binding.ConsumerModuleRow == rootModuleRow
+                    && (!structureIndexByTypeDefRow.ContainsKey(
+                            expectedTypeDefRow)
+                        || consumerTables.TypeDefs.GetGenericRange(
+                            expectedTypeDefRow).Count != 0
+                        || consumerTables.TypeDefs.GetContractRange(
+                            expectedTypeDefRow).Count != 0
+                        || providerTables.TypeDefs.GetGenericRange(
+                            providerTypeDefRow).Count != 0
+                        || providerTables.TypeDefs.GetContractRange(
+                            providerTypeDefRow).Count != 0))
+                {
+                    throw Unsupported(
+                        "The bounded EN1 source-reference route supports only local non-generic uncontracted struct Import stubs.");
+                }
+
+                continue;
+            }
+            if (expectedKind != 4)
             {
                 if (binding.ConsumerArtifactIndex == 0
                     && binding.ConsumerModuleRow == rootModuleRow)
                 {
                     throw Unsupported(
-                        "The bounded EN1 source-reference route does not yet admit imported non-enum TypeDefs.");
+                        "The bounded EN1 source-reference route supports imported enum and non-generic struct TypeDefs only.");
                 }
-
                 continue;
             }
 
@@ -918,15 +958,23 @@ public static partial class TrRmExecutableCompiler
             }
             if (rootTables.TypeDefs.GetKind(typeDefRow) == 1)
             {
-                if (rootTables.Imports.IsExpectedDefinition(
-                        0x1300_0000u | checked((uint)typeDefRow))
-                    || rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
+                var definitionId = 0x1300_0000u
+                    | checked((uint)typeDefRow);
+                if (rootTables.TypeDefs.GetGenericRange(typeDefRow).Count
                         != 0
                     || rootTables.TypeDefs.GetContractRange(typeDefRow).Count
                         != 0)
                 {
                     throw Unsupported(
-                        "The bounded EN1 struct type-reference route requires local non-generic TypeDefs without contracts.");
+                        "The bounded EN1 struct type-reference route requires non-generic TypeDefs without contracts.");
+                }
+                if (rootTables.Imports.IsExpectedDefinition(definitionId)
+                    && (selectedByTypeDef.ContainsKey(typeDefRow)
+                        || !GetExportKeys(0, rootModuleRow,
+                            typeDefRow).IsEmpty))
+                {
+                    throw Invalid(
+                        "An EN1 expected struct declaration cannot be selected or re-exported.");
                 }
                 continue;
             }
@@ -988,6 +1036,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var enumIndexByImportRow = new Dictionary<int, int>();
+        var structureIndexByImportRow = new Dictionary<int, int>();
         foreach (var binding in typeProviderBindings)
         {
             if (binding.ConsumerArtifactIndex != 0
@@ -996,9 +1045,26 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            var expectedKind = rootTables.TypeDefs.GetKind(
+                binding.ExpectedTypeDefRow);
+            if (expectedKind == 1)
+            {
+                if (!structureIndexByTypeDefRow.TryGetValue(
+                        binding.ExpectedTypeDefRow,
+                        out var structureIndex)
+                    || !structureIndexByImportRow.TryAdd(
+                        binding.ImportRow, structureIndex))
+                {
+                    throw Invalid(
+                        "An EN1 imported struct FieldDef type lost its expected TypeDef view.");
+                }
+                continue;
+            }
+
             var actualKey = (binding.ProviderArtifactIndex,
                 binding.ProviderModuleRow, binding.ProviderTypeDefRow);
-            if (!enumIndexByActual.TryGetValue(actualKey,
+            if (expectedKind != 4
+                || !enumIndexByActual.TryGetValue(actualKey,
                     out var enumIndex)
                 || !enumIndexByImportRow.TryAdd(binding.ImportRow,
                     enumIndex))
@@ -1013,7 +1079,9 @@ public static partial class TrRmExecutableCompiler
             : CreateC1EnumClosureStructSourceTypes(rootTables,
                 rootSnapshot, rootModuleRow, structTypeDefRows,
                 selectedByTypeDef, enumIndexByTypeDefRow,
-                enumIndexByImportRow, enumDefinitions);
+                enumIndexByImportRow, structureIndexByImportRow,
+                enumDefinitions, typeProviderBindings, GetTables,
+                GetSnapshot, GetExportKeys);
         if (!structures.IsEmpty)
         {
             var program = new BoundProgram([], -1) {
@@ -1035,10 +1103,19 @@ public static partial class TrRmExecutableCompiler
         int[] typeDefRows, Dictionary<int, List<string>> selectedByTypeDef,
         Dictionary<int, int> enumIndexByTypeDefRow,
         Dictionary<int, int> enumIndexByImportRow,
-        ImmutableArray<BoundEnumDefinition> enumDefinitions)
+        Dictionary<int, int> structureIndexByImportRow,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        Func<int,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables>
+            getTables,
+        Func<int, int, BoundSourceTypeProviderSnapshot> getSnapshot,
+        Func<int, int, int, ImmutableArray<string>> getExportKeys)
     {
         var structureIndexByTypeDefRow = new Dictionary<int, int>(
             typeDefRows.Length);
+        var typeBindingsByExpectedTypeDef = new Dictionary<int,
+            List<TrRmStandardTypeProviderBinding>>();
         for (var rowIndex = 0; rowIndex < typeDefRows.Length; rowIndex++)
         {
             var typeDefRow = typeDefRows[rowIndex];
@@ -1050,11 +1127,13 @@ public static partial class TrRmExecutableCompiler
                 || tables.TypeDefs.GetGenericRange(typeDefRow).Count != 0
                 || tables.TypeDefs.GetContractRange(typeDefRow).Count != 0
                 || !tables.TypeDefs.HasDeclaredCopy(typeDefRow)
-                || tables.Imports.IsExpectedDefinition(
-                    0x1300_0000u | checked((uint)typeDefRow)))
+                || (tables.Imports.IsExpectedDefinition(
+                        0x1300_0000u | checked((uint)typeDefRow))
+                    && !typeBindingsByExpectedTypeDef.ContainsKey(
+                        typeDefRow)))
             {
                 throw Unsupported(
-                    "The bounded EN1 source struct reference requires local non-generic Copy TypeDefs without contracts.");
+                    "The bounded EN1 source struct reference requires local or bound non-generic Copy TypeDefs without contracts.");
             }
 
             var (layoutFirst, layoutCount)
@@ -1079,6 +1158,26 @@ public static partial class TrRmExecutableCompiler
             structureIndexByTypeDefRow.Add(typeDefRow, rowIndex);
         }
 
+        foreach (var binding in typeProviderBindings)
+        {
+            if (binding.ConsumerArtifactIndex != 0
+                || binding.ConsumerModuleRow != moduleRow
+                || !structureIndexByTypeDefRow.ContainsKey(
+                    binding.ExpectedTypeDefRow))
+            {
+                continue;
+            }
+
+            if (!typeBindingsByExpectedTypeDef.TryGetValue(
+                    binding.ExpectedTypeDefRow, out var bindings))
+            {
+                bindings = [];
+                typeBindingsByExpectedTypeDef.Add(
+                    binding.ExpectedTypeDefRow, bindings);
+            }
+            bindings.Add(binding);
+        }
+
         var exportsByField = new Dictionary<int, List<string>>();
         foreach (var (definition, exportKey) in tables.Exports
             .GetExportsForModule(moduleRow))
@@ -1094,6 +1193,13 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid(
                     "An EN1 FieldDef Export is outside the retained struct closure.");
+            }
+            if (tables.Imports.IsExpectedDefinition(
+                    0x1300_0000u | checked((uint)
+                        tables.Fields.GetOwnerTypeDef(fieldRow))))
+            {
+                throw Invalid(
+                    "An EN1 imported struct TypeDef cannot re-export its expected FieldDefs.");
             }
             if (!exportsByField.TryGetValue(fieldRow, out var keys))
             {
@@ -1151,6 +1257,13 @@ public static partial class TrRmExecutableCompiler
             }
 
             if (type.Form == 0x03 && type.Qualifiers == 0
+                && structureIndexByImportRow.TryGetValue(type.Row,
+                    out var importedStructureIndex))
+            {
+                return (PrimitiveType)(100 + importedStructureIndex);
+            }
+
+            if (type.Form == 0x03 && type.Qualifiers == 0
                 && enumIndexByImportRow.TryGetValue(type.Row,
                     out var importedEnumIndex))
             {
@@ -1170,7 +1283,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             throw Unsupported(
-                "The bounded EN1 struct reference supports only scalar, local enum, imported enum and local non-generic struct FieldDefs.");
+                "The bounded EN1 struct reference supports only scalar, local/imported enum and local/imported non-generic struct FieldDefs.");
         }
 
         var structures = new List<BoundStruct>(typeDefRows.Length);
@@ -1230,16 +1343,99 @@ public static partial class TrRmExecutableCompiler
             var typeDefFlags = tables.TypeDefs.GetFlags(typeDefRow);
             var namespaceName = tables.TypeDefs.GetNamespace(typeDefRow);
             var typeName = tables.TypeDefs.GetName(typeDefRow);
-            var exportKeys = GetStandardTypeExportKeys(
-                tables, moduleRow, typeDefRow);
-            var selectedKeys = selectedByTypeDef.TryGetValue(typeDefRow,
-                out var keys) ? keys.ToImmutableArray()
-                : ImmutableArray<string>.Empty;
-            var origin = new BoundStandardTypeOrigin(provider, typeDefId,
-                exportKeys, selectedByTypeDef.ContainsKey(typeDefRow),
-                ReferenceRoot: provider) {
-                SelectedExportKeys = selectedKeys,
-            };
+            BoundStandardTypeOrigin origin;
+            if (typeBindingsByExpectedTypeDef.TryGetValue(typeDefRow,
+                    out var bindings))
+            {
+                var firstBinding = bindings[0];
+                if (selectedByTypeDef.ContainsKey(typeDefRow)
+                    || bindings.Any(binding =>
+                        binding.ProviderArtifactIndex
+                            != firstBinding.ProviderArtifactIndex
+                        || binding.ProviderModuleRow
+                            != firstBinding.ProviderModuleRow
+                        || binding.ProviderTypeDefRow
+                            != firstBinding.ProviderTypeDefRow
+                        || !StringComparer.Ordinal.Equals(
+                            binding.ProducerIdentity,
+                            firstBinding.ProducerIdentity)
+                        || binding.TargetRequirement
+                            != firstBinding.TargetRequirement
+                        || binding.RuntimePolicy
+                            != firstBinding.RuntimePolicy))
+                {
+                    throw Invalid(
+                        "One EN1 expected struct TypeDef has conflicting provider origins.");
+                }
+
+                var providerSnapshot = getSnapshot(
+                    firstBinding.ProviderArtifactIndex,
+                    firstBinding.ProviderModuleRow);
+                var expectations
+                    = ImmutableArray.CreateBuilder<
+                        BoundSourceTypeExpectation>(
+                        bindings.Count + typeProviderBindings.Length);
+                foreach (var binding in bindings)
+                {
+                    expectations.Add(new BoundSourceTypeExpectation(
+                        provider, binding.ImportRow,
+                        0x1300_0000u
+                            | checked((uint)typeDefRow),
+                        binding.ProducerIdentity, binding.ExportKey,
+                        binding.TargetRequirement, binding.RuntimePolicy,
+                        providerSnapshot,
+                        0x1300_0000u
+                            | checked((uint)binding.ProviderTypeDefRow)));
+                }
+
+                foreach (var binding in typeProviderBindings)
+                {
+                    if (binding.ConsumerArtifactIndex
+                            != firstBinding.ProviderArtifactIndex
+                        || binding.ConsumerModuleRow
+                            != firstBinding.ProviderModuleRow)
+                    {
+                        continue;
+                    }
+
+                    expectations.Add(new BoundSourceTypeExpectation(
+                        getSnapshot(binding.ConsumerArtifactIndex,
+                            binding.ConsumerModuleRow),
+                        binding.ImportRow,
+                        0x1300_0000u
+                            | checked((uint)binding.ExpectedTypeDefRow),
+                        binding.ProducerIdentity, binding.ExportKey,
+                        binding.TargetRequirement, binding.RuntimePolicy,
+                        getSnapshot(binding.ProviderArtifactIndex,
+                            binding.ProviderModuleRow),
+                        0x1300_0000u
+                            | checked((uint)binding.ProviderTypeDefRow)));
+                }
+
+                var exportKeys = bindings.Select(
+                        static binding => binding.ExportKey)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToImmutableArray();
+                origin = new BoundStandardTypeOrigin(providerSnapshot,
+                    0x1300_0000u
+                        | checked((uint)firstBinding.ProviderTypeDefRow),
+                    exportKeys, false, expectations.ToImmutable(),
+                    ReferenceRoot: provider) {
+                    SelectedExportKeys = [],
+                };
+            }
+            else
+            {
+                var exportKeys = getExportKeys(0, moduleRow, typeDefRow);
+                var selectedKeys = selectedByTypeDef.TryGetValue(typeDefRow,
+                    out var keys) ? keys.ToImmutableArray()
+                    : ImmutableArray<string>.Empty;
+                origin = new BoundStandardTypeOrigin(provider, typeDefId,
+                    exportKeys, selectedByTypeDef.ContainsKey(typeDefRow),
+                    ReferenceRoot: provider) {
+                    SelectedExportKeys = selectedKeys,
+                };
+            }
             structures.Add(new BoundStruct(
                 namespaceName.Length == 0 ? typeName
                     : namespaceName + "." + typeName,

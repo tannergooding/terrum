@@ -393,7 +393,7 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
-    public void RejectsImportedStructsInMixedEnumClosure()
+    public void ReemitsImportedStructFieldClosure()
     {
         var schemaIdentity = s_schemaIdentities[0];
         var providerTree = SyntaxTree.Parse("""
@@ -459,13 +459,88 @@ internal sealed class TrRmC1EnumClosureSourceTests
         consumerArtifact = RewriteFieldTypeSpecAsImport(
             consumerArtifact, schemaIdentity, packetFieldStart, 1);
 
-        Assert.Throws<NotSupportedException>(() =>
+        var providers = new[] {
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+        };
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "StructConsumer", providers, ["type.packet"]);
+        Assert.That(reference.Structures, Has.Length.EqualTo(2));
+        var importedMarker = reference.Structures.Single(
+            static structure => structure.Name == "Demo.Marker");
+        Assert.That(importedMarker.StandardTypeOrigin,
+            Is.Not.Null);
+        Assert.That(importedMarker.StandardTypeOrigin!.Expectations,
+            Has.Length.EqualTo(1));
+
+        var sourceFreeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        Assert.That(sourceFreeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                sourceFreeCompilation.Diagnostics));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(
+            sourceFreeCompilation.Program!, "StructConsumer",
+            schemaIdentity, 1);
+        var reemittedTables
+            = TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(reemitted,
+                        SchemaFor(schemaIdentity)));
+        Assert.That(reemittedTables.Imports.Count, Is.EqualTo(1));
+        var reemittedPacketRow = Enumerable.Range(1,
+                reemittedTables.TypeDefs.Count)
+            .Single(row =>
+                reemittedTables.TypeDefs.GetName(row) == "Packet");
+        var (reemittedFieldStart, _) = reemittedTables.TypeDefs
+            .GetFieldRange(reemittedPacketRow);
+        var fieldType = reemittedTables.TypeSpecs.GetTypeSpecRef(
+            reemittedTables.Fields.GetTypeSpecRef(reemittedFieldStart));
+        Assert.That(fieldType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(fieldType.Row, Is.EqualTo(1));
+
+        var reloadedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                "StructConsumer", providers, ["type.packet"]);
+        Assert.That(reloadedReference.Structures, Has.Length.EqualTo(2));
+        var reloadedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reloadedReference);
+        Assert.That(reloadedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reloadedCompilation.Diagnostics));
+
+        var incompatibleProviderTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Shade : int8 { Dark = -1 }
+                public struct Marker {
+                    public int64 Id;
+                }
+            }
+            """, "incompatible-struct-provider.terrum");
+        var incompatibleProviderCompilation
+            = Compilation.CreateLibrary(incompatibleProviderTree);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderProgram
+            = (BoundProgram)incompatibleProviderCompilation.Program!;
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderProgram, "StructProvider",
+                schemaIdentity, 1, [
+                    new TrRmSourceTypeExport("Demo", "Marker",
+                        "type.marker"),
+                ], [], [], [
+                    CreateExport(incompatibleProviderProgram,
+                        incompatibleProviderTree, 0, "Shade", [], "shade"),
+                ]);
+        Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(schemaIdentity,
                     consumerArtifact),
                 "StructConsumer", [
                     new TrRmStandardArtifactInput(schemaIdentity,
-                        providerArtifact),
+                        incompatibleProviderArtifact),
                 ], ["type.packet"]));
     }
 
