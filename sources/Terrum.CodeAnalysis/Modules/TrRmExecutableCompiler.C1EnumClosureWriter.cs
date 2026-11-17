@@ -695,12 +695,11 @@ public static partial class TrRmExecutableCompiler
                                 "An EN1 selected class TypeDef key is absent from its provider declaration.");
                         }
 
-                        var typeImports = declaration.SelectedExportKeys
-                            .Select(key => new C1EnumClosureImport(
-                                classView.Provider.ModuleIdentity, key,
-                                classView.Provider.TargetRequirement,
-                                classView.Provider.RuntimePolicy))
-                            .ToImmutableArray();
+                        var typeImport = new C1EnumClosureImport(
+                            classView.Provider.ModuleIdentity,
+                            declaration.SelectedExportKeys[0],
+                            classView.Provider.TargetRequirement,
+                            classView.Provider.RuntimePolicy);
                         var fieldExpectations
                             = ImmutableArray.CreateBuilder<
                                 BoundStandardClassFieldExpectation>();
@@ -720,29 +719,23 @@ public static partial class TrRmExecutableCompiler
                                     "An EN1 imported class query selects an invalid FieldDef key.");
                             }
 
-                            foreach (var key in field.SelectedExportKeys)
-                            {
-                                fieldExpectations.Add(
-                                    new BoundStandardClassFieldExpectation(
-                                        0, 0, field.DefinitionId,
-                                        field.OwnerDefinitionId,
-                                        field.DefinitionId,
-                                        field.OwnerDefinitionId, key,
-                                        classView.Provider));
-                            }
+                            fieldExpectations.Add(
+                                new BoundStandardClassFieldExpectation(
+                                    0, 0, field.DefinitionId,
+                                    field.OwnerDefinitionId,
+                                    field.DefinitionId,
+                                    field.OwnerDefinitionId,
+                                    field.SelectedExportKeys[0],
+                                    classView.Provider));
                         }
 
                         standardClassEmissions.Add(
                             new C1EnumClosureStandardClassEmission(
-                                classView, [],
-                                typeImports[0] with {
+                                classView, [], typeImport with {
                                     RootImportRow = 0,
                                 },
                                 rootTypeDefRow,
-                                fieldExpectations.ToImmutable()) {
-                                AdditionalImports =
-                                    typeImports.RemoveAt(0),
-                            });
+                                fieldExpectations.ToImmutable()));
                     }
                     continue;
                 }

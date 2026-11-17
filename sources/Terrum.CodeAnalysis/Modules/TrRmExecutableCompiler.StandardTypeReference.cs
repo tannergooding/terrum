@@ -291,6 +291,12 @@ public static partial class TrRmExecutableCompiler
         var selectedTypeDefs = new Dictionary<int, List<string>>();
         var selectedFieldKeySet = selectedFieldExportKeys.ToHashSet(
             StringComparer.Ordinal);
+        if (selectedFieldKeySet.Count != selectedFieldExportKeys.Length)
+        {
+            throw new ArgumentException(
+                "Selected FieldDef ExportKeys cannot contain duplicates.",
+                nameof(selectedFieldExportKeys));
+        }
         foreach (var exportKey in exportKeys)
         {
             if (!rootTables.Exports.TryGetDefinitionForKey(rootModuleRow,
@@ -814,8 +820,8 @@ public static partial class TrRmExecutableCompiler
                         declaration.Fields.Length);
             foreach (var field in declaration.Fields)
             {
-                var selectedKeys = field.ExportKeys.Where(
-                        selectedFieldKeySet.Contains)
+                var selectedKeys = selectedFieldExportKeys.Where(
+                        field.ExportKeys.Contains)
                     .ToImmutableArray();
                 if (!selectedKeys.IsEmpty
                     && ((field.Flags & 3) != 2
@@ -899,8 +905,8 @@ public static partial class TrRmExecutableCompiler
             foreach (var field in declaration.Fields)
             {
                 selectedFields.Add(field with {
-                    SelectedExportKeys = [.. field.ExportKeys.Where(
-                        selectedFieldKeySet.Contains)],
+                    SelectedExportKeys = [.. selectedFieldExportKeys.Where(
+                        field.ExportKeys.Contains)],
                 });
             }
             declaration = declaration with {
@@ -1105,6 +1111,14 @@ public static partial class TrRmExecutableCompiler
         bool allowClassLayoutQueryBody = false,
         bool resolveAllClassFieldTypes = false)
     {
+        if (selectedFieldExportKeys.Distinct(StringComparer.Ordinal)
+                .Count() != selectedFieldExportKeys.Length)
+        {
+            throw new ArgumentException(
+                "Selected FieldDef ExportKeys cannot contain duplicates.",
+                nameof(selectedFieldExportKeys));
+        }
+
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
         var rootTables = ValidateForeignInvocationArtifact(
@@ -1818,8 +1832,6 @@ public static partial class TrRmExecutableCompiler
 
         if (selectedFieldExportKeys.Length != 0 && !structures.IsEmpty)
         {
-            var selectedFieldKeys = selectedFieldExportKeys.ToHashSet(
-                StringComparer.Ordinal);
             var selectedStructures = new HashSet<int>();
             var pendingStructures = new Stack<int>();
 
@@ -1928,8 +1940,8 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
 
-                    var selectedKeys = origin.ExportKeys.Where(
-                            selectedFieldKeys.Contains)
+                    var selectedKeys = selectedFieldExportKeys.Where(
+                            origin.ExportKeys.Contains)
                         .ToImmutableArray();
                     if (selectedKeys.IsEmpty)
                     {

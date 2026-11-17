@@ -1546,8 +1546,10 @@ TypeSpec/provider identities. Nested structs preserve unknown class ownership
 and are rejected by Copy-sensitive verification. These class and struct routes
 are unverified under the active hold and do not cover PI1 property carriers.
 Provisional EN1 type+field-key reference selection now retains selected local
-class fields and fields in the selected inline-struct closure. Source binding
-and mandatory verification admit class-root offsetof FieldPaths through one
+class fields and fields in the selected inline-struct closure, preserving
+caller key order so new query imports use the first explicit alias while
+existing Imports retain their keys. Source binding and mandatory verification
+admit class-root offsetof FieldPaths through one
 selected public instance field and subsequent inline-struct fields. Under the
 unapproved exact class-layout successors, the bounded producer emits a
 single parameterless `nint` method whose return expression may combine

@@ -1145,6 +1145,111 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void UsesFirstExplicitAliasesForEN1ClassQueryBodies()
+    {
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box { public int32 Value; }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var classDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclaration = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.FieldDeclaration);
+        var classIndex = providerProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(providerProgram,
+            classIndex, classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclaration.Span, "field.box.value"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassLayoutProvider", schemaIdentity, 1,
+            [], [], [classExport], []);
+        providerArtifact = AddExportAlias(providerArtifact, schemaIdentity,
+            "type.box", "type.box.alias");
+        providerArtifact = AddExportAlias(providerArtifact, schemaIdentity,
+            "field.box.value", "field.box.value.alias");
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ClassLayoutProvider", [], [
+                "type.box.alias",
+                "type.box",
+            ], [
+                "field.box.value.alias",
+                "field.box.value",
+            ]);
+        var selectedClass = reference.StandardClassDeclarations.Single(
+            static declaration =>
+                !declaration.SelectedExportKeys.IsEmpty);
+        Assert.That(selectedClass.SelectedExportKeys,
+            Is.EqualTo(["type.box.alias", "type.box"]));
+        Assert.That(selectedClass.Declaration.Fields.Single(
+            static field => field.Name == "Value").SelectedExportKeys,
+            Is.EqualTo(["field.box.value.alias", "field.box.value"]));
+
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                consumerArtifact, SchemaFor(schemaIdentity), null,
+                usesNativePointerLoads: false,
+                standardSchemaIdentity: schemaIdentity));
+        Assert.That(consumerTables.Imports.Count, Is.EqualTo(2));
+        var rootType = consumerTables.TypeSpecs.GetTypeSpecRef(
+            consumerTables.TargetLayoutDependencies
+                .GetSubjectTypeSpecRef(1));
+        Assert.That(rootType.Form, Is.EqualTo((byte)0x03));
+        Assert.That(consumerTables.Imports.GetBindingForImportRow(
+            checked((int)rootType.Row)).ExportKey,
+            Is.EqualTo("type.box.alias"));
+        var fieldReference
+            = consumerTables.TargetLayoutDependencyFields
+                .GetFieldReference(consumerTables.TargetLayoutDependencies
+                    .GetFieldRange(1).First);
+        Assert.That(fieldReference >> 24, Is.EqualTo(0x1Cu));
+        Assert.That(consumerTables.Imports.GetBindingForImportRow(
+            checked((int)(fieldReference & 0x00FF_FFFF))).ExportKey,
+            Is.EqualTo("field.box.value.alias"));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", [providerInput]);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            "ClassLayoutConsumer", schemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            "ClassLayoutConsumer", [providerInput]);
+        Assert.That(NativeEmitter.EmitLibrary(reloaded, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
     public void LowersEN1ClassQueryFromCompleteProviderFieldLayout()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -2811,6 +2916,99 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .ValidateC1AndGetExecutionTables(
                 new TrRmArtifactIndex(result, schema));
         return result;
+    }
+
+    private static byte[] AddExportAlias(byte[] artifact,
+        string schemaIdentity, string existingKey, string aliasKey)
+    {
+        var schema = SchemaFor(schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        var definition = tables.Exports.GetExportsForModule(1)
+            .Single(export => StringComparer.Ordinal.Equals(
+                export.ExportKey, existingKey)).Definition;
+        if (tables.Exports.GetExportsForModule(1).Any(export =>
+                StringComparer.Ordinal.Equals(export.ExportKey, aliasKey)))
+        {
+            throw new ArgumentException(
+                "The ExportKey alias already exists in the Module.",
+                nameof(aliasKey));
+        }
+
+        if (!index.TryGetSection(0x0002, out var originalStringBytes,
+                out var originalStringCount)
+            || !index.TryGetSection(0x001D, out var originalExportBytes,
+                out var originalExportCount))
+        {
+            throw new InvalidDataException(
+                "The alias fixture requires String and Export tables.");
+        }
+
+        var originalStrings = new TrRmStringTableReader(
+            originalStringBytes, originalStringCount);
+        var stringRows = new List<(string Text, int Encoding)>(
+            originalStrings.Count + 1);
+        var stringRowsByText = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        for (var row = 1; row <= originalStrings.Count; row++)
+        {
+            var text = originalStrings.DecodeNamespace(row);
+            stringRows.Add((text, GetTextEncoding(text)));
+            _ = stringRowsByText.TryAdd(text, row);
+        }
+
+        if (stringRowsByText.ContainsKey(aliasKey))
+        {
+            throw new ArgumentException(
+                "The ExportKey alias is already present in the String table.",
+                nameof(aliasKey));
+        }
+
+        var aliasStringRow = stringRows.Count + 1;
+        stringRows.Add((aliasKey, GetTextEncoding(aliasKey)));
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
+        var exportBytes = new byte[checked(originalExportBytes.Length + 8)];
+        originalExportBytes.CopyTo(exportBytes);
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(
+                exportBytes.AsSpan(originalExportBytes.Length), definition);
+        System.Buffers.Binary.BinaryPrimitives
+            .WriteUInt32LittleEndian(
+                exportBytes.AsSpan(originalExportBytes.Length + 4),
+                checked((uint)aliasStringRow));
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind == 0x0002)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)stringRows.Count), stringBytes));
+            }
+            else if (kind == 0x001D)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)(originalExportCount + 1)),
+                    exportBytes));
+            }
+            else
+            {
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    section.ToArray()));
+            }
+        }
+
+        var result = TrRmArtifactWriter.Encode(sections, schema);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(
+                new TrRmArtifactIndex(result, schema));
+        return result;
+
+        static int GetTextEncoding(string text)
+            => text.Any(static character => character > 0x7F) ? 1 : 0;
     }
 
     private static byte[] AsStaticClassField(byte[] artifact,
