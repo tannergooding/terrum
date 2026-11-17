@@ -216,6 +216,13 @@ cannot retain the full observation and coupling obligations, preserve the
 symbolic Body for interchange or refuse persistence of the evaluated form;
 never emit an orphan scalar constant and discard its dependencies.
 
+Ordinary Body linkage is separately specified by the unapproved
+[Body layout-query dependency proposal](standard-trrm-en1-body-layout-dependencies.md):
+ordered exact matching of rows outside request/value ranges, with genuine
+value-owner linkage or symbolic retention after folding. The existing
+reader and producer changes are partial; the proposal's full acceptance
+requirements remain open.
+
 ## Integration owners and inspected evidence
 
 On adoption, integrate the recipe into
