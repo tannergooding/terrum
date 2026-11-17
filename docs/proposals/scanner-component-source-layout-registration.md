@@ -2,10 +2,9 @@
 
 **Status: unapproved candidate; provisionally actionable only under the user's
 authorized missing-contract workflow.** The option is provisionally implemented
-for scanner-source compilation in `scan-component`/`build-component`, with
-coverage in `CliTests.LayoutCoreManifest`; the focused Debug selection passed
-with zero skips. This does not select production Core authority/provider,
-configure subject-source compilation, or make a stability promise.
+for scanner-source compilation in `scan-component`/`build-component`. This does
+not select production Core authority/provider, configure subject-source
+compilation, or make a stability promise.
 
 ## Missing decision and recommendation
 
