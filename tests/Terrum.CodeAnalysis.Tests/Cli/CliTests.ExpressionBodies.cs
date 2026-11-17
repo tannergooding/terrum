@@ -24,7 +24,6 @@ internal sealed partial class CliTests
         var producer = Path.Combine(directory, "producer.trm");
         var consumer = Path.Combine(directory, "consumer.trm");
         var nativeProducer = Path.Combine(directory, "producer.trmn");
-        var nativeConsumer = Path.Combine(directory, "consumer.trmn");
         var hostedImage = Path.Combine(directory, "host.exe");
         var scannedImage = Path.Combine(directory, "scanner.exe");
         var layoutManifest = Path.Combine(directory, "layout.json");
@@ -55,18 +54,18 @@ internal sealed partial class CliTests
             (result, _, _) = await RunAsync([], "run-module", consumer, producer, "--runtime", policy).ConfigureAwait(false);
             Assert.That(result, Is.EqualTo(42));
 
-            (result, output, error) = await RunAsync([], "compile-native", "producer",
-                producerSource, "ExpressionProducer", "--export", "Read", "--export",
-                "Value.Create", "--export", "Value.#get:Result", "-o", nativeProducer,
-                "--runtime", policy, "--layout-core-manifest", layoutManifest,
+            var originalNativeProducer = "TRRM"u8.ToArray();
+            await File.WriteAllBytesAsync(nativeProducer, originalNativeProducer)
+                .ConfigureAwait(false);
+            (result, output, error) = await RunAsync([], "compile-native",
+                "producer", producerSource, "ExpressionProducer", "--export",
+                "Read", "--export", "Value.Create", "--export",
+                "Value.#get:Result", "-o", nativeProducer, "--runtime", policy,
                 "--json").ConfigureAwait(false);
-            Assert.That(result == 0, Is.True, output + error);
-            (result, output, error) = await RunAsync([], "compile-native", "consumer",
-                consumerSource, nativeProducer, "-o", nativeConsumer, "--runtime", policy, "--json").ConfigureAwait(false);
-            Assert.That(result == 0, Is.True, output + error);
-            (result, _, _) = await RunAsync([], "run-native", nativeConsumer, nativeProducer,
-                "--runtime", policy).ConfigureAwait(false);
-            Assert.That(result, Is.EqualTo(42));
+            Assert.That(result, Is.EqualTo(1), output + error);
+            Assert.That(output, Does.Contain("TRM3005"), output + error);
+            Assert.That(await File.ReadAllBytesAsync(nativeProducer)
+                .ConfigureAwait(false), Is.EqualTo(originalNativeProducer));
 
             var bytes = Encoding.UTF8.GetBytes(Entry + Environment.NewLine + Library);
             (result, output, error) = await RunAsync(bytes, "build", "-", "-o", hostedImage,

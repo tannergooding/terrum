@@ -16,18 +16,64 @@ public static partial class TrRmExecutableCompiler
         PrimitiveType.Bool, PrimitiveType.Char16, PrimitiveType.Int32,
         PrimitiveType.Int64, PrimitiveType.UInt32, PrimitiveType.UInt64,
         PrimitiveType.Float32, PrimitiveType.Float64,
+        PrimitiveType.NativeInt, PrimitiveType.NativeUInt,
     ];
 
-    private static int CompactBuiltinTypeIndex(PrimitiveType type, bool hasFloatingTypes)
+    private static int CompactBuiltinTypeIndex(PrimitiveType type,
+        bool hasFloatingTypes, bool hasNativeWidthTypes)
     {
         var index = Array.IndexOf(s_compactBuiltinTypes, type);
-        var typeCount = hasFloatingTypes
-            ? s_compactBuiltinTypes.Length : s_compactBuiltinTypes.Length - 2;
-        if (index < 0 || index >= typeCount)
+        var typeCount = 6 + (hasFloatingTypes ? 2 : 0)
+            + (hasNativeWidthTypes ? 2 : 0);
+        var compactIndex = index switch {
+            >= 0 and < 6 => index,
+            6 or 7 when hasFloatingTypes => index,
+            8 or 9 when hasNativeWidthTypes
+                => 6 + (hasFloatingTypes ? 2 : 0) + index - 8,
+            _ => -1,
+        };
+        if (compactIndex < 0 || compactIndex >= typeCount)
         {
             throw Unsupported($"Scalar type {type} has no compact Body TypeMap entry.");
         }
-        return index + 1;
+        return compactIndex + 1;
+    }
+
+    private static PrimitiveType[] CompactBuiltinTypeMap(
+        bool hasFloatingTypes, bool hasNativeWidthTypes)
+    {
+        var typeCount = 6 + (hasFloatingTypes ? 2 : 0)
+            + (hasNativeWidthTypes ? 2 : 0);
+        var types = new PrimitiveType[typeCount];
+        Array.Copy(s_compactBuiltinTypes, 0, types, 0, 6);
+        var index = 6;
+        if (hasFloatingTypes)
+        {
+            Array.Copy(s_compactBuiltinTypes, 6, types, index, 2);
+            index += 2;
+        }
+        if (hasNativeWidthTypes)
+        {
+            Array.Copy(s_compactBuiltinTypes, 8, types, index, 2);
+        }
+        return types;
+    }
+
+    private static bool HasNativeWidthScalar(BoundFunction function)
+    {
+        var found = function.ReturnType is PrimitiveType.NativeInt
+            or PrimitiveType.NativeUInt
+            || function.Variables.Any(static variable =>
+                variable.Type is PrimitiveType.NativeInt or PrimitiveType.NativeUInt);
+        if (found)
+        {
+            return true;
+        }
+
+        _ = BoundTreeTraversal.VisitExpressions(function.Body,
+            expression => found |= expression.Type is PrimitiveType.NativeInt
+                or PrimitiveType.NativeUInt);
+        return found;
     }
 
     private static (int Opcode, int Kind) IntegerArithmeticEncoding(TokenKind operation,
@@ -50,8 +96,10 @@ public static partial class TrRmExecutableCompiler
         var instructions = new List<byte>();
         var current = new int[function.Variables.Length];
         var next = function.ParameterCount;
-        var builtinTypeCount = hasFloatingTypes
-            ? s_compactBuiltinTypes.Length : s_compactBuiltinTypes.Length - 2;
+        var hasNativeWidthTypes = HasNativeWidthScalar(function);
+        var builtinTypeMap = CompactBuiltinTypeMap(
+            hasFloatingTypes, hasNativeWidthTypes);
+        var builtinTypeCount = builtinTypeMap.Length;
         for (var parameter = 0; parameter < next; parameter++)
         {
             current[parameter] = parameter + 1;
@@ -61,7 +109,8 @@ public static partial class TrRmExecutableCompiler
 
         int BodyTypeIndex(PrimitiveType type)
         {
-            return CompactBuiltinTypeIndex(type, hasFloatingTypes);
+            return CompactBuiltinTypeIndex(type, hasFloatingTypes,
+                hasNativeWidthTypes);
         }
 
         int EmitExpression(BoundExpression expression)
@@ -97,7 +146,8 @@ public static partial class TrRmExecutableCompiler
                     if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type))
                     {
                         if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked
-                            && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64)
+                            && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64
+                                or PrimitiveType.NativeInt)
                         {
                             opcode = 0x17;
                         }
@@ -313,7 +363,7 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < builtinTypeCount; index++)
         {
             WriteToSpan(destination, ref bodyPosition,
-                (ulong)TypeRow(s_compactBuiltinTypes[index]), 4);
+                (ulong)TypeRow(builtinTypeMap[index]), 4);
         }
         foreach (var type in nativeParameterTypes)
         {
@@ -797,7 +847,8 @@ public static partial class TrRmExecutableCompiler
                 };
                 if (opcode == 0x15 && kind is 6 or 7
                     && (first.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        or PrimitiveType.NativeInt or PrimitiveType.NativeUInt)
                         || second.Type != PrimitiveType.UInt32))
                 {
                     throw Invalid("Checked shift requires an integer and a uint32 count.");

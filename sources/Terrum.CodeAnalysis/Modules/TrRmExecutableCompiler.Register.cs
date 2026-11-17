@@ -259,7 +259,8 @@ public static partial class TrRmExecutableCompiler
                     tables.ConstantSources, tables.FrozenValueNodes, tables.Blobs,
                     tables.TypeSpecs, tables.Features, tables.Modules,
                     tables.TypeDefs, tables.EnumDefs, tables.Imports,
-                    tables.A3LayoutResourceLedger);
+                    tables.A3LayoutResourceLedger, tables.Fields,
+                    tables.TransparentConstantDomains);
                 if (result.Type != resultType)
                 {
                     throw Unsupported("ConstantMap result does not match the selected MethodSig type.");
@@ -658,6 +659,7 @@ public static partial class TrRmExecutableCompiler
             PrimitiveType.Char32 => uint.MaxValue,
             PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
                 or PrimitiveType.Int64 or PrimitiveType.UInt32 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
                 or PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float64 => -1,
             PrimitiveType.Float32 => uint.MaxValue,
             _ => throw Unsupported($"R15 is not a valid result constant for {type}."),

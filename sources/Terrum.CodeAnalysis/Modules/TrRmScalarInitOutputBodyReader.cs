@@ -137,9 +137,20 @@ internal static class TrRmScalarInitOutputBodyReader
             }
             else
             {
-                var type = TrRmCompactLinearBodyReader.ResolveType(types, typeSpec);
-                if (mode == 2 && Scalar(type))
+                var type = mode == 2
+                    ? InitOutputReferentType(types, typeSpec)
+                    : TrRmCompactLinearBodyReader.ResolveType(types,
+                        typeSpec);
+                if (mode == 2)
                 {
+                    if (ruleRevision == 0
+                        || (ruleRevision
+                                == TrRmDevelopmentFeatureTableReader
+                                    .ScalarInitOutputInitialRuleRevision
+                            && type != 8))
+                    {
+                        throw InvalidBody();
+                    }
                     hasOutput = true;
                 }
                 else if (mode != 0)
@@ -166,6 +177,48 @@ internal static class TrRmScalarInitOutputBodyReader
         }
 
         return signature;
+    }
+
+    private static ushort InitOutputReferentType(
+        TrRmTypeSpecTableReader types, uint typeSpecRef)
+    {
+        var type = types.GetTypeSpecRef(typeSpecRef);
+        if (!type.IsRow || type.Form != 0x0E
+            || (type.Qualifiers & ~1) != 0)
+        {
+            throw InvalidBody();
+        }
+
+        var referentTypeSpec
+            = BinaryPrimitives.ReadUInt32LittleEndian(
+                types.GetRow(type.Row)[2..]);
+        var referentType
+            = TrRmCompactLinearBodyReader.ResolveType(types,
+                referentTypeSpec);
+        return Scalar(referentType) ? referentType
+            : throw InvalidBody();
+    }
+
+    private static bool CanForwardInitializationReference(
+        TrRmTypeSpecTableReader types, uint sourceTypeSpecRef,
+        uint targetTypeSpecRef)
+    {
+        var source = types.GetTypeSpecRef(sourceTypeSpecRef);
+        var target = types.GetTypeSpecRef(targetTypeSpecRef);
+        if (!source.IsRow || source.Form != 0x0E
+            || !target.IsRow || target.Form != 0x0E
+            || ((target.Qualifiers & 1) != 0
+                && (source.Qualifiers & 1) == 0))
+        {
+            return false;
+        }
+
+        var sourceReferent = BinaryPrimitives.ReadUInt32LittleEndian(
+            types.GetRow(source.Row)[2..]);
+        var targetReferent = BinaryPrimitives.ReadUInt32LittleEndian(
+            types.GetRow(target.Row)[2..]);
+        return types.AreEquivalentTypeSpecRefs(sourceReferent,
+            targetReferent);
     }
 
     private static ushort ResultType(TrRmTypeSpecTableReader types, uint typeSpecRef)
@@ -411,8 +464,13 @@ internal static class TrRmScalarInitOutputBodyReader
             for (var ordinal = 0; ordinal < parameterCount; ordinal++)
             {
                 var row = first + ordinal;
-                var type = TrRmCompactLinearBodyReader.ResolveType(_types, _parameters.GetTypeSpec(row));
-                if (_parameters.GetMode(row) == 2)
+                var mode = _parameters.GetMode(row);
+                var typeSpec = _parameters.GetTypeSpec(row);
+                var type = mode == 2
+                    ? InitOutputReferentType(_types, typeSpec)
+                    : TrRmCompactLinearBodyReader.ResolveType(_types,
+                        typeSpec);
+                if (mode == 2)
                 {
                     if (formalPlace >= placeCount || Type(_placeTypes[formalPlace]) != type)
                     {
@@ -698,9 +756,13 @@ internal static class TrRmScalarInitOutputBodyReader
             for (var ordinal = 0; ordinal < parameterCount; ordinal++)
             {
                 var row = first + ordinal;
-                var type = TrRmCompactLinearBodyReader.ResolveType(_types,
-                    _parameters.GetTypeSpec(row));
-                if (_parameters.GetMode(row) == 2)
+                var mode = _parameters.GetMode(row);
+                var typeSpec = _parameters.GetTypeSpec(row);
+                var type = mode == 2
+                    ? InitOutputReferentType(_types, typeSpec)
+                    : TrRmCompactLinearBodyReader.ResolveType(_types,
+                        typeSpec);
+                if (mode == 2)
                 {
                     if (formalPlace >= placeCount || Type(_placeTypes[formalPlace]) != type)
                     {
@@ -888,21 +950,76 @@ internal static class TrRmScalarInitOutputBodyReader
                     conditionOperation = operation;
                 }
             }
-            if (conditionOperation is null || entryPlaceState is null
-                || conditionOperation.Opcode != 0x12
-                || conditionOperation.MethodRow == 0
+            var outputConditionCalls = new List<Instruction>();
+            foreach (var operation in entryOperations)
+            {
+                if (operation.Opcode == 0x12
+                    && !operation.OutputPlaces.IsDefaultOrEmpty)
+                {
+                    outputConditionCalls.Add(operation);
+                }
+            }
+            var conditionCall = conditionOperation is { Opcode: 0x12 } call
+                ? call : null;
+            var hasDirectOutputConditionCall = false;
+            if (outputConditionCalls.Count != 0)
+            {
+                if (conditionCall is null)
+                {
+                    throw InvalidBody();
+                }
+
+                foreach (var outputCall in outputConditionCalls)
+                {
+                    if (outputCall.Result == trueCondition)
+                    {
+                        if (outputConditionCalls.Count != 1
+                            || conditionCall.MethodRow == 0)
+                        {
+                            throw InvalidBody();
+                        }
+
+                        hasDirectOutputConditionCall = true;
+                        continue;
+                    }
+
+                    var isConditionArgument = false;
+                    foreach (var operand in conditionCall.Operands)
+                    {
+                        if (operand == outputCall.Result)
+                        {
+                            isConditionArgument = true;
+                            break;
+                        }
+                    }
+
+                    if (!isConditionArgument)
+                    {
+                        throw InvalidBody();
+                    }
+                }
+            }
+            if (entryPlaceState is null
                 || Type(_valueTypes[trueCondition - 1]) != 1
-                || (conditionOperation.OutputPlaces.IsDefaultOrEmpty && _ruleRevision < 6)
-                || entryOperations.IsEmpty || entryOperations[^1].Result != trueCondition
-                || _valueOccurrences[trueCondition - 1] != 1)
+                || ((conditionOperation is null
+                        || conditionOperation.OutputPlaces.IsDefaultOrEmpty)
+                    && _ruleRevision < 6)
+                || (conditionOperation is null
+                    && _valueParameters[trueCondition - 1] < 0
+                    && _definitions[trueCondition - 1] == uint.MaxValue)
+                || _valueOccurrences[trueCondition - 1] == 0)
             {
                 throw InvalidBody();
             }
 
             var expectedTrue = (bool[])entryPlaceState.Clone();
-            foreach (var place in conditionOperation.OutputPlaces)
+            if (hasDirectOutputConditionCall
+                && conditionCall is not null)
             {
-                expectedTrue[place - 1] = true;
+                foreach (var place in conditionCall.OutputPlaces)
+                {
+                    expectedTrue[place - 1] = true;
+                }
             }
             foreach (var place in blocks[1].InheritedPlaces)
             {
@@ -1298,14 +1415,18 @@ internal static class TrRmScalarInitOutputBodyReader
                     var valueId = Number(referenceWidth);
                     operands.Add(valueId);
                     var typeSpec = _parameters.GetTypeSpec(first + argument);
+                    var mode = _parameters.GetMode(first + argument);
                     var nativeOutput = FindNativeOutput(
                         _contractTable.GetNativeOutputs(methodRow), argument);
                     var type = nativeOutput is not null
                         && TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
                             _types, typeSpec, out _)
                             ? (ushort)0x8C
-                            : TrRmCompactLinearBodyReader.ResolveType(_types, typeSpec);
-                    switch (_parameters.GetMode(first + argument))
+                            : mode == 2
+                                ? InitOutputReferentType(_types, typeSpec)
+                                : TrRmCompactLinearBodyReader.ResolveType(
+                                    _types, typeSpec);
+                    switch (mode)
                     {
                         case 0:
                         {
@@ -1364,10 +1485,26 @@ internal static class TrRmScalarInitOutputBodyReader
                         {
                             var place = UseHandle(valueId);
                             if (Type(_valueTypes[valueId - 1]) != type
-                                || _placeParameters[place - 1] != -1 || _initialized[place - 1]
+                                || _initialized[place - 1]
                                 || !destinations.Add(place))
                             {
                                 throw InvalidBody();
+                            }
+                            var sourceParameter = _placeParameters[place - 1];
+                            if (sourceParameter >= 0)
+                            {
+                                var sourceTypeSpec = _parameters.GetTypeSpec(
+                                    first + sourceParameter);
+                                var targetTypeSpec = _parameters.GetTypeSpec(
+                                    first + argument);
+                                if (InitOutputReferentType(_types,
+                                        sourceTypeSpec) != type
+                                    || !CanForwardInitializationReference(
+                                        _types, sourceTypeSpec,
+                                        targetTypeSpec))
+                                {
+                                    throw InvalidBody();
+                                }
                             }
                             outputPlaceIds.Add(place);
 
@@ -1486,7 +1623,8 @@ internal static class TrRmScalarInitOutputBodyReader
                     0x19 => kind is >= 1 and <= 6 && left == right && Float(left),
                     0x1D => kind is >= 1 and <= 4 && left == right && Float(left),
                     0x15 => kind is >= 1 and <= 7 && (kind is 6 or 7
-                        ? Integer(left) && right == 0x0D : Integer(left) && left == right),
+                        ? Integer(left) && right == NativeTypeKey(PrimitiveType.Int32)
+                        : Integer(left) && left == right),
                     _ => kind is >= 1 and <= 12 && left == right
                         && (kind is 4 or 5
                             ? left is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x103
@@ -1536,10 +1674,13 @@ internal static class TrRmScalarInitOutputBodyReader
                 }
 
                 operands = [value];
+                var returnType = ResultType(_types,
+                    _signatures.GetResultTypeSpec(signature));
                 for (var place = 0; place < _active.Length; place++)
                 {
-                    // Retirement ends access, not the independent formal publication fact.
-                    if (_active[place] || (_placeParameters[place] >= 0 && !_initialized[place]))
+                    if (_active[place]
+                        || (_placeParameters[place] >= 0
+                            && returnType != 1 && !_initialized[place]))
                     {
                         throw InvalidBody();
                     }
@@ -1846,10 +1987,12 @@ internal static class TrRmScalarInitOutputBodyReader
     private static int BitWidth(ushort type)
         => type switch { 1 => 1, 3 => 16, 8 or 0x0D or 0x14 => 32, _ => 64 };
 
-    private static bool Integer(ushort type) => type is 8 or 9 or 0x0D or 0x0E;
+    private static bool Integer(ushort type)
+        => type is 8 or 9 or 0x0D or 0x0E or 0x10 or 0x11;
     private static bool Float(ushort type) => type is 0x14 or 0x15;
     private static bool Scalar(ushort type)
-        => type is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x14 or 0x15;
+        => type is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x10 or 0x11
+            or 0x14 or 0x15;
     private static bool NonBooleanScalar(ushort type) => Scalar(type) && type != 1;
 
     private static ushort NativeTypeKey(PrimitiveType type) => type switch
@@ -1858,8 +2001,10 @@ internal static class TrRmScalarInitOutputBodyReader
         PrimitiveType.Char16 => 3,
         PrimitiveType.Int32 => 8,
         PrimitiveType.Int64 => 9,
+        PrimitiveType.NativeInt => 0x10,
         PrimitiveType.UInt32 => 0x0D,
         PrimitiveType.UInt64 => 0x0E,
+        PrimitiveType.NativeUInt => 0x11,
         PrimitiveType.Float32 => 0x14,
         PrimitiveType.Float64 => 0x15,
         _ => ushort.MaxValue,

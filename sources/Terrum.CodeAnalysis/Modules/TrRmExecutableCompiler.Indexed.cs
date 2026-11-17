@@ -12,6 +12,16 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
+    private readonly record struct IndexedOperation(int Result,
+        BoundExpression? Expression, TrRmScalarDivRem? DivRem)
+    {
+        public static implicit operator IndexedOperation(
+            (int Result, BoundExpression Expression) operation)
+            => new(operation.Result, operation.Expression, null);
+    }
+
+    private sealed record IndexedSwitchCase(ulong Bits, IndexedEdge Edge);
+
     private sealed class IndexedEdge(IndexedBlock target, int[] arguments)
     {
         internal IndexedBlock Target = ValidateTarget(target, arguments);
@@ -35,12 +45,15 @@ public static partial class TrRmExecutableCompiler
         internal int Region = region;
         internal bool IsLoopHeader;
         internal readonly List<int> Parameters = [];
-        internal readonly List<(int Result, BoundExpression Expression)> Operations = [];
+        internal readonly List<IndexedOperation> Operations = [];
         internal int Condition;
         internal IndexedEdge? True;
         internal IndexedEdge? False;
         internal int ReturnValue = -1;
         internal int FailureReason;
+        internal int SwitchValue;
+        internal readonly List<IndexedSwitchCase> SwitchCases = [];
+        internal IndexedEdge? SwitchDefault;
     }
 
     private sealed class IndexedRegion(int id, int parent, IndexedBlock header, int[] visibleSlots)
@@ -105,7 +118,13 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported("An indexed raw-pointer value has no raw-pointer TypeSpec row.");
             }
-            var scalarTypeCount = hasFloatingTypes ? 8 : 6;
+            var hasNativeWidthTypes = function.ReturnType is
+                PrimitiveType.NativeInt or PrimitiveType.NativeUInt
+                || sourceTypes.Any(static type => type is PrimitiveType.NativeInt
+                    or PrimitiveType.NativeUInt);
+            var scalarTypeMap = CompactBuiltinTypeMap(hasFloatingTypes,
+                hasNativeWidthTypes);
+            var scalarTypeCount = scalarTypeMap.Length;
             var functionPointerTypes = sourceTypes
                 .Where(NativeFunctionPointerTypes.IsType)
                 .Distinct()
@@ -138,17 +157,37 @@ public static partial class TrRmExecutableCompiler
                 return edge.Target.IsLoopHeader && block.Region == edge.Target.Region && block != edge.Target;
             }
 
+            static void VisitEdges(IndexedBlock block,
+                Action<IndexedEdge> visit)
+            {
+                if (block.True is { } trueEdge)
+                {
+                    visit(trueEdge);
+                }
+                if (block.False is { } falseEdge)
+                {
+                    visit(falseEdge);
+                }
+                foreach (var switchCase in block.SwitchCases)
+                {
+                    visit(switchCase.Edge);
+                }
+                if (block.SwitchDefault is { } switchDefault)
+                {
+                    visit(switchDefault);
+                }
+            }
+
             var indegree = new int[source.Count];
             foreach (var block in source)
             {
-                if (block.True is { } trueEdge && !IsBackEdge(block, trueEdge))
+                VisitEdges(block, edge =>
                 {
-                    indegree[trueEdge.Target.Creation]++;
-                }
-                if (block.False is { } falseEdge && !IsBackEdge(block, falseEdge))
-                {
-                    indegree[falseEdge.Target.Creation]++;
-                }
+                    if (!IsBackEdge(block, edge))
+                    {
+                        indegree[edge.Target.Creation]++;
+                    }
+                });
             }
             var ordered = new List<IndexedBlock>(source.Count);
             var ready = new SortedSet<int>();
@@ -170,20 +209,14 @@ public static partial class TrRmExecutableCompiler
                 var next = source[first];
                 next.Id = ordered.Count + 1;
                 ordered.Add(next);
-                if (next.True is { } trueEdge && !IsBackEdge(next, trueEdge))
+                VisitEdges(next, edge =>
                 {
-                    if (--indegree[trueEdge.Target.Creation] == 0)
+                    if (!IsBackEdge(next, edge)
+                        && --indegree[edge.Target.Creation] == 0)
                     {
-                        _ = ready.Add(trueEdge.Target.Creation);
+                        _ = ready.Add(edge.Target.Creation);
                     }
-                }
-                if (next.False is { } falseEdge && !IsBackEdge(next, falseEdge))
-                {
-                    if (--indegree[falseEdge.Target.Creation] == 0)
-                    {
-                        _ = ready.Add(falseEdge.Target.Creation);
-                    }
-                }
+                });
             }
             var remap = new int[sourceTypes.Count + 1];
             var types = new PrimitiveType[sourceTypes.Count + 1];
@@ -198,12 +231,23 @@ public static partial class TrRmExecutableCompiler
                     types[next] = sourceTypes[value - 1];
                     owner[next] = block.Id;
                 }
-                foreach (var (result, _) in block.Operations)
+                foreach (var operation in block.Operations)
                 {
-                    if (result != 0)
+                    if (operation.DivRem is TrRmScalarDivRem divRem)
                     {
-                        remap[result] = ++next;
-                        types[next] = sourceTypes[result - 1];
+                        var quotient = divRem.QuotientVariable + 1;
+                        var remainder = divRem.RemainderVariable + 1;
+                        remap[quotient] = ++next;
+                        types[next] = sourceTypes[quotient - 1];
+                        owner[next] = block.Id;
+                        remap[remainder] = ++next;
+                        types[next] = sourceTypes[remainder - 1];
+                        owner[next] = block.Id;
+                    }
+                    else if (operation.Result != 0)
+                    {
+                        remap[operation.Result] = ++next;
+                        types[next] = sourceTypes[operation.Result - 1];
                         owner[next] = block.Id;
                     }
                 }
@@ -248,23 +292,34 @@ public static partial class TrRmExecutableCompiler
                 operationOrdinal = 0;
                 for (; operationOrdinal < block.Operations.Count; operationOrdinal++)
                 {
-                    VisitReads(block.Operations[operationOrdinal].Expression, operationVisitor);
+                    var operation = block.Operations[operationOrdinal];
+                    if (operation.Expression is BoundExpression expression)
+                    {
+                        VisitReads(expression, operationVisitor);
+                    }
+                    else if (operation.DivRem is TrRmScalarDivRem divRem)
+                    {
+                        Use(divRem.Dividend.Variable + 1,
+                            operationOrdinal);
+                        Use(divRem.Divisor.Variable + 1,
+                            operationOrdinal);
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "Indexed scalar operation has no executable value.");
+                    }
                 }
-                Use(block.Condition != 0 ? block.Condition : block.ReturnValue, block.Operations.Count);
-                if (block.True is { } trueEdge)
+                Use(block.Condition != 0 ? block.Condition
+                    : block.SwitchValue != 0 ? block.SwitchValue
+                    : block.ReturnValue, block.Operations.Count);
+                VisitEdges(block, edge =>
                 {
-                    foreach (var argument in trueEdge.Arguments)
+                    foreach (var argument in edge.Arguments)
                     {
                         Use(argument, block.Operations.Count);
                     }
-                }
-                if (block.False is { } falseEdge)
-                {
-                    foreach (var argument in falseEdge.Arguments)
-                    {
-                        Use(argument, block.Operations.Count);
-                    }
-                }
+                });
             }
             var liveOuts = new HashSet<int>?[ordered.Count];
             if (regions.Count == 0)
@@ -273,28 +328,17 @@ public static partial class TrRmExecutableCompiler
                 for (var b = ordered.Count - 1; b >= 0; b--)
                 {
                     var block = ordered[b];
-                    if (block.True is { } trueEdge)
+                    VisitEdges(block, edge =>
                     {
-                        if (liveIns[trueEdge.Target.Id - 1] is HashSet<int> targetLiveIn)
+                        if (liveIns[edge.Target.Id - 1] is HashSet<int> targetLiveIn)
                         {
                             (liveOuts[b] ??= new HashSet<int>()).UnionWith(targetLiveIn);
                         }
-                        foreach (var argument in trueEdge.Arguments)
+                        foreach (var argument in edge.Arguments)
                         {
                             _ = (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
-                    }
-                    if (block.False is { } falseEdge)
-                    {
-                        if (liveIns[falseEdge.Target.Id - 1] is HashSet<int> targetLiveIn)
-                        {
-                            (liveOuts[b] ??= new HashSet<int>()).UnionWith(targetLiveIn);
-                        }
-                        foreach (var argument in falseEdge.Arguments)
-                        {
-                            _ = (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
-                        }
-                    }
+                    });
                     if (liveOuts[b] is HashSet<int> liveOut)
                     {
                         foreach (var id in liveOut)
@@ -324,22 +368,14 @@ public static partial class TrRmExecutableCompiler
                 for (var b = 0; b < ordered.Count; b++)
                 {
                     var block = ordered[b];
-                    void AddEdge(IndexedEdge edge)
+                    VisitEdges(block, edge =>
                     {
                         predecessorCounts[edge.Target.Id - 1]++;
                         foreach (var argument in edge.Arguments)
                         {
                             _ = (liveOuts[b] ??= new HashSet<int>()).Add(remap[argument]);
                         }
-                    }
-                    if (block.True is { } trueEdge)
-                    {
-                        AddEdge(trueEdge);
-                    }
-                    if (block.False is { } falseEdge)
-                    {
-                        AddEdge(falseEdge);
-                    }
+                    });
                 }
                 var predecessorStarts = new int[ordered.Count + 1];
                 for (var b = 0; b < ordered.Count; b++)
@@ -351,19 +387,11 @@ public static partial class TrRmExecutableCompiler
                 for (var b = 0; b < ordered.Count; b++)
                 {
                     var block = ordered[b];
-                    void AddPredecessor(IndexedEdge edge)
+                    VisitEdges(block, edge =>
                     {
                         var target = edge.Target.Id - 1;
                         predecessors[predecessorStarts[target] + predecessorCounts[target]++] = b;
-                    }
-                    if (block.True is { } trueEdge)
-                    {
-                        AddPredecessor(trueEdge);
-                    }
-                    if (block.False is { } falseEdge)
-                    {
-                        AddPredecessor(falseEdge);
-                    }
+                    });
                 }
 
                 // Each block enters the queue once per value, bounding propagation by V * (B + E).
@@ -494,17 +522,39 @@ public static partial class TrRmExecutableCompiler
                     {
                         definitions[remap[parameter] - 1] = sentinel;
                     }
-                    foreach (var (result, expression) in block.Operations)
+                    foreach (var operation in block.Operations)
                     {
-                        if (result != 0)
+                        if (operation.DivRem is TrRmScalarDivRem divRem)
                         {
-                            definitions[remap[result] - 1] = (uint)(data.Count - blockStart);
-                            overflowedDefinition |= definitions[remap[result] - 1] >= sentinel;
+                            var definition = (uint)(data.Count - blockStart);
+                            var quotient = remap[divRem.QuotientVariable + 1];
+                            var remainder = remap[divRem.RemainderVariable + 1];
+                            definitions[quotient - 1] = definition;
+                            definitions[remainder - 1] = definition;
+                            overflowedDefinition |= definition >= sentinel;
+                            WriteScalarDivRem(data, divRem, remap);
                         }
-                        WriteScalarOperation(data, result == 0 ? 0 : remap[result],
-                            expression, remap, program, hasFloatingTypes,
-                            sourceTypes.Contains(PrimitiveType.NativeRawPointer)
-                                ? scalarTypeCount + 1 : 0);
+                        else
+                        {
+                            var expression = operation.Expression
+                                ?? throw Unsupported(
+                                    "Indexed scalar operation has no encodable expression.");
+                            var result = operation.Result;
+                            if (result != 0)
+                            {
+                                definitions[remap[result] - 1]
+                                    = (uint)(data.Count - blockStart);
+                                overflowedDefinition |=
+                                    definitions[remap[result] - 1] >= sentinel;
+                            }
+                            WriteScalarOperation(data,
+                                result == 0 ? 0 : remap[result],
+                                expression, remap, program, hasFloatingTypes,
+                                hasNativeWidthTypes,
+                                sourceTypes.Contains(
+                                    PrimitiveType.NativeRawPointer)
+                                        ? scalarTypeCount + 1 : 0);
+                        }
                     }
                     terminators.Add(data.Count - blockStart);
                     WriteIndexedTerminator(data, block, remap);
@@ -534,10 +584,10 @@ public static partial class TrRmExecutableCompiler
                 WriteToSpan(destination, ref bodyPosition, (ulong)sourceTypes.Count, width);
                 WriteToSpan(destination, ref bodyPosition, (ulong)regions.Count, width);
                 WriteToSpan(destination, ref bodyPosition, (ulong)typeCount, width);
-                for (var index = 0; index < scalarTypeCount; index++)
+                foreach (var type in scalarTypeMap)
                 {
                     WriteToSpan(destination, ref bodyPosition,
-                        (ulong)TypeRow(s_compactBuiltinTypes[index]), 4);
+                        (ulong)TypeRow(type), 4);
                 }
                 if (hasNativeRawPointer)
                 {
@@ -570,7 +620,8 @@ public static partial class TrRmExecutableCompiler
                             => functionPointerTypeIds[types[id]],
                         _ when NativePointerTypes.IsType(types[id])
                             => pointerTypeIds[types[id]],
-                        _ => CompactBuiltinTypeIndex(types[id], hasFloatingTypes),
+                        _ => CompactBuiltinTypeIndex(types[id], hasFloatingTypes,
+                            hasNativeWidthTypes),
                     };
                     WriteToSpan(destination, ref bodyPosition, (ulong)typeId, width);
                     WriteToSpan(destination, ref bodyPosition, (ulong)useCounts[id], width);
@@ -702,12 +753,31 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        private static void WriteScalarDivRem(List<byte> bytes,
+            TrRmScalarDivRem divRem, int[] remap)
+        {
+            var result = remap[divRem.QuotientVariable + 1];
+            var secondResult = remap[divRem.RemainderVariable + 1];
+            var dividend = remap[divRem.Dividend.Variable + 1];
+            var divisor = remap[divRem.Divisor.Variable + 1];
+            var width = Width((ulong)Math.Max(Math.Max(result,
+                    secondResult), Math.Max(dividend, divisor)));
+            WriteInstruction(bytes, 0x18, width, 0);
+            Write(bytes, (ulong)result, width);
+            Write(bytes, (ulong)secondResult, width);
+            Write(bytes, (ulong)dividend, width);
+            Write(bytes, (ulong)divisor, width);
+        }
+
         private static void WriteIndexedTerminator(List<byte> bytes, IndexedBlock block, int[] remap)
         {
             if (block.FailureReason != 0)
             {
                 if (block.FailureReason is < 1 or > 4 || block.Condition != 0
-                    || block.True is not null || block.False is not null)
+                    || block.True is not null || block.False is not null
+                    || block.SwitchValue != 0
+                    || block.SwitchCases.Count != 0
+                    || block.SwitchDefault is not null)
                 {
                     throw Unsupported("Indexed failure terminator has invalid flow.");
                 }
@@ -715,26 +785,81 @@ public static partial class TrRmExecutableCompiler
                 bytes.Add((byte)block.FailureReason);
                 return;
             }
-            var maximumOperand = Math.Max(block.Condition == 0
-                ? block.ReturnValue <= 0 ? 0 : remap[block.ReturnValue]
-                : remap[block.Condition], Math.Max(block.True?.Target.Id ?? 0, block.False?.Target.Id ?? 0));
-            if (block.True is { } trueEdgeForWidth)
+
+            var maximumOperand = 0;
+            var maximumArgumentCount = 0;
+            var maximumBits = 0UL;
+            void IncludeEdge(IndexedEdge edge)
             {
-                foreach (var value in trueEdgeForWidth.Arguments)
+                maximumOperand = Math.Max(maximumOperand,
+                    edge.Target.Id);
+                maximumArgumentCount = Math.Max(maximumArgumentCount,
+                    edge.Arguments.Length);
+                foreach (var value in edge.Arguments)
                 {
                     maximumOperand = Math.Max(maximumOperand, remap[value]);
                 }
+            }
+
+            if (block.SwitchValue != 0)
+            {
+                var switchDefault = block.SwitchDefault
+                    ?? throw Unsupported(
+                        "Indexed switch is missing its default edge.");
+                maximumOperand = remap[block.SwitchValue];
+                maximumArgumentCount = block.SwitchCases.Count;
+                foreach (var switchCase in block.SwitchCases)
+                {
+                    maximumBits = Math.Max(maximumBits, switchCase.Bits);
+                    IncludeEdge(switchCase.Edge);
+                }
+                IncludeEdge(switchDefault);
+                var switchReferenceWidth = Width((ulong)maximumOperand);
+                var switchCountWidth = Width((ulong)maximumArgumentCount);
+                var dataWidth = Width(maximumBits);
+                if (switchReferenceWidth == 1 && switchCountWidth == 1
+                    && dataWidth == 1)
+                {
+                    bytes.Add(0x82);
+                }
+                else
+                {
+                    bytes.Add(0xF0);
+                    bytes.Add((byte)(WidthCode(switchReferenceWidth)
+                        | (WidthCode(switchCountWidth) << 2)
+                        | (WidthCode(dataWidth) << 4)));
+                    bytes.Add(0x82);
+                }
+                Write(bytes, (ulong)remap[block.SwitchValue],
+                    switchReferenceWidth);
+                Write(bytes, (ulong)block.SwitchCases.Count,
+                    switchCountWidth);
+                foreach (var switchCase in block.SwitchCases)
+                {
+                    Write(bytes, switchCase.Bits, dataWidth);
+                    WriteIndexedEdge(bytes, switchCase.Edge, remap,
+                        switchReferenceWidth, switchCountWidth);
+                }
+                WriteIndexedEdge(bytes, switchDefault, remap,
+                    switchReferenceWidth, switchCountWidth);
+                return;
+            }
+
+            maximumOperand = Math.Max(block.Condition == 0
+                ? block.ReturnValue <= 0 ? 0 : remap[block.ReturnValue]
+                : remap[block.Condition],
+                Math.Max(block.True?.Target.Id ?? 0,
+                    block.False?.Target.Id ?? 0));
+            if (block.True is { } trueEdgeForWidth)
+            {
+                IncludeEdge(trueEdgeForWidth);
             }
             if (block.False is { } falseEdgeForWidth)
             {
-                foreach (var value in falseEdgeForWidth.Arguments)
-                {
-                    maximumOperand = Math.Max(maximumOperand, remap[value]);
-                }
+                IncludeEdge(falseEdgeForWidth);
             }
             var referenceWidth = Width((ulong)maximumOperand);
-            var countWidth = Width((ulong)Math.Max(block.True?.Arguments.Length ?? 0,
-                block.False?.Arguments.Length ?? 0));
+            var countWidth = Width((ulong)maximumArgumentCount);
             if (block.True is null)
             {
                 WriteInstruction(bytes, 0x83, referenceWidth, 0);
@@ -779,7 +904,8 @@ public static partial class TrRmExecutableCompiler
 
         private static void WriteScalarOperation(List<byte> bytes, int result,
             BoundExpression expression, int[] remap, BoundProgram program,
-            bool hasFloatingTypes, int nativeRawPointerTypeId)
+            bool hasFloatingTypes, bool hasNativeWidthTypes,
+            int nativeRawPointerTypeId)
         {
             int ReadOperand(BoundExpression operand)
             {
@@ -802,7 +928,8 @@ public static partial class TrRmExecutableCompiler
                         ? constant.Value == 0 && nativeRawPointerTypeId != 0
                             ? nativeRawPointerTypeId
                             : throw Unsupported("Only a null raw-pointer constant has an indexed TRRM encoding.")
-                        : CompactBuiltinTypeIndex(constant.Type, hasFloatingTypes);
+                        : CompactBuiltinTypeIndex(constant.Type, hasFloatingTypes,
+                            hasNativeWidthTypes);
                     bits = constant.Type switch {
                         PrimitiveType.Int32 or PrimitiveType.UInt32 => unchecked((uint)constant.Value),
                         PrimitiveType.Bool or PrimitiveType.Char16 => (ulong)constant.Value,
@@ -815,7 +942,8 @@ public static partial class TrRmExecutableCompiler
                     if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type))
                     {
                         if (unary.OverflowBehavior != BoundIntegerOverflowBehavior.Checked
-                            || unary.Type is not (PrimitiveType.Int32 or PrimitiveType.Int64))
+                            || unary.Type is not (PrimitiveType.Int32 or PrimitiveType.Int64
+                                or PrimitiveType.NativeInt))
                         {
                             throw Unsupported("Indexed integer negation must be lowered to an arithmetic operation.");
                         }
@@ -839,22 +967,26 @@ public static partial class TrRmExecutableCompiler
                     {
                         opcode = cast.Operand.Type == cast.Type ? 3 : 0x1A;
                         target = opcode == 0x1A
-                            ? CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes) : 0;
+                            ? CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes,
+                                hasNativeWidthTypes) : 0;
                     }
                     else if (IsInteger(cast.Operand.Type) && IsFloat(cast.Type))
                     {
                         opcode = 0x1B;
-                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes,
+                            hasNativeWidthTypes);
                     }
                     else if (cast.Operand.Type == PrimitiveType.Char16 && IsFloat(cast.Type))
                     {
                         opcode = 0x1E;
-                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes,
+                            hasNativeWidthTypes);
                     }
                     else if (IsFloat(cast.Operand.Type) && IsInteger(cast.Type))
                     {
                         opcode = 0x1F;
-                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes,
+                            hasNativeWidthTypes);
                     }
                     else if (IsFloat(cast.Operand.Type) || IsFloat(cast.Type))
                     {
@@ -863,7 +995,8 @@ public static partial class TrRmExecutableCompiler
                     else
                     {
                         opcode = 0x16;
-                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes,
+                            hasNativeWidthTypes);
                     }
                     break;
                 case TrRmScalarReinterpret reinterpret:
@@ -873,7 +1006,8 @@ public static partial class TrRmExecutableCompiler
                         throw Unsupported("Only equal-width integer bit reinterpretation is executable.");
                     }
                     opcode = 6;
-                    target = CompactBuiltinTypeIndex(reinterpret.Type, hasFloatingTypes);
+                    target = CompactBuiltinTypeIndex(reinterpret.Type, hasFloatingTypes,
+                        hasNativeWidthTypes);
                     break;
                 case BoundBinary binary:
                     if (IsFloat(binary.Left.Type))
@@ -1087,11 +1221,17 @@ public static partial class TrRmExecutableCompiler
             }
             var regionKinds = new byte[regionCount + 1];
             var regionParents = new int[regionCount + 1];
+            var regions = ImmutableArray.CreateBuilder<TrRmScalarRegion>(
+                regionCount);
             for (var region = 1; region <= regionCount; region++)
             {
                 regionKinds[region] = ReadByte(body, ref position);
                 regionParents[region] = ReadInt(body, ref position, width);
-                position += 3 * width;
+                var header = ReadInt(body, ref position, width);
+                var exit = ReadInt(body, ref position, width);
+                _ = ReadInt(body, ref position, width);
+                regions.Add(new TrRmScalarRegion(regionKinds[region],
+                    regionParents[region], header, exit));
             }
             var valueTypes = ImmutableArray.CreateBuilder<PrimitiveType>(valueCount);
             for (var value = 0; value < valueCount; value++)
@@ -1329,10 +1469,12 @@ public static partial class TrRmExecutableCompiler
                 }
                 result.Add(new TrRmScalarBlock(parameters, operations.MoveToImmutable(),
                     condition, whenTrue, whenFalse, returned, failureReason, switchValue,
-                    switchCases, switchDefault, isCallerUnsafeScope));
+                    switchCases, switchDefault, isCallerUnsafeScope,
+                    blockRegion));
             }
             return TrRmScalarGraph.FromAuditedBody(result.MoveToImmutable(),
-                valueTypes.MoveToImmutable(), parameterCount, resultType, doesNotReturn);
+                valueTypes.MoveToImmutable(), parameterCount, resultType,
+                doesNotReturn, regions.MoveToImmutable());
         }
 
         private static ImmutableArray<int> ReadIndexedList(ReadOnlySpan<byte> body,
@@ -1371,7 +1513,8 @@ public static partial class TrRmExecutableCompiler
 
         private static bool IsSwitchType(PrimitiveType type)
             => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
-                or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
+                or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                or PrimitiveType.NativeInt or PrimitiveType.NativeUInt;
 
         private static bool FitsSwitchBits(PrimitiveType type, ulong bits)
             => type switch {
@@ -1422,10 +1565,13 @@ public static partial class TrRmExecutableCompiler
         {
             var unsignedCount = Reinterpret(count, PrimitiveType.UInt32);
             if (token == TokenKind.ShiftRightUnsigned
-                && type is PrimitiveType.Int32 or PrimitiveType.Int64)
+                && type is PrimitiveType.Int32 or PrimitiveType.Int64
+                    or PrimitiveType.NativeInt)
             {
                 var unsignedType = type == PrimitiveType.Int32
-                    ? PrimitiveType.UInt32 : PrimitiveType.UInt64;
+                    ? PrimitiveType.UInt32
+                    : type == PrimitiveType.NativeInt
+                        ? PrimitiveType.NativeUInt : PrimitiveType.UInt64;
                 var payload = Reinterpret(left, unsignedType);
                 var result = Add(new BoundBinary(TokenKind.ShiftRightUnsigned, Read(payload),
                     Read(unsignedCount), unsignedType, default));
@@ -1635,6 +1781,7 @@ public static partial class TrRmExecutableCompiler
                     var unaryOperand = Read(Expression(unary.Operand));
                     if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type)
                         && (unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                            or PrimitiveType.NativeUInt
                             || unary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping))
                     {
                         var zero = Add(new BoundConstant(0, unary.Type, default));
@@ -1651,7 +1798,8 @@ public static partial class TrRmExecutableCompiler
                     return Add(new BoundCast(Read(Expression(cast.Operand)), cast.Type, default));
                 case BoundUpdate { Place: BoundRead place } update
                     when update.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64:
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        or PrimitiveType.NativeInt or PrimitiveType.NativeUInt:
                     if (!_function.Variables[place.Variable].IsMutable)
                     {
                         throw Unsupported("Indexed update requires a writable local.");
@@ -1667,7 +1815,8 @@ public static partial class TrRmExecutableCompiler
                     return update.IsPrefix ? replacement : previous;
                 case BoundCompoundAssignment { Place: BoundRead place } compound
                     when compound.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64:
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        or PrimitiveType.NativeInt or PrimitiveType.NativeUInt:
                     if (!_function.Variables[place.Variable].IsMutable)
                     {
                         throw Unsupported("Indexed compound assignment requires a writable local.");
@@ -2220,6 +2369,7 @@ public static partial class TrRmExecutableCompiler
                     Expression: BoundCompoundAssignment {
                         Place: BoundRead, Type: PrimitiveType.Int32 or PrimitiveType.UInt32
                             or PrimitiveType.Int64 or PrimitiveType.UInt64
+                            or PrimitiveType.NativeInt or PrimitiveType.NativeUInt
                     }
                 }
                 or BoundExpressionStatement { Expression: BoundUpdate }
@@ -2314,6 +2464,106 @@ public static partial class TrRmExecutableCompiler
             _current = falseBlock;
             _slots = (int[])branchSlots.Clone();
             AcyclicTerminalStatement(whenFalse, exit, visible);
+        }
+
+        internal static byte[] Encode(TrRmScalarGraph graph,
+            BoundFunction function, BoundProgram program,
+            bool hasFloatingTypes, int nativeRawPointerTypeRow,
+            Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
+            Dictionary<PrimitiveType, int> nativePointerTypeRows)
+        {
+            ArgumentNullException.ThrowIfNull(graph);
+            ArgumentNullException.ThrowIfNull(function);
+            ArgumentNullException.ThrowIfNull(program);
+            var blocks = new List<IndexedBlock>(graph.Blocks.Length);
+            for (var index = 0; index < graph.Blocks.Length; index++)
+            {
+                var source = graph.Blocks[index];
+                blocks.Add(new IndexedBlock(index, source.Region));
+            }
+
+            var regions = new List<IndexedRegion>(graph.Regions.Length);
+            for (var index = 0; index < graph.Regions.Length; index++)
+            {
+                var source = graph.Regions[index];
+                if (source.Header <= 0 || source.Header > blocks.Count
+                    || source.Exit <= 0 || source.Exit > blocks.Count
+                    || source.Parent < 0
+                    || source.Parent > graph.Regions.Length)
+                {
+                    throw Unsupported(
+                        "Indexed region metadata cannot be re-emitted.");
+                }
+
+                var header = blocks[source.Header - 1];
+                header.IsLoopHeader = true;
+                regions.Add(new IndexedRegion(index + 1, source.Parent,
+                    header, []) {
+                    Kind = source.Kind,
+                    Exit = blocks[source.Exit - 1],
+                });
+            }
+
+            IndexedEdge Edge(TrRmScalarEdge edge)
+            {
+                if (edge.Target <= 0 || edge.Target > blocks.Count)
+                {
+                    throw Unsupported(
+                        "Indexed edge target cannot be re-emitted.");
+                }
+                return new IndexedEdge(blocks[edge.Target - 1],
+                    [.. edge.Arguments]);
+            }
+
+            for (var index = 0; index < graph.Blocks.Length; index++)
+            {
+                blocks[index].Parameters.AddRange(
+                    graph.Blocks[index].Parameters);
+            }
+
+            for (var index = 0; index < graph.Blocks.Length; index++)
+            {
+                var source = graph.Blocks[index];
+                var target = blocks[index];
+                foreach (var operation in source.Operations)
+                {
+                    target.Operations.Add(operation switch {
+                        BoundLocal local => new IndexedOperation(
+                            local.Variable + 1, local.Initializer, null),
+                        BoundExpressionStatement {
+                            Expression: var expression,
+                        } => new IndexedOperation(0, expression, null),
+                        TrRmScalarDivRem divRem => new IndexedOperation(0,
+                            null, divRem),
+                        _ => throw Unsupported(
+                            "Indexed scalar statement cannot be re-emitted."),
+                    });
+                }
+
+                target.Condition = source.Condition;
+                target.True = source.True is null
+                    ? null : Edge(source.True);
+                target.False = source.False is null
+                    ? null : Edge(source.False);
+                target.ReturnValue = source.ReturnValue;
+                target.FailureReason = source.FailureReason;
+                target.SwitchValue = source.SwitchValue;
+                if (!source.SwitchCases.IsDefault)
+                {
+                    foreach (var switchCase in source.SwitchCases)
+                    {
+                        target.SwitchCases.Add(new IndexedSwitchCase(
+                            switchCase.Bits, Edge(switchCase.Edge)));
+                    }
+                }
+                target.SwitchDefault = source.SwitchDefault is null
+                    ? null : Edge(source.SwitchDefault);
+            }
+
+            return EncodeIndexed(function, blocks, regions,
+                [.. graph.Types], program, hasFloatingTypes,
+                nativeRawPointerTypeRow, nativeFunctionPointerTypeRows,
+                nativePointerTypeRows);
         }
 
         internal byte[] Encode()

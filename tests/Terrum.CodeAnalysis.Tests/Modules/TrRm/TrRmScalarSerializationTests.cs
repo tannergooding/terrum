@@ -49,6 +49,10 @@ internal sealed class TrRmScalarSerializationTests
                 ("uint64", "9223372036854775808", "0000000000000080", 6),
                 ("uint64", "18446744073709551615", "FFFFFFFFFFFFFFFF", 6),
                 ("uint64", "0x0123456789ABCDEF", "EFCDAB8967452301", 6),
+                ("nint", "-9223372036854775808", "0000000000000080", 7),
+                ("nint", "9223372036854775807", "FFFFFFFFFFFFFF7F", 7),
+                ("nuint", "9223372036854775808", "0000000000000080", 8),
+                ("nuint", "18446744073709551615", "FFFFFFFFFFFFFFFF", 8),
             ];
             foreach (var (type, literal, hex, typeMapIndex) in values)
             {
@@ -73,8 +77,12 @@ internal sealed class TrRmScalarSerializationTests
         var payload = Convert.FromHexString(hex);
         if (!indexed)
         {
-            var expected = new List<byte> { 4, 6 };
-            foreach (var row in new[] { 2, 4, 9, 10, 13, 14 })
+            var typeCount = type is "nint" or "nuint" ? 8 : 6;
+            var expected = new List<byte> { 4, (byte)typeCount };
+            int[] typeRows = typeCount == 8
+                ? [2, 4, 9, 10, 13, 14, 15, 16]
+                : [2, 4, 9, 10, 13, 14];
+            foreach (var row in typeRows)
             {
                 var bytes = new byte[4];
                 BinaryPrimitives.WriteInt32LittleEndian(bytes, row);

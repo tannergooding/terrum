@@ -46,19 +46,30 @@ internal sealed partial class CliTests
             Path.Combine("Utilities", "CopyAlgorithms.terrum"),
         };
         var adapterNames = new[] { "integer-formatting-abi", "token-abi", "integer-facts-abi", "copy-algorithms-abi" };
-        var trees = sourcePaths
-            .Select(path => SyntaxTree.Parse(File.ReadAllText(TerrumProjectPaths.SourceFile(root, path))))
-            .Concat(adapterNames
-                .Select(name => SyntaxTree.Parse(File.ReadAllText(TerrumProjectPaths.TestFile(root,
-                    Path.Combine("TestHelpers", "Abi", name + ".terrum"))))));
+        var trees = sourcePaths.Select(path =>
+        {
+            var sourcePath = TerrumProjectPaths.SourceFile(root, path);
+            return SyntaxTree.Parse(File.ReadAllText(sourcePath), sourcePath);
+        })
+            .Concat(adapterNames.Select(name =>
+            {
+                var sourcePath = TerrumProjectPaths.TestFile(root,
+                    Path.Combine("TestHelpers", "Abi", name + ".terrum"));
+                return SyntaxTree.Parse(File.ReadAllText(sourcePath), sourcePath);
+            }));
         var compilation = Compilation.CreateLibrary([.. trees],
             new CompilationOptions {
                 RuntimePolicy = BoundRuntimePolicy.FailFast,
                 LayoutCoreRegistration =
                     LayoutCoreRegistrationTestData.Create(),
+                CoreEvaluationFormIdentitySelection =
+                    CoreEvaluationFormTestHelpers.ConstEvalSelection(
+                        BoundRuntimePolicy.FailFast, "sample.consumer"),
             });
         Assert.That(compilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
+            string.Join(Environment.NewLine, compilation.SourceDiagnostics
+                .Select(static diagnostic =>
+                    $"{diagnostic.SyntaxTree.Source.Path}: {diagnostic.Diagnostic}")));
         var program = compilation.Program ?? throw new AssertionException("Expected the test primitives library.");
         var exports = program.Functions.Select(static function => function.Name)
             .Where(static name => name.EndsWith("ForAbiTest", StringComparison.Ordinal)

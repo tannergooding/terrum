@@ -650,10 +650,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                     new TrRmSourceTypeExport("", "Container",
                         "ContainerKey"),
                 }
-                : new[] {
+                : [
                     new TrRmSourceTypeExport("", "Container",
                         "ContainerKey"),
-                };
+                ];
             return CreateSourceTypeLibraryArtifact("Root", SchemaIdentity,
                 prefix + container, exports);
         }
@@ -1856,13 +1856,15 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             var compilerPath = typeof(TrRmExecutableCompiler).Assembly.Location;
             var compilerHash = Convert.ToHexString(
                 System.Security.Cryptography.SHA256.HashData(
-                    File.ReadAllBytes(compilerPath)));
+                    await File.ReadAllBytesAsync(compilerPath)
+                        .ConfigureAwait(true)));
             var nativeLibraryPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.System),
                 "kernel32.dll");
             var nativeLibraryHash = Convert.ToHexString(
                 System.Security.Cryptography.SHA256.HashData(
-                    File.ReadAllBytes(nativeLibraryPath)));
+                    await File.ReadAllBytesAsync(nativeLibraryPath)
+                        .ConfigureAwait(true)));
             byte[]? expectedReemittedBody = null;
             byte[]? expectedReemittedValueProbe = null;
 
@@ -1993,6 +1995,32 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
                 == System.Runtime.InteropServices.Architecture.X64);
 
+        // Keep provider validation off the large async test frame's partially used stack.
+        static T RunOnProviderThread<T>(Func<T> action)
+        {
+            T? result = default;
+            Exception? failure = null;
+            var thread = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    result = action();
+                }
+                catch (Exception exception)
+                {
+                    failure = exception;
+                }
+            }, 1_572_864);
+            thread.Start();
+            thread.Join();
+            if (failure is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo
+                    .Capture(failure).Throw();
+            }
+            return result!;
+        }
+
         static void AssertProviderExpectation(BoundProgram program,
             string providerIdentity, string consumerIdentity,
             int providerModuleRow, string typeName, string exportKey)
@@ -2013,8 +2041,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var leafProviderInput = new TrRmStandardArtifactInput(SchemaIdentity,
             leafProviderArtifact);
         var leafProviderReference
-            = TrRmExecutableCompiler.CreateStandardReference(
-                leafProviderInput, "LeafProvider", [], ["LeafKey"]);
+            = RunOnProviderThread(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    leafProviderInput, "LeafProvider", [], ["LeafKey"]));
         const string providerIdentity = "consumer-global-provider";
         byte[] CreateProvider(bool includePrefix, int arrayExtent = 2,
             string schemaIdentity = SchemaIdentity)
@@ -2056,9 +2085,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var providerInput = new TrRmStandardArtifactInput(SchemaIdentity,
             providerArtifact);
         var providerReference
-            = TrRmExecutableCompiler.CreateStandardReference(
-                providerInput, providerIdentity, [leafProviderInput],
-                ["ContainerAKey", "UsesLeafKey"]);
+            = RunOnProviderThread(() =>
+                TrRmExecutableCompiler.CreateStandardReference(
+                    providerInput, providerIdentity, [leafProviderInput],
+                    ["ContainerAKey", "UsesLeafKey"]));
         const string bodySource = """
             [Terrum.Interop.NativeImport(
                 "kernel32.dll",
@@ -2171,7 +2201,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             offset += sizeof(uint))
         {
             methodMapTokens.Add(BinaryPrimitives.ReadUInt32LittleEndian(
-                mainBody.MethodMap[offset..]).ToString("X8"));
+                mainBody.MethodMap[offset..]).ToString("X8",
+                    System.Globalization.CultureInfo.InvariantCulture));
         }
         TestContext.WriteLine(
             $"A2R1 consumer MethodDefs=[{string.Join(";", methodSummaries)}]; Main.TypeMap={Convert.ToHexString(mainBody.TypeMap)}; Main.MethodMap=[{string.Join(",", methodMapTokens)}]; Main.FieldMapBytes={mainBody.FieldMap.Length}; Main.ConstantMapBytes={mainBody.ConstantMap.Length}.");
@@ -2202,22 +2233,26 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             fieldMapBody.FieldMap), Is.EqualTo(0x1400_0001u));
 
         var providers = new[] { providerInput, leafProviderInput };
-        var loaded = TrRmExecutableCompiler.LoadStandard(input,
-            consumerIdentity, providers);
+        var loaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(input, consumerIdentity,
+                providers));
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             consumerIdentity, A2R1SchemaIdentity, 1);
         var reemittedInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, reemitted);
-        var reloaded = TrRmExecutableCompiler.LoadStandard(reemittedInput,
-            consumerIdentity, providers);
+        var reloaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(reemittedInput,
+                consumerIdentity, providers));
         Assert.That(TrRmExecutableCompiler.EmitStandard(reloaded,
             consumerIdentity, A2R1SchemaIdentity, 1), Is.EqualTo(reemitted));
-        Assert.That(NativeModuleCompiler.ExecuteStandard(reemittedInput,
-            consumerIdentity, providers, NativeRuntimePolicy.FailFast),
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(reemittedInput,
+                consumerIdentity, providers, NativeRuntimePolicy.FailFast)),
             Is.EqualTo(99));
-        var image = NativeModuleCompiler.EmitStandardExecutable(
-            reemittedInput, consumerIdentity, providers,
-            NativeRuntimePolicy.FailFast);
+        var image = RunOnProviderThread(() =>
+            NativeModuleCompiler.EmitStandardExecutable(
+                reemittedInput, consumerIdentity, providers,
+                NativeRuntimePolicy.FailFast));
 
         var permutedArtifact = PermuteA2R1ConsumerGlobalRows(artifact);
         Assert.That(permutedArtifact, Is.Not.EqualTo(artifact));
@@ -2255,23 +2290,27 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         Assert.That(permutedTables.Methods.GetName(permutedAnchorRow),
             Is.EqualTo("__trrm_fnptr_anchor_1"));
 
-        var permutedLoaded = TrRmExecutableCompiler.LoadStandard(
-            permutedInput, consumerIdentity, providers);
+        var permutedLoaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                permutedInput, consumerIdentity, providers));
         var permutedReemitted = TrRmExecutableCompiler.EmitStandard(
             permutedLoaded, consumerIdentity, A2R1SchemaIdentity, 1);
         var permutedReemittedInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, permutedReemitted);
-        var permutedReloaded = TrRmExecutableCompiler.LoadStandard(
-            permutedReemittedInput, consumerIdentity, providers);
+        var permutedReloaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                permutedReemittedInput, consumerIdentity, providers));
         Assert.That(TrRmExecutableCompiler.EmitStandard(permutedReloaded,
             consumerIdentity, A2R1SchemaIdentity, 1),
             Is.EqualTo(permutedReemitted));
-        Assert.That(NativeModuleCompiler.ExecuteStandard(
-            permutedReemittedInput, consumerIdentity, providers,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
-        var permutedImage = NativeModuleCompiler.EmitStandardExecutable(
-            permutedReemittedInput, consumerIdentity, providers,
-            NativeRuntimePolicy.FailFast);
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(permutedReemittedInput,
+                consumerIdentity, providers,
+                NativeRuntimePolicy.FailFast)), Is.EqualTo(99));
+        var permutedImage = RunOnProviderThread(() =>
+            NativeModuleCompiler.EmitStandardExecutable(
+                permutedReemittedInput, consumerIdentity, providers,
+                NativeRuntimePolicy.FailFast));
 
         var shiftedProviderInput = new TrRmStandardArtifactInput(
             SchemaIdentity, CreateProvider(includePrefix: true));
@@ -2279,20 +2318,23 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             shiftedProviderInput,
             leafProviderInput,
         };
-        var shiftedProviderLoaded = TrRmExecutableCompiler.LoadStandard(
-            permutedReemittedInput, consumerIdentity, shiftedProviders);
+        var shiftedProviderLoaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                permutedReemittedInput, consumerIdentity, shiftedProviders));
         var shiftedProviderReemitted = TrRmExecutableCompiler.EmitStandard(
             shiftedProviderLoaded, consumerIdentity, A2R1SchemaIdentity, 1);
         var shiftedProviderReemittedInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, shiftedProviderReemitted);
-        Assert.That(NativeModuleCompiler.ExecuteStandard(
-            shiftedProviderReemittedInput, consumerIdentity,
-            shiftedProviders, NativeRuntimePolicy.FailFast),
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(
+                shiftedProviderReemittedInput, consumerIdentity,
+                shiftedProviders, NativeRuntimePolicy.FailFast)),
             Is.EqualTo(99));
         var shiftedProviderImage
-            = NativeModuleCompiler.EmitStandardExecutable(
+            = RunOnProviderThread(() =>
+                NativeModuleCompiler.EmitStandardExecutable(
                 shiftedProviderReemittedInput, consumerIdentity,
-                shiftedProviders, NativeRuntimePolicy.FailFast);
+                shiftedProviders, NativeRuntimePolicy.FailFast));
 
         var coLocatedProviderArtifact
             = CreateProvider(includePrefix: false,
@@ -2341,31 +2383,36 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         }
         Assert.That(providerLayoutCount, Is.GreaterThan(0));
 
-        var coLocatedLoaded = TrRmExecutableCompiler.LoadStandard(
-            coLocatedInput, consumerIdentity, [leafProviderInput]);
+        var coLocatedLoaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                coLocatedInput, consumerIdentity, [leafProviderInput]));
         AssertProviderExpectation(coLocatedLoaded, providerIdentity,
             consumerIdentity, 2, "ContainerA", "ContainerAKey");
         AssertProviderExpectation(coLocatedLoaded, providerIdentity,
             consumerIdentity, 2, "UsesLeaf", "UsesLeafKey");
-        Assert.That(NativeModuleCompiler.ExecuteStandard(
-            coLocatedInput, consumerIdentity, [leafProviderInput],
-            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(
+                coLocatedInput, consumerIdentity, [leafProviderInput],
+                NativeRuntimePolicy.FailFast)), Is.EqualTo(99));
         var coLocatedReemitted = TrRmExecutableCompiler.EmitStandard(
             coLocatedLoaded, consumerIdentity, A2R1SchemaIdentity, 1);
         var coLocatedReemittedInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, coLocatedReemitted);
-        var coLocatedReloaded = TrRmExecutableCompiler.LoadStandard(
-            coLocatedReemittedInput, consumerIdentity, providers);
+        var coLocatedReloaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                coLocatedReemittedInput, consumerIdentity, providers));
         AssertProviderExpectation(coLocatedReloaded, providerIdentity,
             consumerIdentity, 1, "ContainerA", "ContainerAKey");
         AssertProviderExpectation(coLocatedReloaded, providerIdentity,
             consumerIdentity, 1, "UsesLeaf", "UsesLeafKey");
-        Assert.That(NativeModuleCompiler.ExecuteStandard(
-            coLocatedReemittedInput, consumerIdentity, providers,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
-        var coLocatedImage = NativeModuleCompiler.EmitStandardExecutable(
-            coLocatedInput, consumerIdentity, [leafProviderInput],
-            NativeRuntimePolicy.FailFast);
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(
+                coLocatedReemittedInput, consumerIdentity, providers,
+                NativeRuntimePolicy.FailFast)), Is.EqualTo(99));
+        var coLocatedImage = RunOnProviderThread(() =>
+            NativeModuleCompiler.EmitStandardExecutable(
+                coLocatedInput, consumerIdentity, [leafProviderInput],
+                NativeRuntimePolicy.FailFast));
 
         var bodyPermutedConsumer
             = TrRmForeignInvocationAddressEmitterTests
@@ -2379,15 +2426,18 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 globalPermutedConsumer, coLocatedProviderArtifact);
         var coLocatedPermutedInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, coLocatedPermutedArtifact);
-        var coLocatedPermutedLoaded = TrRmExecutableCompiler.LoadStandard(
-            coLocatedPermutedInput, consumerIdentity, [leafProviderInput]);
+        var coLocatedPermutedLoaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                coLocatedPermutedInput, consumerIdentity,
+                [leafProviderInput]));
         AssertProviderExpectation(coLocatedPermutedLoaded, providerIdentity,
             consumerIdentity, 2, "ContainerA", "ContainerAKey");
         AssertProviderExpectation(coLocatedPermutedLoaded, providerIdentity,
             consumerIdentity, 2, "UsesLeaf", "UsesLeafKey");
-        Assert.That(NativeModuleCompiler.ExecuteStandard(
-            coLocatedPermutedInput, consumerIdentity, [leafProviderInput],
-            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(
+                coLocatedPermutedInput, consumerIdentity, [leafProviderInput],
+                NativeRuntimePolicy.FailFast)), Is.EqualTo(99));
         var coLocatedPermutedReemitted
             = TrRmExecutableCompiler.EmitStandard(coLocatedPermutedLoaded,
                 consumerIdentity, A2R1SchemaIdentity, 1);
@@ -2395,21 +2445,25 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             = new TrRmStandardArtifactInput(A2R1SchemaIdentity,
                 coLocatedPermutedReemitted);
         var coLocatedPermutedReloaded
-            = TrRmExecutableCompiler.LoadStandard(
-                coLocatedPermutedReemittedInput, consumerIdentity, providers);
+            = RunOnProviderThread(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    coLocatedPermutedReemittedInput, consumerIdentity,
+                    providers));
         AssertProviderExpectation(coLocatedPermutedReloaded,
             providerIdentity, consumerIdentity, 1, "ContainerA",
             "ContainerAKey");
         AssertProviderExpectation(coLocatedPermutedReloaded,
             providerIdentity, consumerIdentity, 1, "UsesLeaf",
             "UsesLeafKey");
-        Assert.That(NativeModuleCompiler.ExecuteStandard(
-            coLocatedPermutedReemittedInput, consumerIdentity, providers,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(
+                coLocatedPermutedReemittedInput, consumerIdentity, providers,
+                NativeRuntimePolicy.FailFast)), Is.EqualTo(99));
         var coLocatedPermutedImage
-            = NativeModuleCompiler.EmitStandardExecutable(
-                coLocatedPermutedInput, consumerIdentity,
-                [leafProviderInput], NativeRuntimePolicy.FailFast);
+            = RunOnProviderThread(() =>
+                NativeModuleCompiler.EmitStandardExecutable(
+                    coLocatedPermutedInput, consumerIdentity,
+                    [leafProviderInput], NativeRuntimePolicy.FailFast));
 
         var shiftedCoLocatedProviderArtifact
             = CreateProvider(includePrefix: true,
@@ -2420,29 +2474,36 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 shiftedCoLocatedProviderArtifact);
         var shiftedCoLocatedInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, shiftedCoLocatedArtifact);
-        var shiftedCoLocatedLoaded = TrRmExecutableCompiler.LoadStandard(
-            shiftedCoLocatedInput, consumerIdentity, [leafProviderInput]);
+        var shiftedCoLocatedLoaded = RunOnProviderThread(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                shiftedCoLocatedInput, consumerIdentity,
+                [leafProviderInput]));
         AssertProviderExpectation(shiftedCoLocatedLoaded, providerIdentity,
             consumerIdentity, 2, "ContainerA", "ContainerAKey");
         AssertProviderExpectation(shiftedCoLocatedLoaded, providerIdentity,
             consumerIdentity, 2, "UsesLeaf", "UsesLeafKey");
-        Assert.That(NativeModuleCompiler.ExecuteStandard(
-            shiftedCoLocatedInput, consumerIdentity, [leafProviderInput],
-            NativeRuntimePolicy.FailFast), Is.EqualTo(99));
+        Assert.That(RunOnProviderThread(() =>
+            NativeModuleCompiler.ExecuteStandard(
+                shiftedCoLocatedInput, consumerIdentity, [leafProviderInput],
+                NativeRuntimePolicy.FailFast)), Is.EqualTo(99));
         var shiftedCoLocatedImage
-            = NativeModuleCompiler.EmitStandardExecutable(
-                shiftedCoLocatedInput, consumerIdentity,
-                [leafProviderInput], NativeRuntimePolicy.FailFast);
+            = RunOnProviderThread(() =>
+                NativeModuleCompiler.EmitStandardExecutable(
+                    shiftedCoLocatedInput, consumerIdentity,
+                    [leafProviderInput], NativeRuntimePolicy.FailFast));
 
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(input, consumerIdentity,
-                [leafProviderInput]));
+            RunOnProviderThread(() =>
+                TrRmExecutableCompiler.LoadStandard(input, consumerIdentity,
+                    [leafProviderInput])));
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(coLocatedInput,
-                consumerIdentity, []));
+            RunOnProviderThread(() =>
+                TrRmExecutableCompiler.LoadStandard(coLocatedInput,
+                    consumerIdentity, [])));
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(coLocatedInput,
-                consumerIdentity, [providerInput, leafProviderInput]));
+            RunOnProviderThread(() =>
+                TrRmExecutableCompiler.LoadStandard(coLocatedInput,
+                    consumerIdentity, [providerInput, leafProviderInput])));
         var incompatibleCoLocatedProviderArtifact
             = CreateProvider(includePrefix: false, arrayExtent: 3,
                 schemaIdentity: A2R1SchemaIdentity);
@@ -2451,10 +2512,11 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 globalPermutedConsumer,
                 incompatibleCoLocatedProviderArtifact);
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(
-                new TrRmStandardArtifactInput(A2R1SchemaIdentity,
-                    incompatibleCoLocatedArtifact),
-                consumerIdentity, [leafProviderInput]));
+            RunOnProviderThread(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(A2R1SchemaIdentity,
+                        incompatibleCoLocatedArtifact),
+                    consumerIdentity, [leafProviderInput])));
 
         var malformedTypeSpecRows
             = new ReadOnlyMemory<byte>[permutedTables.TypeSpecs.Count];
@@ -2478,8 +2540,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var malformedTypeSpecInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, malformedTypeSpecArtifact);
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(malformedTypeSpecInput,
-                consumerIdentity, providers));
+            RunOnProviderThread(() =>
+                TrRmExecutableCompiler.LoadStandard(malformedTypeSpecInput,
+                    consumerIdentity, providers)));
 
         var rootModuleRefRow = 0;
         var leafModuleRefRow = 0;
@@ -2529,17 +2592,18 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             }
         }
         Assert.That(splitImportRow, Is.Not.Zero);
-        var importSection = GetA2R1Section(permutedArtifact, 0x001C);
+        var (Bytes, RecordCount) = GetA2R1Section(permutedArtifact, 0x001C);
         BinaryPrimitives.WriteUInt32LittleEndian(
-            importSection.Bytes.AsSpan((splitImportRow - 1) * 12),
+            Bytes.AsSpan((splitImportRow - 1) * 12),
             checked((uint)leafModuleRefRow));
         var splitProviderArtifact = ReplaceA2R1Sections(permutedArtifact,
-            (0x001C, importSection.Bytes));
+            (0x001C, Bytes));
         var splitProviderInput = new TrRmStandardArtifactInput(
             A2R1SchemaIdentity, splitProviderArtifact);
         _ = Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.LoadStandard(splitProviderInput,
-                consumerIdentity, providers));
+            RunOnProviderThread(() =>
+                TrRmExecutableCompiler.LoadStandard(splitProviderInput,
+                    consumerIdentity, providers)));
 
         await TrRmForeignInvocationAddressEmitterTests
             .AssertNativeImageExitCodeAsync(image, consumerIdentity, 99)
@@ -2699,7 +2763,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 => newRow != index + 1), Is.Not.Empty);
 
         uint RemapSpec(uint typeSpecRef)
-            => RemapTypeSpecRef(typeSpecRef, typeSpecRowByOld);
+        {
+            return RemapTypeSpecRef(typeSpecRef, typeSpecRowByOld);
+        }
 
         var typeSpecRows = new ReadOnlyMemory<byte>[tables.TypeSpecs.Count];
         for (var newRow = 1; newRow <= typeSpecRows.Length; newRow++)
@@ -3345,17 +3411,23 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         }
 
         static uint ReadUInt32(ReadOnlySpan<byte> bytes, int offset)
-            => BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..]);
+        {
+            return BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..]);
+        }
 
         static void WriteUInt32(Span<byte> bytes, int offset, uint value)
-            => BinaryPrimitives.WriteUInt32LittleEndian(bytes[offset..],
-                value);
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes[offset..],
+                        value);
+        }
 
         static uint RemapTypeSpecRef(uint typeSpecRef, int typeSpecOffset)
-            => typeSpecRef != 0
-                && (typeSpecRef & 0xFF00_0000u) == 0
-                    ? checked(typeSpecRef + (uint)typeSpecOffset)
-                    : typeSpecRef;
+        {
+            return typeSpecRef != 0
+                        && (typeSpecRef & 0xFF00_0000u) == 0
+                            ? checked(typeSpecRef + (uint)typeSpecOffset)
+                            : typeSpecRef;
+        }
 
         static uint RemapDefinition(uint definition, int typeDefOffset,
             int fieldDefOffset)
@@ -3469,21 +3541,21 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             }
         }
 
-        var consumerStringSection = GetSection(consumerIndex, 0x0002);
+        var (Bytes, Count, Flags) = GetSection(consumerIndex, 0x0002);
         var providerStringSection = GetSection(providerIndex, 0x0002);
         var consumerStringIndex = new TrRmVariableTableIndex(
-            consumerStringSection.Bytes, consumerStringSection.Count, 8, 4);
+            Bytes, Count, 8, 4);
         var providerStringIndex = new TrRmVariableTableIndex(
             providerStringSection.Bytes, providerStringSection.Count, 8, 4);
         var stringRows = new ReadOnlyMemory<byte>[
-            consumerStringSection.Count + providerStringSection.Count];
-        for (var row = 1; row <= consumerStringSection.Count; row++)
+            Count + providerStringSection.Count];
+        for (var row = 1; row <= Count; row++)
         {
             stringRows[row - 1] = consumerStringIndex.GetRow(row).ToArray();
         }
         for (var row = 1; row <= providerStringSection.Count; row++)
         {
-            stringRows[consumerStringSection.Count + row - 1]
+            stringRows[Count + row - 1]
                 = providerStringIndex.GetRow(row).ToArray();
         }
         var stringBytes = TrRmVariableTableWriter.EncodeBlobs(stringRows);
@@ -3555,7 +3627,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             = consumerTables.Modules.GetFeatureRange(1);
         var providerModuleIdentityStringRow = checked((int)ReadUInt32(
             providerModuleSection.Bytes, 0)
-            + consumerStringSection.Count);
+            + Count);
         var (providerTargetRequirement, providerRuntimePolicy)
             = providerTables.Modules.GetRequirements(1);
         var (providerModuleRefStart, _) = providerTables.Modules
@@ -3624,7 +3696,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             var data = providerModuleRefSection.Bytes.AsSpan(row * 12, 12);
             moduleRefRows.Add(new TrRmModuleRefRow(
                 checked((int)ReadUInt32(data, 0)
-                    + consumerStringSection.Count),
+                    + Count),
                 ReadUInt32(data, 4), ReadUInt32(data, 8)));
         }
         var moduleRefBytes = TrRmModuleRefTableWriter.Encode(moduleRefRows,
@@ -3681,7 +3753,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             var section = artifact == 0
                 ? consumerTypeDefSection : providerTypeDefSection;
             var stringOffset = artifact == 0
-                ? 0 : consumerStringSection.Count;
+                ? 0 : Count;
             var fieldOffset = artifact == 0
                 ? 0 : consumerTables.Fields.Count;
             var genericParamOffset = artifact == 0
@@ -3750,7 +3822,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 checked((int)ReadUInt32(data, 0)
                     + consumerTables.TypeDefs.Count),
                 checked((int)ReadUInt32(data, 4)
-                    + consumerStringSection.Count),
+                    + Count),
                 RemapTypeSpecRef(ReadUInt32(data, 8),
                     consumerTables.TypeSpecs.Count),
                 ReadUInt32(data, 12)));
@@ -3872,7 +3944,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                     + (uint)consumerTables.ModuleRefs.Count));
             WriteUInt32(data, 4,
                 checked(ReadUInt32(data, 4)
-                    + (uint)consumerStringSection.Count));
+                    + (uint)Count));
             WriteUInt32(data, 8, RemapDefinition(
                 ReadUInt32(data, 8), consumerTables.TypeDefs.Count,
                 consumerTables.Fields.Count));
@@ -3896,7 +3968,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 consumerTables.Fields.Count));
             WriteUInt32(data, 4,
                 checked(ReadUInt32(data, 4)
-                    + (uint)consumerStringSection.Count));
+                    + (uint)Count));
         }
         var exportCount = consumerExportSection.Count
             + providerExportSection.Count;
@@ -3923,7 +3995,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         SetSection(0x0001, moduleBytes, moduleRows.Length,
             consumerModuleSection.Flags);
         SetSection(0x0002, stringBytes, stringRows.Length,
-            consumerStringSection.Flags);
+            Flags);
         SetSection(0x0004, featureBytes, featureCount,
             consumerFeatureSection.Flags);
         SetSection(0x0010, moduleRefBytes, moduleRefRows.Count,
@@ -4063,10 +4135,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             blocks, records, body.Code.ToArray(), tables.Contracts.Count,
             schema);
 
-        var bodySection = GetA2R1Section(artifact, 0x0020);
-        var bodyTable = new TrRmBodyTableReader(bodySection.Bytes,
-            bodySection.RecordCount, schema);
-        var bodyRows = new ReadOnlyMemory<byte>[bodySection.RecordCount];
+        var (Bytes, RecordCount) = GetA2R1Section(artifact, 0x0020);
+        var bodyTable = new TrRmBodyTableReader(Bytes,
+            RecordCount, schema);
+        var bodyRows = new ReadOnlyMemory<byte>[RecordCount];
         for (var row = 1; row <= bodyRows.Length; row++)
         {
             bodyRows[row - 1] = row == bodyRow
@@ -4099,7 +4171,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var result = ReplaceA2R1SectionsWithCounts(artifact,
             (0x0001, moduleSection.Bytes, moduleSection.RecordCount),
             (0x0004, featureBytes, featureRows.Count),
-            (0x0020, rewrittenBodySection, bodySection.RecordCount));
+            (0x0020, rewrittenBodySection, RecordCount));
         _ = TrRmStructuralMetadataValidator
             .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraftAndGetExecutionTables(
                 TrRmArtifactIndex

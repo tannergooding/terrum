@@ -36,14 +36,18 @@ internal sealed class VariableTableIndexComponentTests
                 }
                 if (validIndex) {
                     for (mut int32 indexedRow = 1; indexedRow <= count; indexedRow = indexedRow + 1) {
+                        init int32 indexedRowStart;
+                        init int32 indexedRowLength;
                         if (!TryGetValidatedVariableTableRowExtent(
                             count, minimumRowBytes, rowAlignment, indexedRow,
-                            init var indexedRowStart, init var indexedRowLength)) {
+                            ref init indexedRowStart, ref init indexedRowLength)) {
                             return 7;
                         }
+                        init int32 checkedRowStart;
+                        init int32 checkedRowLength;
                         if (!TryGetVariableTableRowExtent(
                             count, minimumRowBytes, rowAlignment, indexedRow,
-                            init var checkedRowStart, init var checkedRowLength)
+                            ref init checkedRowStart, ref init checkedRowLength)
                             || indexedRowStart != checkedRowStart
                             || indexedRowLength != checkedRowLength) {
                             return 9;
@@ -54,29 +58,41 @@ internal sealed class VariableTableIndexComponentTests
                     if (!validIndex) {
                         return 4;
                     }
+                    init int32 rowStart;
+                    init int32 rowLength;
                     if (!TryGetVariableTableRowExtent(count, minimumRowBytes, rowAlignment, row,
-                        init var rowStart, init var rowLength)) {
+                        ref init rowStart, ref init rowLength)) {
                         return 1;
                     }
                     if (rowStart != Host.Expected[record + 5]
                         || rowLength != Host.Expected[record + 6]) {
                         return 2;
                     }
+                    init int32 validatedRowStart;
+                    init int32 validatedRowLength;
                     if (!TryGetValidatedVariableTableRowExtent(
                         count, minimumRowBytes, rowAlignment, row,
-                        init var validatedRowStart, init var validatedRowLength)
+                        ref init validatedRowStart, ref init validatedRowLength)
                         || validatedRowStart != rowStart
                         || validatedRowLength != rowLength) {
                         return 5;
                     }
-                } else if (TryGetVariableTableRowExtent(count, minimumRowBytes, rowAlignment, row,
-                    init var rejectedStart, init var rejectedLength)) {
-                    return 3;
-                } else if (validIndex
-                    && TryGetValidatedVariableTableRowExtent(
-                        count, minimumRowBytes, rowAlignment, row,
-                        init var unusedStart, init var unusedLength)) {
-                    return 6;
+                } else {
+                    init int32 rejectedStart;
+                    init int32 rejectedLength;
+                    if (TryGetVariableTableRowExtent(count, minimumRowBytes, rowAlignment, row,
+                        ref init rejectedStart, ref init rejectedLength)) {
+                        return 3;
+                    }
+                    if (validIndex) {
+                        init int32 unusedStart;
+                        init int32 unusedLength;
+                        if (TryGetValidatedVariableTableRowExtent(
+                            count, minimumRowBytes, rowAlignment, row,
+                            ref init unusedStart, ref init unusedLength)) {
+                            return 6;
+                        }
+                    }
                 }
             }
             return 0;

@@ -221,12 +221,12 @@ internal sealed class TrRmExecutableArithmeticProfileTests
         var expectedBehavior = expectedWrapping
             ? BoundIntegerOverflowBehavior.Wrapping : BoundIntegerOverflowBehavior.Checked;
         var artifact = TrRmExecutableCompiler.Emit(Compile($$"""
-            void Fill(int32 value, init ref<int32> result) {
-                result = value + 1;
+            void Fill(int32 value, ref<init int32> result) {
+                *result = value + 1;
             }
             int32 Main() {
                 init int32 result;
-                Fill({{input}}, init result);
+                Fill({{input}}, ref init result);
                 return result;
             }
             """, profile), "output-arithmetic");
@@ -251,17 +251,17 @@ internal sealed class TrRmExecutableArithmeticProfileTests
         var expectedBehavior = expectedWrapping
             ? BoundIntegerOverflowBehavior.Wrapping : BoundIntegerOverflowBehavior.Checked;
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(Compile("""
-            void NegateSigned(int32 value, init ref<int32> result) {
-                result = -value;
+            void NegateSigned(int32 value, ref<init int32> result) {
+                *result = -value;
             }
-            void NegateUnsigned(uint32 value, init ref<uint32> result) {
-                result = -value;
+            void NegateUnsigned(uint32 value, ref<init uint32> result) {
+                *result = -value;
             }
             int32 Main() {
                 init int32 signed;
                 init uint32 unsigned;
-                NegateSigned(0, init signed);
-                NegateUnsigned(uint32(0), init unsigned);
+                NegateSigned(0, ref init signed);
+                NegateUnsigned(uint32(0), ref init unsigned);
                 return int32(signed) + int32(unsigned);
             }
             """, profile), "output-negation-arithmetic"));

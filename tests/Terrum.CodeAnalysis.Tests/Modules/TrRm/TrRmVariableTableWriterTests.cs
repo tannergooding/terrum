@@ -49,7 +49,7 @@ internal sealed class TrRmVariableTableWriterTests
         ]);
         var exactLedger = new TrRmA3LayoutResourceLedger();
         exactLedger.ConsumeWork(
-            TrRmA3LayoutResourceLedger.WorkLimit - 28);
+            TrRmA3LayoutResourceLedger.WorkLimit - 56);
         var exactReader = new TrRmBlobTableReader(section, 1, exactLedger);
 
         Assert.That(exactReader.GetRow(1).ToArray(),
@@ -58,7 +58,7 @@ internal sealed class TrRmVariableTableWriterTests
 
         var shortLedger = new TrRmA3LayoutResourceLedger();
         shortLedger.ConsumeWork(
-            TrRmA3LayoutResourceLedger.WorkLimit - 27);
+            TrRmA3LayoutResourceLedger.WorkLimit - 55);
         var shortReader = new TrRmBlobTableReader(section, 1, shortLedger);
         TrRmResourceLimitException? exception = null;
         try

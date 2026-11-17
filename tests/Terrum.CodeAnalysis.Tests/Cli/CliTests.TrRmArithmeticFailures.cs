@@ -30,12 +30,12 @@ internal sealed partial class CliTests
     [TestCase("Unsigned32Zero() - Unsigned32One() == Unsigned32Zero()",unchecked((int)0xE0540001))]
     [TestCase("Signed64Minimum() - Signed64One() == Signed64Zero()",unchecked((int)0xE0540001))]
     [TestCase("Unsigned64Zero() - Unsigned64One() == Unsigned64Zero()",unchecked((int)0xE0540001))]
-    [TestCase("Signed32One() << Signed32NegativeOne() == Signed32Zero()",unchecked((int)0xE0540001))]
-    [TestCase("Unsigned32One() << Signed32ThirtyTwo() == Unsigned32Zero()",unchecked((int)0xE0540001))]
-    [TestCase("Signed32One() >> Signed32ThirtyTwo() == Signed32Zero()",unchecked((int)0xE0540001))]
-    [TestCase("Signed64One() >> Signed32SixtyFour() == Signed64Zero()",unchecked((int)0xE0540001))]
-    [TestCase("Unsigned64One() >>> Signed32SixtyFour() == Unsigned64Zero()",unchecked((int)0xE0540001))]
-    [TestCase("Unsigned64One() >>> Signed32NegativeOne() == Unsigned64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed32One() << Signed32NegativeOne() == Signed32Zero()",unchecked((int)0xE0540004))]
+    [TestCase("Unsigned32One() << Signed32ThirtyTwo() == Unsigned32Zero()",unchecked((int)0xE0540004))]
+    [TestCase("Signed32One() >> Signed32ThirtyTwo() == Signed32Zero()",unchecked((int)0xE0540004))]
+    [TestCase("Signed64One() >> Signed32SixtyFour() == Signed64Zero()",unchecked((int)0xE0540004))]
+    [TestCase("Unsigned64One() >>> Signed32SixtyFour() == Unsigned64Zero()",unchecked((int)0xE0540004))]
+    [TestCase("Unsigned64One() >>> Signed32NegativeOne() == Unsigned64Zero()",unchecked((int)0xE0540004))]
     [TestCase("Signed32Maximum() * Signed32Two() == Signed32Zero()",unchecked((int)0xE0540001))]
     [TestCase("Unsigned32Maximum() * Unsigned32Two() == Unsigned32Zero()",unchecked((int)0xE0540001))]
     [TestCase("Signed64Maximum() * Signed64Two() == Signed64Zero()",unchecked((int)0xE0540001))]
@@ -44,7 +44,7 @@ internal sealed partial class CliTests
         string expression, int expected)
     {
         var source = $$"""
-            void Fill(int32 value, init ref<int32> result) { result = value; }
+            void Fill(int32 value, ref<init int32> result) { *result = value; }
             int32 Observe(bool value) { return value ? 42 : 0; }
             int32 Signed32One() { return 1; }
             int32 Signed32Zero() { return 0; }
@@ -70,7 +70,7 @@ internal sealed partial class CliTests
             uint64 Unsigned64Two() { return uint64(2); }
             int32 Main() {
                 init int32 result;
-                Fill(Observe({{expression}}), init result);
+                Fill(Observe({{expression}}), ref init result);
                 return result;
             }
             """;

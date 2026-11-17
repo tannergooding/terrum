@@ -110,9 +110,9 @@ internal sealed partial class CliTests
         }
     }
     [TestCase("int32","int32.MaxValue","+=","1",unchecked((int)0xE0540001))]
-    [TestCase("int32","1","<<=","-1",unchecked((int)0xE0540001))]
-    [TestCase("uint32","uint32(1)",">>=","32",unchecked((int)0xE0540001))]
-    [TestCase("int64","int64(1)",">>>=","64",unchecked((int)0xE0540001))]
+    [TestCase("int32","1","<<=","-1",unchecked((int)0xE0540004))]
+    [TestCase("uint32","uint32(1)",">>=","32",unchecked((int)0xE0540004))]
+    [TestCase("int64","int64(1)",">>>=","64",unchecked((int)0xE0540004))]
     [TestCase("uint64","uint64(1)","/=","uint64(0)",unchecked((int)0xE0540002))]
     [TestCase("int32","20","+=","x++ / 0",unchecked((int)0xE0540002))]
     [TestCase("int32","int32.MaxValue","+=","x++ / 0",unchecked((int)0xE0540001))]
@@ -162,7 +162,7 @@ internal sealed partial class CliTests
         var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-raw-shift-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
-        const int failure = unchecked((int)0xE0540001);
+        const int failure = unchecked((int)0xE0540004);
         try
         {
             await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.Artifact(

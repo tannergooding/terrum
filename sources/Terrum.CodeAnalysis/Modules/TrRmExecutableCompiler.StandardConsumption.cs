@@ -81,8 +81,8 @@ public static partial class TrRmExecutableCompiler
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(providers);
-        if (!StringComparer.Ordinal.Equals(input.SchemaIdentity,
-                StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity))
+        if (!IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
+                input.SchemaIdentity))
         {
             throw Unsupported(
                 "Core contract-failure selections require the exact B+I+G profile.");
@@ -136,7 +136,7 @@ public static partial class TrRmExecutableCompiler
     /// <param name="input">The complete provider artifact and its exact schema selection.</param>
     /// <param name="moduleIdentity">The exact identity of the Module to expose.</param>
     /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
-    /// <returns>The selected Module's exported declarations.</returns>
+    /// <returns>The selected Module's declarations and supported imported views.</returns>
     /// <exception cref="ArgumentNullException">An input, provider list or artifact is null.</exception>
     /// <exception cref="ArgumentException">A selection or Module identity is empty or unrecognized.</exception>
     /// <exception cref="NotSupportedException">The selected schema is not supported by this operation.</exception>
@@ -154,7 +154,7 @@ public static partial class TrRmExecutableCompiler
     /// <param name="moduleIdentity">The exact identity of the Module to expose.</param>
     /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
     /// <param name="coreExceptionIdentitySelections">The exact Core exception anchors selected for using Modules.</param>
-    /// <returns>The selected Module's exported declarations.</returns>
+    /// <returns>The selected Module's declarations and supported imported views.</returns>
     /// <exception cref="ArgumentNullException">An input, provider list or artifact is null.</exception>
     /// <exception cref="ArgumentException">A selection or Module identity is empty, duplicate or unrecognized.</exception>
     /// <exception cref="NotSupportedException">The selected schema is not supported by this operation.</exception>
@@ -175,7 +175,7 @@ public static partial class TrRmExecutableCompiler
     /// <param name="moduleIdentity">The exact identity of the Module to expose.</param>
     /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
     /// <param name="coreContractFailureIdentitySelections">The nonserialized Core failure selections retained by the reference.</param>
-    /// <returns>The selected Module's exported declarations and failure-selection context.</returns>
+    /// <returns>The selected Module's declarations, supported imported views, and failure-selection context.</returns>
     public static CompilationReference
         CreateStandardReferenceWithCoreContractFailureIdentitySelections(
         TrRmStandardArtifactInput input, string moduleIdentity,
@@ -184,8 +184,8 @@ public static partial class TrRmExecutableCompiler
             coreContractFailureIdentitySelections)
     {
         if (input is null
-            || !StringComparer.Ordinal.Equals(input.SchemaIdentity,
-                StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity))
+            || !IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
+                input.SchemaIdentity))
         {
             throw Unsupported(
                 "Core contract-failure selections require the exact B+I+G profile.");
@@ -207,7 +207,11 @@ public static partial class TrRmExecutableCompiler
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(providers);
         if (StringComparer.Ordinal.Equals(input.SchemaIdentity,
-                StandardGenericMethodCallsSchemaIdentity))
+                StandardGenericMethodCallsSchemaIdentity)
+            || StringComparer.Ordinal.Equals(input.SchemaIdentity,
+                StandardGenericMethodCallsParameterLabelsSchemaIdentity)
+            || StringComparer.Ordinal.Equals(input.SchemaIdentity,
+                StandardGenericMethodCallsParameterLabelsReceiverAccessSchemaIdentity))
         {
             if (!coreExceptionIdentitySelections.IsDefaultOrEmpty
                 || !coreContractFailureIdentitySelections.IsDefaultOrEmpty)
@@ -263,6 +267,8 @@ public static partial class TrRmExecutableCompiler
             functions.Add(function with
             {
                 Name = exportKey,
+                Variables = function.Variables.Take(function.ParameterCount)
+                    .ToImmutableArray(),
                 Body = new BoundBlock([], default),
                 IndexedBody = null,
                 IsExternal = true,
@@ -356,16 +362,27 @@ public static partial class TrRmExecutableCompiler
                 IsSelectedInitializationReferenceSchemaIdentity);
         var includesInitializationReferenceBodies
             = initializationReferenceBodySchemaIdentity is not null;
+        var initializationReferenceLocalFieldLayoutSchemaIdentity
+            = schemaIdentities.FirstOrDefault(
+                IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity);
         var includesInitializationReferenceLocalFieldLayout
-            = schemaIdentities.Length != 0
-                && schemaIdentities.All(static schemaIdentity =>
-                    StringComparer.Ordinal.Equals(schemaIdentity,
-                        StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity));
+            = initializationReferenceLocalFieldLayoutSchemaIdentity
+                is not null;
+        if (includesInitializationReferenceLocalFieldLayout
+            && schemaIdentities.Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    initializationReferenceLocalFieldLayoutSchemaIdentity)))
+        {
+            throw Unsupported(
+                "The initialization-reference field-layout profile requires the exact schema selection for the root and every provider artifact.");
+        }
         var includesInitializationReferenceGeneralPredicateGraphs
             = schemaIdentities.Length != 0
-                && schemaIdentities.All(static schemaIdentity =>
+                && schemaIdentities.All(schemaIdentity =>
                     StringComparer.Ordinal.Equals(schemaIdentity,
-                        StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity));
+                        schemaIdentities[0]))
+                && IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
+                    schemaIdentities[0]);
         if (includesInitializationReferenceBodies
             && schemaIdentities.Any(identity =>
                 !StringComparer.Ordinal.Equals(identity,
@@ -400,12 +417,11 @@ public static partial class TrRmExecutableCompiler
                 nameof(coreContractFailureIdentitySelections));
         }
         if (!coreContractFailureIdentitySelections.IsDefaultOrEmpty
-            && (!StringComparer.Ordinal.Equals(
-                    initializationReferenceBodySchemaIdentity,
-                    StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity)
+            && (!IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
+                    initializationReferenceBodySchemaIdentity ?? string.Empty)
                 || schemaIdentities.Any(identity =>
-                    !StringComparer.Ordinal.Equals(identity,
-                        StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity))))
+                    !IsSelectedInitializationReferenceGeneralPredicateGraphsSchemaIdentity(
+                        identity))))
         {
             throw Unsupported(
                 "Core contract-failure selections require the exact B+I+G profile for every supplied artifact.");
@@ -434,11 +450,17 @@ public static partial class TrRmExecutableCompiler
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger,
             coreContractFailureIdentitySelections);
         var rootModuleRow = moduleValidation.RootModuleRow;
+        var includesInitializationReferenceNestedFieldDestinations
+            = schemaIdentities.Length != 0
+                && schemaIdentities.All(schemaIdentity =>
+                    StringComparer.Ordinal.Equals(schemaIdentity,
+                        StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity));
         var standardFieldProviderValidation
             = schemaIdentities.Length != 0
-                && schemaIdentities.All(static schemaIdentity =>
-                    StringComparer.Ordinal.Equals(schemaIdentity,
-                        StandardLayoutQueriesSchemaIdentity))
+                && (schemaIdentities.All(static schemaIdentity =>
+                        StringComparer.Ordinal.Equals(schemaIdentity,
+                            StandardLayoutQueriesSchemaIdentity))
+                    || includesInitializationReferenceNestedFieldDestinations)
                 ? TrRmFixedArrayProviderBindingValidator
                     .ValidateFieldDefImports(
                         ValidateForeignInvocationArtifact(
@@ -511,6 +533,7 @@ public static partial class TrRmExecutableCompiler
             or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
             or StandardLocalAggregateLayoutSchemaIdentity
             or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+            or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
             or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
         {
             typeProviderBindings = TrRmFixedArrayProviderBindingValidator
@@ -531,21 +554,59 @@ public static partial class TrRmExecutableCompiler
                 "A2R1 TypeDef provider edges require exact A2 or A2R1+Repeat selections.");
         }
 
-        var allTypeProviderBindings = typeProviderBindings.AddRange(
-            standardFieldProviderValidation.TypeBindings);
+        var allTypeProviderBindings = includesInitializationReferenceNestedFieldDestinations
+            ? typeProviderBindings.AddRange(
+                standardFieldProviderValidation.TypeBindings)
+                .Distinct().ToImmutableArray()
+            : typeProviderBindings.AddRange(
+                standardFieldProviderValidation.TypeBindings);
 
+        var includesInitializationReferencePointerLoads
+            = schemaIdentities.Length != 0
+                && schemaIdentities.All(schemaIdentity =>
+                    StringComparer.Ordinal.Equals(schemaIdentity,
+                        schemaIdentities[0]))
+                && IsSelectedNativePointerLoadsSchemaIdentity(
+                    schemaIdentities[0]);
+        var includesInitializationReferenceNativeParameterContracts
+            = schemaIdentities.Length != 0
+                && schemaIdentities.All(schemaIdentity =>
+                    StringComparer.Ordinal.Equals(schemaIdentity,
+                        schemaIdentities[0]))
+                && (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                        StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity)
+                    || StringComparer.Ordinal.Equals(schemaIdentities[0],
+                        StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity));
         if ((includesInitializationReferenceLocalFieldLayout
-                || includesInitializationReferenceGeneralPredicateGraphs)
+                || includesInitializationReferenceGeneralPredicateGraphs
+                || includesInitializationReferencePointerLoads)
             && HasLocalAggregateMethodClosureWork(artifacts,
                 schemaIdentities, moduleValidation))
         {
-            return LoadLocalAggregateLayoutProviderClosure(artifacts,
+            var loadedProgram = LoadLocalAggregateLayoutProviderClosure(artifacts,
                 schemaIdentities, moduleIdentity, moduleValidation,
                 allTypeProviderBindings,
+                fieldProviderBindings:
+                    includesInitializationReferenceNestedFieldDestinations
+                        ? standardFieldProviderValidation.FieldBindings
+                        : ImmutableArray<TrRmStandardFieldProviderBinding>.Empty,
                 initializationReferenceLocalFieldLayout:
                     includesInitializationReferenceLocalFieldLayout,
+                nestedInitializationReferenceFieldDestinations:
+                    includesInitializationReferenceNestedFieldDestinations,
                 generalPredicateGraphsInitializationReferenceBodies:
-                    includesInitializationReferenceGeneralPredicateGraphs);
+                    includesInitializationReferenceGeneralPredicateGraphs,
+                standardNativePointerLoads:
+                    includesInitializationReferencePointerLoads,
+                nativeParameterContracts:
+                    includesInitializationReferenceNativeParameterContracts);
+            return includesInitializationReferenceNestedFieldDestinations
+                && !standardFieldProviderValidation.FieldBindings.IsEmpty
+                ? RetainStandardFieldProviderClosure(loadedProgram,
+                    standardFieldProviderValidation, artifacts,
+                    schemaIdentities, moduleValidation.Modules,
+                    rootModuleRow, moduleIdentity)
+                : loadedProgram;
         }
 
         if (StringComparer.Ordinal.Equals(schemaIdentities[0],
@@ -925,7 +986,9 @@ public static partial class TrRmExecutableCompiler
         if (validation.TypeBindings.IsEmpty
             && validation.FieldBindings.IsEmpty
             && !StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardLayoutQueriesSchemaIdentity))
+                StandardLayoutQueriesSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity))
         {
             return program;
         }
@@ -933,6 +996,14 @@ public static partial class TrRmExecutableCompiler
         var rootModule = modules.Single(module =>
             module.ArtifactIndex == 0
                 && module.ModuleRow == rootModuleRow);
+        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
+            && !validation.FieldBindings.IsEmpty)
+        {
+            program = RetainLoadedA2SourceFieldOrigins(program, validation,
+                artifacts, schemaIdentities, rootModuleRow);
+        }
+
         var artifactSnapshots
             = ImmutableArray.CreateBuilder<
                 BoundStandardFieldProviderArtifact>(artifacts.Length);
@@ -1001,6 +1072,165 @@ public static partial class TrRmExecutableCompiler
         return program with {
             StandardFieldProviderClosure = fieldProviderClosure,
         };
+    }
+
+    private static BoundProgram RetainLoadedA2SourceFieldOrigins(
+        BoundProgram program,
+        TrRmStandardFieldProviderValidation validation,
+        byte[][] artifacts, string[] schemaIdentities, int rootModuleRow)
+    {
+        var rootTables = ValidateForeignInvocationArtifact(
+            CreateForeignInvocationIndex(artifacts[0], schemaIdentities[0]),
+            schemaIdentities[0], null, createA3ResourceLedger: false);
+        var (typeDefStart, typeDefEnd)
+            = rootTables.Modules.GetTypeDefRange(rootModuleRow);
+        if (typeDefStart <= 0
+            || typeDefEnd - typeDefStart != program.Structures.Length)
+        {
+            throw Invalid(
+                "The nested FieldPath FieldDef origins do not match the root TypeDef range.");
+        }
+
+        var snapshots = new Dictionary<(int ArtifactIndex, int ModuleRow),
+            BoundSourceTypeProviderSnapshot>();
+        var fieldsByOwner = new Dictionary<
+            (int TypeDefRow, int FieldOrdinal),
+            List<(uint DefinitionId, string ExportKey,
+                BoundSourceTypeProviderSnapshot Provider)>>();
+        foreach (var binding in validation.FieldBindings)
+        {
+            if (binding.ConsumerArtifactIndex != 0
+                || binding.ConsumerModuleRow != rootModuleRow)
+            {
+                continue;
+            }
+
+            if (binding.ExpectedOwnerTypeDefRow < typeDefStart
+                || binding.ExpectedOwnerTypeDefRow >= typeDefEnd)
+            {
+                throw Invalid(
+                    "A nested FieldPath FieldDef Import has an invalid expected owner.");
+            }
+
+            var (fieldStart, fieldEnd) = rootTables.TypeDefs.GetFieldRange(
+                binding.ExpectedOwnerTypeDefRow);
+            if (binding.ExpectedFieldDefRow < fieldStart
+                || binding.ExpectedFieldDefRow >= fieldEnd
+                || rootTables.Fields.GetOwnerTypeDef(
+                    binding.ExpectedFieldDefRow)
+                    != binding.ExpectedOwnerTypeDefRow)
+            {
+                throw Invalid(
+                    "A nested FieldPath FieldDef Import is outside its expected owner.");
+            }
+
+            var providerKey = (binding.ProviderArtifactIndex,
+                binding.ProviderModuleRow);
+            if (!snapshots.TryGetValue(providerKey, out var provider))
+            {
+                var providerTables = ValidateForeignInvocationArtifact(
+                    CreateForeignInvocationIndex(
+                        artifacts[binding.ProviderArtifactIndex],
+                        schemaIdentities[binding.ProviderArtifactIndex]),
+                    schemaIdentities[binding.ProviderArtifactIndex], null,
+                    createA3ResourceLedger: false);
+                provider = CreateA2SourceTypeProviderSnapshot(
+                    providerTables,
+                    artifacts[binding.ProviderArtifactIndex],
+                    schemaIdentities[binding.ProviderArtifactIndex],
+                    binding.ProviderModuleRow);
+                snapshots.Add(providerKey, provider);
+            }
+
+            if (!StringComparer.Ordinal.Equals(provider.ModuleIdentity,
+                    binding.ProducerIdentity))
+            {
+                throw Invalid(
+                    "A nested FieldPath FieldDef provider snapshot has a different Module identity.");
+            }
+
+            var ownerIndex = binding.ExpectedOwnerTypeDefRow - typeDefStart;
+            var fieldOrdinal = binding.ExpectedFieldDefRow - fieldStart;
+            var key = (binding.ExpectedOwnerTypeDefRow, fieldOrdinal);
+            if (!fieldsByOwner.TryGetValue(key, out var origins))
+            {
+                origins = [];
+                fieldsByOwner.Add(key, origins);
+            }
+
+            var actualDefinitionId = 0x1400_0000u
+                | checked((uint)binding.ProviderFieldDefRow);
+            if (origins.Any(origin =>
+                    origin.DefinitionId != actualDefinitionId
+                    || !SameA2SourceTypeProviderSnapshot(
+                        origin.Provider, provider)))
+            {
+                throw Invalid(
+                    "One nested FieldPath FieldDef has conflicting provider origins.");
+            }
+
+            origins.Add((actualDefinitionId, binding.ExportKey, provider));
+            if ((uint)ownerIndex >= (uint)program.Structures.Length
+                || (uint)fieldOrdinal
+                    >= (uint)program.Structures[ownerIndex].Fields.Length)
+            {
+                throw Invalid(
+                    "A nested FieldPath FieldDef Import is outside its loaded owner.");
+            }
+        }
+
+        var structures = program.Structures.ToBuilder();
+        foreach (var (key, origins) in fieldsByOwner)
+        {
+            var ownerIndex = key.TypeDefRow - typeDefStart;
+            var structure = structures[ownerIndex];
+            var fields = structure.Fields.ToBuilder();
+            var originalField = fields[key.FieldOrdinal];
+            var field = originalField with {
+                StandardFieldOrigin = null,
+            };
+            var selectedKeys = origins.Select(static origin =>
+                    origin.ExportKey)
+                .Distinct(StringComparer.Ordinal).ToImmutableArray();
+            var existingOrigin = originalField.StandardFieldOrigin;
+            if (existingOrigin is not null
+                && (existingOrigin.DefinitionId
+                        != origins[0].DefinitionId
+                    || !SameA2SourceTypeProviderSnapshot(
+                        existingOrigin.Provider, origins[0].Provider)))
+            {
+                throw Invalid(
+                    "A nested FieldPath FieldDef Import conflicts with its retained source origin.");
+            }
+
+            var exportKeys = existingOrigin is null
+                ? selectedKeys
+                : existingOrigin.ExportKeys.AddRange(selectedKeys)
+                    .Distinct(StringComparer.Ordinal).ToImmutableArray();
+            var selectedExportKeys
+                = existingOrigin is null
+                    || existingOrigin.SelectedExportKeys.IsDefaultOrEmpty
+                ? exportKeys
+                : existingOrigin.SelectedExportKeys.AddRange(selectedKeys)
+                    .Distinct(StringComparer.Ordinal).ToImmutableArray();
+            var fieldOrigin = new BoundStandardFieldOrigin(
+                origins[0].Provider, origins[0].DefinitionId, exportKeys,
+                existingOrigin?.IsLookupRoot ?? false,
+                existingOrigin?.ExpectedDeclaration ?? field) {
+                SelectedExportKeys = selectedExportKeys,
+                AdditionalExpectedDeclarations = existingOrigin is null
+                    ? ImmutableArray<BoundStructField>.Empty
+                    : existingOrigin.AdditionalExpectedDeclarations,
+            };
+            fields[key.FieldOrdinal] = field with {
+                StandardFieldOrigin = fieldOrigin,
+            };
+            structures[ownerIndex] = structure with {
+                Fields = fields.ToImmutable(),
+            };
+        }
+
+        return program with { Structures = structures.MoveToImmutable() };
     }
 
     private static TrRmA3AdmissionFailureKind GetA3AdmissionFailureKind(
@@ -2534,7 +2764,22 @@ public static partial class TrRmExecutableCompiler
                 StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity,
                 resourceLedger)
             || IsSelectedStandardSchemaIdentity(identity,
+                StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
                 StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardInitReferenceBodiesPointerLoadsSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity,
                 resourceLedger)
             || IsSelectedStandardSchemaIdentity(identity,
                 StandardC1SchemaIdentity,
@@ -2598,11 +2843,28 @@ public static partial class TrRmExecutableCompiler
             or StandardRegisterExceptionRegionsSchemaIdentity
             or StandardInitReferenceBodiesSchemaIdentity
             or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+            or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
             or StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
+            or StandardInitReferenceBodiesPointerLoadsSchemaIdentity
+            or StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsSchemaIdentity
+            or StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity
+            or StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity
             or StandardC1SchemaIdentity
             or StandardC1M1SchemaIdentity
             or StandardC1M1ConstructionSchemaIdentity
-            or StandardC1M1Construction2SchemaIdentity))
+            or StandardC1M1Construction2SchemaIdentity
+            or StandardGenericMethodCallsParameterLabelsSchemaIdentity
+            or StandardGenericMethodCallsParameterLabelsReceiverAccessSchemaIdentity
+            or StandardC1L1R1SchemaIdentity
+            or StandardC1M1L1R1SchemaIdentity
+            or StandardC1M1ConstructionL1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
+            or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity))
         {
             throw new ArgumentException(
                 "The exact Standard schema identity is not selected by this consumer.",
@@ -2642,9 +2904,45 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "The initialization-reference local-field layout profile requires its exact schema selection for the root and every provider artifact.");
         }
+        if (result.Contains(
+                StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity,
+                StringComparer.Ordinal)
+            && result.Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)))
+        {
+            throw Unsupported(
+                "The nested initialization-reference field-path profile requires its exact schema selection for the root and every provider artifact.");
+        }
+        var methodParameterLabelSchemaIdentity = result.FirstOrDefault(
+            IsSelectedMethodParameterLabelSchemaIdentity);
+        if (methodParameterLabelSchemaIdentity is not null
+            && result.Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    methodParameterLabelSchemaIdentity)))
+        {
+            throw Unsupported(
+                "A method-parameter-label profile requires the exact schema selection for the root and every provider artifact.");
+        }
 
         return result;
     }
+
+    private static bool IsSelectedMethodParameterLabelSchemaIdentity(
+        string schemaIdentity)
+        => schemaIdentity is
+            StandardGenericMethodCallsParameterLabelsSchemaIdentity
+            or StandardGenericMethodCallsParameterLabelsReceiverAccessSchemaIdentity
+            or StandardC1L1R1SchemaIdentity
+            or StandardC1M1L1R1SchemaIdentity
+            or StandardC1M1ConstructionL1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
+            or StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
+            or StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity;
 
     private static TrRmArtifactSchema GetForeignInvocationSchema(
         string schemaIdentity)
@@ -2681,10 +2979,23 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.RegisterExceptionRegionsDraft,
             StandardInitReferenceBodiesSchemaIdentity
                 => TrRmArtifactSchema.Standard,
+            StandardInitReferenceBodiesPointerLoadsSchemaIdentity
+                => TrRmArtifactSchema.Standard,
             StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
                 => TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft,
+            StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity
+                => TrRmArtifactSchema
+                    .InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft,
             StandardInitReferenceBodiesGeneralPredicateGraphsSchemaIdentity
                 => TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsSchemaIdentity
+                => TrRmArtifactSchema.GeneralPredicateGraphsDraft,
+            StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity
+                => TrRmArtifactSchema
+                    .InitializationReferencePointerLoadNativeParameterDraft,
+            StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity
+                => TrRmArtifactSchema
+                    .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft,
             StandardC1SchemaIdentity
                 => TrRmArtifactSchema.C1Draft,
             StandardC1M1SchemaIdentity
@@ -2693,6 +3004,26 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.C1M1ConstructionDraft,
             StandardC1M1Construction2SchemaIdentity
                 => TrRmArtifactSchema.C1M1Construction2Draft,
+            StandardC1L1R1SchemaIdentity
+                => TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft,
+            StandardC1M1L1R1SchemaIdentity
+                => TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft,
+            StandardC1M1ConstructionL1R1SchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft,
+            StandardC1M1Construction2L1R1SchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft,
+            StandardC1M1ConstructionL1R1PropertyInitializedStateSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft,
+            StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft,
+            StandardC1M1ConstructionL1R1EnumClosureSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft,
+            StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft,
+            StandardC1M1ConstructionL1R1PropertyInitializedStateEnumClosureSchemaIdentity
+                => TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft,
+            StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity
+                => TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft,
             _ => throw new ArgumentException(
                 "The exact Standard schema identity is not selected by this consumer.",
                 nameof(schemaIdentity)),
@@ -2703,6 +3034,37 @@ public static partial class TrRmExecutableCompiler
         TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         var schema = GetForeignInvocationSchema(schemaIdentity);
+        if (StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardInitReferenceBodiesPointerLoadsSchemaIdentity))
+        {
+            return TrRmArtifactIndex.ForNativePointerLoadsDraft(artifact,
+                resourceLedger);
+        }
+
+        if (StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsSchemaIdentity))
+        {
+            return TrRmArtifactIndex
+                .ForGeneralPredicateGraphsNativePointerLoadsDraft(artifact,
+                    resourceLedger);
+        }
+
+        if (StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardInitReferenceBodiesPointerLoadsNativeParameterSchemaIdentity))
+        {
+            return TrRmArtifactIndex
+                .ForInitializationReferencePointerLoadNativeParameterDraft(
+                    artifact, resourceLedger);
+        }
+
+        if (StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardInitReferenceBodiesGeneralPredicateGraphsPointerLoadsNativeParameterSchemaIdentity))
+        {
+            return TrRmArtifactIndex
+                .ForInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft(
+                    artifact, resourceLedger);
+        }
+
         if (resourceLedger is not null)
         {
             return new TrRmArtifactIndex(artifact, schema, resourceLedger);
@@ -2733,11 +3095,23 @@ public static partial class TrRmExecutableCompiler
             return TrRmArtifactIndex.ForC1M1Construction2Draft(artifact);
         }
 
+        if (schema.UsesMethodReceiverAccess())
+        {
+            return new TrRmArtifactIndex(artifact, schema);
+        }
+
         if (schema
             == TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft)
         {
             return TrRmArtifactIndex
                 .ForInitializationReferenceLocalFieldLayoutDraft(artifact);
+        }
+        if (schema
+            == TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+        {
+            return TrRmArtifactIndex
+                .ForInitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft(
+                    artifact);
         }
 
         if (schema.UsesGeneralPredicateGraphs())
@@ -2801,16 +3175,47 @@ public static partial class TrRmExecutableCompiler
             string schemaIdentity,
             TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
             bool createA3ResourceLedger = true)
-        => GetForeignInvocationSchema(schemaIdentity)
+    {
+        var schema = GetForeignInvocationSchema(schemaIdentity);
+        if (schema
+            == TrRmArtifactSchema
+                .InitializationReferencePointerLoadNativeParameterDraft)
+        {
+            return TrRmStructuralMetadataValidator
+                .ValidateInitializationReferencePointerLoadNativeParameterDraftAndGetExecutionTables(
+                    index);
+        }
+
+        if (schema
+            == TrRmArtifactSchema
+                .InitializationReferenceGeneralPredicatePointerLoadNativeParameterDraft)
+        {
+            return TrRmStructuralMetadataValidator
+                .ValidateInitializationReferenceGeneralPredicatePointerLoadNativeParameterDraftAndGetExecutionTables(
+                    index);
+        }
+
+        return schema
             is TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
             ? TrRmStructuralMetadataValidator
                 .ValidateAndGetExecutionTables(index)
             : GetForeignInvocationSchema(schemaIdentity)
                 is TrRmArtifactSchema.C1Draft
+                    or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
                     or TrRmArtifactSchema.C1M1Draft
+                    or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
                     or TrRmArtifactSchema.C1M1ConstructionDraft
+                    or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
                     or TrRmArtifactSchema.C1M1Construction2Draft
+                    or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                    or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                    or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                    or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                    or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                    or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                    or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
             ? TrRmStructuralMetadataValidator
                 .ValidateC1AndGetExecutionTables(index)
             : GetForeignInvocationSchema(schemaIdentity)
@@ -2862,6 +3267,7 @@ public static partial class TrRmExecutableCompiler
                     .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index)
                 : TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+    }
 
     private readonly record struct StandardModuleValidation(
         int RootModuleRow,
@@ -2877,32 +3283,51 @@ public static partial class TrRmExecutableCompiler
     {
         var includesConstruction2 = false;
         var hasConstruction2Mismatch = false;
+        var selectedConstruction2SchemaIdentity = (string?)null;
         for (var index = 0; index < schemaIdentities.Length; index++)
         {
-        var isConstruction2 = StringComparer.Ordinal.Equals(
-            schemaIdentities[index],
-            StandardC1M1Construction2SchemaIdentity);
-        includesConstruction2 |= isConstruction2;
-        hasConstruction2Mismatch |= !isConstruction2;
+            var isConstruction2
+                = IsSelectedConstruction2SchemaIdentity(
+                    schemaIdentities[index]);
+            includesConstruction2 |= isConstruction2;
+            if (!isConstruction2)
+            {
+                hasConstruction2Mismatch = true;
+                continue;
+            }
+
+            if (selectedConstruction2SchemaIdentity is null)
+            {
+                selectedConstruction2SchemaIdentity
+                    = schemaIdentities[index];
+            }
+            else if (!StringComparer.Ordinal.Equals(
+                    schemaIdentities[index],
+                    selectedConstruction2SchemaIdentity))
+            {
+                hasConstruction2Mismatch = true;
+            }
         }
 
         if (includesConstruction2 && hasConstruction2Mismatch)
         {
-        throw new ArgumentException(
-            "Construction-2 requires the exact construction-2 schema identity for the root and every supplied provider.",
-            nameof(schemaIdentities));
+            throw new ArgumentException(
+                "Construction-2 requires the exact selected Construction-2 schema identity for the root and every supplied provider.",
+                nameof(schemaIdentities));
         }
+        var initializationReferenceLocalFieldLayoutSchemaIdentity
+            = schemaIdentities.FirstOrDefault(
+                IsSelectedInitializationReferenceLocalFieldLayoutSchemaIdentity);
         var includesInitializationReferenceLocalFieldLayout
-            = schemaIdentities.Any(static schemaIdentity =>
-                StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity));
+            = initializationReferenceLocalFieldLayoutSchemaIdentity
+                is not null;
         if (includesInitializationReferenceLocalFieldLayout
-            && schemaIdentities.Any(static schemaIdentity =>
+            && schemaIdentities.Any(schemaIdentity =>
                 !StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity)))
+                    initializationReferenceLocalFieldLayoutSchemaIdentity)))
         {
             throw Unsupported(
-                "The initialization-reference local-field layout profile requires the exact schema selection for the root and every provider artifact.");
+                "The initialization-reference field-layout profile requires the exact schema selection for the root and every provider artifact.");
         }
 
         var exactFProviderClosure
@@ -3014,6 +3439,9 @@ public static partial class TrRmExecutableCompiler
                 var supportsInitializationReferenceBodies
                     = IsSelectedInitializationReferenceSchemaIdentity(
                         schemaIdentities[index]);
+                var supportsNativePointerLoads
+                    = IsSelectedNativePointerLoadsSchemaIdentity(
+                        schemaIdentities[index]);
                 var supportsGeneralPredicateGraphsInitializationBodies
                     = IsSelectedGeneralPredicateGraphsSchemaIdentity(
                         schemaIdentities[index]);
@@ -3026,6 +3454,9 @@ public static partial class TrRmExecutableCompiler
                             or TrRmFeatureTableReader.RootlessNativeValuesFeatureId
                             or TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId)
                         && !(supportsNativeOutputCells
+                            && feature.FeatureId
+                                == TrRmFeatureTableReader.DirectNativeCallsFeatureId)
+                        && !(supportsNativePointerLoads
                             && feature.FeatureId
                                 == TrRmFeatureTableReader.DirectNativeCallsFeatureId)
                         && !(supportsNativeOutputCells
@@ -3100,7 +3531,8 @@ public static partial class TrRmExecutableCompiler
                         or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                         or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                         or StandardLocalAggregateLayoutSchemaIdentity
-                        or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity)
+                        or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                        or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
                     && methodEnd == methodStart && typeEnd > typeStart;
                 if (!isSelectedRoot && moduleRefEnd != moduleRefStart
                     && !isA2TypeOnlyModule && !includesFProviderClosure
@@ -3207,7 +3639,8 @@ public static partial class TrRmExecutableCompiler
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity
                     or StandardLocalAggregateLayoutSchemaIdentity
-                    or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity)
+                    or StandardInitReferenceBodiesLocalFieldLayoutSchemaIdentity
+                    or StandardInitReferenceBodiesNestedFieldDestinationsSchemaIdentity)
                 && rootMethodStart == rootMethodEnd
                 && rootTypeStart < rootTypeEnd
                 && tables.Modules.GetEntryMethod(rootModuleRow) == 0;
@@ -3238,6 +3671,14 @@ public static partial class TrRmExecutableCompiler
         return new StandardModuleValidation(rootModuleRow,
             moduleSelections.ToImmutable(), hasNativeOutputProviderImports);
     }
+
+    private static bool IsSelectedConstruction2SchemaIdentity(
+        string schemaIdentity)
+        => schemaIdentity is StandardC1M1Construction2SchemaIdentity
+            or StandardC1M1Construction2L1R1SchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateSchemaIdentity
+            or StandardC1M1Construction2L1R1EnumClosureSchemaIdentity
+            or StandardC1M1Construction2L1R1PropertyInitializedStateEnumClosureSchemaIdentity;
 
     private static int FindModuleRow(TrRmModuleTableReader modules,
         string moduleIdentity)

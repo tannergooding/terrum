@@ -42,6 +42,14 @@ public static class TrRmMethodDefTableWriter
         TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,
         int contractCount, int bodyCount,
         TrRmA3LayoutResourceLedger? resourceLedger)
+        => Encode(rows, strings, modules, types, signatures, contractCount,
+            bodyCount, TrRmArtifactSchema.Standard, resourceLedger);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmMethodDefRow> rows,
+        TrRmStringTableReader strings, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,
+        int contractCount, int bodyCount, TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -67,7 +75,7 @@ public static class TrRmMethodDefTableWriter
         }
 
         _ = new TrRmMethodDefTableReader(result, rows.Count, strings, modules, types,
-            signatures, contractCount, bodyCount, resourceLedger);
+            signatures, contractCount, bodyCount, schema, resourceLedger);
         return result;
     }
 

@@ -124,14 +124,27 @@ internal sealed class TrRmIndexedMutationTests
         Assert.That(compilation.HasErrors, Is.True);
     }
     [TestCase(" int32 Main() { mut int32 x = 1; x++; return 42; }")]
-    [TestCase(" int32 Main() { mut uint32 x = 1; x >>= 0; return 42; }")]
-    [TestCase(" int32 Main() { mut int32 x = 1; return false ? x << 1 : 42; }")]
+    [TestCase(" int32 Main(int32 count) { mut uint32 x = 1; x >>= count; return 42; }")]
+    [TestCase(" int32 Main(int32 count) { mut int32 x = 1; return x << count; }")]
     public void NoThrowRejectsRetainedCheckedOperations(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Main");
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+    }
+
+    [Test]
+    public void NoThrowAllowsUnreachableCheckedOperation()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "int32 Main() { mut int32 x = 1; return false ? x << 1 : 42; }"));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(
+            compilation.Program!, "Main");
+
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]

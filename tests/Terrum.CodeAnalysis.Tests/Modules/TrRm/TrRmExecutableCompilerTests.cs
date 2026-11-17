@@ -16,8 +16,8 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
+using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -44,16 +44,30 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     private static readonly byte[] s_nonFloatingBuiltinTypeCodes =
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0B, 0x0C, 0x0D, 0x0E];
-    private const int NonFloatingBuiltinTypeSpecCount = 14;
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11];
+    private const int NonFloatingBuiltinTypeSpecCount = 16;
     private const int FirstOptionalTypeSpecRow = NonFloatingBuiltinTypeSpecCount + 1;
     private const int Float32TypeSpecRow = NonFloatingBuiltinTypeSpecCount + 1;
     private const int OptionalFloat32TypeSpecRow = Float32TypeSpecRow + 1;
 
-    private static BoundProgram Compile(string source, bool library = false)
+    private static BoundProgram Compile(string source, bool library = false,
+        CompilationOptions? options = null)
     {
         var syntax = SyntaxTree.Parse(source);
-        var compilation = library ? Compilation.CreateLibrary(syntax) : Compilation.Create(syntax);
+        Compilation compilation;
+        if (options is null)
+        {
+            compilation = library
+                ? Compilation.CreateLibrary(syntax)
+                : Compilation.Create(syntax);
+        }
+        else
+        {
+            var selectedOptions = options.Value;
+            compilation = library
+                ? Compilation.CreateLibrary(syntax, selectedOptions)
+                : Compilation.Create(syntax, selectedOptions);
+        }
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual0 = compilation.Program;
@@ -61,6 +75,87 @@ internal sealed class TrRmExecutableCompilerTests
             return (BoundProgram)__nunitActual0!;
         }))();
     }
+
+    private static byte[] CreateStandardOffsetQueryArtifact()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Pair {
+                public int32 First;
+                public int32 Second;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Other {
+                public int32 Value;
+            }
+
+            public nint OffsetOfSecond() {
+                return offsetof(Pair, Second);
+            }
+
+            public nint OffsetOfPlace(Pair value) {
+                return offsetof(value.Second);
+            }
+
+            public nint OffsetOfOther() {
+                return offsetof(Other, Value);
+            }
+            """), new CompilationOptions {
+                LayoutCoreRegistration = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException("The query program did not bind.");
+        return TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+    }
+
+    [Test]
+    public void StandardSourceEmitterRejectsSourceGenericTypePersistence()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            internal struct Packet<const int32 Count> {
+                public uint32 Kind;
+                public uint32 Value;
+            }
+
+            [Terrum.Interop.NativeImport("example.dll", "Observe")]
+            internal extern int32 Observe(
+                [Terrum.Interop.NativeOutput(
+                    When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Packet<42>> value);
+
+            internal void Probe() {
+                init mut Packet<42> value;
+                unsafe { Observe(&init value); }
+            }
+            """), NativeOutputCoreRegistrationTests
+                .CreateRegisteredCompilationOptions());
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "The source generic native-output call did not bind.");
+        Assert.That(program.SourceGenericTypeInstances, Has.Length.EqualTo(1));
+
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "generic",
+                schemaIdentity, 1));
+        Assert.That(exception!.Message,
+            Does.Contain("source generic type persistence"));
+    }
+
     [TestCase("int32 Main() { return 42; }",42)]
     [TestCase("int32 Main() { mut int32 x = 10; x = x + 20; x = x ^ 12; return x; }",18)]
     [TestCase("int32 Main() { int32 x = int32(uint64.MaxValue % uint64(100)); return x; }",15)]
@@ -110,6 +205,5400 @@ internal sealed class TrRmExecutableCompilerTests
         _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             TrRmExecutableCompiler.EmitStandard(program, "sample",
                 "trrm/1-draft-layout-queries-1", 2));
+    }
+
+    [Test]
+    public void StandardRegisteredLayoutQueryRoundTripsThroughFeature13Body()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public nint SizeOfValue(nint value) {
+                return sizeof(value);
+            }
+            public nint AlignOfValue(nint value) {
+                return alignof(value);
+            }
+            public bool SameSize() {
+                return sizeof(nint) == sizeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SizeOfValue")
+            .Body.Statements.Single();
+        var query = (BoundLayoutQuery)returned.Value!;
+        Assert.That(query.Kind, Is.EqualTo(BoundLayoutQueryKind.SizeOf));
+        Assert.That(query.Subject.Type, Is.EqualTo(PrimitiveType.NativeInt));
+        Assert.That(query.Subject.Kind, Is.EqualTo(BoundQuerySubjectKind.Type));
+
+        var alignReturned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "AlignOfValue")
+            .Body.Statements.Single();
+        var alignQuery = (BoundLayoutQuery)alignReturned.Value!;
+        Assert.That(alignQuery.Kind, Is.EqualTo(BoundLayoutQueryKind.AlignOf));
+        Assert.That(alignQuery.Subject.Type,
+            Is.EqualTo(PrimitiveType.NativeInt));
+
+        var comparisonReturned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SameSize")
+            .Body.Statements.Single();
+        var comparison = (BoundBinary)comparisonReturned.Value!;
+        Assert.That(comparison.Operator, Is.EqualTo(TokenKind.EqualsEquals));
+        Assert.That(comparison.Left, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(comparison.Right, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(comparison.Left.Type, Is.EqualTo(PrimitiveType.NativeInt));
+        Assert.That(comparison.Right.Type, Is.EqualTo(PrimitiveType.NativeInt));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryArithmeticExecutesThroughNativeJit()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                nint firstSize = sizeof(int32);
+                mut nint total = firstSize;
+                total += sizeof(int64);
+                total = total + sizeof(int64);
+                return int32(total);
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "query-arithmetic", schemaIdentity,
+            targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "query-arithmetic", Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "Main")
+            .Body.Statements.Single();
+        var cast = (BoundCast)returned.Value!;
+        var addition = (BoundBinary)cast.Operand;
+        Assert.That(addition.Operator, Is.EqualTo(TokenKind.Plus));
+        Assert.That(addition.Left, Is.TypeOf<BoundBinary>());
+        var firstAddition = (BoundBinary)addition.Left;
+        Assert.That(firstAddition.Operator, Is.EqualTo(TokenKind.Plus));
+        Assert.That(firstAddition.Left, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(firstAddition.Right, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(addition.Right, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(20));
+
+        var invalidArithmetic = RewriteStandardRegisteredQueryBody(artifact,
+            static code => {
+                var query = FindStandardBodyInstruction(code, 0xDE);
+                code[query + 1] = (byte)((code[query + 1] & 0x0F) | 0x50);
+                return code;
+            });
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidArithmetic),
+                "query-arithmetic",
+                Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryOrderedComparisonRoundTripsThroughFeature13Body()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public bool IsSmaller() {
+                return sizeof(int32) < sizeof(int64);
+            }
+            public bool IsNoLarger() {
+                return sizeof(int32) <= sizeof(int64);
+            }
+            public bool IsLarger() {
+                return sizeof(int32) > sizeof(int64);
+            }
+            public bool IsAtLeast() {
+                return sizeof(int32) >= sizeof(int64);
+            }
+            public nint SelectSize() {
+                return sizeof(int32) < sizeof(int64)
+                    ? sizeof(int32) : sizeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        static void AssertComparison(BoundProgram program, string name,
+            TokenKind expectedOperator)
+        {
+            var returned = (BoundReturn)program.Functions.Single(
+                function => function.Name == name)
+                .Body.Statements.Single();
+            var comparison = (BoundBinary)returned.Value!;
+            Assert.That(comparison.Operator, Is.EqualTo(expectedOperator));
+            Assert.That(comparison.Left, Is.TypeOf<BoundLayoutQuery>());
+            Assert.That(comparison.Right, Is.TypeOf<BoundLayoutQuery>());
+        }
+
+        AssertComparison(loaded, "IsSmaller", TokenKind.Less);
+        AssertComparison(loaded, "IsNoLarger", TokenKind.LessEquals);
+        AssertComparison(loaded, "IsLarger", TokenKind.Greater);
+        AssertComparison(loaded, "IsAtLeast", TokenKind.GreaterEquals);
+        var selectedReturn = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectSize")
+            .Body.Statements.Single();
+        var selectedSize = (BoundConditional)selectedReturn.Value!;
+        Assert.That(selectedSize.Condition, Is.TypeOf<BoundBinary>());
+        Assert.That(((BoundBinary)selectedSize.Condition).Operator,
+            Is.EqualTo(TokenKind.Less));
+        Assert.That(selectedSize.WhenTrue, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(selectedSize.WhenFalse, Is.TypeOf<BoundLayoutQuery>());
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryRelationSelectionExecutesThroughNativeJit()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                return int32(sizeof(int32) < sizeof(int64)
+                    ? sizeof(int32) : sizeof(int64));
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "query-selection", schemaIdentity,
+            targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "query-selection", Array.Empty<TrRmStandardArtifactInput>());
+
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(4));
+
+        var conditionalMoveArtifact
+            = RewriteStandardRegisteredQueryBody(artifact, static code => {
+                var position = FindStandardBodyInstruction(code, 0xC4);
+                var payload = BinaryPrimitives.ReadUInt16LittleEndian(
+                    code.AsSpan(position + 2));
+                var destination = payload & 0x0F;
+                var condition = (payload >> 4) & 0x0F;
+                var trueValue = (payload >> 8) & 0x0F;
+                var falseValue = payload >> 12;
+                var rewritten = new byte[code.Length + 2];
+                Array.Copy(code, 0, rewritten, 0, position);
+                rewritten[position] = 0x10;
+                rewritten[position + 1]
+                    = (byte)(destination | (falseValue << 4));
+                Array.Copy(code, position, rewritten, position + 2,
+                    code.Length - position);
+                var conditionalMovePosition = position + 2;
+                var conditionalMovePayload = (ushort)(destination
+                    | (condition << 4) | (trueValue << 8) | (0x0F << 12));
+                rewritten[conditionalMovePosition] = 0xC5;
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    rewritten.AsSpan(conditionalMovePosition + 2),
+                    conditionalMovePayload);
+                return rewritten;
+            });
+        var conditionalMoveLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                conditionalMoveArtifact),
+            "query-selection", Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(NativeJit.Execute(conditionalMoveLoaded,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryValueDiamondRoundTripsThroughFeature13Body()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                }
+            }
+
+            public nint SelectSize(bool chooseFirst) {
+                return chooseFirst ? sizeof(int32) : sizeof(int64);
+            }
+            public nint SelectAlignment(bool chooseFirst) {
+                return chooseFirst ? alignof(int32) : alignof(int64);
+            }
+            public nint SelectOffset(bool chooseFirst) {
+                return chooseFirst
+                    ? offsetof(Example.Pair, First)
+                    : offsetof(Example.Pair, Second);
+            }
+            public nint SelectPlaceOffset(Example.Pair value,
+                bool chooseFirst) {
+                return chooseFirst
+                    ? offsetof(value.First)
+                    : offsetof(value.Second);
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectSize")
+            .Body.Statements.Single();
+        var selectedSize = (BoundConditional)returned.Value!;
+        Assert.That(selectedSize.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(selectedSize.WhenTrue, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(selectedSize.WhenFalse, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(selectedSize.Type, Is.EqualTo(PrimitiveType.NativeInt));
+        var selectedAlignmentReturn = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectAlignment")
+            .Body.Statements.Single();
+        var selectedAlignment
+            = (BoundConditional)selectedAlignmentReturn.Value!;
+        Assert.That(((BoundLayoutQuery)selectedAlignment.WhenTrue).Kind,
+            Is.EqualTo(BoundLayoutQueryKind.AlignOf));
+        Assert.That(((BoundLayoutQuery)selectedAlignment.WhenFalse).Kind,
+            Is.EqualTo(BoundLayoutQueryKind.AlignOf));
+
+        var selectedOffsetReturn = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectOffset")
+            .Body.Statements.Single();
+        var selectedOffset
+            = (BoundConditional)selectedOffsetReturn.Value!;
+        Assert.That(((BoundLayoutQuery)selectedOffset.WhenTrue).Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfType));
+        Assert.That(((BoundLayoutQuery)selectedOffset.WhenFalse).Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfType));
+        Assert.That(((BoundLayoutQuery)selectedOffset.WhenTrue)
+            .Subject.FieldPath?.Steps, Has.Length.EqualTo(1));
+        Assert.That(((BoundLayoutQuery)selectedOffset.WhenFalse)
+            .Subject.FieldPath?.Steps, Has.Length.EqualTo(1));
+
+        var selectedPlaceReturn = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectPlaceOffset")
+            .Body.Statements.Single();
+        var selectedPlace = (BoundConditional)selectedPlaceReturn.Value!;
+        var truePlaceQuery = (BoundLayoutQuery)selectedPlace.WhenTrue;
+        var falsePlaceQuery = (BoundLayoutQuery)selectedPlace.WhenFalse;
+        Assert.That(truePlaceQuery.Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfPlace));
+        Assert.That(falsePlaceQuery.Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfPlace));
+        Assert.That(truePlaceQuery.Subject.Kind,
+            Is.EqualTo(BoundQuerySubjectKind.FieldPathPlace));
+        Assert.That(falsePlaceQuery.Subject.Kind,
+            Is.EqualTo(BoundQuerySubjectKind.FieldPathPlace));
+        Assert.That(truePlaceQuery.Subject.FieldPath?.Steps,
+            Has.Length.EqualTo(1));
+        Assert.That(falsePlaceQuery.Subject.FieldPath?.Steps,
+            Has.Length.EqualTo(1));
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryValueDiamondRejectsInvalidMergeEvidence()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public nint SelectSize(bool chooseFirst) {
+                return chooseFirst ? sizeof(int32) : sizeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+
+        var invalidCarrier = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                records[3][9] = 2;
+                records[3][10] = 0;
+                records[3][11] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidCarrier),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidIncomingType = RewriteStandardRegisteredQueryBody(artifact,
+            static code => {
+                var position = FindStandardBodyInstruction(code, 0xDE);
+                code[position + 1]
+                    = (byte)((code[position + 1] & 0x0F) | 0x50);
+                return code;
+            });
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidIncomingType),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidIncomingRegister
+            = RewriteStandardRegisteredQueryBody(artifact, static code => {
+                var position = FindStandardBodyInstruction(code, 0xDE);
+                code[position + 1]
+                    = (byte)((code[position + 1] & 0xF0) | 0x0F);
+                return code;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidIncomingRegister),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidEdge = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                records[4][6] = 3;
+                records[4][7] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, invalidEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryNestedConditionalEmitsStandardBody()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public nint SelectSize(bool outer, bool inner) {
+                return outer
+                    ? (inner ? sizeof(int32) : sizeof(int16))
+                    : sizeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectSize")
+            .Body.Statements.Single();
+        var outer = (BoundConditional)returned.Value!;
+        var inner = (BoundConditional)outer.WhenTrue;
+        Assert.That(outer.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(inner.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(inner.WhenTrue, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(inner.WhenFalse, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(outer.WhenFalse, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(outer.Type, Is.EqualTo(PrimitiveType.NativeInt));
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryMultipleNestedJoinsRoundTripThroughFeature13Body()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public nint SelectSize(bool outer, bool left, bool right) {
+                return outer
+                    ? (left ? sizeof(int32) : sizeof(int16))
+                    : (right ? alignof(int64) : sizeof(int8));
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectSize")
+            .Body.Statements.Single();
+        var outer = (BoundConditional)returned.Value!;
+        var left = (BoundConditional)outer.WhenTrue;
+        var right = (BoundConditional)outer.WhenFalse;
+        Assert.That(outer.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(left.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(right.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(left.WhenTrue, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(left.WhenFalse, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(right.WhenTrue, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(right.WhenFalse, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(((BoundLayoutQuery)right.WhenTrue).Kind,
+            Is.EqualTo(BoundLayoutQueryKind.AlignOf));
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryNestedFieldPathsCrossMultipleJoins()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Inner {
+                    public uint8 First;
+                    public uint32 Second;
+                }
+
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 Prefix;
+                    public Inner Nested;
+                    public uint16 Suffix;
+                }
+            }
+
+            public nint SelectOffset(bool outer, bool left, bool right) {
+                return outer
+                    ? (left
+                        ? offsetof(Example.Pair, Nested.First)
+                        : sizeof(int16))
+                    : (right
+                        ? offsetof(Example.Pair, Nested.Second)
+                        : offsetof(Example.Pair, Suffix));
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "sample", schemaIdentity,
+            targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectOffset")
+            .Body.Statements.Single();
+        var outer = (BoundConditional)returned.Value!;
+        var left = (BoundConditional)outer.WhenTrue;
+        var right = (BoundConditional)outer.WhenFalse;
+        var nestedOffset = (BoundLayoutQuery)left.WhenTrue;
+        Assert.That(nestedOffset.Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfType));
+        Assert.That(nestedOffset.Subject.FieldPath?.Steps,
+            Has.Length.EqualTo(2));
+        Assert.That(((BoundLayoutQuery)left.WhenFalse).Kind,
+            Is.EqualTo(BoundLayoutQueryKind.SizeOf));
+        Assert.That(((BoundLayoutQuery)right.WhenTrue).Subject.FieldPath?.Steps,
+            Has.Length.EqualTo(2));
+        Assert.That(((BoundLayoutQuery)right.WhenFalse)
+            .Subject.FieldPath?.Steps, Has.Length.EqualTo(1));
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryValueSurvivesLoopBackedge()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var source = """
+            public nint KeepSize(bool start, bool stop) {
+                mut bool repeat = start;
+                nint size = sizeof(int32);
+                while (repeat) {
+                    repeat = stop;
+                }
+                return size;
+            }
+
+            public nint KeepSizeAfter(bool start, bool stop) {
+                mut bool repeat = start;
+                nint size = sizeof(int32);
+                do {
+                    repeat = stop;
+                } while (repeat);
+                return size;
+            }
+            """;
+        var program = Compile(source, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var loopFunction = loaded.Functions.Single(
+            static function => function.Name == "KeepSize");
+        Assert.That(loopFunction.Body.Statements,
+            Has.Length.EqualTo(4));
+        Assert.That(loopFunction.Body.Statements[0],
+            Is.TypeOf<BoundLocal>());
+        Assert.That(((BoundLocal)loopFunction.Body.Statements[1]).Initializer,
+            Is.TypeOf<BoundLayoutQuery>());
+        var loop = (BoundWhile)loopFunction.Body.Statements[2];
+        Assert.That(loop.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(loop.Body, Is.TypeOf<BoundBlock>());
+        Assert.That(((BoundBlock)loop.Body).Statements.Single(),
+            Is.TypeOf<BoundAssignment>());
+        Assert.That(((BoundReturn)loopFunction.Body.Statements[3]).Value,
+            Is.TypeOf<BoundRead>());
+        var postTestedLoopFunction = loaded.Functions.Single(
+            static function => function.Name == "KeepSizeAfter");
+        var postTestedLoop = (BoundWhile)postTestedLoopFunction.Body
+            .Statements[2];
+        Assert.That(postTestedLoop.IsPostTested, Is.True);
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSize(true, false)
+                    + KeepSizeAfter(false, false));
+            }
+
+            public nint KeepSize(bool start, bool stop) {
+                mut bool repeat = start;
+                nint size = sizeof(int32);
+                while (repeat) {
+                    repeat = stop;
+                }
+                return size;
+            }
+
+            public nint KeepSizeAfter(bool start, bool stop) {
+                mut bool repeat = start;
+                nint size = sizeof(int32);
+                do {
+                    repeat = stop;
+                } while (repeat);
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+
+        var foundKeepSize = false;
+        var foundKeepSizeAfter = false;
+        var functions = executionProgram.Functions.ToBuilder();
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            var functionName
+                = executionProgram.Functions[functionIndex].Name;
+            if (functionName == "KeepSize")
+            {
+                functions[functionIndex] = loopFunction;
+                foundKeepSize = true;
+            }
+            else if (functionName == "KeepSizeAfter")
+            {
+                functions[functionIndex] = postTestedLoopFunction;
+                foundKeepSizeAfter = true;
+            }
+        }
+        Assert.That(foundKeepSize, Is.True);
+        Assert.That(foundKeepSizeAfter, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryLoopRejectsMalformedBackedgeState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public nint KeepSize(bool start, bool stop) {
+                mut bool repeat = start;
+                nint size = sizeof(int32);
+                while (repeat) {
+                    repeat = stop;
+                }
+                return size;
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+
+        var invalidBackedge = RewriteStandardRegisteredQueryBody(artifact,
+            static code => {
+                var preheaderBranch
+                    = FindStandardBodyInstruction(code, 0xE3);
+                var bodyBranchSearch = preheaderBranch + 4;
+                var branchPosition = bodyBranchSearch
+                    + FindStandardBodyInstruction(code[bodyBranchSearch..],
+                        0xE3);
+                code[branchPosition + 2] = 3;
+                code[branchPosition + 3] = 0;
+                return code;
+            });
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidBackedge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidState = RewriteStandardRegisteredQueryBodyRecords(artifact,
+            static records => {
+                records[2][15] = 0;
+                records[2][16] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, invalidState),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryValueChangesAcrossLoopBackedge()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint UpdateSize(bool start, bool stop) {
+                mut bool repeat = start;
+                mut nint size = sizeof(int32);
+                while (repeat) {
+                    size = sizeof(int64);
+                    repeat = stop;
+                }
+                return size;
+            }
+
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var loopFunction = loaded.Functions.Single(
+            static function => function.Name == "UpdateSize");
+        var loop = (BoundWhile)loopFunction.Body.Statements[2];
+        var loopBody = (BoundBlock)loop.Body;
+        Assert.That(loopBody.Statements, Has.Length.EqualTo(2));
+        var valueUpdate = (BoundAssignment)loopBody.Statements[0];
+        Assert.That(valueUpdate.Value, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(((BoundLayoutQuery)valueUpdate.Value).Subject.Type,
+            Is.EqualTo(PrimitiveType.Int64));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(UpdateSize(true, false));
+            }
+
+            public nint UpdateSize(bool start, bool stop) {
+                mut bool repeat = start;
+                mut nint size = sizeof(int32);
+                while (repeat) {
+                    size = sizeof(int64);
+                    repeat = stop;
+                }
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name == "UpdateSize")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryNestedLoopsRoundTripAndExecute()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeWithNestedLoops(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        innerRepeat = innerStop;
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(6));
+        Assert.That(body.RecordCount, Is.EqualTo(8));
+        Assert.That(body.GetBlockCode(1).Length, Is.EqualTo(4));
+        Assert.That(body.GetBlockCode(2).Length, Is.EqualTo(4));
+        Assert.That(body.GetBlockCode(3).Length, Is.EqualTo(8));
+        Assert.That(body.GetBlockCode(4).Length, Is.EqualTo(8));
+        Assert.That(body.GetBlockCode(5).Length, Is.EqualTo(2));
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var reorderedLibrary = Compile("""
+            public nint KeepSizeWithNestedLoopsReordered(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool innerRepeat = innerStart;
+                mut bool outerRepeat = outerStart;
+                nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        innerRepeat = innerStop;
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """, library: true);
+        var reorderedArtifact = TrRmExecutableCompiler.EmitStandard(
+            reorderedLibrary, "sample", schemaIdentity, targetRequirement);
+        var reorderedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reorderedArtifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var loopFunction = loaded.Functions.Single(
+            static function => function.Name == "KeepSizeWithNestedLoops");
+        var reorderedLoopFunction = reorderedLoaded.Functions.Single(
+            static function
+                => function.Name == "KeepSizeWithNestedLoopsReordered");
+        Assert.That(loopFunction.Body.Statements, Has.Length.EqualTo(5));
+        var outerLoop = (BoundWhile)loopFunction.Body.Statements[3];
+        var outerBody = (BoundBlock)outerLoop.Body;
+        Assert.That(outerBody.Statements, Has.Length.EqualTo(2));
+        Assert.That(outerBody.Statements[0], Is.TypeOf<BoundWhile>());
+        var innerLoop = (BoundWhile)outerBody.Statements[0];
+        Assert.That(((BoundBlock)innerLoop.Body).Statements.Single(),
+            Is.TypeOf<BoundAssignment>());
+        var reorderedOuterLoop
+            = (BoundWhile)reorderedLoopFunction.Body.Statements[3];
+        Assert.That(((BoundBlock)reorderedOuterLoop.Body).Statements[0],
+            Is.TypeOf<BoundWhile>());
+
+        var invalidOuterEdge = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                records[6][6] = 4;
+                records[6][7] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidOuterEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidLoopState = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                for (var blockIndex = 1; blockIndex < 6; blockIndex++)
+                {
+                    records[blockIndex][15] = records[blockIndex][20];
+                    records[blockIndex][16] = records[blockIndex][21];
+                }
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidLoopState),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeWithNestedLoops(
+                    true, true, false, false)
+                    + KeepSizeWithNestedLoopsReordered(
+                        true, true, false, false));
+            }
+
+            public nint KeepSizeWithNestedLoops(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        innerRepeat = innerStop;
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+
+            public nint KeepSizeWithNestedLoopsReordered(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool innerRepeat = innerStart;
+                mut bool outerRepeat = outerStart;
+                nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        innerRepeat = innerStop;
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        var foundReorderedLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeWithNestedLoops")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+            }
+            else if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeWithNestedLoopsReordered")
+            {
+                functions[functionIndex] = reorderedLoopFunction;
+                foundReorderedLoop = true;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        Assert.That(foundReorderedLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(8));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryNestedLoopUpdatesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint UpdateSizeWithNestedLoops(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                do {
+                    while (innerRepeat) {
+                        innerRepeat = innerStop;
+                    }
+                    size = sizeof(int64);
+                    outerRepeat = outerStop;
+                } while (outerRepeat);
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loopFunction = loaded.Functions.Single(
+            static function
+                => function.Name == "UpdateSizeWithNestedLoops");
+        var outerLoop = (BoundWhile)loopFunction.Body.Statements[3];
+        Assert.That(outerLoop.IsPostTested, Is.True);
+        var outerBody = (BoundBlock)outerLoop.Body;
+        Assert.That(outerBody.Statements, Has.Length.EqualTo(3));
+        var queryUpdate = (BoundAssignment)outerBody.Statements[1];
+        Assert.That(queryUpdate.Value, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(((BoundLayoutQuery)queryUpdate.Value).Subject.Type,
+            Is.EqualTo(PrimitiveType.Int64));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(UpdateSizeWithNestedLoops(
+                    true, true, false, false)
+                    + UpdateSizeWithNestedLoops(
+                        false, true, false, false));
+            }
+
+            public nint UpdateSizeWithNestedLoops(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                do {
+                    while (innerRepeat) {
+                        innerRepeat = innerStop;
+                    }
+                    size = sizeof(int64);
+                    outerRepeat = outerStop;
+                } while (outerRepeat);
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(16));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "UpdateSizeWithNestedLoops")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(16));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryNestedInnerBreakPreservesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeWithNestedBreak(bool outerStart,
+                bool innerStart, bool stop, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        if (stop) {
+                            break;
+                        }
+                        size = sizeof(int64);
+                        innerRepeat = innerStop;
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loopFunction = loaded.Functions.Single(
+            static function => function.Name == "KeepSizeWithNestedBreak");
+        var outerLoop = (BoundWhile)loopFunction.Body.Statements[3];
+        var innerLoop = (BoundWhile)((BoundBlock)outerLoop.Body)
+            .Statements[0];
+        var innerStatements = ((BoundBlock)innerLoop.Body).Statements;
+        Assert.That(innerStatements, Has.Length.EqualTo(3));
+        Assert.That(innerStatements[0], Is.TypeOf<BoundIf>());
+        Assert.That(((BoundBlock)((BoundIf)innerStatements[0]).Then!)
+            .Statements.Single(), Is.TypeOf<BoundBreak>());
+
+        var invalidBreakEdge = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                records[9][4] = 4;
+                records[9][5] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidBreakEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeWithNestedBreak(
+                    true, true, true, false, false)
+                    + KeepSizeWithNestedBreak(
+                        true, true, false, false, false));
+            }
+
+            public nint KeepSizeWithNestedBreak(bool outerStart,
+                bool innerStart, bool stop, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        if (stop) {
+                            break;
+                        }
+                        size = sizeof(int64);
+                        innerRepeat = innerStop;
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeWithNestedBreak")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryNestedInnerContinuePreservesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeWithNestedContinue(bool outerStart,
+                bool innerStart, bool stop, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        size = sizeof(int64);
+                        innerRepeat = innerStop;
+                        if (stop) {
+                            continue;
+                        }
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(7));
+        Assert.That(body.RecordCount, Is.EqualTo(10));
+        Assert.That(body.GetBlockCode(3).Length, Is.GreaterThanOrEqualTo(6));
+        Assert.That(body.GetBlockCode(3)[^6], Is.EqualTo(0x11));
+        Assert.That(body.GetBlockCode(3)[^4], Is.EqualTo(0xE4));
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loopFunction = loaded.Functions.Single(
+            static function
+                => function.Name == "KeepSizeWithNestedContinue");
+        var outerLoop = (BoundWhile)loopFunction.Body.Statements[3];
+        var innerLoop = (BoundWhile)((BoundBlock)outerLoop.Body)
+            .Statements[0];
+        var innerStatements = ((BoundBlock)innerLoop.Body).Statements;
+        Assert.That(innerStatements, Has.Length.EqualTo(3));
+        Assert.That(innerStatements[^1], Is.TypeOf<BoundIf>());
+        Assert.That(((BoundBlock)((BoundIf)innerStatements[^1]).Then!)
+            .Statements.Single(), Is.TypeOf<BoundContinue>());
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeWithNestedContinue(
+                    true, true, true, false, false)
+                    + KeepSizeWithNestedContinue(
+                        true, true, false, false, false));
+            }
+
+            public nint KeepSizeWithNestedContinue(bool outerStart,
+                bool innerStart, bool stop, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                while (outerRepeat) {
+                    while (innerRepeat) {
+                        size = sizeof(int64);
+                        innerRepeat = innerStop;
+                        if (stop) {
+                            continue;
+                        }
+                    }
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(16));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeWithNestedContinue")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(16));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryDeepNestedMixedExitsPreserveQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeAcrossDeepMixedExits(bool outerStart,
+                bool middleStart, bool innerStart, bool continueOuter,
+                bool breakMiddle) {
+                mut bool outerRepeat = outerStart;
+                mut bool middleRepeat = middleStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                outer: while (outerRepeat) {
+                    outerRepeat = breakMiddle;
+                    middle: while (middleRepeat) {
+                        do {
+                            size = sizeof(int8);
+                            innerRepeat = breakMiddle;
+                            if (size == sizeof(int16)) {
+                                continue outer;
+                            }
+                            if (continueOuter) {
+                                continue outer;
+                            }
+                            if (breakMiddle) { break middle; }
+                        } while (innerRepeat);
+                        size = sizeof(int64);
+                        middleRepeat = continueOuter;
+                    }
+                    outerRepeat = continueOuter;
+                }
+                return size;
+            }
+            """;
+
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        AssertStandardRegisteredQueryTransferTargetIsValidated(artifact,
+            schemaIdentity);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(static function =>
+            function.Name == "KeepSizeAcrossDeepMixedExits");
+        var loops = new List<BoundWhile>();
+        var transferDepths = new List<int>();
+        Assert.That(BoundTreeTraversal.VisitStatements(loadedLoop.Body,
+            statement => {
+                switch (statement)
+                {
+                    case BoundWhile loop:
+                        loops.Add(loop);
+                        break;
+                    case BoundBreak transfer:
+                        transferDepths.Add(transfer.TargetDepth);
+                        break;
+                    case BoundContinue transfer:
+                        transferDepths.Add(transfer.TargetDepth);
+                        break;
+                }
+            }), Is.True);
+        Assert.That(loops, Has.Count.EqualTo(3));
+        Assert.That(transferDepths, Does.Contain(2));
+        Assert.That(transferDepths, Does.Contain(3));
+        Assert.That(transferDepths, Has.All.LessThanOrEqualTo(3));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeAcrossDeepMixedExits(
+                    true, true, true, true, false)
+                    + KeepSizeAcrossDeepMixedExits(
+                        true, true, true, false, true)
+                    + KeepSizeAcrossDeepMixedExits(
+                        true, true, true, false, false)
+                    + KeepSizeAcrossDeepMixedExits(
+                        true, false, true, false, false));
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(14));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var functionIndex = -1;
+        for (var index = 0; index < functions.Count; index++)
+        {
+            if (functions[index].Name == "KeepSizeAcrossDeepMixedExits")
+            {
+                functionIndex = index;
+                break;
+            }
+        }
+        Assert.That(functionIndex, Is.GreaterThanOrEqualTo(0));
+        functions[functionIndex] = loadedLoop;
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(14));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryFourAndFiveLevelTransfersPreserveQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public unsafe nint KeepSizeAcrossFourLoops(bool loopStart,
+                bool stop, bool continueOuter, bool breakInner) {
+                mut bool repeat = loopStart;
+                mut nint size = sizeof(int8);
+                levelOne: while (repeat) {
+                    while (repeat) {
+                        levelThree: while (repeat) {
+                            deep: while (repeat) {
+                                repeat = stop;
+                                size = sizeof(int64);
+                                if (continueOuter) {
+                                    continue levelOne;
+                                }
+                                if (breakInner) { break levelThree; }
+                            }
+                        }
+                        size = sizeof(int16);
+                    }
+                }
+                return size;
+            }
+
+            public unsafe nint KeepSizeAcrossFiveLoops(bool loopStart,
+                bool stop, bool continueOuter) {
+                mut bool repeat = loopStart;
+                mut nint size = sizeof(int8);
+                outer: while (repeat) {
+                    while (repeat) {
+                        while (repeat) {
+                            while (repeat) {
+                                while (repeat) {
+                                    repeat = stop;
+                                    size = sizeof(int64);
+                                    if (continueOuter) {
+                                        continue outer;
+                                    }
+                                }
+                                size = sizeof(int16);
+                            }
+                        }
+                    }
+                }
+                return size;
+            }
+            """;
+
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        AssertStandardRegisteredQueryTransferTargetIsValidated(artifact,
+            schemaIdentity);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(static function =>
+            function.Name == "KeepSizeAcrossFourLoops");
+        var loops = new List<BoundWhile>();
+        var transferDepths = new List<int>();
+        Assert.That(BoundTreeTraversal.VisitStatements(loadedLoop.Body,
+            statement => {
+                switch (statement)
+                {
+                    case BoundWhile loop:
+                        loops.Add(loop);
+                        break;
+                    case BoundBreak transfer:
+                        transferDepths.Add(transfer.TargetDepth);
+                        break;
+                    case BoundContinue transfer:
+                        transferDepths.Add(transfer.TargetDepth);
+                        break;
+                }
+            }), Is.True);
+        Assert.That(loops, Has.Count.EqualTo(4));
+        Assert.That(transferDepths, Does.Contain(2));
+        Assert.That(transferDepths, Does.Contain(4));
+        Assert.That(transferDepths, Has.All.LessThanOrEqualTo(4));
+
+        var loadedFiveLevelLoop = loaded.Functions.Single(static function =>
+            function.Name == "KeepSizeAcrossFiveLoops");
+        var fiveLevelLoops = new List<BoundWhile>();
+        var fiveLevelTransferDepths = new List<int>();
+        Assert.That(BoundTreeTraversal.VisitStatements(loadedFiveLevelLoop.Body,
+            statement => {
+                switch (statement)
+                {
+                    case BoundWhile loop:
+                        fiveLevelLoops.Add(loop);
+                        break;
+                    case BoundBreak transfer:
+                        fiveLevelTransferDepths.Add(transfer.TargetDepth);
+                        break;
+                    case BoundContinue transfer:
+                        fiveLevelTransferDepths.Add(transfer.TargetDepth);
+                        break;
+                }
+            }), Is.True);
+        Assert.That(fiveLevelLoops, Has.Count.EqualTo(5));
+        Assert.That(fiveLevelTransferDepths, Does.Contain(5));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(unsafe(KeepSizeAcrossFourLoops(
+                    true, false, true, false))
+                    + unsafe(KeepSizeAcrossFourLoops(
+                        true, false, false, true))
+                    + unsafe(KeepSizeAcrossFourLoops(
+                        true, false, false, false))
+                    + unsafe(KeepSizeAcrossFourLoops(
+                        false, false, false, false))
+                    + unsafe(KeepSizeAcrossFiveLoops(true, false, true))
+                    + unsafe(KeepSizeAcrossFiveLoops(true, false, false))
+                    + unsafe(KeepSizeAcrossFiveLoops(false, false, false)));
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(24));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var loadedFunctions = loaded.Functions.ToDictionary(
+            static function => function.Name);
+        for (var index = 0; index < functions.Count; index++)
+        {
+            if (loadedFunctions.TryGetValue(functions[index].Name,
+                    out var loadedFunction))
+            {
+                functions[index] = loadedFunction;
+            }
+        }
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(24));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryForContinueRunsIteratorAndCarriesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint UpdateSizeAcrossForContinue(bool firstStart,
+                bool nextFirst, bool repeatStart, bool breakStart) {
+                mut bool first = firstStart;
+                mut nint size = sizeof(int8);
+                for (mut bool repeat = repeatStart;
+                    repeat;
+                    size = sizeof(int64)) {
+                    if (breakStart) { break; }
+                    if (first) {
+                        first = nextFirst;
+                        repeat = nextFirst;
+                        continue;
+                    }
+                    size = sizeof(int16);
+                    repeat = nextFirst;
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        AssertStandardRegisteredQueryTransferTargetIsValidated(artifact,
+            schemaIdentity);
+        AssertStandardRegisteredQueryLoopStateIsValidated(artifact,
+            schemaIdentity);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(static function =>
+            function.Name == "UpdateSizeAcrossForContinue");
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(UpdateSizeAcrossForContinue(
+                    true, false, true, false)
+                    + UpdateSizeAcrossForContinue(
+                        false, false, true, false)
+                    + UpdateSizeAcrossForContinue(
+                        false, false, true, true));
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(17));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var functionIndex = -1;
+        for (var index = 0; index < functions.Count; index++)
+        {
+            if (functions[index].Name == "UpdateSizeAcrossForContinue")
+            {
+                functionIndex = index;
+                break;
+            }
+        }
+        Assert.That(functionIndex, Is.GreaterThanOrEqualTo(0));
+        functions[functionIndex] = loadedLoop;
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(17));
+    }
+
+    [Test]
+    public void StandardRegisteredQuerySiblingBreaksPreserveLoopTargets()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public unsafe nint BreakFirstSibling(bool firstStart,
+                bool breakFirst, bool stopFirst, bool secondStart,
+                bool stopSecond) {
+                mut bool first = firstStart;
+                mut bool second = secondStart;
+                mut nint size = sizeof(int8);
+                while (first) {
+                    if (breakFirst) { break; }
+                    first = stopFirst;
+                    size = sizeof(int16);
+                }
+                while (second) {
+                    second = stopSecond;
+                    size = sizeof(int64);
+                }
+                return size;
+            }
+
+            public unsafe nint BreakSecondSibling(bool firstStart,
+                bool stopFirst, bool secondStart, bool breakSecond,
+                bool stopSecond) {
+                mut bool first = firstStart;
+                mut bool second = secondStart;
+                mut nint size = sizeof(int8);
+                while (first) {
+                    first = stopFirst;
+                    size = sizeof(int16);
+                }
+                while (second) {
+                    if (breakSecond) { break; }
+                    second = stopSecond;
+                    size = sizeof(int64);
+                }
+                return size;
+            }
+
+            public unsafe nint ContinueFirstBreakSecond(bool firstStart,
+                bool stopFirst, bool continueFirst, bool secondStart,
+                bool breakSecond, bool stopSecond) {
+                mut bool first = firstStart;
+                mut bool second = secondStart;
+                mut nint size = sizeof(int8);
+                while (first) {
+                    first = stopFirst;
+                    size = sizeof(int16);
+                    if (continueFirst) { continue; }
+                }
+                while (second) {
+                    if (breakSecond) { break; }
+                    second = stopSecond;
+                    size = sizeof(int64);
+                }
+                return size;
+            }
+
+            public unsafe nint BreakFirstContinueSecond(bool firstStart,
+                bool breakFirst, bool stopFirst, bool secondStart,
+                bool continueSecond, bool stopSecond) {
+                mut bool first = firstStart;
+                mut bool second = secondStart;
+                mut nint size = sizeof(int8);
+                while (first) {
+                    if (breakFirst) { break; }
+                    first = stopFirst;
+                    size = sizeof(int16);
+                }
+                while (second) {
+                    second = stopSecond;
+                    size = sizeof(int64);
+                    if (continueSecond) { continue; }
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        AssertStandardRegisteredQueryTransferTargetIsValidated(artifact,
+            schemaIdentity);
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(unsafe(BreakFirstSibling(
+                    true, true, false, true, false))
+                    + unsafe(BreakSecondSibling(
+                        false, false, true, true, false))
+                    + unsafe(BreakFirstSibling(
+                        true, false, false, false, false))
+                    + unsafe(BreakSecondSibling(
+                        false, false, true, false, false))
+                    + unsafe(ContinueFirstBreakSecond(
+                        true, false, true, true, true, false))
+                    + unsafe(BreakFirstContinueSecond(
+                        true, true, false, true, true, false)));
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(29));
+
+        var loadedFunctions = loaded.Functions.ToDictionary(
+            static function => function.Name);
+        var functions = executionProgram.Functions.ToBuilder();
+        for (var index = 0; index < functions.Count; index++)
+        {
+            if (loadedFunctions.TryGetValue(functions[index].Name,
+                    out var loadedFunction))
+            {
+                functions[index] = loadedFunction;
+            }
+        }
+        var programWithLoadedLoops = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoops,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(29));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryLoopReconstructsMultipleTransfers()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public unsafe nint TransferLoop(bool repeatStart,
+                bool breakStart, bool stopRepeat, bool continueStart) {
+                mut bool repeat = repeatStart;
+                mut nint size = sizeof(int8);
+                while (repeat) {
+                    if (breakStart) { break; }
+                    repeat = stopRepeat;
+                    if (continueStart) { continue; }
+                    size = sizeof(int16);
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        AssertStandardRegisteredQueryTransferTargetIsValidated(artifact,
+            schemaIdentity);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(
+            static function => function.Name == "TransferLoop");
+        AssertStandardRegisteredQueryLoopStateIsValidated(artifact,
+            schemaIdentity);
+        var artifactIndex = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                artifactIndex);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        var breakEdgeIndex = -1;
+        var conditionalEdgeShapes = new List<string>();
+        var returnBlock = -1;
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            if (code.Length == 2 && code[0] == 0x17)
+            {
+                returnBlock = blockIndex;
+                break;
+            }
+        }
+        Assert.That(returnBlock, Is.GreaterThanOrEqualTo(0));
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            if (code.Length < 4 || code[^4] != 0xE4)
+            {
+                continue;
+            }
+            var edgeIndex = BinaryPrimitives.ReadUInt16LittleEndian(code[^2..]);
+            var edge = body.GetRecord(edgeIndex);
+            if (edge.Length == 8 && edge[0] == 0x06)
+            {
+                var trueTarget
+                    = BinaryPrimitives.ReadUInt16LittleEndian(edge[4..]);
+                var falseTarget
+                    = BinaryPrimitives.ReadUInt16LittleEndian(edge[6..]);
+                var trueTargetCode = body.GetBlockCode(trueTarget);
+                var falseTargetCode = body.GetBlockCode(falseTarget);
+                var trueLeavesLoop = trueTarget == returnBlock
+                    || (trueTargetCode.Length >= 4
+                        && trueTargetCode[^4] == 0xE3
+                        && BinaryPrimitives.ReadUInt16LittleEndian(
+                            trueTargetCode[^2..]) == returnBlock);
+                var falseLeavesLoop = falseTarget == returnBlock
+                    || (falseTargetCode.Length >= 4
+                        && falseTargetCode[^4] == 0xE3
+                        && BinaryPrimitives.ReadUInt16LittleEndian(
+                            falseTargetCode[^2..]) == returnBlock);
+                conditionalEdgeShapes.Add(
+                    $"block={blockIndex}, condition={code[^3] & 0x0F}, true={BinaryPrimitives.ReadUInt16LittleEndian(edge[4..])}, false={BinaryPrimitives.ReadUInt16LittleEndian(edge[6..])}");
+                if (trueLeavesLoop && !falseLeavesLoop)
+                {
+                    breakEdgeIndex = edgeIndex;
+                    break;
+                }
+            }
+        }
+        Assert.That(breakEdgeIndex, Is.GreaterThanOrEqualTo(0),
+            string.Join("; ", conditionalEdgeShapes));
+        var invalidBreakEdge = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, records => {
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    records[breakEdgeIndex].AsSpan(4), 0);
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidBreakEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(unsafe(TransferLoop(true, true, false, false))
+                    + unsafe(TransferLoop(true, false, false, true))
+                    + unsafe(TransferLoop(true, false, false, false))
+                    + unsafe(TransferLoop(false, false, false, false)));
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(5));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var functionIndex = -1;
+        for (var index = 0; index < functions.Count; index++)
+        {
+            if (functions[index].Name == "TransferLoop")
+            {
+                functionIndex = index;
+                break;
+            }
+        }
+        Assert.That(functionIndex, Is.GreaterThanOrEqualTo(0));
+        functions[functionIndex] = loadedLoop;
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(5));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryContinueRunsFinallyBeforeForIterator()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-register-exception-regions-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public unsafe nint KeepSizeAcrossFinallyContinue(
+                bool firstStart, bool nextFirst, bool repeatStart) {
+                mut bool first = firstStart;
+                mut nint size = sizeof(int8);
+                for (mut bool repeat = repeatStart;
+                    repeat;
+                    repeat = nextFirst) {
+                    try {
+                        if (first) {
+                            size = sizeof(int8);
+                            continue;
+                        }
+                        first = repeatStart;
+                        repeat = nextFirst;
+                        size = sizeof(int16);
+                    } finally {
+                        if (first) {
+                            first = nextFirst;
+                            if (repeat) {
+                                size = sizeof(int64);
+                            } else {
+                                size = sizeof(int16);
+                            }
+                        } else {
+                            size = sizeof(int8);
+                        }
+                    }
+                }
+                return size;
+            }
+            """;
+        var breakLoopSource = """
+            public unsafe nint KeepSizeAcrossFinallyBreak(bool repeatStart,
+                bool breakStart, bool nextRepeat) {
+                mut nint size = sizeof(int8);
+                for (mut bool repeat = repeatStart;
+                    repeat;
+                    size = sizeof(int64)) {
+                    try {
+                        if (breakStart) { break; }
+                        repeat = nextRepeat;
+                        size = sizeof(int16);
+                        continue;
+                    } finally {
+                        size = sizeof(int16);
+                    }
+                }
+                return size;
+            }
+            """;
+        var combinedSource = loopSource + breakLoopSource;
+        var executionProgram = Compile("""
+                int32 Main() {
+                    return int32(unsafe(KeepSizeAcrossFinallyContinue(
+                        true, false, true))
+                        + unsafe(KeepSizeAcrossFinallyContinue(
+                            false, false, true))
+                        + unsafe(KeepSizeAcrossFinallyBreak(true, true,
+                            false)));
+            }
+            """ + combinedSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+        var library = Compile(combinedSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var coreArtifact = CreateCoreExceptionIdentityAnchorArtifact(
+            targetRequirement);
+        var coreInput = new TrRmStandardArtifactInput(schemaIdentity,
+            coreArtifact);
+        var coreSelection = new CoreExceptionIdentitySelection("sample",
+            "core", "IException", "core", "UnreachableException");
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", [coreInput], [coreSelection]);
+        var invalidLeaveTarget = CorruptRegisterExceptionLeaveTarget(
+            artifact, "KeepSizeAcrossFinallyContinue");
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidLeaveTarget),
+                "sample", [coreInput], [coreSelection]));
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "sample",
+                [new TrRmStandardArtifactInput(
+                    "trrm/1-draft-layout-queries-1", coreArtifact)],
+                [coreSelection]));
+        var loadedLoop = loaded.Functions.Single(static function =>
+            function.Name == "KeepSizeAcrossFinallyContinue");
+        var loadedBreakLoop = loaded.Functions.Single(static function =>
+            function.Name == "KeepSizeAcrossFinallyBreak");
+        var functions = executionProgram.Functions.ToBuilder();
+        for (var index = 0; index < functions.Count; index++)
+        {
+            if (functions[index].Name == "KeepSizeAcrossFinallyContinue")
+            {
+                functions[index] = loadedLoop;
+            }
+            else if (functions[index].Name == "KeepSizeAcrossFinallyBreak")
+            {
+                functions[index] = loadedBreakLoop;
+            }
+        }
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+            CoreExceptionIdentitySelections
+                = loaded.CoreExceptionIdentitySelections,
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+    }
+
+    private static byte[] CorruptRegisterExceptionLeaveTarget(
+        byte[] artifact, string functionName)
+    {
+        var index = TrRmArtifactIndex.ForRegisterExceptionRegionsDraft(
+            artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateRegisterExceptionRegionsDraftAndGetExecutionTables(
+                index);
+        var methodRow = -1;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == functionName)
+            {
+                methodRow = row;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThanOrEqualTo(1));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var leaveRecordIndex = -1;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record.Length >= 8 && record[0] == 0x0A
+                && record[4] == 1)
+            {
+                leaveRecordIndex = recordIndex;
+                break;
+            }
+        }
+        Assert.That(leaveRecordIndex, Is.GreaterThanOrEqualTo(0));
+
+        var sectionCount = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12)));
+        var bodySectionOffset = -1;
+        var bodyCount = 0;
+        for (var sectionIndex = 0; sectionIndex < sectionCount;
+            sectionIndex++)
+        {
+            var directoryOffset = 32 + (sectionIndex * 16);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                    artifact.AsSpan(directoryOffset)) != 0x0020)
+            {
+                continue;
+            }
+            bodyCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(directoryOffset + 4)));
+            bodySectionOffset = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(directoryOffset + 8)));
+            break;
+        }
+        Assert.That(bodySectionOffset, Is.GreaterThanOrEqualTo(0));
+        var bodyOffsetInSection = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(
+                bodySectionOffset + ((bodyRow - 1) * sizeof(uint)))));
+        var bodyStart = bodySectionOffset
+            + ((bodyCount + 1) * sizeof(uint)) + bodyOffsetInSection;
+        var bodyBytes = tables.Bodies.GetRow(bodyRow);
+        var recordOffset = GetRegisterBodyRecordOffset(bodyBytes,
+            leaveRecordIndex);
+        var result = (byte[])artifact.Clone();
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            result.AsSpan(bodyStart + recordOffset + 6),
+            checked((ushort)body.BlockCount));
+        return result;
+    }
+
+    private static int GetRegisterBodyRecordOffset(ReadOnlySpan<byte> body,
+        int recordIndex)
+    {
+        var mapMask = body[2];
+        var mapRowSizes = new[] { 8, 4, 4, 4, 8 };
+        var mapCounts = new int[mapRowSizes.Length];
+        var position = 5;
+        for (var mapIndex = 0; mapIndex < mapRowSizes.Length; mapIndex++)
+        {
+            if ((mapMask & (1 << mapIndex)) == 0)
+            {
+                continue;
+            }
+            mapCounts[mapIndex] = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    body[position..]));
+            position += sizeof(uint);
+        }
+
+        var blockCount = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(body[position..]));
+        position += sizeof(uint);
+        var recordCount = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(body[position..]));
+        position += sizeof(uint) * 2;
+        var mapBytes = 0;
+        for (var mapIndex = 0; mapIndex < mapRowSizes.Length; mapIndex++)
+        {
+            mapBytes += mapCounts[mapIndex] * mapRowSizes[mapIndex];
+        }
+        var recordOffsetsStart = position + mapBytes
+            + (blockCount * 12);
+        var recordDataStart = recordOffsetsStart
+            + ((recordCount + 1) * sizeof(uint));
+        var recordOffset = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(
+                recordOffsetsStart + (recordIndex * sizeof(uint)))));
+        return recordDataStart + recordOffset;
+    }
+
+    private static byte[] CreateCoreExceptionIdentityAnchorArtifact(
+        uint targetRequirement)
+    {
+        // This Body does not construct Core failures; it needs only the
+        // selected declaration anchors.
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("core", 0), ("Terrum", 0), ("IException", 0),
+            ("TSelf", 0), ("UnreachableException", 0), ("IException", 0),
+            ("UnreachableException", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 8);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, targetRequirement, 0, 0,
+                1, 1, 1, 1),
+        ], strings, 0, 2, 0, 0, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 2, 0, 0, 0);
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode([
+            new TrRmTypeDefRow(3, 4, 14,
+                0, 0, 1, 1, 1, 1, 0, 0),
+            new TrRmTypeDefRow(3, 6, 10,
+                0, 0, 0, 0, 2, 1, 0, 0),
+        ], strings, modules, 0, 1, 2, 0);
+        var types = new TrRmTypeDefTableReader(typeDefBytes, 2,
+            strings, modules, 0, 1, 2, 0);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 0, 0),
+        ], types, targetProfiles, 0);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(0),
+        ], 2, 0, 1);
+        var typeSpecs = new TrRmTypeSpecTableReader(
+            typeSpecBytes, 1, 2, 0, 1);
+        var signatures = default(TrRmMethodSigTableReader);
+        var methods = new TrRmMethodDefTableReader([], 0,
+            strings, modules, types, signatures, 0, 0);
+        var genericParamBytes = TrRmGenericParamTableWriter.Encode([
+            new TrRmGenericParamRow(0x1300_0001, 0, 5,
+                0, 0, 1, 1, 1, 0, 0),
+        ], strings, types, methods, signatures, typeSpecs, 0);
+        var formals = new TrRmGenericParamTableReader(genericParamBytes, 1,
+            strings, types, methods, signatures, typeSpecs, 0);
+        var interfaceDefBytes = TrRmInterfaceDefTableWriter.Encode([
+            new TrRmInterfaceDefRow(1, 1, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0),
+        ], types, formals, 0, 0, 0, 0, 0);
+        var interfaces = new TrRmInterfaceDefTableReader(interfaceDefBytes, 1,
+            types, formals, 0, 0, 0, 0, 0);
+        var exportBytes = TrRmExportTableWriter.Encode([
+            new TrRmExportRow(0x1300_0001, 7),
+            new TrRmExportRow(0x1300_0002, 8),
+        ], strings, types, methods, default, default, interfaces);
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 8, stringBytes),
+            new TrRmSection(0x0011, 0, 1, typeSpecBytes),
+            new TrRmSection(0x0013, 0, 2, typeDefBytes),
+            new TrRmSection(0x0015, 0, 2, layoutBytes),
+            new TrRmSection(0x0019, 0, 1, genericParamBytes),
+            new TrRmSection(0x001D, 0, 2, exportBytes),
+            new TrRmSection(0x0025, 0, 1, interfaceDefBytes),
+        ]);
+        TrRmStructuralMetadataValidator.Validate(artifact);
+        return artifact;
+    }
+
+    [Test]
+    public void StandardRegisteredQueryInnerLoopUpdatesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint UpdateSizeWithNestedInnerLoop(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                while (outerRepeat) {
+                    do {
+                        size = sizeof(int64);
+                        innerRepeat = innerStop;
+                    } while (innerRepeat);
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loopFunction = loaded.Functions.Single(
+            static function
+                => function.Name == "UpdateSizeWithNestedInnerLoop");
+        var outerLoop = (BoundWhile)loopFunction.Body.Statements[3];
+        var innerLoop = (BoundWhile)((BoundBlock)outerLoop.Body)
+            .Statements[0];
+        Assert.That(innerLoop.IsPostTested, Is.True);
+        var innerBody = (BoundBlock)innerLoop.Body;
+        Assert.That(innerBody.Statements, Has.Length.EqualTo(2));
+        var queryUpdate = (BoundAssignment)innerBody.Statements[0];
+        Assert.That(queryUpdate.Value, Is.TypeOf<BoundLayoutQuery>());
+        Assert.That(((BoundLayoutQuery)queryUpdate.Value).Subject.Type,
+            Is.EqualTo(PrimitiveType.Int64));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(UpdateSizeWithNestedInnerLoop(
+                    true, true, false, false)
+                    + UpdateSizeWithNestedInnerLoop(
+                        false, true, false, false));
+            }
+
+            public nint UpdateSizeWithNestedInnerLoop(bool outerStart,
+                bool innerStart, bool innerStop, bool outerStop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int32);
+                while (outerRepeat) {
+                    do {
+                        size = sizeof(int64);
+                        innerRepeat = innerStop;
+                    } while (innerRepeat);
+                    outerRepeat = outerStop;
+                }
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "UpdateSizeWithNestedInnerLoop")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+    }
+
+    [Test]
+    public void StandardRegisteredQuerySiblingLoopsRoundTripAndExecute()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        static BoundProgram CompileWithLayout(string source, bool library)
+        {
+            var options = new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            };
+            var syntax = SyntaxTree.Parse(source);
+            var compilation = library
+                ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.Create(syntax, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return compilation.Program
+                ?? throw new InvalidOperationException(
+                    "The registered-layout loop program did not bind.");
+        }
+
+        const string loopSource = """
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepSizeAcrossSiblingLoops(bool firstStart,
+                bool secondStart, bool stop) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = stop;
+                } while (firstRepeat);
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = stop;
+                }
+                return offset;
+            }
+            """;
+        var library = CompileWithLayout(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loopFunction = loaded.Functions.Single(
+            static function
+                => function.Name == "KeepSizeAcrossSiblingLoops");
+        Assert.That(loopFunction.Body.Statements, Has.Length.EqualTo(6));
+        var firstLoop = (BoundWhile)loopFunction.Body.Statements[3];
+        var secondLoop = (BoundWhile)loopFunction.Body.Statements[4];
+        Assert.That(firstLoop.IsPostTested, Is.True);
+        Assert.That(secondLoop.IsPostTested, Is.False);
+        var firstAssignments = ((BoundBlock)firstLoop.Body).Statements;
+        var secondAssignments = ((BoundBlock)secondLoop.Body).Statements;
+        Assert.That(firstAssignments, Has.Length.EqualTo(2));
+        Assert.That(secondAssignments, Has.Length.EqualTo(2));
+        var firstQuery = (BoundLayoutQuery)
+            ((BoundAssignment)firstAssignments[0]).Value;
+        var secondQuery = (BoundLayoutQuery)
+            ((BoundAssignment)secondAssignments[0]).Value;
+        Assert.That(firstQuery.Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfType));
+        Assert.That(secondQuery.Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfType));
+        Assert.That(firstQuery.Subject.FieldPath?.Steps,
+            Has.Length.EqualTo(1));
+        Assert.That(secondQuery.Subject.FieldPath?.Steps,
+            Has.Length.EqualTo(1));
+
+        var invalidSiblingEdge = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                records[7][6] = 2;
+                records[7][7] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidSiblingEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidSiblingState
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                static records => {
+                    for (var blockIndex = 1; blockIndex < 7; blockIndex++)
+                    {
+                        records[blockIndex][15] = records[blockIndex][20];
+                        records[blockIndex][16] = records[blockIndex][21];
+                    }
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidSiblingState),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var executionProgram = CompileWithLayout("""
+            int32 Main() {
+                return int32(KeepSizeAcrossSiblingLoops(
+                    true, true, false));
+            }
+
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepSizeAcrossSiblingLoops(bool firstStart,
+                bool secondStart, bool stop) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = stop;
+                } while (firstRepeat);
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = stop;
+                }
+                return offset;
+            }
+            """, library: false);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(5));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeAcrossSiblingLoops")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoops = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoops,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(5));
+    }
+
+    [Test]
+    public void StandardRegisteredQuerySiblingContinuePreservesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        static BoundProgram CompileWithLayout(string source, bool library)
+        {
+            var options = new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            };
+            var syntax = SyntaxTree.Parse(source);
+            var compilation = library
+                ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.Create(syntax, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return compilation.Program
+                ?? throw new InvalidOperationException(
+                    "The registered-layout sibling-continue program did not bind.");
+        }
+
+        const string functionSource = """
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossSiblingContinue(bool firstStart,
+                bool secondStart, bool firstStop, bool secondStop,
+                bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                } while (firstRepeat);
+                do {
+                    if (continueNow) {
+                        continue;
+                    }
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                } while (secondRepeat);
+                return offset;
+            }
+            """;
+        var library = CompileWithLayout(functionSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(8));
+        Assert.That(body.RecordCount, Is.EqualTo(11));
+
+        var continueEdgeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetBlockCode(4)[4..]);
+        Assert.That(continueEdgeIndex, Is.LessThan(body.RecordCount),
+            Convert.ToHexString(body.GetBlockCode(4)));
+        var invalidContinueEdge
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                records => {
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        records[continueEdgeIndex].AsSpan(4), 5);
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidContinueEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+        var invalidContinueState
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                static records => {
+                    records[4][15] = records[4][20];
+                    records[4][16] = records[4][21];
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidContinueState),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(
+            static function
+                => function.Name == "KeepOffsetAcrossSiblingContinue");
+        var siblingLoops = loadedLoop.Body.Statements;
+        Assert.That(siblingLoops, Has.Length.EqualTo(6));
+        var firstLoop = (BoundWhile)siblingLoops[3];
+        var secondLoop = (BoundWhile)siblingLoops[4];
+        Assert.That(firstLoop.IsPostTested, Is.True);
+        Assert.That(secondLoop.IsPostTested, Is.True);
+        var secondLoopBody = ((BoundBlock)secondLoop.Body).Statements;
+        Assert.That(secondLoopBody, Has.Length.EqualTo(3));
+        Assert.That(secondLoopBody[0], Is.TypeOf<BoundIf>());
+        var continueBlock = (BoundBlock)((BoundIf)secondLoopBody[0]).Then!;
+        Assert.That(continueBlock.Statements.Single(),
+            Is.EqualTo(new BoundContinue(default)));
+
+        var executionProgram = CompileWithLayout("""
+            int32 Main() {
+                return int32(KeepOffsetAcrossSiblingContinue(
+                    true, false, false, false, true)
+                    + KeepOffsetAcrossSiblingContinue(
+                        true, false, false, false, false));
+            }
+
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossSiblingContinue(bool firstStart,
+                bool secondStart, bool firstStop, bool secondStop,
+                bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                } while (firstRepeat);
+                do {
+                    if (continueNow) {
+                        continue;
+                    }
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                } while (secondRepeat);
+                return offset;
+            }
+            """, library: false);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(6));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepOffsetAcrossSiblingContinue")
+            {
+                functions[functionIndex] = loadedLoop;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(6));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryFirstSiblingContinuePreservesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        static BoundProgram CompileWithLayout(string source, bool library)
+        {
+            var options = new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            };
+            var syntax = SyntaxTree.Parse(source);
+            var compilation = library
+                ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.Create(syntax, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return compilation.Program
+                ?? throw new InvalidOperationException(
+                    "The registered-layout sibling-continue program did not bind.");
+        }
+
+        const string functionSource = """
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossFirstSiblingContinue(
+                bool firstStart, bool secondStart, bool firstStop,
+                bool secondStop, bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    if (continueNow) {
+                        continue;
+                    }
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                } while (firstRepeat);
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                }
+                return offset;
+            }
+            """;
+        var library = CompileWithLayout(functionSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(
+            static function
+                => function.Name == "KeepOffsetAcrossFirstSiblingContinue");
+        var loops = loadedLoop.Body.Statements;
+        Assert.That(loops, Has.Length.EqualTo(6));
+        var firstLoop = (BoundWhile)loops[3];
+        var secondLoop = (BoundWhile)loops[4];
+        Assert.That(firstLoop.IsPostTested, Is.True);
+        Assert.That(secondLoop.IsPostTested, Is.False);
+        var firstLoopBody = ((BoundBlock)firstLoop.Body).Statements;
+        Assert.That(firstLoopBody, Has.Length.EqualTo(3));
+        Assert.That(firstLoopBody[0], Is.TypeOf<BoundIf>());
+        Assert.That(((BoundBlock)((BoundIf)firstLoopBody[0]).Then!)
+            .Statements.Single(), Is.EqualTo(new BoundContinue(default)));
+
+        var executionProgram = CompileWithLayout("""
+            int32 Main() {
+                return int32(KeepOffsetAcrossFirstSiblingContinue(
+                    false, false, false, false, true)
+                    + KeepOffsetAcrossFirstSiblingContinue(
+                        false, false, false, false, false));
+            }
+
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossFirstSiblingContinue(
+                bool firstStart, bool secondStart, bool firstStop,
+                bool secondStop, bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    if (continueNow) {
+                        continue;
+                    }
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                } while (firstRepeat);
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                }
+                return offset;
+            }
+            """, library: false);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepOffsetAcrossFirstSiblingContinue")
+            {
+                functions[functionIndex] = loadedLoop;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryPretestSiblingContinuePreservesUpdatedState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        static BoundProgram CompileWithLayout(string source, bool library)
+        {
+            var options = new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            };
+            var syntax = SyntaxTree.Parse(source);
+            var compilation = library
+                ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.Create(syntax, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return compilation.Program
+                ?? throw new InvalidOperationException(
+                    "The registered-layout pretest-continue program did not bind.");
+        }
+
+        const string functionSource = """
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossPretestSiblingContinue(
+                bool firstStart, bool secondStart, bool firstStop,
+                bool secondStop, bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                } while (firstRepeat);
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                    if (continueNow) {
+                        continue;
+                    }
+                }
+                return offset;
+            }
+            """;
+        var library = CompileWithLayout(functionSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(8));
+        Assert.That(body.RecordCount, Is.EqualTo(11));
+        var continueEdgeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetBlockCode(5)[^2..]);
+        var invalidContinueEdge
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                records => {
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        records[continueEdgeIndex].AsSpan(6), 4);
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidContinueEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(
+            static function
+                => function.Name == "KeepOffsetAcrossPretestSiblingContinue");
+        var secondLoop = (BoundWhile)loadedLoop.Body.Statements[4];
+        Assert.That(secondLoop.IsPostTested, Is.False);
+        var secondLoopBody = ((BoundBlock)secondLoop.Body).Statements;
+        Assert.That(secondLoopBody, Has.Length.EqualTo(3));
+        Assert.That(secondLoopBody[^1], Is.TypeOf<BoundIf>());
+        Assert.That(((BoundBlock)((BoundIf)secondLoopBody[^1]).Then!)
+            .Statements.Single(), Is.EqualTo(new BoundContinue(default)));
+
+        var executionProgram = CompileWithLayout("""
+            int32 Main() {
+                return int32(KeepOffsetAcrossPretestSiblingContinue(
+                    false, true, false, false, true)
+                    + KeepOffsetAcrossPretestSiblingContinue(
+                        false, true, false, false, false));
+            }
+
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossPretestSiblingContinue(
+                bool firstStart, bool secondStart, bool firstStop,
+                bool secondStop, bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                do {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                } while (firstRepeat);
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                    if (continueNow) {
+                        continue;
+                    }
+                }
+                return offset;
+            }
+            """, library: false);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(10));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepOffsetAcrossPretestSiblingContinue")
+            {
+                functions[functionIndex] = loadedLoop;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(10));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryFirstPretestSiblingContinuePreservesUpdatedState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        static BoundProgram CompileWithLayout(string source, bool library)
+        {
+            var options = new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            };
+            var syntax = SyntaxTree.Parse(source);
+            var compilation = library
+                ? Compilation.CreateLibrary(syntax, options)
+                : Compilation.Create(syntax, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return compilation.Program
+                ?? throw new InvalidOperationException(
+                    "The registered-layout first-pretest-continue program did not bind.");
+        }
+
+        const string functionSource = """
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossFirstPretestSiblingContinue(
+                bool firstStart, bool secondStart, bool firstStop,
+                bool secondStop, bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                while (firstRepeat) {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                    if (continueNow) {
+                        continue;
+                    }
+                }
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                }
+                return offset;
+            }
+            """;
+        var library = CompileWithLayout(functionSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(8));
+        Assert.That(body.RecordCount, Is.EqualTo(11));
+        var continueEdgeIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetBlockCode(2)[^2..]);
+        var invalidContinueEdge
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                records => {
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        records[continueEdgeIndex].AsSpan(6), 4);
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidContinueEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(
+            static function
+                => function.Name == "KeepOffsetAcrossFirstPretestSiblingContinue");
+        var firstLoop = (BoundWhile)loadedLoop.Body.Statements[3];
+        Assert.That(firstLoop.IsPostTested, Is.False);
+        var firstLoopBody = ((BoundBlock)firstLoop.Body).Statements;
+        Assert.That(firstLoopBody, Has.Length.EqualTo(3));
+        Assert.That(firstLoopBody[0], Is.TypeOf<BoundAssignment>());
+        Assert.That(firstLoopBody[1], Is.TypeOf<BoundAssignment>());
+        Assert.That(firstLoopBody[2], Is.TypeOf<BoundIf>());
+        Assert.That(((BoundBlock)((BoundIf)firstLoopBody[2]).Then!)
+            .Statements.Single(), Is.EqualTo(new BoundContinue(default)));
+
+        var executionProgram = CompileWithLayout("""
+            int32 Main() {
+                return int32(KeepOffsetAcrossFirstPretestSiblingContinue(
+                    true, false, false, false, true)
+                    + KeepOffsetAcrossFirstPretestSiblingContinue(
+                        true, false, false, false, false));
+            }
+
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 First;
+                    public uint32 Second;
+                    public uint8 Tail;
+                }
+            }
+
+            public nint KeepOffsetAcrossFirstPretestSiblingContinue(
+                bool firstStart, bool secondStart, bool firstStop,
+                bool secondStop, bool continueNow) {
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                mut nint offset = offsetof(Example.Pair, First);
+                while (firstRepeat) {
+                    offset = offsetof(Example.Pair, Second);
+                    firstRepeat = firstStop;
+                    if (continueNow) {
+                        continue;
+                    }
+                }
+                while (secondRepeat) {
+                    offset = offsetof(Example.Pair, Tail);
+                    secondRepeat = secondStop;
+                }
+                return offset;
+            }
+            """, library: false);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(2));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepOffsetAcrossFirstPretestSiblingContinue")
+            {
+                functions[functionIndex] = loadedLoop;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryLoopBreakPreservesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeWithBreak(bool start, bool stop) {
+                mut bool repeat = start;
+                mut nint size = sizeof(int32);
+                while (repeat) {
+                    if (stop) {
+                        break;
+                    }
+                    size = sizeof(int64);
+                    repeat = stop;
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var loopFunction = loaded.Functions.Single(
+            static function => function.Name == "KeepSizeWithBreak");
+        var loop = (BoundWhile)loopFunction.Body.Statements[2];
+        var loopBody = (BoundBlock)loop.Body;
+        Assert.That(loopBody.Statements, Has.Length.EqualTo(3));
+        Assert.That(loopBody.Statements[0], Is.TypeOf<BoundIf>());
+        Assert.That(((BoundIf)loopBody.Statements[0]).Then,
+            Is.TypeOf<BoundBlock>());
+        Assert.That(((BoundBlock)((BoundIf)loopBody.Statements[0]).Then!)
+            .Statements.Single(), Is.TypeOf<BoundBreak>());
+
+        var invalidBreakEdge = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                records[6][4] = 3;
+                records[6][5] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidBreakEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeWithBreak(true, false)
+                    + KeepSizeWithBreak(true, true));
+            }
+
+            public nint KeepSizeWithBreak(bool start, bool stop) {
+                mut bool repeat = start;
+                mut nint size = sizeof(int32);
+                while (repeat) {
+                    if (stop) {
+                        break;
+                    }
+                    size = sizeof(int64);
+                    repeat = stop;
+                }
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeWithBreak")
+            {
+                functions[functionIndex] = loopFunction;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryPostTestLoopBreakPreservesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeAfterBreak(bool start, bool stop) {
+                mut bool repeat = start;
+                mut nint size = sizeof(int32);
+                do {
+                    if (stop) {
+                        break;
+                    }
+                    size = sizeof(int64);
+                    repeat = stop;
+                } while (repeat);
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(
+            static function => function.Name == "KeepSizeAfterBreak");
+        var loop = (BoundWhile)loadedLoop.Body.Statements[2];
+        Assert.That(loop.IsPostTested, Is.True);
+        Assert.That(((BoundBlock)loop.Body).Statements[0],
+            Is.TypeOf<BoundIf>());
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeAfterBreak(false, false)
+                    + KeepSizeAfterBreak(true, true));
+            }
+
+            public nint KeepSizeAfterBreak(bool start, bool stop) {
+                mut bool repeat = start;
+                mut nint size = sizeof(int32);
+                do {
+                    if (stop) {
+                        break;
+                    }
+                    size = sizeof(int64);
+                    repeat = stop;
+                } while (repeat);
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeAfterBreak")
+            {
+                functions[functionIndex] = loadedLoop;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(12));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryLoopContinuePreservesQueryState()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeAfterContinue(bool start, bool stop) {
+                mut bool repeat = start;
+                nint size = sizeof(int32);
+                do {
+                    if (stop) {
+                        continue;
+                    }
+                    repeat = stop;
+                } while (repeat);
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var loadedLoop = loaded.Functions.Single(
+            static function => function.Name == "KeepSizeAfterContinue");
+        var loop = (BoundWhile)loadedLoop.Body.Statements[2];
+        Assert.That(loop.IsPostTested, Is.True);
+        var body = (BoundBlock)loop.Body;
+        Assert.That(body.Statements[0], Is.TypeOf<BoundIf>());
+        Assert.That(((BoundBlock)((BoundIf)body.Statements[0]).Then!)
+            .Statements.Single(), Is.TypeOf<BoundContinue>());
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeAfterContinue(false, true));
+            }
+
+            public nint KeepSizeAfterContinue(bool start, bool stop) {
+                mut bool repeat = start;
+                nint size = sizeof(int32);
+                do {
+                    if (stop) {
+                        continue;
+                    }
+                    repeat = stop;
+                } while (repeat);
+                return size;
+            }
+            """);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "KeepSizeAfterContinue")
+            {
+                functions[functionIndex] = loadedLoop;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryTypeIdentitySurvivesLoopBackedge()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public bool SameTypeAfterLoop(bool start, bool stop) {
+                mut bool repeat = start;
+                while (repeat) {
+                    repeat = stop;
+                }
+                return typeof(int32) == typeof(int64);
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var loadedLoop = loaded.Functions.Single(
+            static function => function.Name == "SameTypeAfterLoop");
+        Assert.That(loadedLoop.Body.Statements, Has.Length.EqualTo(3));
+        var loop = (BoundWhile)loadedLoop.Body.Statements[1];
+        Assert.That(loop.Condition, Is.TypeOf<BoundRead>());
+        var returned = (BoundReturn)loadedLoop.Body.Statements[2];
+        Assert.That(returned.Value, Is.TypeOf<BoundBinary>());
+        var comparison = (BoundBinary)returned.Value!;
+        Assert.That(comparison.Left, Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.That(comparison.Right, Is.TypeOf<BoundTypeIdentityQuery>());
+
+        var invalidIdentityState
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                static records => {
+                    records[1][14] = 0;
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidIdentityState),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return SameTypeAfterLoop(true, false) ? 0 : 42;
+            }
+
+            public bool SameTypeAfterLoop(bool start, bool stop) {
+                mut bool repeat = start;
+                while (repeat) {
+                    repeat = stop;
+                }
+                return typeof(int32) == typeof(int64);
+            }
+            """);
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < executionProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (executionProgram.Functions[functionIndex].Name
+                == "SameTypeAfterLoop")
+            {
+                functions[functionIndex] = loadedLoop;
+                foundLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundLoop, Is.True);
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryTypeIdentityConditionSurvivesNestedLoopTransfers()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public nint KeepSizeAcrossTypeIdentityCondition(bool outerStart,
+                bool outerStop, bool innerStart, bool stop, int32 left,
+                int32 right) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int8);
+                outer: while (outerRepeat) {
+                    outerRepeat = outerStop;
+                    inner: while (innerRepeat) {
+                        innerRepeat = stop;
+                        size = sizeof(int64);
+                        if (typeof(left) == typeof(right)) {
+                            break inner;
+                        }
+                        if (stop) {
+                            continue outer;
+                        }
+                        size = sizeof(int32);
+                    }
+                    size = sizeof(int16);
+                }
+                return size;
+            }
+
+            public nint KeepSizeAcrossDifferentTypeCondition(
+                bool outerStart, bool outerStop, bool innerStart, bool stop,
+                int32 left, int64 right) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                mut nint size = sizeof(int8);
+                outer: while (outerRepeat) {
+                    outerRepeat = outerStop;
+                    inner: while (innerRepeat) {
+                        innerRepeat = stop;
+                        size = sizeof(int64);
+                        if (typeof(left) == typeof(right)) {
+                            break inner;
+                        }
+                        if (stop) {
+                            continue outer;
+                        }
+                        size = sizeof(int32);
+                    }
+                    size = sizeof(int16);
+                }
+                return size;
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        AssertStandardRegisteredQueryTransferTargetIsValidated(artifact,
+            schemaIdentity);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        foreach (var functionName in new[] {
+            "KeepSizeAcrossTypeIdentityCondition",
+            "KeepSizeAcrossDifferentTypeCondition",
+        })
+        {
+            var loadedLoop = loaded.Functions.Single(function =>
+                function.Name == functionName);
+            var loops = new List<BoundWhile>();
+            var transferDepths = new List<int>();
+            var typeIdentityConditionCount = 0;
+            Assert.That(BoundTreeTraversal.VisitStatements(loadedLoop.Body,
+                statement => {
+                    switch (statement)
+                    {
+                        case BoundWhile loop:
+                            loops.Add(loop);
+                            break;
+                        case BoundBreak transfer:
+                            transferDepths.Add(transfer.TargetDepth);
+                            break;
+                        case BoundContinue transfer:
+                            transferDepths.Add(transfer.TargetDepth);
+                            break;
+                        case BoundIf {
+                            Condition: BoundBinary {
+                                Left: BoundTypeIdentityQuery,
+                                Right: BoundTypeIdentityQuery,
+                            },
+                        }:
+                            typeIdentityConditionCount++;
+                            break;
+                    }
+                }), Is.True);
+            Assert.That(loops, Has.Count.EqualTo(2));
+            Assert.That(transferDepths, Does.Contain(1));
+            Assert.That(transferDepths, Does.Contain(2));
+            Assert.That(typeIdentityConditionCount, Is.EqualTo(1));
+        }
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return int32(KeepSizeAcrossTypeIdentityCondition(
+                        true, false, true, false, 1, 2)
+                    + KeepSizeAcrossTypeIdentityCondition(
+                        false, false, true, false, 1, 2)
+                    + KeepSizeAcrossTypeIdentityCondition(
+                        true, false, false, false, 1, 2)
+                    + KeepSizeAcrossDifferentTypeCondition(
+                        true, false, true, false, 1, 2)
+                    + KeepSizeAcrossDifferentTypeCondition(
+                        true, false, true, true, 1, 2));
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(15));
+
+        var loadedFunctions = loaded.Functions.ToDictionary(
+            static function => function.Name);
+        var functions = executionProgram.Functions.ToBuilder();
+        for (var index = 0; index < functions.Count; index++)
+        {
+            if (loadedFunctions.TryGetValue(functions[index].Name,
+                    out var loadedFunction))
+            {
+                functions[index] = loadedFunction;
+            }
+        }
+        var programWithLoadedLoop = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoop,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(15));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryTypeIdentitySurvivesNestedSiblingLoopTransfers()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string loopSource = """
+            public bool DifferentTypeAcrossSiblingLoops(bool outerStart,
+                bool outerStop, bool firstStart, bool secondStart, bool stop,
+                int32 left, int64 right) {
+                mut bool outerRepeat = outerStart;
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                outer: while (outerRepeat) {
+                    outerRepeat = outerStop;
+                    first: while (firstRepeat) {
+                        if (typeof(left) == typeof(right)) {
+                            break first;
+                        }
+                        if (stop) {
+                            continue outer;
+                        }
+                        firstRepeat = stop;
+                    }
+                    second: while (secondRepeat) {
+                        if (typeof(left) == typeof(right)) {
+                            break second;
+                        }
+                        if (stop) {
+                            continue outer;
+                        }
+                        secondRepeat = stop;
+                    }
+                }
+                return ((typeof(left) == typeof(right))
+                    ? typeof(left) : typeof(right)) == typeof(left);
+            }
+            public bool SameTypeAcrossSiblingLoops(bool outerStart,
+                bool outerStop, bool firstStart, bool secondStart, bool stop,
+                int32 left, int32 right) {
+                mut bool outerRepeat = outerStart;
+                mut bool firstRepeat = firstStart;
+                mut bool secondRepeat = secondStart;
+                outer: while (outerRepeat) {
+                    outerRepeat = outerStop;
+                    first: while (firstRepeat) {
+                        if (typeof(left) == typeof(right)) {
+                            break first;
+                        }
+                        if (stop) {
+                            continue outer;
+                        }
+                        firstRepeat = stop;
+                    }
+                    second: while (secondRepeat) {
+                        if (typeof(left) == typeof(right)) {
+                            break second;
+                        }
+                        if (stop) {
+                            continue outer;
+                        }
+                        secondRepeat = stop;
+                    }
+                }
+                return ((typeof(left) == typeof(right))
+                    ? typeof(left) : typeof(right)) == typeof(left);
+            }
+            """;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        var typeIdentityRegisters = new HashSet<byte>();
+        var typeIdentityStateBlockCount = 0;
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            var entryRecordIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(block[8..]);
+            var entry = body.GetRecord(entryRecordIndex);
+            var count = BinaryPrimitives.ReadUInt32LittleEndian(entry[4..]);
+            var hasTypeIdentityState = false;
+            for (var row = 0; row < count; row++)
+            {
+                var offset = 8 + (checked((int)row) * 5);
+                if (entry[offset + 1] != 2)
+                {
+                    continue;
+                }
+                hasTypeIdentityState = true;
+                _ = typeIdentityRegisters.Add(entry[offset]);
+                Assert.That(entry[offset + 2], Is.Zero);
+                Assert.That(entry[offset + 3], Is.Zero);
+                Assert.That(entry[offset + 4], Is.Zero);
+            }
+            if (hasTypeIdentityState)
+            {
+                typeIdentityStateBlockCount++;
+            }
+        }
+        Assert.That(typeIdentityStateBlockCount, Is.GreaterThan(2));
+        Assert.That(typeIdentityRegisters, Has.Count.GreaterThanOrEqualTo(2));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        foreach (var functionName in new[] {
+            "DifferentTypeAcrossSiblingLoops",
+            "SameTypeAcrossSiblingLoops",
+        })
+        {
+            var function = loaded.Functions.Single(candidate =>
+                candidate.Name == functionName);
+            var loops = new List<BoundWhile>();
+            var breakDepths = new List<int>();
+            var continueDepths = new List<int>();
+            var typeIdentityTagVariables = function.Variables
+                .Select((variable, index) => (variable, index))
+                .Where(static item => item.variable.Type
+                        == PrimitiveType.NativeInt
+                    && item.variable.Name.StartsWith(
+                        "__trrm_loop_register_", StringComparison.Ordinal))
+                .Select(static item => item.index)
+                .ToHashSet();
+            var typeIdentityConditionCount = 0;
+            var typeIdentitySelectionCount = 0;
+            Assert.That(BoundTreeTraversal.VisitStatements(function.Body,
+                statement => {
+                    switch (statement)
+                    {
+                        case BoundWhile loop:
+                            loops.Add(loop);
+                            break;
+                        case BoundBreak transfer:
+                            breakDepths.Add(transfer.TargetDepth);
+                            break;
+                        case BoundContinue transfer:
+                            continueDepths.Add(transfer.TargetDepth);
+                            break;
+                        case BoundIf {
+                            Condition: BoundBinary {
+                                Left: BoundRead leftIdentity,
+                                Right: BoundRead rightIdentity,
+                            },
+                        } when typeIdentityTagVariables.Contains(
+                                leftIdentity.Variable)
+                            && typeIdentityTagVariables.Contains(
+                                rightIdentity.Variable):
+                            typeIdentityConditionCount++;
+                            break;
+                    }
+                }), Is.True);
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression => {
+                    if (expression is BoundConditional {
+                            Type: PrimitiveType.NativeInt,
+                        })
+                    {
+                        typeIdentitySelectionCount++;
+                    }
+                }), Is.True);
+            Assert.That(loops, Has.Count.EqualTo(3));
+            Assert.That(breakDepths, Is.EquivalentTo(new[] { 1, 1 }));
+            Assert.That(continueDepths, Is.EquivalentTo(new[] { 2, 2 }));
+            Assert.That(typeIdentityConditionCount, Is.EqualTo(2));
+            Assert.That(typeIdentityTagVariables,
+                Has.Count.GreaterThanOrEqualTo(2));
+            Assert.That(typeIdentitySelectionCount, Is.EqualTo(1));
+            Assert.That(function.Variables.Any(variable =>
+                variable.Type == PrimitiveType.TypeIdentity), Is.False);
+            var returned = (BoundReturn)function.Body.Statements[^1];
+            var comparison = (BoundBinary)returned.Value!;
+            Assert.That(comparison.Left, Is.TypeOf<BoundConditional>());
+            Assert.That(comparison.Left!.Type,
+                Is.EqualTo(PrimitiveType.NativeInt));
+            Assert.That(comparison.Right!.Type,
+                Is.EqualTo(PrimitiveType.NativeInt));
+        }
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+
+        var invalidIdentityCarrier
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                static records => {
+                    var changed = false;
+                    foreach (var record in records)
+                    {
+                        if (record.Length < 8 || record[0] != 0x01)
+                        {
+                            continue;
+                        }
+                        var count = BinaryPrimitives
+                            .ReadUInt32LittleEndian(record.AsSpan(4));
+                        for (var row = 0; row < count; row++)
+                        {
+                            var offset = 8 + (checked((int)row) * 5);
+                            if (record[offset + 1] != 2)
+                            {
+                                continue;
+                            }
+                            record[offset + 2] = 1;
+                            changed = true;
+                            break;
+                        }
+                        if (changed)
+                        {
+                            break;
+                        }
+                    }
+                    Assert.That(changed, Is.True);
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidIdentityCarrier),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return (DifferentTypeAcrossSiblingLoops(
+                        true, false, true, true, true, 1, 2) ? 1 : 0)
+                    + (DifferentTypeAcrossSiblingLoops(
+                        true, false, true, true, false, 1, 2) ? 2 : 0)
+                    + (SameTypeAcrossSiblingLoops(
+                        true, false, true, true, true, 1, 2) ? 4 : 0);
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+        var loadedFunctions = loaded.Functions.ToDictionary(
+            static function => function.Name);
+        var functions = executionProgram.Functions.ToBuilder();
+        for (var functionIndex = 0;
+            functionIndex < functions.Count; functionIndex++)
+        {
+            if (loadedFunctions.TryGetValue(functions[functionIndex].Name,
+                    out var loadedFunction))
+            {
+                functions[functionIndex] = loadedFunction;
+            }
+        }
+        var programWithLoadedLoops = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoops,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+    }
+
+    [Test]
+    public void StandardTypeIdentityValuesRemainLiveAcrossNestedLoopMerges()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        const string sameTypeSource = """
+            public bool SameTypeAfterNestedLoops(bool outerStart,
+                bool outerStop, bool innerStart, bool stop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                outer: while (outerRepeat) {
+                    outerRepeat = outerStop;
+                    inner: while (innerRepeat) {
+                        if (stop) {
+                            break inner;
+                        }
+                        innerRepeat = stop;
+                    }
+                }
+                return typeof(int32) == typeof(int32);
+            }
+            """;
+
+        const string differentTypeSource = """
+            public bool DifferentTypeAfterNestedLoops(bool outerStart,
+                bool outerStop, bool innerStart, bool stop) {
+                mut bool outerRepeat = outerStart;
+                mut bool innerRepeat = innerStart;
+                outer: while (outerRepeat) {
+                    outerRepeat = outerStop;
+                    inner: while (innerRepeat) {
+                        if (stop) {
+                            break inner;
+                        }
+                        innerRepeat = stop;
+                    }
+                }
+                return typeof(int32) == typeof(int64);
+            }
+            """;
+        const string loopSource = sameTypeSource + "\n"
+            + differentTypeSource;
+        var library = Compile(loopSource, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(library, "sample",
+            schemaIdentity, targetRequirement);
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        var typeIdentityRegisters = new HashSet<byte>();
+        var typeIdentityStateBlockCount = 0;
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            var entryRecordIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(block[8..]);
+            var entry = body.GetRecord(entryRecordIndex);
+            var count = BinaryPrimitives.ReadUInt32LittleEndian(entry[4..]);
+            var hasTypeIdentityState = false;
+            for (var row = 0; row < count; row++)
+            {
+                var offset = 8 + (checked((int)row) * 5);
+                if (entry[offset + 1] == 2)
+                {
+                    hasTypeIdentityState = true;
+                    _ = typeIdentityRegisters.Add(entry[offset]);
+                    Assert.That(entry[offset], Is.LessThan(14));
+                    Assert.That(entry[offset + 2], Is.Zero);
+                    Assert.That(entry[offset + 3], Is.Zero);
+                    Assert.That(entry[offset + 4], Is.Zero);
+                }
+            }
+            if (hasTypeIdentityState)
+            {
+                typeIdentityStateBlockCount++;
+            }
+        }
+        Assert.That(typeIdentityStateBlockCount, Is.GreaterThan(1));
+        Assert.That(typeIdentityRegisters, Has.Count.EqualTo(2));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        var sameFunction = loaded.Functions.Single(function =>
+            function.Name == "SameTypeAfterNestedLoops");
+        var differentFunction = loaded.Functions.Single(function =>
+            function.Name == "DifferentTypeAfterNestedLoops");
+        foreach (var function in new[] { sameFunction, differentFunction })
+        {
+            var loops = new List<BoundWhile>();
+            var breaks = new List<BoundBreak>();
+            Assert.That(BoundTreeTraversal.VisitStatements(function.Body,
+                statement => {
+                    if (statement is BoundWhile loop)
+                    {
+                        loops.Add(loop);
+                    }
+                    else if (statement is BoundBreak transfer)
+                    {
+                        breaks.Add(transfer);
+                    }
+                }), Is.True);
+            Assert.That(loops, Has.Count.EqualTo(2));
+            Assert.That(breaks, Has.Count.EqualTo(1));
+            Assert.That(breaks[0].TargetDepth, Is.EqualTo(1));
+            Assert.That(function.Variables.Any(variable =>
+                variable.Type == PrimitiveType.TypeIdentity), Is.False);
+            var returned = (BoundReturn)function.Body.Statements[^1];
+            var comparison = (BoundBinary)returned.Value!;
+            Assert.That(comparison.Left,
+                Is.TypeOf<BoundTypeIdentityQuery>());
+            Assert.That(comparison.Right,
+                Is.TypeOf<BoundTypeIdentityQuery>());
+        }
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+
+        var singleFunctionArtifact = TrRmExecutableCompiler.EmitStandard(
+            Compile(sameTypeSource, library: true), "sample", schemaIdentity,
+            targetRequirement);
+        var invalidIdentityCarrier
+            = RewriteStandardRegisteredQueryBodyRecords(singleFunctionArtifact,
+                static records => {
+                    var changed = false;
+                    foreach (var record in records)
+                    {
+                        if (record.Length < 8 || record[0] != 0x01)
+                        {
+                            continue;
+                        }
+                        var count = BinaryPrimitives
+                            .ReadUInt32LittleEndian(record.AsSpan(4));
+                        for (var row = 0; row < count; row++)
+                        {
+                            var offset = 8 + (checked((int)row) * 5);
+                            if (record[offset + 1] != 2)
+                            {
+                                continue;
+                            }
+                            record[offset + 2] = 1;
+                            changed = true;
+                            break;
+                        }
+                        if (changed)
+                        {
+                            break;
+                        }
+                    }
+                    Assert.That(changed, Is.True);
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidIdentityCarrier),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var executionProgram = Compile("""
+            int32 Main() {
+                return (SameTypeAfterNestedLoops(
+                        true, false, true, true) ? 1 : 0)
+                    + (DifferentTypeAfterNestedLoops(
+                        true, false, true, false) ? 2 : 0);
+            }
+            """ + loopSource);
+        Assert.That(NativeJit.Execute(executionProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+        var functions = executionProgram.Functions.ToBuilder();
+        var foundSameFunction = false;
+        var foundDifferentFunction = false;
+        for (var functionIndex = 0;
+            functionIndex < functions.Count; functionIndex++)
+        {
+            if (functions[functionIndex].Name == "SameTypeAfterNestedLoops")
+            {
+                functions[functionIndex] = sameFunction;
+                foundSameFunction = true;
+            }
+            else if (functions[functionIndex].Name
+                == "DifferentTypeAfterNestedLoops")
+            {
+                functions[functionIndex] = differentFunction;
+                foundDifferentFunction = true;
+            }
+        }
+        Assert.That(foundSameFunction, Is.True);
+        Assert.That(foundDifferentFunction, Is.True);
+        var programWithLoadedLoops = executionProgram with {
+            Functions = functions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(programWithLoadedLoops,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryMultipleNestedJoinsRejectMalformedEvidence()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public nint SelectSize(bool outer, bool left, bool right) {
+                return outer
+                    ? (left ? sizeof(int32) : sizeof(int16))
+                    : (right ? alignof(int64) : sizeof(int8));
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+
+        var invalidEdge = RewriteStandardRegisteredQueryBodyRecords(artifact,
+            static records => {
+                records[10][6] = 4;
+                records[10][7] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, invalidEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidJoinType
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                static records => {
+                    records[9][10] = 0;
+                    records[9][11] = 0;
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidJoinType),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [Test]
+    public void StandardRegisteredQueryNestedConditionalRejectsBadJoinEvidence()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public nint SelectSize(bool outer, bool inner) {
+                return outer
+                    ? (inner ? sizeof(int32) : sizeof(int16))
+                    : sizeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+
+        var invalidEdge = RewriteStandardRegisteredQueryBodyRecords(artifact,
+            static records => {
+                records[8][6] = 4;
+                records[8][7] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, invalidEdge),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+
+        var invalidJoinType
+            = RewriteStandardRegisteredQueryBodyRecords(artifact,
+                static records => {
+                    records[4][10] = 0;
+                    records[4][11] = 0;
+                    records[6][10] = 0;
+                    records[6][11] = 0;
+                    return records;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidJoinType),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [Test]
+    public void StandardRegisteredTypeIdentityComparisonAndSelectionRoundTripThroughFeature13Body()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public bool Same(nint left, int64 right) {
+                return typeof(left) == typeof(right);
+            }
+            public bool SelectedIdentity() {
+                return (typeof(nint) != typeof(int64)
+                    ? typeof(int64) : typeof(nint)) == typeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "Same")
+            .Body.Statements.Single();
+        var comparison = (BoundBinary)returned.Value!;
+        Assert.That(comparison.Operator, Is.EqualTo(TokenKind.EqualsEquals));
+        Assert.That(comparison.Left, Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.That(comparison.Right, Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.That(comparison.Left.Type, Is.EqualTo(PrimitiveType.TypeIdentity));
+        Assert.That(comparison.Right.Type, Is.EqualTo(PrimitiveType.TypeIdentity));
+        var selected = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectedIdentity")
+            .Body.Statements.Single();
+        var selectedComparison = (BoundBinary)selected.Value!;
+        var selectedIdentity = (BoundConditional)selectedComparison.Left;
+        Assert.That(selectedIdentity.Condition, Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)selectedIdentity.Condition).Value,
+            Is.EqualTo(1));
+        Assert.That(selectedIdentity.WhenTrue,
+            Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    [Test]
+    public void StandardTypeIdentityRelationAndConditionalMoveDecodeThroughFeature13Body()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public bool SelectedIdentity() {
+                return (typeof(nint) != typeof(int64)
+                    ? typeof(int64) : typeof(nint)) == typeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+
+        var relationArtifact = RewriteStandardRegisteredQueryBody(artifact,
+            static code => {
+                var position = FindInstruction(code, 0x40);
+                var registersPair = code[position + 1];
+                var left = registersPair & 0x0F;
+                var right = registersPair >> 4;
+                var rewritten = new byte[code.Length + 2];
+                Array.Copy(code, 0, rewritten, 0, position);
+                rewritten[position] = 0xC2;
+                rewritten[position + 1] = 0;
+                rewritten[position + 2] = (byte)(left | 0xF0);
+                rewritten[position + 3] = (byte)(left | (right << 4));
+                Array.Copy(code, position + 2, rewritten, position + 4,
+                    code.Length - position - 2);
+                return rewritten;
+            });
+        var relationLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, relationArtifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+        AssertSelectedIdentity(relationLoaded);
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(relationLoaded));
+
+        var conditionalMoveArtifact = RewriteStandardRegisteredQueryBody(
+            artifact, static code => {
+                var rewritten = (byte[])code.Clone();
+                var oldDestination = -1;
+                var newDestination = -1;
+                var conditionalMoveCount = 0;
+                for (var position = 0; position < rewritten.Length;)
+                {
+                    var opcode = rewritten[position];
+                    var instructionLength
+                        = TrRmRegisterBodyReader.InstructionLength(opcode,
+                            TrRmArtifactSchema.Standard);
+                    if (opcode == 0xC4)
+                    {
+                        var payload = BinaryPrimitives
+                            .ReadUInt16LittleEndian(
+                                rewritten.AsSpan(position + 2));
+                        oldDestination = payload & 0x0F;
+                        var condition = (payload >> 4) & 0x0F;
+                        var selectedValue = (payload >> 8) & 0x0F;
+                        newDestination = payload >> 12;
+                        rewritten[position] = 0xC5;
+                        rewritten[position + 2]
+                            = (byte)(newDestination | (condition << 4));
+                        rewritten[position + 3]
+                            = (byte)(selectedValue | 0xF0);
+                        conditionalMoveCount++;
+                    }
+                    else if (opcode == 0xC2
+                        && rewritten[position + 1] == 1
+                        && (rewritten[position + 3] & 0x0F)
+                            == oldDestination)
+                    {
+                        rewritten[position + 3]
+                            = (byte)(newDestination
+                                | (rewritten[position + 3] & 0xF0));
+                    }
+
+                    position += instructionLength;
+                }
+
+                Assert.That(conditionalMoveCount, Is.EqualTo(1));
+                Assert.That(newDestination, Is.GreaterThanOrEqualTo(0));
+                return rewritten;
+            });
+        var conditionalMoveLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                conditionalMoveArtifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+        AssertSelectedIdentity(conditionalMoveLoaded);
+        Assert.DoesNotThrow(
+            () => SemanticVerifier.VerifyLibrary(conditionalMoveLoaded));
+
+        static void AssertSelectedIdentity(BoundProgram loaded)
+        {
+            var returned = (BoundReturn)loaded.Functions.Single(
+                static function => function.Name == "SelectedIdentity")
+                .Body.Statements.Single();
+            var comparison = (BoundBinary)returned.Value!;
+            var selected = (BoundConditional)comparison.Left;
+            Assert.That(selected.Condition, Is.TypeOf<BoundConstant>());
+            Assert.That(((BoundConstant)selected.Condition).Value,
+                Is.EqualTo(1));
+            Assert.That(selected.WhenTrue,
+                Is.TypeOf<BoundTypeIdentityQuery>());
+        }
+
+        static int FindInstruction(byte[] code, byte targetOpcode)
+        {
+            for (var position = 0; position < code.Length;)
+            {
+                var opcode = code[position];
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(opcode,
+                        TrRmArtifactSchema.Standard);
+                if (opcode == targetOpcode)
+                {
+                    return position;
+                }
+
+                position += instructionLength;
+            }
+
+            throw new InvalidOperationException(
+                $"The expected instruction 0x{targetOpcode:X2} was not emitted.");
+        }
+    }
+
+    [Test]
+    public void StandardTypeIdentityCarrierMergesAcrossFeature13Blocks()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public bool SelectedIdentity(bool choose) {
+                return (choose ? typeof(nint) : typeof(int64))
+                    == typeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "SelectedIdentity")
+            .Body.Statements.Single();
+        var comparison = (BoundBinary)returned.Value!;
+        var selected = (BoundConditional)comparison.Left;
+        Assert.That(selected.Condition, Is.TypeOf<BoundRead>());
+        Assert.That(((BoundRead)selected.Condition).Variable, Is.EqualTo(0));
+        Assert.That(selected.WhenTrue,
+            Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.That(selected.WhenFalse,
+            Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(4));
+        Assert.That(body.RecordCount, Is.EqualTo(5));
+        var mergeState = body.GetRecord(3);
+        Assert.That(mergeState[9], Is.EqualTo(2));
+
+        var invalidCarrier = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, static records => {
+                records[3][9] = 0;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidCarrier), "sample",
+                Array.Empty<TrRmStandardArtifactInput>()));
+
+        var falseBlockOffset = BinaryPrimitives.ReadUInt32LittleEndian(
+            body.GetBlock(2));
+        var invalidIncomingType = RewriteStandardRegisteredQueryBody(
+            artifact, code => {
+                code[checked((int)falseBlockOffset) + 1]
+                    = (byte)((code[checked((int)falseBlockOffset) + 1]
+                        & 0x0F) | 0x10);
+                return code;
+            });
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidIncomingType), "sample",
+                Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [Test]
+    public void StandardTypeIdentityMoveAliasesPreserveFeature13BodyValues()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public bool Same(nint left, int64 right) {
+                return typeof(left) == typeof(right);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var aliasedArtifact = RewriteStandardRegisteredQueryBody(artifact,
+            static code => {
+                var position = FindStandardBodyInstruction(code, 0xC2, 1);
+                var rightRegister = code[position + 3] >> 4;
+                var rewritten = new byte[code.Length + 2];
+                Array.Copy(code, 0, rewritten, 0, position);
+                rewritten[position] = 0x10;
+                rewritten[position + 1] = 0x03;
+                Array.Copy(code, position, rewritten, position + 2,
+                    code.Length - position);
+                var comparePosition = position + 2;
+                rewritten[comparePosition + 2] = 0xF4;
+                rewritten[comparePosition + 3]
+                    = (byte)(3 | (rightRegister << 4));
+                rewritten[comparePosition + 5] = 4;
+                return rewritten;
+            });
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, aliasedArtifact),
+            "sample", Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "Same")
+            .Body.Statements.Single();
+        var comparison = (BoundBinary)returned.Value!;
+        Assert.That(comparison.Left,
+            Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.That(comparison.Right,
+            Is.TypeOf<BoundTypeIdentityQuery>());
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    [Test]
+    public void StandardTypeIdentityRelationCanFeedFeature13SetCondition()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("""
+            public bool Distinct() {
+                return typeof(nint) != typeof(int64);
+            }
+            """, library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var setConditionArtifact = RewriteStandardRegisteredQueryBody(
+            artifact, static code => {
+                var position = FindStandardBodyInstruction(code, 0xC2, 2);
+                var rewritten = new byte[code.Length + 4];
+                Array.Copy(code, 0, rewritten, 0, position);
+                Array.Copy(code, position, rewritten, position,
+                    code.Length - position);
+                rewritten[position + 1] = 0;
+                rewritten[position + 4] = 0xC3;
+                rewritten[position + 5] = 13;
+                rewritten[position + 6] = 0x22;
+                rewritten[position + 7] = 0xFF;
+                Array.Copy(code, position + 4, rewritten, position + 8,
+                    code.Length - position - 4);
+                return rewritten;
+            });
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                setConditionArtifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "Distinct")
+            .Body.Statements.Single();
+        Assert.That(returned.Value, Is.TypeOf<BoundConstant>());
+        Assert.That(((BoundConstant)returned.Value!).Value,
+            Is.EqualTo(1));
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyLibrary(loaded));
+    }
+
+    private static void AssertStandardRegisteredQueryTransferTargetIsValidated(
+        byte[] artifact, string schemaIdentity)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        var transferBlockIndex = -1;
+        for (var blockIndex = 0; blockIndex < body.BlockCount;
+            blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            if (code.Length < 4 || code[^4] != 0xE3)
+            {
+                continue;
+            }
+            var targetBlock
+                = BinaryPrimitives.ReadUInt16LittleEndian(code[^2..]);
+            if (targetBlock < blockIndex)
+            {
+                transferBlockIndex = blockIndex;
+                break;
+            }
+        }
+        Assert.That(transferBlockIndex, Is.GreaterThanOrEqualTo(0));
+        var transferCode = body.GetBlockCode(transferBlockIndex);
+        var transferBlock = body.GetBlock(transferBlockIndex);
+        var transferOffset = checked((int)
+            BinaryPrimitives.ReadUInt32LittleEndian(transferBlock));
+        var transferCodeLength = transferCode.Length;
+        var blockCount = body.BlockCount;
+        var invalidTarget
+            = RewriteStandardRegisteredQueryBodyCodeUnchecked(artifact,
+                code => {
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        code.AsSpan(transferOffset + transferCodeLength - 2),
+                        checked((ushort)blockCount));
+                    return code;
+                });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    invalidTarget),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    private static byte[] RewriteStandardRegisteredQueryBodyCodeUnchecked(
+        byte[] artifact, Func<byte[], byte[]> rewrite)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        var replacedBody = false;
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = bytes.ToArray();
+            if (kind == 0x0020)
+            {
+                var bodies = new TrRmBodyTableReader(sectionBytes,
+                    recordCount);
+                var bodyRows = new ReadOnlyMemory<byte>[bodies.Count];
+                for (var bodyRow = 1; bodyRow <= bodies.Count; bodyRow++)
+                {
+                    var rawBody = bodies.GetRow(bodyRow).ToArray();
+                    if (bodyRow == 1)
+                    {
+                        var body = new TrRmRegisterBodyReader(rawBody);
+                        var code = rewrite(body.Code.ToArray());
+                        Assert.That(code.Length,
+                            Is.EqualTo(body.CodeByteLength));
+                        code.CopyTo(rawBody,
+                            rawBody.Length - body.CodeByteLength);
+                    }
+                    bodyRows[bodyRow - 1] = rawBody;
+                }
+                sectionBytes = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+                replacedBody = true;
+            }
+
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount,
+                sectionBytes));
+        }
+
+        Assert.That(replacedBody, Is.True);
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static void AssertStandardRegisteredQueryLoopStateIsValidated(
+        byte[] artifact, string schemaIdentity)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        var stateRecordIndex = -1;
+        byte[]? reducedState = null;
+        for (var blockIndex = 0; blockIndex < body.BlockCount;
+            blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            if (code.Length < 4 || code[^4] != 0xE4)
+            {
+                continue;
+            }
+            var conditionRegister = code[code.Length - 3] & 0x0F;
+            var block = body.GetBlock(blockIndex);
+            var recordIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(block[8..]);
+            var state = body.GetRecord(recordIndex).ToArray();
+            var stateCount = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    state.AsSpan(4)));
+            var rowToRemove = -1;
+            for (var row = 0; row < stateCount; row++)
+            {
+                if (state[8 + (row * 5)] == conditionRegister)
+                {
+                    rowToRemove = row;
+                    break;
+                }
+            }
+            if (rowToRemove < 0)
+            {
+                continue;
+            }
+
+            reducedState = new byte[state.Length - 5];
+            state.AsSpan(0, 8).CopyTo(reducedState);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                reducedState.AsSpan(4), checked((uint)(stateCount - 1)));
+            var beforeLength = rowToRemove * 5;
+            state.AsSpan(8, beforeLength).CopyTo(
+                reducedState.AsSpan(8));
+            var afterStart = 8 + ((rowToRemove + 1) * 5);
+            var afterLength = (stateCount - rowToRemove - 1) * 5;
+            state.AsSpan(afterStart, afterLength)
+                .CopyTo(reducedState.AsSpan(8 + beforeLength));
+            stateRecordIndex = recordIndex;
+            break;
+        }
+        Assert.That(stateRecordIndex, Is.GreaterThanOrEqualTo(0));
+        Assert.That(reducedState, Is.Not.Null);
+        var invalidState = RewriteStandardRegisteredQueryBodyRecords(
+            artifact, records => {
+                records[stateRecordIndex] = reducedState!;
+                return records;
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, invalidState),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    private static byte[] RewriteStandardRegisteredQueryBody(
+        byte[] artifact, Func<byte[], byte[]> rewrite)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        var replacedBody = false;
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = bytes.ToArray();
+            if (kind == 0x0020)
+            {
+                var bodies = new TrRmBodyTableReader(sectionBytes,
+                    recordCount);
+                Assert.That(bodies.Count, Is.EqualTo(1));
+                var body = new TrRmRegisterBodyReader(bodies.GetRow(1));
+                var code = rewrite(body.Code.ToArray());
+                if (body.BlockCount != 1)
+                {
+                    Assert.That(code.Length,
+                        Is.EqualTo(body.CodeByteLength));
+                }
+
+                var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
+                for (var blockIndex = 0; blockIndex < blocks.Length;
+                    blockIndex++)
+                {
+                    var block = body.GetBlock(blockIndex);
+                    var offset = BinaryPrimitives.ReadUInt32LittleEndian(block);
+                    var length = BinaryPrimitives.ReadUInt32LittleEndian(
+                        block[4..]);
+                    blocks[blockIndex] = new TrRmRegisterBodyBlock(offset,
+                        body.BlockCount == 1 ? (uint)code.Length : length,
+                        BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+                }
+
+                var records = new ReadOnlyMemory<byte>[body.RecordCount];
+                for (var recordIndex = 0; recordIndex < records.Length;
+                    recordIndex++)
+                {
+                    records[recordIndex] = body.GetRecord(recordIndex).ToArray();
+                }
+
+                var rewrittenBody = TrRmRegisterBodyWriter.Encode(
+                    body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+                    body.MethodMap.ToArray(), body.FieldMap.ToArray(),
+                    body.ConstantMap.ToArray(), blocks, records, code);
+                sectionBytes = TrRmVariableTableWriter.EncodeBodies(
+                    [new ReadOnlyMemory<byte>(rewrittenBody)]);
+                replacedBody = true;
+            }
+
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount,
+                sectionBytes));
+        }
+
+        Assert.That(replacedBody, Is.True);
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static int FindStandardBodyInstruction(byte[] code,
+        byte opcode, byte? control = null)
+    {
+        for (var position = 0; position < code.Length;)
+        {
+            var instruction = code[position];
+            var instructionLength
+                = TrRmRegisterBodyReader.InstructionLength(instruction,
+                    TrRmArtifactSchema.Standard);
+            if (instruction == opcode
+                && (!control.HasValue
+                    || code[position + 1] == control.Value))
+            {
+                return position;
+            }
+
+            position += instructionLength;
+        }
+
+        throw new InvalidOperationException(
+            $"The expected instruction 0x{opcode:X2} was not emitted.");
+    }
+
+    private static byte[] RewriteStandardRegisteredQueryBodyRecords(
+        byte[] artifact, Func<byte[][], byte[][]> rewrite)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        var replacedBody = false;
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = bytes.ToArray();
+            if (kind == 0x0020)
+            {
+                var bodies = new TrRmBodyTableReader(sectionBytes,
+                    recordCount);
+                Assert.That(bodies.Count, Is.EqualTo(1));
+                var body = new TrRmRegisterBodyReader(bodies.GetRow(1));
+                var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
+                for (var blockIndex = 0; blockIndex < blocks.Length;
+                    blockIndex++)
+                {
+                    var block = body.GetBlock(blockIndex);
+                    blocks[blockIndex] = new TrRmRegisterBodyBlock(
+                        BinaryPrimitives.ReadUInt32LittleEndian(block),
+                        BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
+                        BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+                }
+
+                var records = new byte[body.RecordCount][];
+                for (var recordIndex = 0; recordIndex < records.Length;
+                    recordIndex++)
+                {
+                    records[recordIndex]
+                        = body.GetRecord(recordIndex).ToArray();
+                }
+
+                records = rewrite(records);
+                var rewrittenBody = TrRmRegisterBodyWriter.Encode(
+                    body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+                    body.MethodMap.ToArray(), body.FieldMap.ToArray(),
+                    body.ConstantMap.ToArray(), blocks,
+                    records.Select(static record
+                        => new ReadOnlyMemory<byte>(record)).ToArray(),
+                    body.Code.ToArray());
+                sectionBytes = TrRmVariableTableWriter.EncodeBodies(
+                    [new ReadOnlyMemory<byte>(rewrittenBody)]);
+                replacedBody = true;
+            }
+
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount,
+                sectionBytes));
+        }
+
+        Assert.That(replacedBody, Is.True);
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    [Test]
+    public void StandardLayoutQueryBodyExecutesThroughNativeJit()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("int32 Main() { return int32(sizeof(nint)); }");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "Main")
+            .Body.Statements.Single();
+        Assert.That(returned.Value, Is.TypeOf<BoundCast>());
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(8));
+    }
+
+    [Test]
+    public void StandardLayoutQueriesEmitsExplicitSourceFieldExports()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example {
+                [Blittable]
+                [Layout(LayoutKind.Sequential, Packing: 1)]
+                public struct Pair {
+                    public uint8 Tag;
+                    public uint32 Value;
+                }
+            }
+            """), new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "Example", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Example", "Pair", "pair") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value", "pair-value"),
+                    ],
+                },
+            ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(new TrRmArtifactIndex(artifact));
+
+        Assert.That(tables.Exports.TryGetExportKeyForDefinition(1,
+            0x1300_0001, out var typeExportKey), Is.True);
+        Assert.That(typeExportKey, Is.EqualTo("pair"));
+        Assert.That(tables.Exports.TryGetExportKeyForDefinition(1,
+            0x1400_0002, out var fieldExportKey), Is.True);
+        Assert.That(fieldExportKey, Is.EqualTo("pair-value"));
+
+        var typeOnlyArtifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, "Example", schemaIdentity,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                new TrRmSourceTypeExport("Example", "Pair", "pair"),
+            ]);
+        var typeOnlyTables = TrRmStructuralMetadataValidator
+            .ValidateAndGetExecutionTables(
+                new TrRmArtifactIndex(typeOnlyArtifact));
+        Assert.That(typeOnlyTables.Exports.TryGetExportKeyForDefinition(1,
+            0x1300_0001, out var typeOnlyExportKey), Is.True);
+        Assert.That(typeOnlyExportKey, Is.EqualTo("pair"));
+        var loadedTypeOnlyProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, typeOnlyArtifact),
+            "Example", Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(loadedTypeOnlyProgram.Structures, Has.Length.EqualTo(1));
+        Assert.That(loadedTypeOnlyProgram.Structures[0].Name,
+            Is.EqualTo("Example.Pair"));
+
+        var sourceReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            "Example", Array.Empty<TrRmStandardArtifactInput>(), ["pair"],
+            ["pair-value"]);
+        var sourceConsumer = Compilation.Create(SyntaxTree.Parse("""
+            using Example;
+            int32 Main() { return int32(offsetof(Pair, Value)); }
+            """), sourceReference, new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        });
+        Assert.That(sourceConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
+        var typeOnlyReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                "Example", Array.Empty<TrRmStandardArtifactInput>(), ["pair"],
+                []);
+        var missingFieldConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 ReadOffset() { return int32(offsetof(Pair, Value)); }
+                """), typeOnlyReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(missingFieldConsumer.Diagnostics.Any(static diagnostic =>
+            diagnostic.Message.Contains(
+                "no selected Standard FieldDef ExportKey",
+                StringComparison.Ordinal)), Is.True);
+        var valueUseConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 ReadValue(Pair pair) { return int32(pair.Value); }
+                """), sourceReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(valueUseConsumer.Diagnostics.Any(static diagnostic =>
+            diagnostic.Message.Contains(
+                "Standard LayoutQueries source reference",
+                StringComparison.Ordinal)), Is.True);
+
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                "Example", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("Example", "Pair", "pair") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Missing", "missing"),
+                        ],
+                    },
+                ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                "Example", schemaIdentity,
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement, [
+                    new TrRmSourceTypeExport("Example", "Pair", "pair") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Tag", "shared"),
+                            new TrRmSourceFieldExport("Value", "shared"),
+                        ],
+                    },
+                ]));
+    }
+
+    [Test]
+    public void StandardLayoutQueryBodyUsesImportedProviderLayout()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var layoutOptions = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+        var leafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Leaf {
+                        public uint8 Tag;
+                        public uint32 Value;
+                    }
+                }
+                """), layoutOptions);
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, "LeafProvider", schemaIdentity,
+            targetRequirement, [
+                new TrRmSourceTypeExport("Example", "Leaf", "leaf-key") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value", "leaf-value"),
+                    ],
+                },
+            ]);
+        var leafReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+            "LeafProvider", Array.Empty<TrRmStandardArtifactInput>(),
+            ["leaf-key"], []);
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Pair {
+                        public Leaf Inner;
+                        public uint8 Tag;
+                    }
+
+                    public int32 Size() {
+                        return int32(sizeof(Pair));
+                    }
+                }
+                """), leafReference, layoutOptions);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerProgram = providerCompilation.Program
+            ?? throw new InvalidOperationException(
+                "The imported layout provider did not bind.");
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "PairProvider", schemaIdentity, targetRequirement, [
+                new TrRmSourceTypeExport("Example", "Pair", "pair") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Inner", "pair-inner"),
+                        new TrRmSourceFieldExport("Tag", "pair-tag"),
+                    ],
+                },
+            ]);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            "PairProvider", [
+                new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+            ], ["pair"], ["pair-inner", "pair-tag"]);
+        var coLocatedLeafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Leaf {
+                        public uint8 Tag;
+                        public uint32 Value;
+                    }
+
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Extra {
+                        public uint8 Value;
+                    }
+                }
+                """), layoutOptions);
+        Assert.That(coLocatedLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                coLocatedLeafCompilation.Diagnostics));
+        var coLocatedLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            coLocatedLeafCompilation.Program!, "LeafProvider",
+            schemaIdentity, targetRequirement, [
+                new TrRmSourceTypeExport("Example", "Leaf", "leaf-key") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value", "leaf-value"),
+                    ],
+                },
+                new TrRmSourceTypeExport("Example", "Extra", "extra-key"),
+            ]);
+        var alternateDependencyReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+                "PairProvider", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        coLocatedLeafArtifact),
+                ], ["pair"], ["pair-inner", "pair-tag"]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [reference, alternateDependencyReference]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [alternateDependencyReference, reference]));
+
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main() { return int32(offsetof(Pair, Tag)); }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var unselectedNestedField = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main() {
+                    return int32(offsetof(Pair, Inner.Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(unselectedNestedField.Diagnostics.Any(
+            static diagnostic => diagnostic.Message.Contains(
+                "no selected Standard FieldDef ExportKey",
+                StringComparison.Ordinal)), Is.True);
+
+        var leafFieldReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+            "LeafProvider", Array.Empty<TrRmStandardArtifactInput>(),
+            ["leaf-key"], ["leaf-value"]);
+        var composedReference
+            = TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [reference, leafFieldReference]);
+        var composedConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main() {
+                    return int32(offsetof(Pair, Inner.Value));
+                }
+                """), composedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(composedConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                composedConsumerCompilation.Diagnostics));
+        var composedValueUse = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main(Pair pair) { return int32(pair.Tag); }
+                """), composedReference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(composedValueUse.Diagnostics.Any(
+            static diagnostic => diagnostic.Message.Contains(
+                "cannot be used as a value", StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, composedValueUse.Diagnostics));
+
+        var consumerProgram = consumerCompilation.Program
+            ?? throw new InvalidOperationException(
+                "The imported layout consumer did not bind.");
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerProgram, "Consumer", schemaIdentity,
+            targetRequirement);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "Consumer",
+            [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+            ]);
+
+        Assert.That(NativeJit.Execute(loaded,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(5));
+
+        var composedConsumerProgram = composedConsumerCompilation.Program
+            ?? throw new InvalidOperationException(
+                "The composed imported layout consumer did not bind.");
+        var composedConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            composedConsumerProgram, "ComposedConsumer", schemaIdentity,
+            targetRequirement);
+        var composedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                composedConsumerArtifact),
+            "ComposedConsumer",
+            [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+            ]);
+        Assert.That(NativeJit.Execute(composedLoaded,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+
+        var composedLoopCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Example;
+                public nint OffsetLoop(bool start, bool stop) {
+                    mut bool repeat = start;
+                    mut nint offset = offsetof(Pair, Inner.Value);
+                    while (repeat) {
+                        offset = offsetof(Pair, Tag);
+                        repeat = stop;
+                    }
+                    return offset;
+                }
+                """), composedReference, layoutOptions);
+        Assert.That(composedLoopCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                composedLoopCompilation.Diagnostics));
+        var composedLoopArtifact = TrRmExecutableCompiler.EmitStandard(
+            composedLoopCompilation.Program!, "ComposedLoop", schemaIdentity,
+            targetRequirement);
+        var composedLoopLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                composedLoopArtifact),
+            "ComposedLoop",
+            [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+            ]);
+        var loopFunction = composedLoopLoaded.Functions.Single(
+            static function => function.Name == "OffsetLoop");
+
+        var loopCallerCompilation = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main() {
+                    return int32(OffsetLoop(true, false)
+                        + OffsetLoop(false, false));
+                }
+
+                public nint OffsetLoop(bool start, bool stop) {
+                    mut bool repeat = start;
+                    mut nint offset = offsetof(Pair, Inner.Value);
+                    while (repeat) {
+                        offset = offsetof(Pair, Tag);
+                        repeat = stop;
+                    }
+                    return offset;
+                }
+                """), composedReference, layoutOptions);
+        Assert.That(loopCallerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                loopCallerCompilation.Diagnostics));
+        var loopCallerProgram = loopCallerCompilation.Program
+            ?? throw new InvalidOperationException(
+                "The imported query-loop caller did not bind.");
+        Assert.That(NativeJit.Execute(loopCallerProgram,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(6));
+        var loopCallerFunctions = loopCallerProgram.Functions.ToBuilder();
+        var foundImportedLoop = false;
+        for (var functionIndex = 0;
+            functionIndex < loopCallerProgram.Functions.Length;
+            functionIndex++)
+        {
+            if (loopCallerProgram.Functions[functionIndex].Name
+                == "OffsetLoop")
+            {
+                loopCallerFunctions[functionIndex] = loopFunction;
+                foundImportedLoop = true;
+                break;
+            }
+        }
+        Assert.That(foundImportedLoop, Is.True);
+        var loopCallerWithImportedBody = loopCallerProgram with {
+            Functions = loopCallerFunctions.ToImmutable(),
+        };
+        Assert.That(NativeJit.Execute(loopCallerWithImportedBody,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(6));
+
+        var loopFieldImportBypass
+            = RewriteStandardFieldPathImportsAsDefinitions(
+                composedLoopArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    loopFieldImportBypass),
+                "ComposedLoop", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        providerArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
+        var fieldImportBypass
+            = RewriteStandardFieldPathImportsAsDefinitions(
+                composedConsumerArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    fieldImportBypass),
+                "ComposedConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        providerArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+
+        var incompatibleLeafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Leaf {
+                        public uint8 Tag;
+                        public uint16 Value;
+                    }
+                }
+                """), layoutOptions);
+        Assert.That(incompatibleLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleLeafCompilation.Diagnostics));
+        var incompatibleLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            incompatibleLeafCompilation.Program!, "LeafProvider",
+            schemaIdentity, targetRequirement, [
+                new TrRmSourceTypeExport("Example", "Leaf", "leaf-key") {
+                    FieldExports = [
+                        new TrRmSourceFieldExport("Value", "leaf-value"),
+                    ],
+                },
+            ]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    composedConsumerArtifact),
+                "ComposedConsumer", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        providerArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        incompatibleLeafArtifact),
+                ]));
+    }
+
+    private static byte[] RewriteStandardFieldPathImportsAsDefinitions(
+        byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var paths = tables.FieldPaths;
+        var rows = new List<TrRmFieldPathRow>(paths.Count);
+        var replacedImport = false;
+        for (var row = 1; row <= paths.Count; row++)
+        {
+            var fieldCount = paths.GetFieldCount(row);
+            var fieldReferences = new uint[fieldCount];
+            for (var field = 0; field < fieldCount; field++)
+            {
+                var fieldReference = paths.GetFieldReference(row, field);
+                if ((fieldReference >> 24) == 0x1C)
+                {
+                    var importRow = checked((int)(
+                        fieldReference & 0x00FF_FFFF));
+                    fieldReference = tables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow);
+                    replacedImport = true;
+                }
+
+                fieldReferences[field] = fieldReference;
+            }
+
+            rows.Add(new TrRmFieldPathRow(
+                paths.GetRootTypeSpecRef(row), fieldReferences));
+        }
+
+        if (!replacedImport)
+        {
+            throw new InvalidOperationException(
+                "The provider consumer has no FieldDef Import in its FieldPath.");
+        }
+
+        var fieldPathBytes = TrRmFieldPathTableWriter.Encode(rows,
+            tables.TypeSpecs, tables.Fields, tables.Imports);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var sectionBytes, out var recordCount);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                kind == 0x4B ? fieldPathBytes : sectionBytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.Standard);
+    }
+
+    [Test]
+    public void StandardReferenceSetKeepsDistinctModulesAndRejectsConflictingSnapshots()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var options = new CompilationOptions {
+            LayoutCoreRegistration
+                = LayoutCoreRegistrationTestData.Create(),
+        };
+
+        static Compilation CreateTypeCompilation(string fieldType,
+            CompilationOptions options)
+        {
+            return Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+                namespace Example {
+                    [Blittable]
+                    [Layout(LayoutKind.Sequential, Packing: 1)]
+                    public struct Same {
+                        public {{fieldType}} Value;
+                    }
+                }
+                """), options);
+        }
+
+        static byte[] EmitTypeArtifact(string moduleIdentity,
+            string fieldType, CompilationOptions options)
+        {
+            var compilation = CreateTypeCompilation(fieldType, options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, moduleIdentity, schemaIdentity,
+                targetRequirement, [
+                    new TrRmSourceTypeExport("Example", "Same",
+                        $"{moduleIdentity}-type") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                $"{moduleIdentity}-value"),
+                        ],
+                    },
+                    new TrRmSourceTypeExport("Example", "Same",
+                        $"{moduleIdentity}-type-alias") {
+                        FieldExports = [
+                            new TrRmSourceFieldExport("Value",
+                                $"{moduleIdentity}-value-alias"),
+                        ],
+                    },
+                ]);
+        }
+
+        var firstArtifact = EmitTypeArtifact("FirstProvider", "uint8",
+            options);
+        var secondArtifact = EmitTypeArtifact("SecondProvider", "uint8",
+            options);
+        var firstReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, firstArtifact),
+            "FirstProvider", Array.Empty<TrRmStandardArtifactInput>(),
+            ["FirstProvider-type"], ["FirstProvider-value"]);
+        _ = Assert.Throws<ArgumentNullException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(null!));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                Array.Empty<CompilationReference>()));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [firstReference]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [firstReference, null!]));
+        var firstAliasReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, firstArtifact),
+                "FirstProvider", Array.Empty<TrRmStandardArtifactInput>(),
+                ["FirstProvider-type-alias"],
+                ["FirstProvider-value-alias"]);
+        var mutableAliasReferences = new List<CompilationReference> {
+            firstReference, firstAliasReference,
+        };
+        var aliases = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            mutableAliasReferences);
+        mutableAliasReferences.Clear();
+        Assert.That(aliases.Structures, Has.Length.EqualTo(1));
+        Assert.That(aliases.StandardQuerySourceAssociation!
+            .ProviderClosures, Has.Length.EqualTo(2));
+        Assert.That(aliases.Structures[0].StandardTypeOrigin!
+            .AdditionalExpectedDeclarations, Has.Length.EqualTo(1));
+        var selectedTypeKeys = aliases.Structures[0].StandardTypeOrigin!
+            .SelectedExportKeys;
+        Assert.That(selectedTypeKeys, Has.Length.EqualTo(2));
+        Assert.That(selectedTypeKeys[0], Is.EqualTo("FirstProvider-type"));
+        Assert.That(selectedTypeKeys[1],
+            Is.EqualTo("FirstProvider-type-alias"));
+        Assert.That(aliases.Structures[0].Fields[0].StandardFieldOrigin!
+            .AdditionalExpectedDeclarations, Has.Length.EqualTo(1));
+        var selectedFieldKeys = aliases.Structures[0].Fields[0]
+            .StandardFieldOrigin!.SelectedExportKeys;
+        Assert.That(selectedFieldKeys, Has.Length.EqualTo(2));
+        Assert.That(selectedFieldKeys[0], Is.EqualTo("FirstProvider-value"));
+        Assert.That(selectedFieldKeys[1],
+            Is.EqualTo("FirstProvider-value-alias"));
+        var aliasConsumer = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main() { return int32(offsetof(Same, Value)); }
+                """), aliases, options);
+        Assert.That(aliasConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, aliasConsumer.Diagnostics));
+        var aliasConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            aliasConsumer.Program!, "AliasConsumer", schemaIdentity,
+            targetRequirement);
+        var aliasLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                aliasConsumerArtifact),
+            "AliasConsumer", [
+                new TrRmStandardArtifactInput(schemaIdentity, firstArtifact),
+            ]);
+        Assert.That(NativeJit.Execute(aliasLoaded,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(0));
+
+        var secondReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, secondArtifact),
+            "SecondProvider", Array.Empty<TrRmStandardArtifactInput>(),
+            ["SecondProvider-type"], ["SecondProvider-value"]);
+        var distinctModules = TrRmExecutableCompiler.CreateStandardReferenceSet(
+            [firstReference, secondReference]);
+
+        Assert.That(distinctModules.Structures, Has.Length.EqualTo(2));
+        var ambiguousConsumer = Compilation.Create(
+            SyntaxTree.Parse("""
+                using Example;
+                int32 Main() { return int32(sizeof(Same)); }
+                """), distinctModules, options);
+        Assert.That(ambiguousConsumer.Diagnostics.Any(
+            static diagnostic => diagnostic.Message.Contains(
+                "ambiguous", StringComparison.OrdinalIgnoreCase)), Is.True,
+            string.Join(Environment.NewLine,
+                ambiguousConsumer.Diagnostics));
+
+        var conflictingArtifact = EmitTypeArtifact("FirstProvider", "uint16",
+            options);
+        var conflictingReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    conflictingArtifact),
+                "FirstProvider", Array.Empty<TrRmStandardArtifactInput>(),
+                ["FirstProvider-type"], ["FirstProvider-value"]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [firstReference, conflictingReference]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReferenceSet(
+                [conflictingReference, firstReference]));
+    }
+
+    [Test]
+    public void StandardRegisteredOffsetQueryRoundTripsThroughFieldPath()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        var artifact = CreateStandardOffsetQueryArtifact();
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact), "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+
+        var returned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "OffsetOfSecond")
+            .Body.Statements.Single();
+        var query = (BoundLayoutQuery)returned.Value!;
+        Assert.That(query.Kind, Is.EqualTo(BoundLayoutQueryKind.OffsetOfType));
+        Assert.That(query.Subject.FieldPath?.Steps, Has.Length.EqualTo(1));
+        Assert.That(query.Subject.FieldPath?.RootType,
+            Is.EqualTo(query.Subject.Type));
+
+        var placeReturned = (BoundReturn)loaded.Functions.Single(
+            static function => function.Name == "OffsetOfPlace")
+            .Body.Statements.Single();
+        var placeQuery = (BoundLayoutQuery)placeReturned.Value!;
+        Assert.That(placeQuery.Kind,
+            Is.EqualTo(BoundLayoutQueryKind.OffsetOfPlace));
+        Assert.That(placeQuery.Subject.Kind,
+            Is.EqualTo(BoundQuerySubjectKind.FieldPathPlace));
+        Assert.That(placeQuery.Subject.PlaceExpression, Is.Null);
+        Assert.That(placeQuery.Subject.FieldPath?.Steps.Length,
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public void StandardRegisteredOffsetQueryRejectsPathWithMismatchedRoot()
+    {
+        const string schemaIdentity = "trrm/1-draft-layout-queries-1";
+        var artifact = CreateStandardOffsetQueryArtifact();
+        var index = new TrRmArtifactIndex(artifact);
+        var tables
+            = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                index);
+        var paths = tables.FieldPaths;
+        Assert.That(paths.Count, Is.EqualTo(3));
+        var pairRoot = paths.GetRootTypeSpecRef(1);
+        var otherRoot = paths.GetRootTypeSpecRef(3);
+        Assert.That(otherRoot, Is.Not.EqualTo(pairRoot));
+        var rows = new List<TrRmFieldPathRow>(paths.Count);
+        for (var row = 1; row <= paths.Count; row++)
+        {
+            var fieldCount = paths.GetFieldCount(row);
+            var fieldReferences = new uint[fieldCount];
+            for (var field = 0; field < fieldCount; field++)
+            {
+                fieldReferences[field]
+                    = paths.GetFieldReference(row, field);
+            }
+
+            var root = paths.GetRootTypeSpecRef(row);
+            rows.Add(new TrRmFieldPathRow(
+                root == pairRoot ? otherRoot : root, fieldReferences));
+        }
+
+        var fieldPathBytes = TrRmFieldPathTableWriter.Encode(rows,
+            tables.TypeSpecs, tables.Fields, tables.Imports);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var sectionBytes, out var recordCount);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                kind == 0x4B ? fieldPathBytes : sectionBytes.ToArray()));
+        }
+
+        var malformed = TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.Standard);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, malformed),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
     }
 
     [Test]
@@ -706,32 +6195,43 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [TestCase("""
-        int32 Fill(int32 prefix, init ref<int32> result, int32 suffix) {
-            result = prefix + suffix;
+        int32 Fill(int32 prefix, ref<init int32> result, int32 suffix) {
+            *result = prefix + suffix;
             return suffix;
         }
         int32 Main() {
             init int32 result;
-            int32 status = Fill(20, init result, 2);
+            int32 status = Fill(20, ref init result, 2);
             return result + status;
         }
         """,24)]
     [TestCase("""
-        void Fill(init ref<int32> first, init ref<int32> second) {
-            first = 40;
-            second = 2;
+        void Fill(ref<init int32> first, ref<init int32> second) {
+            *first = 40;
+            *second = 2;
         }
         int32 Main() {
             init int32 first;
             init int32 second;
-            Fill(init first, init second);
+            Fill(ref init first, ref init second);
             return first + second;
         }
         """,42)]
     [TestCase("""
+        void Fill(ref<init int32> result) { *result = 42; }
+        void Forward(ref<init int32> result) {
+            Fill(ref init *result);
+        }
+        int32 Main() {
+            init int32 result;
+            Forward(ref init result);
+            return result;
+        }
+        """,42)]
+    [TestCase("""
         void Store(bool flag, char16 character, uint32 unsigned32, int64 signed64,
-            uint64 unsigned64, float32 single, float64 wide, init ref<int32> result) {
-            result = 42;
+            uint64 unsigned64, float32 single, float64 wide, ref<init int32> result) {
+            *result = 42;
         }
         bool GetFlag() { return true; }
         char16 GetCharacter() { return char16(65); }
@@ -743,7 +6243,7 @@ internal sealed class TrRmExecutableCompilerTests
         int32 Main() {
             init int32 result;
             Store(GetFlag(), GetCharacter(), GetUnsigned32(), GetSigned64(),
-                GetUnsigned64(), GetSingle(), GetWide(), init result);
+                GetUnsigned64(), GetSingle(), GetWide(), ref init result);
             return result;
         }
         """,42)]
@@ -760,6 +6260,10 @@ internal sealed class TrRmExecutableCompilerTests
             Is.EqualTo(new TrRmFeatureRow(1, ScalarInitOutputRuleRevision)));
 
         var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.That(loaded.Functions.SelectMany(static function =>
+                function.Variables.Take(function.ParameterCount))
+            .Where(static parameter => parameter.IsInit)
+            .All(static parameter => !parameter.IsOut), Is.True);
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
@@ -897,7 +6401,7 @@ internal sealed class TrRmExecutableCompilerTests
     public void ScalarOperationsRoundTripInOutputBodies(string expression, int expected)
     {
         var source = $$"""
-            void Fill(int32 value, init ref<int32> result) { result = value; }
+            void Fill(int32 value, ref<init int32> result) { *result = value; }
             int32 Observe(bool value) { return value ? 42 : 0; }
             bool TrueValue() { return true; }
             bool FalseValue() { return false; }
@@ -962,7 +6466,7 @@ internal sealed class TrRmExecutableCompilerTests
             float64 NegativeWideOne() { return float64(-1.0); }
             int32 Main() {
                 init int32 result;
-                Fill(Observe({{expression}}), init result);
+                Fill(Observe({{expression}}), ref init result);
                 return result;
             }
             """;
@@ -980,17 +6484,19 @@ internal sealed class TrRmExecutableCompilerTests
     [TestCase("uint32","uint32.MaxValue","uint32.MaxValue")]
     [TestCase("int64","int64.MinValue","int64.MinValue")]
     [TestCase("uint64","uint64.MaxValue","uint64.MaxValue")]
+    [TestCase("nint","nint.MinValue","nint.MinValue")]
+    [TestCase("nuint","nuint.MaxValue","nuint.MaxValue")]
     [TestCase("float32","float32(1.5)","float32(1.5)")]
     [TestCase("float64","float64(2.5)","float64(2.5)")]
     public void InitOutputPlacesRoundTripWithScalarReferents(
         string type, string value, string expected)
     {
         var source = $$"""
-            void Fill({{type}} value, init ref<{{type}}> result) { result = value; }
+            void Fill({{type}} value, ref<init {{type}}> result) { *result = value; }
             int32 Observe({{type}} value) { return value == {{expected}} ? 42 : 0; }
             int32 Main() {
                 init {{type}} result;
-                Fill({{value}}, init result);
+                Fill({{value}}, ref init result);
                 return Observe(result);
             }
             """;
@@ -1012,8 +6518,8 @@ internal sealed class TrRmExecutableCompilerTests
         string type, string value, string expected)
     {
         var source = $$"""
-            {{type}} Fill(init ref<int32> result) {
-                result = 42;
+            {{type}} Fill(ref<init int32> result) {
+                *result = 42;
                 return {{value}};
             }
             int32 Check({{type}} returned, int32 result) {
@@ -1021,7 +6527,7 @@ internal sealed class TrRmExecutableCompilerTests
             }
             int32 Main() {
                 init int32 result;
-                {{type}} returned = Fill(init result);
+                {{type}} returned = Fill(ref init result);
                 return Check(returned, result);
             }
             """;
@@ -1060,13 +6566,13 @@ internal sealed class TrRmExecutableCompilerTests
     public void InitOutputBooleanResultsRequireRuleRevisionFour()
     {
         var program = Compile("""
-            bool Fill(init ref<int32> result) {
-                result = 42;
+            bool Fill(ref<init int32> result) {
+                *result = 42;
                 return true;
             }
             int32 Main() {
                 init int32 result;
-                bool success = Fill(init result);
+                bool success = Fill(ref init result);
                 return Status(success);
             }
             int32 Status(bool success) { return success ? 42 : 0; }
@@ -1094,20 +6600,25 @@ internal sealed class TrRmExecutableCompilerTests
     {
         var publishText = publish ? "true" : "false";
         var source = $$"""
-            bool Fill(bool shouldPublish, init ref<bool> flag,
-                init ref<char16> marker, init ref<int32> result,
-                init ref<uint32> smallCount, init ref<int64> signedCount,
-                init ref<uint64> wideCount, init ref<float32> ratio,
-                init ref<float64> amount) {
-                flag = false;
-                marker = char16(65);
-                result = 0;
-                smallCount = uint32.MaxValue;
-                signedCount = int64.MinValue;
-                wideCount = 0;
-                ratio = float32(1.5);
-                amount = 0.0;
-                return shouldPublish;
+            bool CanPublish(bool requested) { return requested; }
+            bool Fill(bool shouldPublish, ref<init bool> flag,
+                ref<init char16> marker, ref<init int32> result,
+                ref<init uint32> smallCount, ref<init int64> signedCount,
+                ref<init uint64> wideCount, ref<init float32> ratio,
+                ref<init float64> amount) {
+                if (CanPublish(shouldPublish)) {
+                    *flag = false;
+                    *marker = char16(65);
+                    *result = 0;
+                    *smallCount = uint32.MaxValue;
+                    *signedCount = int64.MinValue;
+                    *wideCount = 0;
+                    *ratio = float32(1.5);
+                    *amount = 0.0;
+                    return true;
+                } else {
+                    return false;
+                }
             }
             int32 Status(bool value) { return value ? 1 : 0; }
             int32 Main() {
@@ -1119,9 +6630,9 @@ internal sealed class TrRmExecutableCompilerTests
                 init uint64 wideCount;
                 init float32 ratio;
                 init float64 amount;
-                bool published = Fill({{publishText}}, init flag, init marker,
-                    init result, init smallCount, init signedCount, init wideCount,
-                    init ratio, init amount);
+                bool published = Fill({{publishText}}, ref init flag, ref init marker,
+                    ref init result, ref init smallCount, ref init signedCount, ref init wideCount,
+                    ref init ratio, ref init amount);
                 return Status(published);
             }
             """;
@@ -1134,8 +6645,11 @@ internal sealed class TrRmExecutableCompilerTests
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
-        var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
-        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(revisionFourArtifact),
+        var revisionFiveArtifact = SetScalarInitOutputRuleRevision(artifact, 5);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(revisionFiveArtifact));
+        var revisionSixArtifact = SetScalarInitOutputRuleRevision(artifact, 6);
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(revisionSixArtifact),
             NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
     [TestCase(false,0)]
@@ -1144,20 +6658,25 @@ internal sealed class TrRmExecutableCompilerTests
     {
         var publishText = publish ? "true" : "false";
         var source = $$"""
-            bool Fill(bool shouldPublish, init ref<bool> flag,
-                init ref<char16> marker, init ref<int32> result,
-                init ref<uint32> smallCount, init ref<int64> signedCount,
-                init ref<uint64> wideCount, init ref<float32> ratio,
-                init ref<float64> amount) {
-                flag = true;
-                marker = char16(65);
-                result = 42;
-                smallCount = uint32.MaxValue;
-                signedCount = int64.MinValue;
-                wideCount = uint64.MaxValue;
-                ratio = float32(1.5);
-                amount = float64(2.5);
-                return shouldPublish;
+            bool CanPublish(bool requested) { return requested; }
+            bool Fill(bool shouldPublish, ref<init bool> flag,
+                ref<init char16> marker, ref<init int32> result,
+                ref<init uint32> smallCount, ref<init int64> signedCount,
+                ref<init uint64> wideCount, ref<init float32> ratio,
+                ref<init float64> amount) {
+                if (CanPublish(shouldPublish)) {
+                    *flag = true;
+                    *marker = char16(65);
+                    *result = 42;
+                    *smallCount = uint32.MaxValue;
+                    *signedCount = int64.MinValue;
+                    *wideCount = uint64.MaxValue;
+                    *ratio = float32(1.5);
+                    *amount = float64(2.5);
+                    return true;
+                } else {
+                    return false;
+                }
             }
             int32 Check(bool flag, char16 marker, int32 result, uint32 smallCount,
                 int64 signedCount, uint64 wideCount, float32 ratio, float64 amount) {
@@ -1166,8 +6685,8 @@ internal sealed class TrRmExecutableCompilerTests
                     && wideCount == uint64.MaxValue && ratio == float32(1.5)
                     && amount == float64(2.5) ? 42 : 1;
             }
-            int32 Refill(init ref<int32> result) {
-                result = 42;
+            int32 Refill(ref<init int32> result) {
+                *result = 42;
                 return 0;
             }
             int32 Run(bool shouldPublish) {
@@ -1181,12 +6700,12 @@ internal sealed class TrRmExecutableCompilerTests
                 init float64 amount;
                 init int32 retained;
                 retained = 5;
-                if (Fill(shouldPublish, init flag, init marker, init result,
-                    init smallCount, init signedCount, init wideCount, init ratio, init amount)) {
+                if (Fill(shouldPublish, ref init flag, ref init marker, ref init result,
+                    ref init smallCount, ref init signedCount, ref init wideCount, ref init ratio, ref init amount)) {
                     return Check(flag, marker, result, smallCount, signedCount,
                         wideCount, ratio, amount) + retained - 5;
                 } else {
-                    return Refill(init result) + result + retained - 47;
+                    return Refill(ref init result) + result + retained - 47;
                 }
             }
             int32 Main() { return Run({{publishText}}); }
@@ -1203,12 +6722,17 @@ internal sealed class TrRmExecutableCompilerTests
         var revisionFourArtifact = SetScalarInitOutputRuleRevision(artifact, 4);
         _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(revisionFourArtifact));
         var revisionFiveArtifact = SetScalarInitOutputRuleRevision(artifact, 5);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(revisionFiveArtifact));
+        var revisionSixArtifact = SetScalarInitOutputRuleRevision(artifact, 6);
         Assert.That(NativeJit.Execute(
-            TrRmExecutableCompiler.Load(revisionFiveArtifact), NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+            TrRmExecutableCompiler.Load(revisionSixArtifact), NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
-        var forgedTrueState = SetConditionalInheritedPlaceState(artifact, 1, false);
+        var forgedTrueState = SetConditionalInheritedPlaceState(artifact, 1,
+            false, conditionalOrdinal: 1);
         _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedTrueState));
-        var forgedFalseState = SetConditionalInheritedPlaceState(artifact, 2, true);
+        var forgedFalseState = SetConditionalInheritedPlaceState(artifact, 2,
+            true, conditionalOrdinal: 1);
         _ = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(forgedFalseState));
     }
     [TestCase(true,true,true)]
@@ -1267,17 +6791,17 @@ internal sealed class TrRmExecutableCompilerTests
     {
         var selection = selected ? "true" : "false";
         var program = Compile($$"""
-            int32 Fill(init ref<int32> result) {
-                result = 42;
+            int32 Fill(ref<init int32> result) {
+                *result = 42;
                 return 42;
             }
             bool Select() { return {{selection}}; }
             int32 Main() {
                 init int32 result;
                 if (Select()) {
-                    return Fill(init result);
+                    return Fill(ref init result);
                 } else {
-                    return Fill(init result);
+                    return Fill(ref init result);
                 }
             }
             """);
@@ -1291,8 +6815,7 @@ internal sealed class TrRmExecutableCompilerTests
     public void InitOutputConditionalNoOutputCallInheritsArgumentCallState()
     {
         var program = Compile("""
-            bool Fill(init ref<int32> result) {
-                result = 7;
+            bool Fill(ref<init int32> result) {
                 return false;
             }
             bool Select(bool selected) { return selected; }
@@ -1300,7 +6823,7 @@ internal sealed class TrRmExecutableCompilerTests
                 init int32 initialized;
                 init int32 vacant;
                 initialized = 42;
-                if (Select(Fill(init vacant))) {
+                if (Select(Fill(ref init vacant))) {
                     return initialized;
                 } else {
                     require false;
@@ -1361,10 +6884,10 @@ internal sealed class TrRmExecutableCompilerTests
     {
         var additions = string.Join(" + ", Enumerable.Repeat("seed", 64));
         var source = $$"""
-            void Fill(int32 seed, init ref<int32> result) { result = {{additions}}; }
+            void Fill(int32 seed, ref<init int32> result) { *result = {{additions}}; }
             int32 Main() {
                 init int32 result;
-                Fill(1, init result);
+                Fill(1, ref init result);
                 return result;
             }
             """;
@@ -1380,20 +6903,21 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
-    public void StoredBooleanResultDoesNotCorrelateItsOutputDestination()
+    public void RejectsBooleanInitBodyThatWritesBeforeUnknownOutcome()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            bool Fill(bool publish, init ref<int32> result) {
-                result = 42;
+            bool Fill(bool publish, ref<init int32> result) {
+                *result = 42;
                 return publish;
             }
             int32 Main() {
                 init int32 result;
-                bool success = Fill(false, init result);
+                bool success = Fill(false, ref init result);
                 return success ? result : 0;
             }
             """));
 
+        _ = compilation.Program;
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
     }
@@ -1402,16 +6926,16 @@ internal sealed class TrRmExecutableCompilerTests
     public void InitOutputPlacesPreserveMixedTypesAndInterleavedArguments()
     {
         var source = """
-            void Fill(float64 wide, init ref<uint32> unsigned, int64 signed,
-                init ref<bool> flag, char16 marker, init ref<float32> ratio,
-                init ref<char16> code, uint64 count, init ref<int32> result,
-                int32 value, init ref<int64> signedWide) {
-                unsigned = uint32.MaxValue;
-                flag = true;
-                ratio = float32(1.5);
-                code = marker;
-                result = value;
-                signedWide = signed;
+            void Fill(float64 wide, ref<init uint32> unsigned, int64 signed,
+                ref<init bool> flag, char16 marker, ref<init float32> ratio,
+                ref<init char16> code, uint64 count, ref<init int32> result,
+                int32 value, ref<init int64> signedWide) {
+                *unsigned = uint32.MaxValue;
+                *flag = true;
+                *ratio = float32(1.5);
+                *code = marker;
+                *result = value;
+                *signedWide = signed;
             }
             int32 Check(uint32 unsigned, bool flag, float32 ratio, char16 code,
                 int32 result, int64 signedWide, float64 wide, uint64 count) {
@@ -1428,8 +6952,8 @@ internal sealed class TrRmExecutableCompilerTests
                 init int64 signedWide;
                 mut float64 wide = float64(2.5);
                 wide = float64(3.5);
-                Fill(wide, init unsigned, int64(-7), init flag, char16(65),
-                    init ratio, init code, uint64(9), init result, 42, init signedWide);
+                Fill(wide, ref init unsigned, int64(-7), ref init flag, char16(65),
+                    ref init ratio, ref init code, uint64(9), ref init result, 42, ref init signedWide);
                 return Check(unsigned, flag, ratio, code, result, signedWide, wide, uint64(9));
             }
             """;
@@ -1445,10 +6969,10 @@ internal sealed class TrRmExecutableCompilerTests
     public void InitOutputRuleRevisionOneRemainsLimitedToInt32Referents()
     {
         const string int32Source = """
-            void Fill(int32 value, init ref<int32> result) { result = value; }
+            void Fill(int32 value, ref<init int32> result) { *result = value; }
             int32 Main() {
                 init int32 result;
-                Fill(42, init result);
+                Fill(42, ref init result);
                 return result;
             }
             """;
@@ -1459,11 +6983,11 @@ internal sealed class TrRmExecutableCompilerTests
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         const string boolSource = """
-            void Fill(bool value, init ref<bool> result) { result = value; }
+            void Fill(bool value, ref<init bool> result) { *result = value; }
             int32 Observe(bool value) { return value ? 42 : 0; }
             int32 Main() {
                 init bool result;
-                Fill(true, init result);
+                Fill(true, ref init result);
                 return Observe(result);
             }
             """;
@@ -1499,10 +7023,10 @@ internal sealed class TrRmExecutableCompilerTests
     public void InitOutputParameterRequiresModuleFeatureAssignment()
     {
         var artifact = TrRmExecutableCompiler.Emit(Compile("""
-            void Fill(init ref<int32> result) { result = 42; }
+            void Fill(ref<init int32> result) { *result = 42; }
             int32 Main() {
                 init int32 result;
-                Fill(init result);
+                Fill(ref init result);
                 return result;
             }
             """), "missing-feature");
@@ -1531,10 +7055,10 @@ internal sealed class TrRmExecutableCompilerTests
     public void ExportedInitOutputFunctionRemainsOutsideTheProvisionalProfile()
     {
         const string source = """
-            public void Fill(init ref<int32> result) { result = 42; }
+            public void Fill(ref<init int32> result) { *result = 42; }
             int32 Main() {
                 init int32 result;
-                Fill(init result);
+                Fill(ref init result);
                 return result;
             }
             """;
@@ -2860,7 +8384,10 @@ internal sealed class TrRmExecutableCompilerTests
             [ConstEval] int32 Identity(int32 value) { return value; }
             int32 Main() { static require true; return const Identity(42); }
             """;
-        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(Compile(source), "proven"));
+        var loaded = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(
+                Compile(source, options:
+                    CoreEvaluationFormTestHelpers.Options()), "proven"));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
@@ -3568,7 +9095,8 @@ internal sealed class TrRmExecutableCompilerTests
     }
 
     private static byte[] SetConditionalInheritedPlaceState(byte[] artifact,
-        int blockIndex, bool initialized, int placeId = 1)
+        int blockIndex, bool initialized, int placeId = 1,
+        int conditionalOrdinal = 0)
     {
         var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount), Is.True);
@@ -3580,6 +9108,7 @@ internal sealed class TrRmExecutableCompilerTests
         }
 
         var found = false;
+        var matchingConditionals = 0;
         for (var row = 0; row < bodyRows.Length && !found; row++)
         {
             var body = bodyRows[row].ToArray();
@@ -3590,7 +9119,8 @@ internal sealed class TrRmExecutableCompilerTests
 
             var width = 1 << body[0];
             var position = 1;
-            if (ReadLocal(body, ref position, width) != 3)
+            if (ReadLocal(body, ref position, width) != 3
+                || matchingConditionals++ != conditionalOrdinal)
             {
                 continue;
             }

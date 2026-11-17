@@ -25,7 +25,7 @@ internal readonly ref struct TrRmIntrinsicRegistrationTableReader
     {
         if (!TrRmStaticFieldTableReader.ValidCount(recordCount)
             || (long)recordCount * RowSize != section.Length
-            || schema != TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+            || !schema.UsesGeneralPredicateGraphs())
         {
             throw InvalidTable();
         }

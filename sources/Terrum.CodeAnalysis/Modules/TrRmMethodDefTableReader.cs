@@ -17,6 +17,7 @@ public readonly ref struct TrRmMethodDefTableReader
     private readonly int _recordCount;
     private readonly int _contractCount;
     private readonly int[] _bodyOwners;
+    private readonly TrRmArtifactSchema _schema;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of Contract rows.</summary>
@@ -37,6 +38,17 @@ public readonly ref struct TrRmMethodDefTableReader
         TrRmModuleTableReader modules, TrRmTypeDefTableReader types,
         TrRmMethodSigTableReader signatures, int contractCount, int bodyCount,
         TrRmA3LayoutResourceLedger? resourceLedger)
+        : this(section, recordCount, strings, modules, types, signatures,
+            contractCount, bodyCount, TrRmArtifactSchema.Standard, resourceLedger)
+    {
+    }
+
+    internal TrRmMethodDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmModuleTableReader modules, TrRmTypeDefTableReader types,
+        TrRmMethodSigTableReader signatures, int contractCount, int bodyCount,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         resourceLedger?.ConsumeWork(7);
         if (recordCount is < 0 or > 0xFF_FFFF
@@ -53,6 +65,7 @@ public readonly ref struct TrRmMethodDefTableReader
         _modules = modules;
         _recordCount = recordCount;
         _contractCount = contractCount;
+        _schema = schema;
         _resourceLedger = resourceLedger;
         _resourceLedger?.ConsumeWork(checked((ulong)bodyCount + 1UL
             + (ulong)signatures.Count + 1UL));
@@ -97,12 +110,16 @@ public readonly ref struct TrRmMethodDefTableReader
             var count = Read(data, 20);
             var body = Read(data, 24);
             _resourceLedger?.ConsumeWork(8);
+            var methodFlagMask = schema.UsesMethodReceiverAccess() ? 7u : 3u;
             if (owner > types.Count
                 || (owner != 0 && (owner < (uint)moduleTypeRange.Start
                     || owner >= (uint)moduleTypeRange.End))
                 || name is 0 or > 0xFF_FFFF
                 || signature == 0 || signature > signatures.Count
-                || flags > 2 || !ValidRange(first, count, contractCount)
+                || (flags & ~methodFlagMask) != 0 || (flags & 3) == 3
+                || ((flags & 4) != 0
+                    && signatures.GetReceiverTypeSpec((int)signature) == 0)
+                || !ValidRange(first, count, contractCount)
                 || body > bodyCount || (body != 0 && _bodyOwners[body] != 0))
             {
                 throw InvalidMethod();

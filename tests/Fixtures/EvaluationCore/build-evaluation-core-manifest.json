@@ -1,0 +1,45 @@
+{
+  "schema": "terrumc.evaluation-core-manifest/1",
+  "coreAuthorityIdentity": "terrum.repository.test-host",
+  "usingModuleIdentity": "terrum.compiler-primitives",
+  "pureSchema": null,
+  "constEvalSchema": {
+    "providerIdentity": "terrum.compiler-primitives",
+    "exportKey": "evaluation/constant-source"
+  },
+  "localSchemaDeclarations": {
+    "origin": {
+      "moduleIdentity": "terrum.compiler-primitives",
+      "revisionIdentity": "repository-compiler-primitives-revision-1",
+      "schema": {
+        "identity": "terrum.repository.compiler-primitives.evaluation-declarations",
+        "revision": 1
+      },
+      "governingSemanticEdition": 1,
+      "targetRequirement": 1,
+      "runtimePolicy": 0
+    },
+    "declarations": [
+      {
+        "qualifiedName": "ConstEval",
+        "genericArity": 0,
+        "argumentCount": 0,
+        "targets": [
+          "ordinary-named-callable",
+          "individual-accessor",
+          "eligible-initialization-constructor"
+        ],
+        "isPublic": true,
+        "isPrimary": true,
+        "isPrimaryTargetOnly": true,
+        "isRepeatable": false
+      }
+    ],
+    "exports": [
+      {
+        "exportKey": "evaluation/constant-source",
+        "declarationIndex": 0
+      }
+    ]
+  }
+}

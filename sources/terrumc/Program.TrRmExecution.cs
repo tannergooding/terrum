@@ -5,17 +5,25 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.Tools;
 
 internal static partial class Program
 {
+    private readonly record struct TrRmExecutionConfigurationFile(
+        CoreManifestKind? CoreKind, string Path,
+        bool IsSourceEnumExports,
+        bool IsSourceGenericMethodExports = false,
+        bool IsSourceTypeExports = false);
+
     private const string A3FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private const string A2EUScalarFrozenValuesSchemaIdentity
@@ -28,6 +36,10 @@ internal static partial class Program
         = "trrm/1-draft-local-aggregate-layout-execution-1";
     private const string RegisterExceptionRegionsSchemaIdentity
         = "trrm/1-draft-register-exception-regions-1";
+    private const string GenericMethodCallsSchemaIdentity
+        = "trrm/1-draft-generic-method-calls-parameter-labels-1";
+    private const string NestedFieldDestinationsSchemaIdentity
+        = "trrm/1-draft-init-reference-bodies-local-field-layout-2";
 
     private static int RunTrRmExecutionCommand(string[] args, bool json)
     {
@@ -46,10 +58,18 @@ internal static partial class Program
         string? layoutCoreManifestPath = null;
         string? nativeCoreManifestPath = null;
         string? nativeOutputCoreManifestPath = null;
-        var coreManifestOrder = new List<CoreManifestKind>();
+        string? evaluationCoreManifestPath = null;
+        string? sourceEnumExportsPath = null;
+        string? sourceTypeExportsPath = null;
+        string? sourceGenericMethodExportsPath = null;
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null;
+        TrRmSourceGenericMethodExportsFile? sourceMethodExportsFile = null;
+        var configurationFileOrder
+            = new List<TrRmExecutionConfigurationFile>();
         LayoutCoreRegistrationSet? layoutCoreRegistration = null;
         NativeCoreRegistrationSet? nativeCoreRegistration = null;
         NativeOutputCoreRegistrationSet? nativeOutputCoreRegistration = null;
+        CoreEvaluationFormIdentitySelection? evaluationFormSelection = null;
         var library = false;
         var runtime = false;
         var hasArithmeticProfile = false;
@@ -117,7 +137,10 @@ internal static partial class Program
                     continue;
                 }
                 if (i + 1 == count
-                    || ((args[i] is "--trrm-schema" or "--trrm-module")
+                    || ((args[i] is "--trrm-schema" or "--trrm-module"
+                        or "--trrm-source-enum-exports"
+                        or "--trrm-source-type-exports"
+                        or "--trrm-source-generic-method-exports")
                         && args[i + 1].StartsWith('-',
                             StringComparison.Ordinal)))
                 {
@@ -153,7 +176,10 @@ internal static partial class Program
                             StringComparison.Ordinal)
                         && TryGetFullPath(value, out var manifestFullPath):
                         layoutCoreManifestPath = manifestFullPath;
-                        coreManifestOrder.Add(CoreManifestKind.Layout);
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(
+                                CoreManifestKind.Layout, manifestFullPath,
+                                false));
                         break;
                     case "--native-core-manifest" when command == "compile-trrm"
                         && nativeCoreManifestPath is null
@@ -162,7 +188,10 @@ internal static partial class Program
                             StringComparison.Ordinal)
                         && TryGetFullPath(value, out var nativeManifestFullPath):
                         nativeCoreManifestPath = nativeManifestFullPath;
-                        coreManifestOrder.Add(CoreManifestKind.Native);
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(
+                                CoreManifestKind.Native,
+                                nativeManifestFullPath, false));
                         break;
                     case "--native-output-core-manifest"
                         when command == "compile-trrm"
@@ -173,7 +202,63 @@ internal static partial class Program
                             out var nativeOutputManifestFullPath):
                         nativeOutputCoreManifestPath
                             = nativeOutputManifestFullPath;
-                        coreManifestOrder.Add(CoreManifestKind.NativeOutput);
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(
+                                CoreManifestKind.NativeOutput,
+                                nativeOutputManifestFullPath, false));
+                        break;
+                    case "--evaluation-core-manifest"
+                        when command == "compile-trrm"
+                        && evaluationCoreManifestPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-', StringComparison.Ordinal)
+                        && TryGetFullPath(value,
+                            out var evaluationManifestFullPath):
+                        evaluationCoreManifestPath
+                            = evaluationManifestFullPath;
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(
+                                CoreManifestKind.Evaluation,
+                                evaluationManifestFullPath, false));
+                        break;
+                    case "--trrm-source-enum-exports"
+                        when command == "compile-trrm"
+                        && sourceEnumExportsPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-', StringComparison.Ordinal)
+                        && TryGetFullPath(value,
+                            out var sourceEnumExportsFullPath):
+                        sourceEnumExportsPath = sourceEnumExportsFullPath;
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(null,
+                                sourceEnumExportsFullPath, true));
+                        break;
+                    case "--trrm-source-type-exports"
+                        when command == "compile-trrm"
+                        && sourceTypeExportsPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-', StringComparison.Ordinal)
+                        && TryGetFullPath(value,
+                            out var sourceTypeExportsFullPath):
+                        sourceTypeExportsPath = sourceTypeExportsFullPath;
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(null,
+                                sourceTypeExportsFullPath, false, false,
+                                true));
+                        break;
+                    case "--trrm-source-generic-method-exports"
+                        when command == "compile-trrm"
+                        && sourceGenericMethodExportsPath is null
+                        && value.Length != 0 && value != "-"
+                        && !value.StartsWith('-', StringComparison.Ordinal)
+                        && TryGetFullPath(value,
+                            out var sourceGenericMethodExportsFullPath):
+                        sourceGenericMethodExportsPath
+                            = sourceGenericMethodExportsFullPath;
+                        configurationFileOrder.Add(
+                            new TrRmExecutionConfigurationFile(null,
+                                sourceGenericMethodExportsFullPath, false,
+                                true));
                         break;
                     case "--export" when command == "build-trrm-library" && uniqueExports.Add(value):
                         exports.Add(value);
@@ -235,6 +320,31 @@ internal static partial class Program
                 return 2;
             }
 
+            if (sourceEnumExportsPath is not null
+                && !StringComparer.Ordinal.Equals(schemaIdentity,
+                    "trrm/1-draft-nominal-enums-1"))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            if (sourceTypeExportsPath is not null
+                && (!StringComparer.Ordinal.Equals(schemaIdentity,
+                        NestedFieldDestinationsSchemaIdentity)
+                    || sourceEnumExportsPath is not null
+                    || sourceGenericMethodExportsPath is not null))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            if (sourceGenericMethodExportsPath is not null
+                && (!StringComparer.Ordinal.Equals(schemaIdentity,
+                        GenericMethodCallsSchemaIdentity)
+                    || sourceEnumExportsPath is not null))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+
             if ((command == "compile-trrm"
                 && (moduleIdentity is not null || providers.Count != 0))
                 || (isArtifactCommand
@@ -256,6 +366,7 @@ internal static partial class Program
                         or A2R1RepeatInitializationSchemaIdentity
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
                         or LocalAggregateLayoutSchemaIdentity
+                        or NestedFieldDestinationsSchemaIdentity
                         or RegisterExceptionRegionsSchemaIdentity)
                     || providers.Exists(static provider =>
                         provider.SchemaIdentity is not (
@@ -269,7 +380,18 @@ internal static partial class Program
                             or A2R1RepeatInitializationSchemaIdentity
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
                             or LocalAggregateLayoutSchemaIdentity
+                            or NestedFieldDestinationsSchemaIdentity
                             or RegisterExceptionRegionsSchemaIdentity))))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            if (isArtifactCommand
+                && StringComparer.Ordinal.Equals(schemaIdentity,
+                    NestedFieldDestinationsSchemaIdentity)
+                && providers.Exists(static provider =>
+                    !StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                        NestedFieldDestinationsSchemaIdentity)))
             {
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
@@ -307,6 +429,129 @@ internal static partial class Program
                     PathsAlias(output, provider.Path)))
             {
                 WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            if (sourceEnumExportsPath is not null
+                && ((output is not null
+                        && PathsAlias(sourceEnumExportsPath, output))
+                    || paths.Any(path => path != "-"
+                        && PathsAlias(sourceEnumExportsPath, path))
+                    || (layoutCoreManifestPath is string layoutPath
+                        && PathsAlias(sourceEnumExportsPath, layoutPath))
+                    || (nativeCoreManifestPath is string nativePath
+                        && PathsAlias(sourceEnumExportsPath, nativePath))
+                    || (nativeOutputCoreManifestPath
+                        is string nativeOutputPath
+                        && PathsAlias(sourceEnumExportsPath,
+                            nativeOutputPath))))
+            {
+                WriteInputError(json, "TRM2002",
+                    "The source enum export file must be distinct from every source, Core manifest and artifact output.");
+                return 2;
+            }
+            if (sourceTypeExportsPath is not null
+                && ((output is not null
+                        && PathsAlias(sourceTypeExportsPath, output))
+                    || paths.Any(path => path != "-"
+                        && PathsAlias(sourceTypeExportsPath, path))
+                    || (layoutCoreManifestPath is string typeLayoutPath
+                        && PathsAlias(sourceTypeExportsPath,
+                            typeLayoutPath))
+                    || (nativeCoreManifestPath is string typeNativePath
+                        && PathsAlias(sourceTypeExportsPath,
+                            typeNativePath))
+                    || (nativeOutputCoreManifestPath
+                        is string typeNativeOutputPath
+                        && PathsAlias(sourceTypeExportsPath,
+                            typeNativeOutputPath))
+                    || (evaluationCoreManifestPath
+                        is string typeEvaluationPath
+                        && PathsAlias(sourceTypeExportsPath,
+                            typeEvaluationPath))
+                    || (sourceEnumExportsPath is string enumExportsPath
+                        && PathsAlias(sourceTypeExportsPath,
+                            enumExportsPath))
+                    || (sourceGenericMethodExportsPath
+                        is string genericExportsPath
+                        && PathsAlias(sourceTypeExportsPath,
+                            genericExportsPath))))
+            {
+                WriteInputError(json, "TRM2002",
+                    "The source type export file must be distinct from every source, configuration and artifact output.");
+                return 2;
+            }
+            if (sourceGenericMethodExportsPath is not null)
+            {
+                var aliasesInput = paths.Any(path => path != "-"
+                    && PathsAlias(sourceGenericMethodExportsPath, path));
+                var aliasesAnotherSource = false;
+                for (var sourceIndex = 0;
+                    sourceIndex < paths.Count && !aliasesAnotherSource;
+                    sourceIndex++)
+                {
+                    if (paths[sourceIndex] == "-")
+                    {
+                        continue;
+                    }
+                    for (var otherIndex = 0; otherIndex < sourceIndex;
+                        otherIndex++)
+                    {
+                        if (paths[otherIndex] != "-"
+                            && PathsAlias(paths[sourceIndex],
+                                paths[otherIndex]))
+                        {
+                            aliasesAnotherSource = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (aliasesInput || aliasesAnotherSource
+                    || (output is not null
+                        && PathsAlias(sourceGenericMethodExportsPath,
+                            output))
+                    || (layoutCoreManifestPath is string genericLayoutPath
+                        && PathsAlias(sourceGenericMethodExportsPath,
+                            genericLayoutPath))
+                    || (nativeCoreManifestPath is string genericNativePath
+                        && PathsAlias(sourceGenericMethodExportsPath,
+                            genericNativePath))
+                    || (nativeOutputCoreManifestPath
+                        is string genericNativeOutputPath
+                        && PathsAlias(sourceGenericMethodExportsPath,
+                            genericNativeOutputPath)))
+                {
+                    WriteInputError(json, "TRM2002",
+                        "The source generic method export file and source inputs must be distinct from each other, Core manifests and artifact output.");
+                    return 2;
+                }
+            }
+            if (evaluationCoreManifestPath is not null
+                && ((output is not null
+                        && PathsAlias(evaluationCoreManifestPath, output))
+                    || paths.Any(path => path != "-"
+                        && PathsAlias(evaluationCoreManifestPath, path))
+                    || (layoutCoreManifestPath is not null
+                        && PathsAlias(evaluationCoreManifestPath,
+                            layoutCoreManifestPath))
+                    || (nativeCoreManifestPath is not null
+                        && PathsAlias(evaluationCoreManifestPath,
+                            nativeCoreManifestPath))
+                    || (nativeOutputCoreManifestPath is not null
+                        && PathsAlias(evaluationCoreManifestPath,
+                            nativeOutputCoreManifestPath))
+                    || (sourceEnumExportsPath is not null
+                        && PathsAlias(evaluationCoreManifestPath,
+                            sourceEnumExportsPath))
+                    || (sourceTypeExportsPath is not null
+                        && PathsAlias(evaluationCoreManifestPath,
+                            sourceTypeExportsPath))
+                    || (sourceGenericMethodExportsPath is not null
+                        && PathsAlias(evaluationCoreManifestPath,
+                            sourceGenericMethodExportsPath))))
+            {
+                WriteInputError(json, "TRM2002",
+                    "The evaluation Core manifest must be distinct from every source, configuration and artifact output.");
                 return 2;
             }
             if (layoutCoreManifestPath is not null
@@ -353,42 +598,111 @@ internal static partial class Program
                         "Core manifests must be distinct from one another, the source and artifact output.");
                     return 2;
                 }
+            }
+
+            if (configurationFileOrder.Count != 0)
+            {
+                LayoutCoreManifestDefinition? layoutDefinition = null;
+                NativeCoreManifestDefinition? nativeDefinition = null;
+                NativeOutputCoreManifestDefinition? nativeOutputDefinition
+                    = null;
+                EvaluationCoreManifestDefinition? evaluationDefinition = null;
+                foreach (var configurationFile in configurationFileOrder)
+                {
+                    if (configurationFile.IsSourceEnumExports)
+                    {
+                        sourceTypeExports
+                            = ReadTrRmSourceEnumExports(
+                                configurationFile.Path);
+                        continue;
+                    }
+                    if (configurationFile.IsSourceTypeExports)
+                    {
+                        sourceTypeExports
+                            = ReadTrRmSourceTypeExports(
+                                configurationFile.Path);
+                        continue;
+                    }
+                    if (configurationFile.IsSourceGenericMethodExports)
+                    {
+                        sourceMethodExportsFile
+                            = TrRmSourceGenericMethodExportsReader.Read(
+                                configurationFile.Path);
+                        continue;
+                    }
+
+                    switch (configurationFile.CoreKind)
+                    {
+                        case CoreManifestKind.Layout:
+                            layoutDefinition
+                                = LayoutCoreManifestReader.ReadDefinition(
+                                    configurationFile.Path);
+                            break;
+                        case CoreManifestKind.Native:
+                            nativeDefinition
+                                = NativeCoreManifestReader.ReadDefinition(
+                                    configurationFile.Path);
+                            break;
+                        case CoreManifestKind.NativeOutput:
+                            nativeOutputDefinition
+                                = NativeOutputCoreManifestReader
+                                    .ReadDefinition(
+                                        configurationFile.Path);
+                            break;
+                        case CoreManifestKind.Evaluation:
+                            evaluationDefinition
+                                = EvaluationCoreManifestReader.ReadDefinition(
+                                    configurationFile.Path);
+                            break;
+                        default:
+                            throw new InvalidOperationException(
+                                "A selected TRRM configuration file has no registered reader.");
+                    }
+                }
+
+                if (sourceMethodExportsFile is not null)
+                {
+                    ValidateSourceGenericMethodInputPaths(
+                        sourceMethodExportsFile, paths,
+                        sourceGenericMethodExportsPath!);
+                }
 
                 var usingModuleIdentity = identity
                     ?? throw new InvalidOperationException(
                         "Missing compile-trrm identity.");
-                var definitions = ReadCoreManifestDefinitions(
-                    layoutCoreManifestPath, nativeCoreManifestPath,
-                    nativeOutputCoreManifestPath, coreManifestOrder);
-                if ((definitions.Layout is LayoutCoreManifestDefinition
-                        layoutDefinition
+                if ((layoutDefinition is not null
                         && !StringComparer.Ordinal.Equals(
                             layoutDefinition.UsingModuleIdentity,
                             usingModuleIdentity))
-                    || (definitions.Native is
-                        NativeCoreManifestDefinition nativeDefinition
+                    || (nativeDefinition is not null
                         && !StringComparer.Ordinal.Equals(
                             nativeDefinition.UsingModuleIdentity,
                             usingModuleIdentity))
-                    || (definitions.NativeOutput is
-                        NativeOutputCoreManifestDefinition
-                            nativeOutputDefinition
+                    || (nativeOutputDefinition is not null
                         && !StringComparer.Ordinal.Equals(
                             nativeOutputDefinition.UsingModuleIdentity,
+                            usingModuleIdentity))
+                    || (evaluationDefinition is not null
+                        && !StringComparer.Ordinal.Equals(
+                            evaluationDefinition.UsingModuleIdentity,
                             usingModuleIdentity)))
                 {
                     WriteInputError(json, "TRM2000",
                         "Each Core manifest usingModuleIdentity must exactly match --identity.");
                     return 2;
                 }
+                evaluationDefinition?.ValidateRuntimePolicy(
+                    BoundRuntimePolicy.FailFast, evaluationCoreManifestPath!);
                 var registrations = CoreManifestRegistrationComposer.Create(
-                    definitions.Layout, definitions.Native,
-                    definitions.NativeOutput, layoutCoreManifestPath,
-                    nativeCoreManifestPath, nativeOutputCoreManifestPath);
+                    layoutDefinition, nativeDefinition,
+                    nativeOutputDefinition, layoutCoreManifestPath,
+                    nativeCoreManifestPath, nativeOutputCoreManifestPath,
+                    evaluationDefinition, evaluationCoreManifestPath);
                 layoutCoreRegistration = registrations.Layout;
                 nativeCoreRegistration = registrations.Native;
                 nativeOutputCoreRegistration
                     = registrations.NativeOutput;
+                evaluationFormSelection = registrations.Evaluation;
             }
 
             byte[] artifact;
@@ -400,6 +714,12 @@ internal static partial class Program
                     trees.Add(SyntaxTree.Parse(ReadSource(path), path == "-" ? "<stdin>" : path));
                 }
                 var snapshots = trees.MoveToImmutable();
+                if (sourceMethodExportsFile is not null)
+                {
+                    ValidateSourceGenericMethodSnapshots(
+                        sourceMethodExportsFile, snapshots,
+                        sourceGenericMethodExportsPath!);
+                }
                 var options = new CompilationOptions {
                     SourceArithmeticProfile = sourceArithmeticProfile,
                     RuntimePolicy = BoundRuntimePolicy.FailFast,
@@ -407,6 +727,8 @@ internal static partial class Program
                     NativeCoreRegistration = nativeCoreRegistration,
                     NativeOutputCoreRegistration
                         = nativeOutputCoreRegistration,
+                    CoreEvaluationFormIdentitySelection
+                        = evaluationFormSelection,
                 };
                 var compilation = library
                     ? snapshots.Length == 1 ? Compilation.CreateLibrary(snapshots[0], options)
@@ -421,6 +743,11 @@ internal static partial class Program
                 }
                 var program = compilation.Program
                     ?? throw new InvalidOperationException("A successful compilation must contain a bound program.");
+                if (evaluationFormSelection is not null)
+                {
+                    throw new NotSupportedException(
+                        "TRRM publication cannot retain the selected evaluation-form schema context; a declaration/context codec is required.");
+                }
                 var sourceModuleIdentity = identity
                     ?? throw new InvalidOperationException("Missing module identity.");
                 if (schemaIdentity is null)
@@ -432,8 +759,96 @@ internal static partial class Program
                 {
                     try
                     {
-                        artifact = TrRmExecutableCompiler.EmitStandard(program,
-                            sourceModuleIdentity, schemaIdentity, 1);
+                        if (sourceMethodExportsFile
+                            is TrRmSourceGenericMethodExportsFile methodMap)
+                        {
+                            var typeExports = ImmutableArray.CreateBuilder<
+                                TrRmSourceTypeExport>(
+                                    methodMap.TypeExports.Length);
+                            foreach (var typeExport in methodMap.TypeExports)
+                            {
+                                var interfaceMethodExports =
+                                    ImmutableArray.CreateBuilder<
+                                        TrRmSourceInterfaceMethodExport>(
+                                            typeExport
+                                                .InterfaceMethodExports
+                                                .Length);
+                                foreach (var methodExport in typeExport
+                                    .InterfaceMethodExports)
+                                {
+                                    interfaceMethodExports.Add(
+                                        new TrRmSourceInterfaceMethodExport(
+                                            methodExport.SourceInputOrdinal,
+                                            new TextSpan(
+                                                methodExport.DeclarationStart,
+                                                methodExport.DeclarationLength),
+                                            methodExport.ExportKey));
+                                }
+                                typeExports.Add(new TrRmSourceTypeExport(
+                                    typeExport.Namespace, typeExport.Name,
+                                    typeExport.ExportKey) {
+                                    GenericArity = typeExport.GenericArity,
+                                    InterfaceMethodExports =
+                                        interfaceMethodExports
+                                            .MoveToImmutable(),
+                                });
+                            }
+                            var methodExports =
+                                ImmutableArray.CreateBuilder<
+                                    TrRmSourceGenericMethodExport>(
+                                        methodMap.Exports.Length);
+                            foreach (var export in methodMap.Exports)
+                            {
+                                methodExports.Add(
+                                    new TrRmSourceGenericMethodExport(
+                                        program,
+                                        export.SourceInputOrdinal,
+                                        new TextSpan(
+                                            export.DeclarationStart,
+                                            export.DeclarationLength),
+                                        export.ExportKey));
+                            }
+                            artifact = TrRmExecutableCompiler.EmitStandard(
+                                program, sourceModuleIdentity,
+                                schemaIdentity, 1,
+                                typeExports.MoveToImmutable(),
+                                methodExports.MoveToImmutable());
+                        }
+                        else
+                        {
+                            artifact = sourceTypeExports is null
+                            ? TrRmExecutableCompiler.EmitStandard(program,
+                                sourceModuleIdentity, schemaIdentity, 1)
+                            : TrRmExecutableCompiler.EmitStandard(program,
+                                sourceModuleIdentity, schemaIdentity, 1,
+                                sourceTypeExports);
+                        }
+                    }
+                    catch (ArgumentException exception)
+                        when ((sourceEnumExportsPath is not null
+                                || sourceTypeExportsPath is not null)
+                            && exception.ParamName == "typeExports")
+                    {
+                        WriteInputError(json, "TRM2001",
+                            exception.Message);
+                        return 2;
+                    }
+                    catch (ArgumentException exception)
+                        when (sourceGenericMethodExportsPath is not null
+                            && exception.ParamName
+                                == "genericMethodExports")
+                    {
+                        WriteInputError(json, "TRM2001",
+                            exception.Message);
+                        return 2;
+                    }
+                    catch (ArgumentException exception)
+                        when (sourceGenericMethodExportsPath is not null
+                            && exception.ParamName == "typeExports")
+                    {
+                        WriteInputError(json, "TRM2001",
+                            exception.Message);
+                        return 2;
                     }
                     catch (ArgumentException exception)
                         when (exception.ParamName == "schemaIdentity")
@@ -443,6 +858,32 @@ internal static partial class Program
                     }
                 }
                 var artifactPath = output ?? throw new InvalidOperationException("Missing artifact output path.");
+                if (sourceGenericMethodExportsPath is not null
+                    && ((output is not null
+                            && PathsAlias(sourceGenericMethodExportsPath,
+                                output))
+                        || paths.Any(path => path != "-"
+                            && PathsAlias(sourceGenericMethodExportsPath,
+                                path))
+                        || (layoutCoreManifestPath is string lateLayoutPath
+                            && PathsAlias(sourceGenericMethodExportsPath,
+                                lateLayoutPath))
+                        || (nativeCoreManifestPath is string lateNativePath
+                            && PathsAlias(sourceGenericMethodExportsPath,
+                                lateNativePath))
+                        || (nativeOutputCoreManifestPath
+                            is string lateNativeOutputPath
+                            && PathsAlias(sourceGenericMethodExportsPath,
+                                lateNativeOutputPath))
+                        || (evaluationCoreManifestPath
+                            is string lateEvaluationPath
+                            && PathsAlias(sourceGenericMethodExportsPath,
+                                lateEvaluationPath))))
+                {
+                    WriteInputError(json, "TRM2002",
+                        "The source generic method export file must remain distinct from every source, Core manifest and artifact output.");
+                    return 2;
+                }
                 WriteArtifact(artifactPath, artifact);
                 WriteTrRmSuccess(command, artifactPath, artifact.Length, json);
                 return 0;
@@ -635,6 +1076,68 @@ internal static partial class Program
             WriteInputError(json, "TRM2001", exception.Message);
             return 2;
         }
+    }
+
+    private static void ValidateSourceGenericMethodInputPaths(
+        TrRmSourceGenericMethodExportsFile configuration,
+        List<string> sourcePaths, string configurationPath)
+    {
+        if (configuration.Sources.Length != sourcePaths.Count)
+        {
+            throw new FormatException(
+                $"Invalid source generic method exports '{configurationPath}': source count does not match compile-trrm inputs.");
+        }
+
+        for (var index = 0; index < sourcePaths.Count; index++)
+        {
+            var assertedPath = configuration.Sources[index].Path;
+            var sourcePath = sourcePaths[index];
+            var matches = assertedPath == "-"
+                ? sourcePath == "-"
+                : sourcePath != "-"
+                    && PathsAlias(assertedPath, sourcePath);
+            if (!matches)
+            {
+                throw new FormatException(
+                    $"Invalid source generic method exports '{configurationPath}' at $.sources[{index}].path: source path does not match the ordered compile-trrm input.");
+            }
+        }
+    }
+
+    private static void ValidateSourceGenericMethodSnapshots(
+        TrRmSourceGenericMethodExportsFile configuration,
+        ImmutableArray<SyntaxTree> snapshots, string configurationPath)
+    {
+        if (configuration.Sources.Length != snapshots.Length)
+        {
+            throw new FormatException(
+                $"Invalid source generic method exports '{configurationPath}': source count changed during source acquisition.");
+        }
+
+        for (var index = 0; index < snapshots.Length; index++)
+        {
+            var text = snapshots[index].Root.ToFullString();
+            var digest = ComputeLowercaseSha256Utf16(text);
+            if (!StringComparer.Ordinal.Equals(digest,
+                    configuration.Sources[index].SnapshotSha256))
+            {
+                throw new FormatException(
+                    $"Invalid source generic method exports '{configurationPath}' at $.sources[{index}].snapshotSha256: source snapshot does not match.");
+            }
+        }
+    }
+
+    private static string ComputeLowercaseSha256Utf16(string text)
+    {
+        const string hex = "0123456789abcdef";
+        var digest = SHA256.HashData(Encoding.Unicode.GetBytes(text));
+        var characters = new char[digest.Length * 2];
+        for (var index = 0; index < digest.Length; index++)
+        {
+            characters[index * 2] = hex[digest[index] >> 4];
+            characters[(index * 2) + 1] = hex[digest[index] & 0x0F];
+        }
+        return new string(characters);
     }
 
     private static void WriteTrRmSuccess(string command, string path, int bytes, bool json)

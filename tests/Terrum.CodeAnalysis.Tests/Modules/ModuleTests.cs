@@ -38,6 +38,36 @@ internal sealed class ModuleTests
             "FieldPathProvider", definitions, []);
     }
 
+    private static PrimitiveType FindStructType(BoundProgram program,
+        string name)
+    {
+        var structure = program.Structures.Single(item => item.Name == name);
+        return (PrimitiveType)(100 + program.Structures.IndexOf(structure));
+    }
+
+    private static PrivateModuleIdentityInputs
+        CreatePrivateStructDefinitionInputs(BoundProgram program,
+            string moduleIdentity, string typeName)
+    {
+        var structure = program.Structures.Single(item => item.Name == typeName);
+        var key = "types." + typeName.ToLowerInvariant();
+        return PrivateModuleIdentityInputs.Create(program, moduleIdentity,
+            [new PrivateNominalDefinition(FindStructType(program, typeName),
+                key, IsExported: !structure.IsPrivate && !structure.IsInternal)],
+            []);
+    }
+
+    private static PrivateModuleIdentityInputs
+        CreatePrivateStructImportInputs(BoundProgram program,
+            string moduleIdentity, string typeName, string providerIdentity)
+    {
+        var key = "types." + typeName.ToLowerInvariant();
+        return PrivateModuleIdentityInputs.Create(program, moduleIdentity,
+            [],
+            [new PrivateNominalImport(FindStructType(program, typeName),
+                key + ".proxy", providerIdentity, key)]);
+    }
+
     private static string CreatePrivateIdentityManifest(
         string usingModuleIdentity, IReadOnlyList<string> sourcePaths,
         string? producerPath, IReadOnlyList<object> definitions,
@@ -1752,6 +1782,9 @@ internal sealed class ModuleTests
             public struct RawWord {
                 public mut uint32 Narrow;
                 public mut uint64 Wide;
+                public RawWord(uint64 value) {
+                    unsafe { Wide = value; }
+                }
             }
 
             public RawWord MakeWide() {
@@ -1855,6 +1888,39 @@ internal sealed class ModuleTests
         Assert.That(retainedExpectation, Is.EqualTo(actualCoverage));
         Assert.That(retainedWideFunction
             .HasDeclaredRawUnionReturnCoverage, Is.True);
+        var consumerCoverageRecordOffset = -1;
+        for (var offset = sizeof(int) * 2;
+            offset <= consumer.Length - sizeof(int)
+                - retainedExpectation.Length;
+            offset++)
+        {
+            if (BinaryPrimitives.ReadInt32LittleEndian(
+                    consumer.AsSpan(offset, sizeof(int)))
+                    != retainedExpectation.Length
+                || !consumer.AsSpan(offset + sizeof(int),
+                        retainedExpectation.Length).SequenceEqual(
+                    retainedExpectation.AsSpan()))
+            {
+                continue;
+            }
+            Assert.That(consumerCoverageRecordOffset, Is.EqualTo(-1),
+                "The bodyless raw-Union coverage vector must have one unambiguous record.");
+            consumerCoverageRecordOffset = offset;
+        }
+        Assert.That(consumerCoverageRecordOffset,
+            Is.GreaterThanOrEqualTo(0));
+        var malformedConsumer = (byte[])consumer.Clone();
+        malformedConsumer[consumerCoverageRecordOffset + sizeof(int)] = 2;
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.ReadConsumerContractSnapshot(
+                malformedConsumer));
+        malformedConsumer = (byte[])consumer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformedConsumer.AsSpan(consumerCoverageRecordOffset,
+                sizeof(int)), retainedExpectation.Length - 1);
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.ReadConsumerContractSnapshot(
+                malformedConsumer));
         var linked = ModuleCompiler.Link(consumer, provider);
         Assert.That(NativeJit.Execute(linked,
             NativeRuntimePolicy.FailFast), Is.Zero);
@@ -1871,6 +1937,9 @@ internal sealed class ModuleTests
             CreateRawWordDefinition(providerProgram));
         var nativeProviderReference
             = NativeModuleCompiler.CreateReference(nativeProvider);
+        Assert.That(nativeProviderReference.Functions.Single(
+                static function => function.Name == "MakeWide")
+            .RawUnionReturnCoverage, Is.EqualTo(actualCoverage));
         var nativeConsumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut RawWord value = MakeWide();
@@ -1901,6 +1970,48 @@ internal sealed class ModuleTests
             string.Join(Environment.NewLine, neutralCompilation.Diagnostics));
         var neutralProvider = ModuleCompiler.CreateProducer(
             neutralCompilation.Program!, ["Anchor"]);
+        var nativeNeutralProvider = NativeModuleCompiler.CreateProducer(
+            neutralCompilation.Program!, ["Anchor"],
+            "RawUnionNeutralProvider", NativeRuntimePolicy.FailFast);
+        var nativeReferenceSet = NativeModuleCompiler.CreateReferenceSet(
+            [nativeProvider, nativeNeutralProvider]);
+        Assert.That(nativeReferenceSet.Functions.Single(
+                static function => function.Name == "MakeWide")
+            .RawUnionReturnCoverage, Is.EqualTo(actualCoverage));
+        var nativeSetCompilation = Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut RawWord value = MakeWide();
+                unsafe { return value.Wide == uint64(0x1122334455667788) ? 0 : 1; }
+            }
+            """), nativeReferenceSet, BoundRuntimePolicy.FailFast);
+        Assert.That(nativeSetCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                nativeSetCompilation.Diagnostics));
+        var nativeSetProgram = nativeSetCompilation.Program!;
+        var nativeSetInputs = PrivateModuleIdentityInputs.Create(
+            nativeSetProgram, "RawUnionNativeSetConsumer", [],
+            [new PrivateNominalImport(FindRawWord(nativeSetProgram),
+                "types.rawword.proxy", "RawUnionProvider",
+                "types.rawword")]);
+        var nativeConsumerSet = NativeModuleCompiler.CreateConsumerSet(
+            nativeSetProgram, [nativeProvider, nativeNeutralProvider],
+            NativeRuntimePolicy.FailFast, nativeSetInputs);
+        Assert.DoesNotThrow(() => NativeModuleCompiler.ValidateConsumerSet(
+            nativeConsumerSet, [nativeProvider, nativeNeutralProvider]));
+        var reversedNativeProviders
+            = new[] { nativeNeutralProvider, nativeProvider };
+        Assert.DoesNotThrow(() =>
+            NativeModuleCompiler.ValidateConsumerSet(nativeConsumerSet,
+                reversedNativeProviders));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
+            nativeConsumerSet, [nativeProvider, nativeNeutralProvider],
+            TimeSpan.FromSeconds(30), NativeRuntimePolicy.FailFast)
+            .ConfigureAwait(false), Is.Zero);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
+            nativeConsumerSet, reversedNativeProviders,
+            TimeSpan.FromSeconds(30), NativeRuntimePolicy.FailFast)
+            .ConfigureAwait(false), Is.Zero);
+
         var providers = new[] { provider, neutralProvider };
         var referenceSet = ModuleCompiler.CreateReferenceSet(providers);
         var setCompilation = Create(SyntaxTree.Parse("""
@@ -1921,6 +2032,22 @@ internal sealed class ModuleTests
             providers, setInputs);
         Assert.DoesNotThrow(() =>
             ModuleCompiler.ValidateConsumerSet(consumerSet, providers));
+        Assert.DoesNotThrow(() =>
+            ModuleCompiler.ValidateConsumerSet(consumerSet,
+                [neutralProvider, provider]));
+        var restoredSetProgram
+            = ModuleCompiler.RestoreConsumerAgainstReference(consumer,
+                referenceSet);
+        var restoredSetInputs = PrivateModuleIdentityInputs.Create(
+            restoredSetProgram, "RawUnionSetConsumer", [],
+            [new PrivateNominalImport(
+                FindRawWord(restoredSetProgram), "types.rawword.proxy",
+                "RawUnionProvider", "types.rawword")]);
+        var reencodedConsumerSet = ModuleCompiler.CreateConsumerSet(
+            restoredSetProgram, providers, restoredSetInputs);
+        Assert.DoesNotThrow(() =>
+            ModuleCompiler.ValidateConsumerSet(reencodedConsumerSet,
+                providers));
 
         var graphCompilation = CreateLibrary(SyntaxTree.Parse("""
             public RawWord Forward() { return MakeWide(); }
@@ -1938,6 +2065,119 @@ internal sealed class ModuleTests
             ["Forward"], providerReference, graphInputs);
         Assert.DoesNotThrow(() => ModuleCompiler.ValidateGraphLibrary(
             graph, ["Forward"], providerReference));
+        var reversedGraphReference
+            = ModuleCompiler.CreateReferenceSet(
+                [neutralProvider, provider]);
+        Assert.DoesNotThrow(() => ModuleCompiler.ValidateGraphLibrary(
+            graph, ["Forward"], reversedGraphReference));
+        var nativeGraphProvider = NativeModuleCompiler.CreateGraphProducer(
+            graphProgram, ["Forward"], "RawUnionGraph", [nativeProvider],
+            NativeRuntimePolicy.FailFast, graphInputs);
+        var nativeGraphReference = NativeModuleCompiler.CreateGraphReference(
+            [nativeGraphProvider, nativeProvider]);
+        Assert.That(nativeGraphReference.Functions.Single(
+                static function => function.Name == "Forward")
+            .RawUnionReturnCoverage, Is.EqualTo(actualCoverage));
+        var graphConsumerCompilation = Create(SyntaxTree.Parse("""
+            public RawWord Forward() { return MakeWide(); }
+            int32 Main() { return 0; }
+            """), providerReference, BoundRuntimePolicy.FailFast);
+        Assert.That(graphConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                graphConsumerCompilation.Diagnostics));
+        var graphConsumerProgram = graphConsumerCompilation.Program!;
+        var graphConsumerInputs = PrivateModuleIdentityInputs.Create(
+            graphConsumerProgram, "RawUnionGraph", [],
+            [new PrivateNominalImport(
+                FindRawWord(graphConsumerProgram), "types.rawword.proxy",
+                "RawUnionProvider", "types.rawword")]);
+        var graphConsumerArtifact = ModuleCompiler.CreateConsumer(
+            graphConsumerProgram, provider, graphConsumerInputs);
+        var restoredGraphConsumerProgram
+            = ModuleCompiler.RestoreConsumerAgainstReference(
+                graphConsumerArtifact, providerReference);
+        var restoredGraphProgram = restoredGraphConsumerProgram with {
+            EntryPoint = -1,
+        };
+        var restoredGraphInputs = PrivateModuleIdentityInputs.Create(
+            restoredGraphProgram, "RawUnionGraph", [],
+            [new PrivateNominalImport(
+                FindRawWord(restoredGraphProgram), "types.rawword.proxy",
+                "RawUnionProvider", "types.rawword")]);
+        var sourceFreeGraphProvider
+            = NativeModuleCompiler.CreateGraphProducer(
+                restoredGraphProgram, ["Forward"], "RawUnionGraph",
+                [nativeProvider], NativeRuntimePolicy.FailFast,
+                restoredGraphInputs);
+        var sourceFreeGraphReference
+            = NativeModuleCompiler.CreateGraphReference(
+                [sourceFreeGraphProvider, nativeProvider]);
+        Assert.That(sourceFreeGraphReference.Functions.Single(
+                static function => function.Name == "Forward")
+            .RawUnionReturnCoverage, Is.EqualTo(actualCoverage));
+        Assert.That(sourceFreeGraphReference.PrivateNominalTypeOrigins,
+            Is.EqualTo(nativeGraphReference.PrivateNominalTypeOrigins));
+        var corruptedGraphProvider = (byte[])sourceFreeGraphProvider.Clone();
+        corruptedGraphProvider[^1] ^= 0x01;
+        _ = Assert.Throws<ModuleFormatException>(() =>
+            NativeModuleCompiler.CreateGraphReference(
+                [corruptedGraphProvider, nativeProvider]));
+        var nativeGraphConsumerCompilation = Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut RawWord value = Forward();
+                unsafe { return value.Wide == uint64(0x1122334455667788) ? 0 : 1; }
+            }
+            """), nativeGraphReference, BoundRuntimePolicy.FailFast);
+        Assert.That(nativeGraphConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                nativeGraphConsumerCompilation.Diagnostics));
+        var nativeGraphConsumerProgram
+            = nativeGraphConsumerCompilation.Program!;
+        var nativeGraphConsumerInputs
+            = PrivateModuleIdentityInputs.Create(
+                nativeGraphConsumerProgram, "RawUnionGraphConsumer", [],
+                [new PrivateNominalImport(
+                    FindRawWord(nativeGraphConsumerProgram),
+                    "types.rawword.proxy", "RawUnionProvider",
+                    "types.rawword")]);
+        var nativeGraphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            nativeGraphConsumerProgram,
+            [nativeGraphProvider, nativeProvider],
+            NativeRuntimePolicy.FailFast, nativeGraphConsumerInputs);
+        NativeModuleCompiler.ValidateGraph(nativeGraphConsumer,
+            [nativeGraphProvider, nativeProvider]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(
+            nativeGraphConsumer, [nativeGraphProvider, nativeProvider],
+            TimeSpan.FromSeconds(30)).ConfigureAwait(false), Is.Zero);
+        NativeModuleCompiler.ValidateGraph(nativeGraphConsumer,
+            [sourceFreeGraphProvider, nativeProvider]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(
+            nativeGraphConsumer, [sourceFreeGraphProvider, nativeProvider],
+            TimeSpan.FromSeconds(30)).ConfigureAwait(false), Is.Zero);
+        var reversedGraphProviders
+            = new[] { nativeProvider, nativeGraphProvider };
+        NativeModuleCompiler.ValidateGraph(nativeGraphConsumer,
+            reversedGraphProviders);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(
+            nativeGraphConsumer, reversedGraphProviders,
+            TimeSpan.FromSeconds(30)).ConfigureAwait(false), Is.Zero);
+        var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = frameworkDirectory.Parent?.Name
+            ?? throw new InvalidOperationException(
+                "Missing test configuration directory.");
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var apphost = Path.Combine(repositoryRoot, "artifacts", "bin",
+            "sources", "terrumc", configuration, frameworkDirectory.Name,
+            "terrumc.exe");
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(
+            nativeGraphConsumer, [nativeGraphProvider, nativeProvider],
+            apphost, TimeSpan.FromSeconds(30),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.Zero);
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(
+            nativeGraphConsumer, [sourceFreeGraphProvider, nativeProvider],
+            apphost, TimeSpan.FromSeconds(30),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(false), Is.Zero);
 
         const string narrowSource = """
             [Blittable]
@@ -1972,6 +2212,9 @@ internal sealed class ModuleTests
             NativeModuleCompiler.Validate(nativeConsumer,
                 nativeReplacement));
         _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(nativeGraphConsumer,
+                [nativeGraphProvider, nativeReplacement]));
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.ValidateConsumerSet(consumerSet,
                 [replacement, neutralProvider]));
         var replacementReference = ModuleCompiler.CreateReference(
@@ -1979,6 +2222,32 @@ internal sealed class ModuleTests
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.ValidateGraphLibrary(graph, ["Forward"],
                 replacementReference));
+
+        var narrowGraphCompilation = CreateLibrary(
+            SyntaxTree.Parse("""
+                public RawWord Forward() {
+                    init mut RawWord value;
+                    unsafe { value.Narrow = uint32(0x55667788); }
+                    return value;
+                }
+                """), providerReference);
+        Assert.That(narrowGraphCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                narrowGraphCompilation.Diagnostics));
+        var narrowGraphProgram = narrowGraphCompilation.Program!;
+        var narrowGraphInputs = PrivateModuleIdentityInputs.Create(
+            narrowGraphProgram, "RawUnionGraph", [],
+            [new PrivateNominalImport(
+                FindRawWord(narrowGraphProgram), "types.rawword.proxy",
+                "RawUnionProvider", "types.rawword")]);
+        var narrowGraphReplacement
+            = NativeModuleCompiler.CreateGraphProducer(
+                narrowGraphProgram, ["Forward"], "RawUnionGraph",
+                [nativeProvider], NativeRuntimePolicy.FailFast,
+                narrowGraphInputs);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(nativeGraphConsumer,
+                [narrowGraphReplacement, nativeProvider]));
     }
 
     [Test]
@@ -2001,7 +2270,7 @@ internal sealed class ModuleTests
                 public mut [[RawWord; 2]; 2] Values;
 
                 public Envelope(RawWord seed) {
-                    Empty = [];
+                    Empty = [seed; 0];
                     Values = [[seed; 2]; 2];
                 }
             }
@@ -2022,6 +2291,17 @@ internal sealed class ModuleTests
                     result.Values[1][0].Narrow = uint32(23);
                     result.Values[1][1].Narrow = uint32(24);
                 }
+                return result;
+            }
+
+            public Envelope CopyEnvelope(Envelope value) {
+                return value;
+            }
+
+            public Envelope CopyValues(Envelope source) {
+                mut Envelope result = new Envelope(
+                    new RawWord(uint64(0)));
+                result.Values = source.Values;
                 return result;
             }
             """;
@@ -2065,9 +2345,29 @@ internal sealed class ModuleTests
                 providerCompilation.Diagnostics)
             + Environment.NewLine + typeLayoutDiagnostics);
         var providerProgram = providerCompilation.Program!;
+        var zeroCountRepeats
+            = new List<BoundNativeFixedArrayRepeatInitialization>();
+        foreach (var function in providerProgram.Functions)
+        {
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression
+                        is BoundNativeFixedArrayRepeatInitialization {
+                            Layout.ElementCount: 0,
+                        } repeat)
+                    {
+                        zeroCountRepeats.Add(repeat);
+                    }
+                }), Is.True);
+        }
+        Assert.That(zeroCountRepeats, Has.Length.EqualTo(1));
+        Assert.That(zeroCountRepeats.Single().Seed.Type,
+            Is.EqualTo(FindType(providerProgram, "RawWord")));
         var providerInputs = CreateProviderInputs(providerProgram);
         var provider = ModuleCompiler.CreateProducer(providerProgram,
-            ["MakeBase", "MakeWide"], providerInputs);
+            ["MakeBase", "MakeWide", "CopyEnvelope", "CopyValues"],
+            providerInputs);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
             provider.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(106));
 
@@ -2085,11 +2385,35 @@ internal sealed class ModuleTests
         Array.Fill(expectedWideCoverage, (byte)1, 16, 4);
         Array.Fill(expectedWideCoverage, (byte)1, 24, 4);
         Assert.That(wideCoverage, Is.EqualTo(expectedWideCoverage));
+        var copyValuesSummary = providerReference.Functions.Single(
+            static function => function.Name == "CopyValues")
+            .CopyOriginSummary;
+        Assert.That(copyValuesSummary, Is.Not.Null);
+        var arrayCopyOrigin = copyValuesSummary!.Facts.Single();
+        Assert.That(arrayCopyOrigin.DestinationPath.Steps,
+            Has.Length.EqualTo(1));
+        Assert.That(arrayCopyOrigin.Origins, Has.Length.EqualTo(1));
+        Assert.That(arrayCopyOrigin.Origins.Single().SourcePath.Steps,
+            Has.Length.EqualTo(1));
+        var destinationField = arrayCopyOrigin.DestinationPath.Steps.Single();
+        var destinationFieldType = providerProgram.Structures[
+            (int)destinationField.OwnerType - 100]
+            .Fields[destinationField.FieldOrdinal].Type;
+        Assert.That(NativeFixedArrayTypes.IsType(destinationFieldType),
+            Is.True);
+        var sourceField = arrayCopyOrigin.Origins.Single().SourcePath
+            .Steps.Single();
+        var sourceFieldType = providerProgram.Structures[
+            (int)sourceField.OwnerType - 100]
+            .Fields[sourceField.FieldOrdinal].Type;
+        Assert.That(NativeFixedArrayTypes.IsType(sourceFieldType), Is.True);
 
         var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 mut Envelope baseline = MakeBase();
                 mut Envelope wide = MakeWide();
+                mut Envelope copied = CopyEnvelope(wide);
+                mut Envelope copiedValues = CopyValues(wide);
                 unsafe {
                     if (baseline.Values[0][0].Narrow != uint32(11)) {
                         return 1;
@@ -2103,6 +2427,14 @@ internal sealed class ModuleTests
                     }
                     if (wide.Values[1][1].Narrow != uint32(24)) {
                         return 4;
+                    }
+                    if (copied.Values[0][0].Wide
+                        != uint64(0x1122334455667788)) {
+                        return 5;
+                    }
+                    if (copiedValues.Values[0][0].Wide
+                        != uint64(0x1122334455667788)) {
+                        return 6;
                     }
                 }
                 return 0;
@@ -2139,6 +2471,12 @@ internal sealed class ModuleTests
             Is.True);
         Assert.That(retainedWideImport.DeclaredRawUnionReturnCoverage,
             Is.EqualTo(expectedWideCoverage));
+        Assert.That(parsedConsumer.Functions.Single(
+                static function => function.Name == "CopyEnvelope")
+            .ExpectedCopyOriginSummaryData, Is.Not.Null);
+        Assert.That(parsedConsumer.Functions.Single(
+                static function => function.Name == "CopyValues")
+            .ExpectedCopyOriginSummaryData, Is.Not.Null);
         var linked = ModuleCompiler.Link(consumer, provider);
         Assert.That(NativeJit.Execute(linked,
             NativeRuntimePolicy.FailFast), Is.Zero);
@@ -2333,7 +2671,8 @@ internal sealed class ModuleTests
                 }
             }
             OwnedInt32Buffer Create(int32 value) {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 require buffer.TryAppend(value);
                 return move buffer;
@@ -2360,7 +2699,7 @@ internal sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(
             library.Program!, ["Consume", "RetireNested"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)),
-            Is.EqualTo(104));
+            Is.EqualTo(106));
         var fieldMoveStart = producerSource.IndexOf(
             fieldMoveText, StringComparison.Ordinal);
         Assert.That(fieldMoveStart, Is.GreaterThanOrEqualTo(0));
@@ -2530,8 +2869,8 @@ internal sealed class ModuleTests
                 value = seed;
                 return true;
             }
-            public int32 Initialize(int32 value, init ref<int32> result) {
-                result = value;
+            public int32 Initialize(int32 value, ref<init int32> result) {
+                *result = value;
                 return 0;
             }
             """), policy);
@@ -2549,7 +2888,7 @@ internal sealed class ModuleTests
                     return 1;
                 }
                 init int32 initialized;
-                int32 status = Initialize(result: init initialized, value: output);
+                int32 status = Initialize(result: ref init initialized, value: output);
                 return initialized + status;
             }
             """), ModuleCompiler.CreateReference(producer), policy);
@@ -2574,8 +2913,8 @@ internal sealed class ModuleTests
                 value = 3.5;
                 return true;
             }
-            public bool Initialize(float64 input, init ref<float64> result) {
-                result = input;
+            public bool Initialize(float64 input, ref<init float64> result) {
+                *result = input;
                 return true;
             }
             """), policy);
@@ -2590,7 +2929,7 @@ internal sealed class ModuleTests
         var compilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init float64 initialized;
-                if (!Initialize(7.75, init initialized)) { return 1; }
+                if (!Initialize(7.75, ref init initialized)) { return 1; }
                 if (!TryGet(out var output)) { return 2; }
                 return initialized == 7.75 && output == 3.5 ? 42 : 0;
             }
@@ -2689,7 +3028,7 @@ internal sealed class ModuleTests
                     Second = second;
                 }
             }
-            int32 Fill<T>(T value, out T result) where T : [Copy] {
+            int32 Fill<T>(T value, out T result)  {
                 result = value;
                 return 7;
             }
@@ -2767,16 +3106,18 @@ internal sealed class ModuleTests
                     Second = second;
                 }
             }
-            int32 Fill<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+            int32 Fill<T>(T value, ref<init T> result)  {
+                *result = value;
                 return 7;
             }
-            void FillVoid<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+            void FillVoid<T>(T value, ref<init T> result)  {
+                *result = value;
             }
             public int32 Read() {
-                int32 status = Fill(new Pair(20, 22), init var result);
-                FillVoid(new Pair(5, 2), init var voidResult);
+                init Pair result;
+                int32 status = Fill(new Pair(20, 22), ref init result);
+                init Pair voidResult;
+                FillVoid(new Pair(5, 2), ref init voidResult);
                 return status + result.First + result.Second + voidResult.First + voidResult.Second;
             }
             """;
@@ -2788,7 +3129,10 @@ internal sealed class ModuleTests
             Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual17!;
         }))();
-        var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
+        var producerIdentityInputs = CreatePrivateStructDefinitionInputs(
+            program, "GenericCopyInitProvider", "Pair");
+        var producer = ModuleCompiler.CreateProducer(program, ["Read"],
+            producerIdentityInputs);
         var compilation = Create(SyntaxTree.Parse(ConsumerSource),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2811,12 +3155,16 @@ internal sealed class ModuleTests
             Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual19!;
         }))();
-        var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Read"]);
+        var replacementIdentityInputs = CreatePrivateStructDefinitionInputs(
+            replacementProgram, "GenericCopyInitProvider", "Pair");
+        var replacement = ModuleCompiler.CreateProducer(replacementProgram,
+            ["Read"], replacementIdentityInputs);
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(
             ModuleCompiler.Link(consumer, replacement), nativePolicy)).ConfigureAwait(true), Is.EqualTo(57));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(
-            program, ["Read"], "GenericCopyInitProvider", nativePolicy);
+            program, ["Read"], "GenericCopyInitProvider", nativePolicy,
+            producerIdentityInputs);
         var nativeCompilation = Create(SyntaxTree.Parse(ConsumerSource),
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: policy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
@@ -2830,7 +3178,8 @@ internal sealed class ModuleTests
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(56));
 
         var nativeReplacement = NativeModuleCompiler.CreateProducer(
-            replacementProgram, ["Read"], "GenericCopyInitProvider", nativePolicy);
+            replacementProgram, ["Read"], "GenericCopyInitProvider",
+            nativePolicy, replacementIdentityInputs);
         NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeReplacement]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
             [nativeReplacement], TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(57));
@@ -2849,17 +3198,18 @@ internal sealed class ModuleTests
                     Second = second;
                 }
             }
-            float32 FillOut<T>(T value, out T result) where T : [Copy] {
+            float32 FillOut<T>(T value, out T result)  {
                 result = value;
                 return float32(1.5);
             }
-            float64 FillInit<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+            float64 FillInit<T>(T value, ref<init T> result)  {
+                *result = value;
                 return float64(2.5);
             }
             public int32 Read() {
                 float32 outResult = FillOut(new Pair(20, 22), out var copied);
-                float64 initResult = FillInit(new Pair(5, 2), init var initialized);
+                init Pair initialized;
+                float64 initResult = FillInit(new Pair(5, 2), ref init initialized);
                 if (outResult != float32(1.5) || copied.First != 20 || copied.Second != 22
                     || initResult != float64(2.5) || initialized.First != 5 || initialized.Second != 2) {
                     return 1;
@@ -2875,7 +3225,10 @@ internal sealed class ModuleTests
             Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual21!;
         }))();
-        var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
+        var producerIdentityInputs = CreatePrivateStructDefinitionInputs(
+            program, "GenericFloatingOutputProvider", "Pair");
+        var producer = ModuleCompiler.CreateProducer(program, ["Read"],
+            producerIdentityInputs);
         var compilation = Create(SyntaxTree.Parse(ConsumerSource),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -2902,12 +3255,16 @@ internal sealed class ModuleTests
             Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual23!;
         }))();
-        var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Read"]);
+        var replacementIdentityInputs = CreatePrivateStructDefinitionInputs(
+            replacementProgram, "GenericFloatingOutputProvider", "Pair");
+        var replacement = ModuleCompiler.CreateProducer(replacementProgram,
+            ["Read"], replacementIdentityInputs);
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(
             ModuleCompiler.Link(consumer, replacement), nativePolicy)).ConfigureAwait(true), Is.EqualTo(43));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(
-            program, ["Read"], "GenericFloatingOutputProvider", nativePolicy);
+            program, ["Read"], "GenericFloatingOutputProvider", nativePolicy,
+            producerIdentityInputs);
         var nativeCompilation = Create(SyntaxTree.Parse(ConsumerSource),
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: policy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
@@ -2921,7 +3278,8 @@ internal sealed class ModuleTests
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(42));
 
         var nativeReplacement = NativeModuleCompiler.CreateProducer(
-            replacementProgram, ["Read"], "GenericFloatingOutputProvider", nativePolicy);
+            replacementProgram, ["Read"], "GenericFloatingOutputProvider",
+            nativePolicy, replacementIdentityInputs);
         NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeReplacement]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
             [nativeReplacement], TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(43));
@@ -2945,20 +3303,23 @@ internal sealed class ModuleTests
                 result = new Pair(key, 2);
                 return true;
             }
-            public bool TryInitializePair(int32 key, init ref<Pair> result) {
+            public bool TryInitializePair(int32 key, ref<init Pair> result) {
                 if (key == 0) { return false; }
-                result = new Pair(key, 3);
+                *result = new Pair(key, 3);
                 return true;
             }
             """;
         var library = CreateLibrary(SyntaxTree.Parse(LibrarySource), policy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual25 = library.Program;
             Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual25!;
-        }))(),
-            ["TryGetPair", "TryInitializePair"]);
+        }))();
+        var producerIdentityInputs = CreatePrivateStructDefinitionInputs(
+            producerProgram, "CopyOutputProvider", "Pair");
+        var producer = ModuleCompiler.CreateProducer(producerProgram,
+            ["TryGetPair", "TryInitializePair"], producerIdentityInputs);
 
         const string ConsumerSource = """
             int32 Main() {
@@ -2967,40 +3328,45 @@ internal sealed class ModuleTests
                 if (TryGetPair(0, out copied) || copied is init) { return 2; }
                 if (!TryGetPair(40, out copied)) { return 2; }
                 init Pair initialized;
-                if (TryInitializePair(0, init initialized)) { return 3; }
-                if (!TryInitializePair(40, init initialized)) { return 4; }
+                if (TryInitializePair(0, ref init initialized)) { return 3; }
+                if (!TryInitializePair(40, ref init initialized)) { return 4; }
                 return copied.First + copied.Second + initialized.First + initialized.Second;
             }
             """;
         var compilation = Create(SyntaxTree.Parse(ConsumerSource),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => {
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual26 = compilation.Program;
             Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual26!;
-        }))(), producer);
+        }))();
+        var consumerIdentityInputs = CreatePrivateStructImportInputs(
+            consumerProgram, "CopyOutputConsumer", "Pair", "CopyOutputProvider");
+        var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer,
+            consumerIdentityInputs);
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(
             ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true), Is.EqualTo(85));
 
-        var program = ((global::System.Func<BoundProgram>)(() => {
-            var __nunitActual27 = library.Program;
-            Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>());
-            return (BoundProgram)__nunitActual27!;
-        }))();
-        var nativeProvider = NativeModuleCompiler.CreateProducer(program,
-            ["TryGetPair", "TryInitializePair"], "CopyOutputProvider", nativePolicy);
+        var nativeProvider = NativeModuleCompiler.CreateProducer(producerProgram,
+            ["TryGetPair", "TryInitializePair"], "CopyOutputProvider",
+            nativePolicy, producerIdentityInputs);
         var nativeCompilation = Create(SyntaxTree.Parse(ConsumerSource),
             NativeModuleCompiler.CreateGraphReference([nativeProvider]), runtimePolicy: policy);
         Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        var nativeConsumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual28 = nativeCompilation.Program;
+            Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual28!;
+        }))();
+        var nativeConsumerIdentityInputs = CreatePrivateStructImportInputs(
+            nativeConsumerProgram, "CopyOutputNativeConsumer", "Pair",
+            "CopyOutputProvider");
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual28 = nativeCompilation.Program;
-                Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual28!;
-            }))(), [nativeProvider], nativePolicy);
+            nativeConsumerProgram, [nativeProvider], nativePolicy,
+            nativeConsumerIdentityInputs);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProvider],
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(85));
 
@@ -3008,13 +3374,16 @@ internal sealed class ModuleTests
             LibrarySource.Replace("new Pair(key, 2)", "new Pair(key, 4)", StringComparison.Ordinal)
                 .Replace("new Pair(key, 3)", "new Pair(key, 5)", StringComparison.Ordinal)), policy);
         Assert.That(replacementLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, replacementLibrary.Diagnostics));
+        var replacementProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual29 = replacementLibrary.Program;
+            Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual29!;
+        }))();
+        var replacementIdentityInputs = CreatePrivateStructDefinitionInputs(
+            replacementProgram, "CopyOutputProvider", "Pair");
         var replacementProvider = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual29 = replacementLibrary.Program;
-                Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual29!;
-            }))(),
-            ["TryGetPair", "TryInitializePair"], "CopyOutputProvider", nativePolicy);
+            replacementProgram, ["TryGetPair", "TryInitializePair"],
+            "CopyOutputProvider", nativePolicy, replacementIdentityInputs);
         NativeModuleCompiler.ValidateGraph(nativeConsumer, [replacementProvider]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [replacementProvider],
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(89));
@@ -3032,37 +3401,40 @@ internal sealed class ModuleTests
                     Second = second;
                 }
             }
-            public void FailAfterInitializePair(int32 key, init ref<Pair> result) {
-                result = new Pair(key, 3);
+            public void FailAfterInitializePair(int32 key, ref<init Pair> result) {
+                *result = new Pair(key, 3);
                 if (key == 0) { require false; }
             }
-            public bool TryInitializePair(int32 key, init ref<Pair> result) {
+            public bool TryInitializePair(int32 key, ref<init Pair> result) {
                 if (key == 0) { return false; }
-                result = new Pair(key, 3);
+                *result = new Pair(key, 3);
                 return true;
             }
             """;
         var library = CreateLibrary(SyntaxTree.Parse(librarySource),
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual30 = library.Program;
+            Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual30!;
+        }))();
+        var producerIdentityInputs = CreatePrivateStructDefinitionInputs(
+            producerProgram, "CopyOutputFailure", "Pair");
         var producer = NativeModuleCompiler.CreateProducer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual30 = library.Program;
-                Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual30!;
-            }))(),
-            ["FailAfterInitializePair", "TryInitializePair"], "CopyOutputFailure",
-            NativeRuntimePolicy.CheckedExceptions);
+            producerProgram, ["FailAfterInitializePair", "TryInitializePair"],
+            "CopyOutputFailure", NativeRuntimePolicy.CheckedExceptions,
+            producerIdentityInputs);
         var consumerCompilation = Create(SyntaxTree.Parse("""
             int32 Main() {
                 init Pair initialized;
                 unsafe {
                     try {
-                        FailAfterInitializePair(0, init initialized);
+                        FailAfterInitializePair(0, ref init initialized);
                         return 1;
                     } catch {
                         if (initialized is init) { return 2; }
-                        if (!TryInitializePair(40, init initialized)) { return 3; }
+                        if (!TryInitializePair(40, ref init initialized)) { return 3; }
                     }
                 }
                 return initialized.First + initialized.Second;
@@ -3070,13 +3442,17 @@ internal sealed class ModuleTests
             """), NativeModuleCompiler.CreateGraphReference([producer]),
             runtimePolicy: BoundRuntimePolicy.CheckedExceptions);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual31 = consumerCompilation.Program;
+            Assert.That(__nunitActual31, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual31!;
+        }))();
+        var consumerIdentityInputs = CreatePrivateStructImportInputs(
+            consumerProgram, "CopyOutputFailureConsumer", "Pair",
+            "CopyOutputFailure");
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            ((global::System.Func<BoundProgram>)(() => {
-                var __nunitActual31 = consumerCompilation.Program;
-                Assert.That(__nunitActual31, Is.TypeOf<BoundProgram>());
-                return (BoundProgram)__nunitActual31!;
-            }))(), [producer],
-            NativeRuntimePolicy.CheckedExceptions);
+            consumerProgram, [producer], NativeRuntimePolicy.CheckedExceptions,
+            consumerIdentityInputs);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(43));
     }
@@ -3086,8 +3462,8 @@ internal sealed class ModuleTests
         BoundRuntimePolicy policy)
     {
         const string functionSource = """
-            public int32 Initialize(int32 first, int32 second, init ref<int32> result) {
-                result = first * 10 + second;
+            public int32 Initialize(int32 first, int32 second, ref<init int32> result) {
+                *result = first * 10 + second;
                 return 0;
             }
             """;
@@ -3097,7 +3473,7 @@ internal sealed class ModuleTests
                 init int32 initialized;
                 int32 status = Initialize(
                     second: trace++,
-                    result: init initialized,
+                    result: ref init initialized,
                     first: trace++);
                 return initialized + trace + status;
             }
@@ -3432,7 +3808,8 @@ internal sealed class ModuleTests
             checkedConversionsPath);
         var bitOperations = SyntaxTree.Parse(await File.ReadAllTextAsync(bitOperationsPath).ConfigureAwait(true),
             bitOperationsPath);
-        var library = CreateLibrary([range, facts, utf16CodeUnits, integerFacts, integerFactsExports,
+        var library = Compilation.CreateLibrary(
+            [range, facts, utf16CodeUnits, integerFacts, integerFactsExports,
             token, managedTokenChain, managedTokenChainTests, copyAlgorithms, copyAlgorithmsTests,
             float32MathSelection, float64MathSelection, floatMathSelectionTests, wideFacts,
             integerFormatting, integerFormattingTests, integerFloatConversion, integerFloatConversionTests,
@@ -3440,13 +3817,60 @@ internal sealed class ModuleTests
             floatingFormatConversionTests, floatingNegation, floatingNegationTests, checkedFacts,
             char16FloatConversion, char16FloatConversionTests, floatingComparison, floatingComparisonTests,
             floatingArithmetic, floatingArithmeticTests,
-            integerMath, integerSaturation, integerWrapping, checkedConversions, bitOperations], policy);
+            integerMath, integerSaturation, integerWrapping, checkedConversions,
+            bitOperations],
+            CreateModuleTestOptions(policy) with {
+                CoreEvaluationFormIdentitySelection
+                    = CoreEvaluationFormTestHelpers.ConstEvalSelection(policy),
+            });
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => {
+            var producerProgram = ((global::System.Func<BoundProgram>)(() => {
             var __nunitActual42 = library.Program;
             Assert.That(__nunitActual42, Is.TypeOf<BoundProgram>());
             return (BoundProgram)__nunitActual42!;
-        }))(), [
+            }))();
+            var definitions = producerProgram.Structures.Select((structure, index) =>
+                    new PrivateNominalDefinition((PrimitiveType)(100 + index),
+                        $"self_host_struct_{structure.Name.ToUpperInvariant()}",
+                        IsExported: !structure.IsPrivate && !structure.IsInternal))
+                .Concat(producerProgram.Classes.Select((classDefinition, index) =>
+                    new PrivateNominalDefinition(
+                        (PrimitiveType)(ManagedClassTypes.First + index),
+                        $"self_host_class_{classDefinition.Name.ToUpperInvariant()}",
+                        IsExported: !classDefinition.IsInternal)))
+                .ToArray();
+            var imports = producerProgram.PrivateClassReferences
+                .Where(static reference => reference.IsSourceLookupRoot
+                    && reference.Origin.OriginKind
+                        == BoundPrivateNominalOriginKind.ImportedExpectation)
+                .GroupBy(static reference => reference.ClassType)
+                .Select(static references => {
+                    var reference = references.First();
+                    if (references.Any(other =>
+                        other.Origin.LocalDeclarationKey
+                            != reference.Origin.LocalDeclarationKey
+                        || other.Origin.SelectedModuleIdentity
+                            != reference.Origin.SelectedModuleIdentity
+                        || other.Origin.SelectedExportKey
+                            != reference.Origin.SelectedExportKey))
+                    {
+                        throw new InvalidOperationException(
+                            "A self-host component class reference has conflicting provider origins.");
+                    }
+                    return new PrivateNominalImport(reference.ClassType,
+                        reference.Origin.LocalDeclarationKey,
+                        reference.Origin.SelectedModuleIdentity
+                            ?? throw new InvalidOperationException(
+                                "A self-host component class reference has no selected provider."),
+                        reference.Origin.SelectedExportKey
+                            ?? throw new InvalidOperationException(
+                                "A self-host component class reference has no selected export."));
+                })
+                .ToArray();
+            var identityInputs = PrivateModuleIdentityInputs.Create(
+                producerProgram, "SelfHostComponentTestRunner", definitions,
+                imports);
+            var producer = ModuleCompiler.CreateProducer(producerProgram, [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
             "Terrum.CodeAnalysis.SourceRange.GetEnd",
             "Terrum.CodeAnalysis.SourceRange.#get:End",
@@ -3587,7 +4011,7 @@ internal sealed class ModuleTests
             "Terrum.CodeAnalysis.Numerics64.ReverseEndiannessUInt64",
             "Terrum.CodeAnalysis.Numerics64.IsPow2UInt64",
             "Terrum.CodeAnalysis.Numerics64.TryRoundUpToPowerOfTwoUInt64",
-        ]);
+        ], identityInputs);
         var rangeTests = SyntaxTree.Parse(await File.ReadAllTextAsync(rangeTestsPath).ConfigureAwait(true), rangeTestsPath);
         var factsTests = SyntaxTree.Parse(await File.ReadAllTextAsync(factsTestsPath).ConfigureAwait(true), factsTestsPath);
         var utf16CodeUnitsTests = SyntaxTree.Parse(
@@ -4795,13 +5219,13 @@ internal sealed class ModuleTests
         bool initialUsesInit)
     {
         var initialDeclaration = initialUsesInit
-            ? "public void Set(init ref<int32> result) { result = 42; }"
+            ? "public void Set(ref<init int32> result) { *result = 42; }"
             : "public void Set(out int32 result) { result = 42; }";
         var replacementDeclaration = initialUsesInit
             ? "public void Set(out int32 result) { result = 42; }"
-            : "public void Set(init ref<int32> result) { result = 42; }";
+            : "public void Set(ref<init int32> result) { *result = 42; }";
         var consumerSource = initialUsesInit
-            ? "int32 Main() { init int32 result; Set(init result); return result; }"
+            ? "int32 Main() { init int32 result; Set(ref init result); return result; }"
             : "int32 Main() { Set(out var result); return result; }";
 
         var initialCompilation = CreateLibrary(SyntaxTree.Parse(initialDeclaration), policy);
@@ -5097,8 +5521,16 @@ internal sealed class ModuleTests
             + "int32 Main() { return 0; } public Pair Make() { return new Pair(); }");
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(privateField, ["Make"]))!;
 
-        var staticField = Create(SyntaxTree.Parse("struct S { static int32 Value; } int32 Main() { return 0; }"));
-        Assert.That(global::System.Linq.Enumerable.Any(staticField.Diagnostics,static diagnostic => diagnostic.Code == "TRM3001"),Is.True);
+        var staticField = Create(SyntaxTree.Parse(
+            "struct S { private int32 Field; public static int32 Value = 1; } "
+            + "int32 Main() { return S.Value; }"));
+        Assert.That(staticField.HasErrors, Is.False,
+            string.Join(Environment.NewLine, staticField.Diagnostics));
+        var staticFieldProgram = staticField.Program!;
+        Assert.That(staticFieldProgram.StaticFields, Has.Length.EqualTo(1));
+        _ = Assert.Throws<ModuleContractException>(
+            () => ModuleCompiler.CreateProducer(staticFieldProgram,
+                ["S.Value"]))!;
     }
 
     [Test]
@@ -5155,7 +5587,8 @@ internal sealed class ModuleTests
         var producer = Produce("public int32 API() { Helper(); return 42; } void Helper() { }", "API");
         var consumer = Compile("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                init OwnedInt32Buffer raw;
+                require OwnedInt32Buffer.TryCreate(1, ref init raw);
                 mut OwnedInt32Buffer buffer = move raw;
                 buffer.Clear();
                 Helper();
@@ -5180,7 +5613,8 @@ internal sealed class ModuleTests
             """, "API");
         var consumer = Compile("""
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate(1, out var buffer);
+                init OwnedInt32Buffer buffer;
+                require OwnedInt32Buffer.TryCreate(1, ref init buffer);
                 return buffer.Count;
             }
             void Hidden() { Helper(); }
@@ -5247,6 +5681,128 @@ internal sealed class ModuleTests
             }
         }
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(program, producer))!;
+    }
+
+    [Test]
+    public void LegacyPrivateClassProjectionDoesNotInventOwnership()
+    {
+        var compilation = CreateLibrary(SyntaxTree.Parse("""
+            public partial class Node {
+                public int32 Value;
+                public Node(int32 value) { Value = value; }
+            }
+            partial class Node {
+                public int32 Get() { return Value; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Classes.Single().IsUnique, Is.False);
+
+        var classIdentityInputs = PrivateModuleIdentityInputs.Create(program,
+            "ClassOwnershipProvider", [
+                new PrivateNominalDefinition(
+                    (PrimitiveType)ManagedClassTypes.First,
+                    "types.node", IsExported: true),
+            ], []);
+        var producer = ModuleCompiler.CreateProducer(program,
+            ["Node.Get"], classIdentityInputs);
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.That(reference.Classes.Single().IsUnique, Is.Null);
+        Assert.That(reference.Classes.Single().HasCleanup, Is.False);
+        var unknownOwnershipCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public T Copy<T>(T value) { return value; }
+                public Node CopyNode(Node value) {
+                    return Copy<Node>(value);
+                }
+                """), reference);
+        Assert.That(unknownOwnershipCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("ownership domain",
+                    StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine,
+                unknownOwnershipCompilation.Diagnostics));
+        var unavailableCleanupProgram = program with {
+            Classes = [program.Classes.Single() with {
+                HasCleanup = null,
+            }],
+        };
+        var unavailableCleanupInputs
+            = PrivateModuleIdentityInputs.Create(
+                unavailableCleanupProgram, "ClassOwnershipProvider", [
+                    new PrivateNominalDefinition(
+                        (PrimitiveType)ManagedClassTypes.First,
+                        "types.node", IsExported: true),
+                ], []);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(unavailableCleanupProgram,
+                ["Node.Get"], unavailableCleanupInputs));
+        var directCopyCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public Node CopyNode(Node value) {
+                    Node copy = value;
+                    return copy;
+                }
+                """), reference);
+        Assert.That(directCopyCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine,
+                directCopyCompilation.Diagnostics));
+        var returnCopyCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public Node ReturnNode(Node value) { return value; }
+                """), reference);
+        Assert.That(returnCopyCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine,
+                returnCopyCompilation.Diagnostics));
+        var argumentCopyCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                void TakeNode(Node value) { }
+                public int32 PassNode(Node value) {
+                    TakeNode(value);
+                    return 0;
+                }
+                """), reference);
+        Assert.That(argumentCopyCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine,
+                argumentCopyCompilation.Diagnostics));
+        var fieldCopyCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                class Holder {
+                    public Node Value;
+                    public Holder(Node value) { Value = value; }
+                }
+                """), reference);
+        Assert.That(fieldCopyCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True,
+            string.Join(Environment.NewLine,
+                fieldCopyCompilation.Diagnostics));
+
+        var uniqueCompilation = CreateLibrary(SyntaxTree.Parse("""
+            public unique class Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public int32 Get() { return Value; }
+            }
+            """));
+        Assert.That(uniqueCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                uniqueCompilation.Diagnostics));
+        var uniqueProgram = uniqueCompilation.Program!;
+        Assert.That(uniqueProgram.Classes.Single().IsUnique, Is.True);
+        var uniqueIdentityInputs = PrivateModuleIdentityInputs.Create(
+            uniqueProgram, "UniqueClassOwnershipProvider", [
+                new PrivateNominalDefinition(
+                    (PrimitiveType)ManagedClassTypes.First, "types.owner",
+                    IsExported: true),
+            ], []);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(uniqueProgram, ["Owner.Get"],
+                uniqueIdentityInputs));
     }
 
     [Test]

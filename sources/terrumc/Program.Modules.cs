@@ -163,6 +163,23 @@ internal static partial class Program
                         return 2;
                     }
                 }
+                if (args[1] == "consumer"
+                    && privateIdentityManifest is not null
+                    && layoutCoreManifest is not null
+                    && privateIdentityManifest.Imports.Any(selection =>
+                        selection.Declaration.Kind
+                            == PrivateNominalDeclarationKind.Enum
+                        && selection.SelectedModuleIdentity
+                            == layoutCoreManifest.Registration
+                                .LayoutKinds.Identity.ProviderIdentity
+                        && selection.SelectedExportKey
+                            == layoutCoreManifest.Registration
+                                .LayoutKinds.Identity.ExportKey))
+                {
+                    WriteInputError(json, "TRM2001",
+                        "A consumer cannot select a Core enum identity directly from a layout registration; imports must resolve through its positional producer.");
+                    return 2;
+                }
                 var snapshots = ReadModuleSources(paths,
                     out var sourceSha256);
                 if (privateIdentityManifest is not null

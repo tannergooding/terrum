@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -30,6 +31,26 @@ internal sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int StandardFNativeFunction();
+
+    private static readonly string[] s_trRmColorMemberKeys = [
+        "member.β", "member.red", "member.spare",
+    ];
+    private static readonly string[] s_trRmGlobalMemberKeys = ["member.β"];
+    private static readonly string[] s_trRmCoreManifestAliasOptions = [
+        "--native-core-manifest", "--native-output-core-manifest",
+    ];
+
+    private static string LowercaseHex(ReadOnlySpan<byte> bytes)
+    {
+        const string hex = "0123456789abcdef";
+        var characters = new char[bytes.Length * 2];
+        for (var index = 0; index < bytes.Length; index++)
+        {
+            characters[index * 2] = hex[bytes[index] >> 4];
+            characters[(index * 2) + 1] = hex[bytes[index] & 0x0F];
+        }
+        return new string(characters);
+    }
 
     [Test]
     public async Task CompileTrRmSelectsTheExactNominalEnumsSchemaAsync()
@@ -66,6 +87,1280 @@ internal sealed partial class CliTests
         }
         finally
         {
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmTransportsExplicitSourceGenericMethodKeysAsync()
+    {
+        const string source
+            = "public T Identity<T>(T value) { return value; }";
+        const string secondarySource
+            = "public int32 Helper(int32 value) { return value; }";
+        var sourcePath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-source-{Guid.NewGuid():N}.terrum");
+        var secondaryPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-secondary-{Guid.NewGuid():N}.terrum");
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-exports-{Guid.NewGuid():N}.json");
+        var staleExportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-exports-stale-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-exports-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllTextAsync(sourcePath, source,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(secondaryPath, secondarySource,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var syntaxTree = SyntaxTree.Parse(source, sourcePath);
+            var secondaryTree = SyntaxTree.Parse(secondarySource,
+                secondaryPath);
+            var declaration = syntaxTree.Root.DescendantNodes().Single(
+                static node => node.Kind == SyntaxKind.FunctionDeclaration);
+            var digest = LowercaseHex(SHA256.HashData(
+                Encoding.Unicode.GetBytes(syntaxTree.Root.ToFullString())));
+            var configuration = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                sources = new[] {
+                    new { path = sourcePath, snapshotSha256 = digest },
+                    new {
+                        path = secondaryPath,
+                        snapshotSha256 = LowercaseHex(
+                            SHA256.HashData(Encoding.Unicode.GetBytes(
+                                secondaryTree.Root.ToFullString()))),
+                    },
+                },
+                exports = new[] {
+                    new {
+                        sourceInputOrdinal = 0,
+                        declarationStart = declaration.Span.Start,
+                        declarationLength = declaration.Span.Length,
+                        exportKey = "identity/v1",
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(exportFile, configuration,
+                new UTF8Encoding(true)).ConfigureAwait(true);
+
+            var (exit, output, error) = await RunAsync([], "compile-trrm",
+                sourcePath, "--source", secondaryPath, "--identity",
+                "identity.provider",
+                "--trrm-schema",
+                "trrm/1-draft-generic-method-calls-parameter-labels-1",
+                "--trrm-source-generic-method-exports", exportFile,
+                "--library", "-o", artifact, "--runtime", "fail-fast",
+                "--json").ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var artifactBytes = await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateGenericMethodCallsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForGenericMethodCallsParameterLabelsDraft(
+                        artifactBytes));
+            Assert.That(tables.Methods.Count, Is.EqualTo(2));
+            Assert.That(tables.Features.TryGetFeature(23, out var feature),
+                Is.True);
+            Assert.That(feature.RuleRevision, Is.EqualTo(1));
+            Assert.That(tables.Features.TryGetFeature(26, out var labels),
+                Is.True);
+            Assert.That(labels.RuleRevision, Is.EqualTo(1));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "identity/v1", out var exportedDefinition), Is.True);
+            Assert.That(exportedDefinition, Is.EqualTo(0x1600_0002));
+            Assert.That(tables.MethodParameterLabels.TryGetNameStringRow(
+                checked((int)(exportedDefinition & 0x00FF_FFFF)), 0,
+                out var parameterNameRow), Is.True);
+            Assert.That(tables.Strings.DecodeName(parameterNameRow),
+                Is.EqualTo("value"));
+
+            var staleConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                sources = new[] {
+                    new {
+                        path = sourcePath,
+                        snapshotSha256 = digest,
+                    },
+                    new {
+                        path = secondaryPath,
+                        snapshotSha256 = new string('0', 64),
+                    },
+                },
+                exports = new[] {
+                    new {
+                        sourceInputOrdinal = 0,
+                        declarationStart = declaration.Span.Start,
+                        declarationLength = declaration.Span.Length,
+                        exportKey = "identity/v1",
+                    },
+                },
+            });
+            await File.WriteAllTextAsync(staleExportFile,
+                staleConfiguration, new UTF8Encoding(false))
+                .ConfigureAwait(true);
+            var sentinel = "123"u8.ToArray();
+            await File.WriteAllBytesAsync(artifact, sentinel)
+                .ConfigureAwait(true);
+            var (staleExit, staleOutput, staleError) = await RunAsync([],
+                "compile-trrm", sourcePath, "--source", secondaryPath,
+                "--identity",
+                "identity.provider", "--trrm-schema",
+                "trrm/1-draft-generic-method-calls-parameter-labels-1",
+                "--trrm-source-generic-method-exports", staleExportFile,
+                "--library", "-o", artifact, "--runtime", "fail-fast",
+                "--json").ConfigureAwait(false);
+            Assert.That(staleExit, Is.EqualTo(2),
+                $"{staleOutput}{Environment.NewLine}{staleError}");
+            Assert.That(staleError, Is.Empty);
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true), Is.EqualTo(sentinel));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(sourcePath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(secondaryPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(staleExportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmRejectsMalformedGenericMethodMapsWithoutReplacingOutputAsync()
+    {
+        const string source
+            = "public T Identity<T>(T value) { return value; }";
+        var sourcePath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-invalid-source-{Guid.NewGuid():N}.terrum");
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-invalid-exports-{Guid.NewGuid():N}.json");
+        var missingMap = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-missing-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-generic-invalid-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllTextAsync(sourcePath, source,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var tree = SyntaxTree.Parse(source, sourcePath);
+            var declaration = tree.Root.DescendantNodes().Single(
+                static node => node.Kind == SyntaxKind.FunctionDeclaration);
+            var digest = LowercaseHex(SHA256.HashData(
+                Encoding.Unicode.GetBytes(tree.Root.ToFullString())));
+            var validConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                sources = new[] {
+                    new { path = sourcePath, snapshotSha256 = digest },
+                },
+                exports = new[] {
+                    new {
+                        sourceInputOrdinal = 0,
+                        declarationStart = declaration.Span.Start,
+                        declarationLength = declaration.Span.Length,
+                        exportKey = "identity/v1",
+                    },
+                },
+            });
+            var duplicateKeyConfiguration = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                sources = new[] {
+                    new { path = sourcePath, snapshotSha256 = digest },
+                },
+                exports = new[] {
+                    new {
+                        sourceInputOrdinal = 0,
+                        declarationStart = declaration.Span.Start,
+                        declarationLength = declaration.Span.Length,
+                        exportKey = "identity/v1",
+                    },
+                    new {
+                        sourceInputOrdinal = 0,
+                        declarationStart = declaration.Span.Start,
+                        declarationLength = declaration.Span.Length,
+                        exportKey = "identity/v1",
+                    },
+                },
+            });
+            var malformedConfigurations = new[] {
+                validConfiguration.Replace("\"schemaVersion\":1",
+                    "\"schemaVersion\":1,\"schemaVersion\":1",
+                    StringComparison.Ordinal),
+                validConfiguration.Replace("\"schemaVersion\":1",
+                    "\"schemaVersion\":1.0", StringComparison.Ordinal),
+                validConfiguration.Replace(digest,
+                    digest.ToUpperInvariant(), StringComparison.Ordinal),
+                duplicateKeyConfiguration,
+            };
+            var sentinel = "ABC"u8.ToArray();
+            foreach (var malformedConfiguration in malformedConfigurations)
+            {
+                await File.WriteAllTextAsync(exportFile,
+                    malformedConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                await File.WriteAllBytesAsync(artifact, sentinel)
+                    .ConfigureAwait(true);
+                var (exit, output, error) = await RunAsync([],
+                    "compile-trrm", sourcePath, "--identity",
+                    "identity.provider", "--trrm-schema",
+                    "trrm/1-draft-generic-method-calls-parameter-labels-1",
+                    "--trrm-source-generic-method-exports", exportFile,
+                    "--library", "-o", artifact, "--runtime", "fail-fast",
+                    "--json").ConfigureAwait(false);
+                Assert.That(exit, Is.EqualTo(2),
+                    $"{output}{Environment.NewLine}{error}");
+                Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true), Is.EqualTo(sentinel));
+            }
+
+            await File.WriteAllBytesAsync(artifact, sentinel)
+                .ConfigureAwait(true);
+            var (schemaExit, schemaOutput, schemaError) = await RunAsync([],
+                "compile-trrm", sourcePath, "--identity",
+                "identity.provider", "--trrm-schema",
+                "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-generic-method-exports", missingMap,
+                "--library", "-o", artifact, "--runtime", "fail-fast",
+                "--json").ConfigureAwait(false);
+            Assert.That(schemaExit, Is.EqualTo(2),
+                $"{schemaOutput}{Environment.NewLine}{schemaError}");
+            Assert.That(schemaOutput, Does.Contain("TRM2000"));
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                .ConfigureAwait(true), Is.EqualTo(sentinel));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(sourcePath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmTransportsExplicitSourceEnumMemberKeysAsync()
+    {
+        const string secondarySource = """
+            namespace Example {
+                partial enum Color { Blue = 7 }
+            }
+            """;
+        const string primarySource = """
+            namespace Example {
+                public partial enum Color : int32 {
+                    Red = 7, Spare = 11
+                }
+                public enum Size : int32 { Small = 1 }
+                public enum Empty : int32 { }
+                public Color GetColor() { return Color.Blue; }
+            }
+            """;
+        const string globalSource
+            = "public enum Global : int32 { Only = 3 }";
+        var secondaryPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-secondary-{Guid.NewGuid():N}.terrum");
+        var primaryPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-primary-{Guid.NewGuid():N}.terrum");
+        var globalPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-global-{Guid.NewGuid():N}.terrum");
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-exports-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-exports-{Guid.NewGuid():N}.trrm");
+        var longMemberKey = new string('k', 257);
+        var exportConfiguration = JsonSerializer.Serialize(new {
+            schemaVersion = 1,
+            exports = new[] {
+                new {
+                    @namespace = "Example",
+                    name = "Empty",
+                    exportKey = "enum.empty",
+                    enumMemberDeclarationKeys = Array.Empty<string>(),
+                },
+                new {
+                    @namespace = "Example",
+                    name = "Size",
+                    exportKey = "enum.size",
+                    enumMemberDeclarationKeys = new[] { longMemberKey },
+                },
+                new {
+                    @namespace = "",
+                    name = "Global",
+                    exportKey = "g",
+                    enumMemberDeclarationKeys = s_trRmGlobalMemberKeys,
+                },
+                new {
+                    @namespace = "Example",
+                    name = "Color",
+                    exportKey = "enum.color",
+                    enumMemberDeclarationKeys = s_trRmColorMemberKeys,
+                },
+            },
+        });
+        try
+        {
+            await File.WriteAllTextAsync(secondaryPath, secondarySource)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(primaryPath, primarySource)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(globalPath, globalSource)
+                .ConfigureAwait(true);
+            await File.WriteAllTextAsync(exportFile, exportConfiguration,
+                new UTF8Encoding(true)).ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync(
+                [], "compile-trrm", secondaryPath, "--source", primaryPath,
+                "--source", globalPath,
+                "--identity", "source-enum-module", "--trrm-schema",
+                "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", exportFile, "--library",
+                "-o", artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateNominalEnumsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForNominalEnumsDraft(
+                        await File.ReadAllBytesAsync(artifact)
+                            .ConfigureAwait(true)));
+            Assert.That(tables.EnumDefs.Count, Is.EqualTo(4));
+            Assert.That(tables.EnumMembers.Count, Is.EqualTo(5));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "enum.color", out var colorDefId), Is.True);
+            var colorTypeDef = (int)(colorDefId & 0x00FF_FFFF);
+            var colorEnum = tables.EnumDefs.GetRowForTypeDef(colorTypeDef);
+            var (colorFirst, colorCount)
+                = tables.EnumDefs.GetMemberRange(colorEnum);
+            Assert.That(colorCount, Is.EqualTo(3));
+            Assert.That(tables.EnumMembers.GetDeclarationKey(colorFirst),
+                Is.EqualTo("member.β"));
+            Assert.That(tables.EnumMembers.GetDeclarationKey(colorFirst + 1),
+                Is.EqualTo("member.red"));
+            Assert.That(tables.EnumMembers.GetDeclarationKey(colorFirst + 2),
+                Is.EqualTo("member.spare"));
+
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "enum.size", out var sizeDefId), Is.True);
+            var sizeTypeDef = (int)(sizeDefId & 0x00FF_FFFF);
+            var sizeEnum = tables.EnumDefs.GetRowForTypeDef(sizeTypeDef);
+            var (sizeFirst, sizeCount)
+                = tables.EnumDefs.GetMemberRange(sizeEnum);
+            Assert.That(sizeCount, Is.EqualTo(1));
+            Assert.That(tables.EnumMembers.GetDeclarationKey(sizeFirst),
+                Is.EqualTo(longMemberKey));
+
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "g", out var globalDefId), Is.True);
+            var globalTypeDef = (int)(globalDefId & 0x00FF_FFFF);
+            var globalEnum = tables.EnumDefs.GetRowForTypeDef(globalTypeDef);
+            var (globalFirst, globalCount)
+                = tables.EnumDefs.GetMemberRange(globalEnum);
+            Assert.That(globalCount, Is.EqualTo(1));
+            Assert.That(tables.EnumMembers.GetDeclarationKey(globalFirst),
+                Is.EqualTo("member.β"));
+
+            var emptyTypeDef = 0;
+            for (var row = 1; row <= tables.TypeDefs.Count; row++)
+            {
+                if (tables.TypeDefs.GetName(row) == "Empty")
+                {
+                    emptyTypeDef = row;
+                    break;
+                }
+            }
+            Assert.That(emptyTypeDef, Is.Not.Zero);
+            var emptyEnum = tables.EnumDefs.GetRowForTypeDef(emptyTypeDef);
+            Assert.That(tables.EnumDefs.GetMemberRange(emptyEnum),
+                Is.EqualTo((0, 0)));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(secondaryPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(primaryPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(globalPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmTransportsExplicitSourceTypeAndFieldKeysAsync()
+    {
+        const string moduleIdentity = "source-type-field-cli";
+        const string source = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Cell {
+                public int32 Value;
+            }
+            """;
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-exports-{Guid.NewGuid():N}.json");
+        var layoutManifest = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-layout-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-exports-{Guid.NewGuid():N}.trrm");
+        const string consumerIdentity = "source-type-field-cli-consumer";
+        var consumerArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-consumer-{Guid.NewGuid():N}.trrm");
+        var consumerImage = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-consumer-{Guid.NewGuid():N}.exe");
+        var exportConfiguration = JsonSerializer.Serialize(new {
+            schemaVersion = 1,
+            exports = new[] {
+                new {
+                    @namespace = "",
+                    name = "Cell",
+                    exportKey = "type.cell",
+                    fieldExports = new[] {
+                        new {
+                            name = "Value",
+                            exportKey = "field.cell.value",
+                        },
+                    },
+                },
+            },
+        });
+        try
+        {
+            await File.WriteAllTextAsync(exportFile, exportConfiguration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(layoutManifest,
+                CreateLayoutCoreManifest(moduleIdentity),
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", moduleIdentity, "--trrm-schema",
+                "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                "--trrm-source-type-exports", exportFile,
+                "--layout-core-manifest", layoutManifest, "--library", "-o",
+                artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables
+                = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForInitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft(
+                            await File.ReadAllBytesAsync(artifact)
+                                .ConfigureAwait(true)));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "type.cell", out var typeDefinition), Is.True);
+            Assert.That(typeDefinition >> 24, Is.EqualTo(0x13u));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "field.cell.value", out var fieldDefinition), Is.True);
+            Assert.That(fieldDefinition >> 24, Is.EqualTo(0x14u));
+            Assert.That(tables.Fields.GetOwnerTypeDef(checked((int)(
+                fieldDefinition & 0x00FF_FFFF))),
+                Is.EqualTo(checked((int)(typeDefinition & 0x00FF_FFFF))));
+            Assert.That(tables.Features.TryGetFeature(13,
+                out var fieldExportFeature), Is.True);
+            Assert.That(fieldExportFeature.RuleRevision, Is.EqualTo(1));
+
+            var providerInput = new TrRmStandardArtifactInput(
+                "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true));
+            var reference = TrRmExecutableCompiler.CreateStandardReference(
+                providerInput, moduleIdentity, [], ["type.cell"],
+                ["field.cell.value"]);
+            var consumerCompilation = Compilation.Create(
+                SyntaxTree.Parse("""
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Wrapper {
+                        public Cell Inner;
+                    }
+
+                    public void Fill(ref<init int32> result, int32 value) {
+                        *result = value;
+                    }
+
+                    public int32 Main() {
+                        init Wrapper wrapper;
+                        Fill(ref init wrapper.Inner.Value, 42);
+                        return wrapper.Inner.Value;
+                    }
+                    """), reference, new CompilationOptions {
+                    LayoutCoreRegistration =
+                        LayoutCoreRegistrationTestData.Create(),
+                });
+            Assert.That(consumerCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    consumerCompilation.Diagnostics));
+            var consumerArtifactBytes
+                = TrRmExecutableCompiler.EmitStandard(
+                    (BoundProgram)consumerCompilation.Program!,
+                    consumerIdentity,
+                    "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                    1);
+            await File.WriteAllBytesAsync(consumerArtifact,
+                consumerArtifactBytes).ConfigureAwait(true);
+
+            var (runExit, runOutput, runError) = await RunAsync([],
+                "run-trrm", consumerArtifact, "--runtime", "fail-fast",
+                "--trrm-schema",
+                "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                artifact, "--json").ConfigureAwait(false);
+            Assert.That(runExit, Is.EqualTo(42),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (buildExit, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", consumerArtifact, "-o", consumerImage,
+                "--runtime", "fail-fast", "--trrm-schema",
+                "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                artifact, "--json").ConfigureAwait(false);
+            Assert.That(buildExit, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteTrRmImageAsync(consumerImage)
+                .ConfigureAwait(true), Is.EqualTo(42));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(layoutManifest)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(consumerImage)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmRejectsInvalidSourceTypeExportFilesAsync()
+    {
+        const string moduleIdentity = "source-type-field-invalid";
+        const string source = "public int32 Main() { return 0; }";
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-invalid-{Guid.NewGuid():N}.json");
+        var aliasArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-alias-{Guid.NewGuid():N}.trrm");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-source-type-invalid-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        string[] invalidConfigurations = [
+            """{"schemaVersion":1,"schema\u0056ersion":1,"exports":[]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"","name":"Cell","exportKey":"type.cell","fieldExports":[],"unknown":true}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"","name":"Cell","exportKey":"same","fieldExports":[{"name":"Value","exportKey":"same"}]}]}""",
+            """{"schemaVersion":1.0,"exports":[]}""",
+        ];
+        try
+        {
+            await File.WriteAllBytesAsync(artifact, retained)
+                .ConfigureAwait(true);
+            foreach (var invalidConfiguration in invalidConfigurations)
+            {
+                await File.WriteAllTextAsync(exportFile,
+                    invalidConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                var (exit, output, error) = await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", moduleIdentity, "--trrm-schema",
+                    "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                    "--trrm-source-type-exports", exportFile, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+                Assert.That(exit, Is.EqualTo(2),
+                    $"{output}{Environment.NewLine}{error}");
+                Assert.That(error, Is.Empty);
+                using var document = JsonDocument.Parse(output);
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+                Assert.That(await File.ReadAllBytesAsync(artifact)
+                        .ConfigureAwait(true),
+                    Is.EqualTo(retained));
+            }
+
+            var (wrongSchemaExit, wrongSchemaOutput, wrongSchemaError)
+                = await RunAsync(Encoding.UTF8.GetBytes(source),
+                    "compile-trrm", "-", "--identity", moduleIdentity,
+                    "--trrm-schema",
+                    "trrm/1-draft-init-reference-bodies-local-field-layout-1",
+                    "--trrm-source-type-exports", exportFile, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(wrongSchemaExit, Is.EqualTo(2),
+                $"{wrongSchemaOutput}{Environment.NewLine}{wrongSchemaError}");
+            using (var document = JsonDocument.Parse(wrongSchemaOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            var aliasManifest = JsonSerializer.Serialize(new {
+                schemaVersion = 1,
+                exports = Array.Empty<object>(),
+            });
+            await File.WriteAllTextAsync(aliasArtifact, aliasManifest,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var aliasContents = await File.ReadAllBytesAsync(aliasArtifact)
+                .ConfigureAwait(true);
+            var (aliasExit, aliasOutput, aliasError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", moduleIdentity, "--trrm-schema",
+                "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                "--trrm-source-type-exports", aliasArtifact, "--library",
+                "-o", aliasArtifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(aliasExit, Is.EqualTo(2),
+                $"{aliasOutput}{Environment.NewLine}{aliasError}");
+            using (var document = JsonDocument.Parse(aliasOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(aliasArtifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(aliasContents));
+
+            var (enumMixExit, enumMixOutput, enumMixError)
+                = await RunAsync(Encoding.UTF8.GetBytes(source),
+                    "compile-trrm", "-", "--identity", moduleIdentity,
+                    "--trrm-schema",
+                    "trrm/1-draft-init-reference-bodies-local-field-layout-2",
+                    "--trrm-source-type-exports", exportFile,
+                    "--trrm-source-enum-exports", exportFile, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(enumMixExit, Is.EqualTo(2),
+                $"{enumMixOutput}{Environment.NewLine}{enumMixError}");
+            using (var document = JsonDocument.Parse(enumMixOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(aliasArtifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmAcceptsExplicitEmptySourceEnumExportMapAsync()
+    {
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-empty-enum-exports-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-empty-enum-exports-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllTextAsync(exportFile,
+                """{"schemaVersion":1,"exports":[]}""",
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(
+                    "public int32 GetValue() { return 42; }"),
+                "compile-trrm", "-", "--identity", "empty-enum-module",
+                "--trrm-schema", "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", exportFile, "--library", "-o",
+                artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateNominalEnumsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForNominalEnumsDraft(
+                        await File.ReadAllBytesAsync(artifact)
+                            .ConfigureAwait(true)));
+            Assert.That(tables.EnumDefs.Count, Is.Zero);
+            Assert.That(tables.EnumMembers.Count, Is.Zero);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmEmptySourceEnumExportMapDoesNotInferKeysAsync()
+    {
+        const string source
+            = "public enum Color : int32 { Red = 7 }";
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-empty-enum-export-map-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-empty-enum-export-map-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0x9A, 0xA9];
+        try
+        {
+            await File.WriteAllTextAsync(exportFile,
+                """{"schemaVersion":1,"exports":[]}""",
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(artifact, retained)
+                .ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", "empty-enum-export-map",
+                "--trrm-schema", "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", exportFile, "--library", "-o",
+                artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(1),
+                $"{output}{Environment.NewLine}{error}");
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmRejectsInvalidSourceEnumExportFilesWithoutReplacingOutputAsync()
+    {
+        const string source
+            = "namespace Example { public enum Color : int32 { Red = 7, Blue = 19 } }";
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-exports-invalid-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-exports-invalid-{Guid.NewGuid():N}.trrm");
+        var absentArtifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-exports-absent-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xA5, 0x5A];
+        string[] invalidConfigurations = [
+            """{"schemaVersion":1,"schema\u0056ersion":1,"exports":[]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"\uD800","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":[]}]}""",
+            """{"exports":[]}""",
+            """{"schemaVersion":1}""",
+            """{"schemaVersion":1,"exports":null}""",
+            """{"schemaVersion":1,"exports":[{"namespace":null,"name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":[]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example\u0000","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":[]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"","exportKey":"enum.color","enumMemberDeclarationKeys":[]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"","enumMemberDeclarationKeys":[]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Nested.Color","exportKey":"enum.color","enumMemberDeclarationKeys":[]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":[""]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":["member\u0000key"]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color"}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":null}]}""",
+            """{"schemaVersion":1,"exports":[],"unknown":true}""",
+            """{"schemaVersion":1.0,"exports":[]}""",
+            """{"schemaVersion":1e0,"exports":[]}""",
+            """{"schemaVersion":"1","exports":[]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":["only-one"]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":["same","same"]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Missing","exportKey":"enum.missing","enumMemberDeclarationKeys":[]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":["red","blue"]},{"namespace":"Example","name":"Color","exportKey":"enum.color2","enumMemberDeclarationKeys":["red","blue"]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"duplicate","enumMemberDeclarationKeys":["red","blue"]},{"namespace":"Other","name":"Shade","exportKey":"duplicate","enumMemberDeclarationKeys":[]}]}""",
+            """{"schemaVersion":1,"exports":[{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":["red","blue"]},{"namespace":"Example","name":"Color","exportKey":"enum.color","enumMemberDeclarationKeys":["red","blue"]}]}""",
+        ];
+        try
+        {
+            await File.WriteAllBytesAsync(artifact, retained)
+                .ConfigureAwait(true);
+            foreach (var invalidConfiguration in invalidConfigurations)
+            {
+                await File.WriteAllTextAsync(exportFile,
+                    invalidConfiguration, new UTF8Encoding(false))
+                    .ConfigureAwait(true);
+                var (exit, output, error) = await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--trrm-source-enum-exports", exportFile, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+                Assert.That(exit, Is.EqualTo(2),
+                    $"{output}{Environment.NewLine}{error}");
+                Assert.That(error, Is.Empty);
+                using var document = JsonDocument.Parse(output);
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+                Assert.That(await File.ReadAllBytesAsync(artifact)
+                        .ConfigureAwait(true),
+                    Is.EqualTo(retained));
+            }
+
+            byte[][] invalidByteConfigurations = [
+                [0xFF, 0xFE],
+                [
+                    0xEF, 0xBB, 0xBF, 0xEF, 0xBB, 0xBF,
+                    .. Encoding.UTF8.GetBytes(
+                        """{"schemaVersion":1,"exports":[]}"""),
+                ],
+            ];
+            foreach (var invalidConfiguration
+                in invalidByteConfigurations)
+            {
+                await File.WriteAllBytesAsync(exportFile,
+                    invalidConfiguration).ConfigureAwait(true);
+                var (exit, output, error) = await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--trrm-source-enum-exports", exportFile, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+                Assert.That(exit, Is.EqualTo(2),
+                    $"{output}{Environment.NewLine}{error}");
+                using var document = JsonDocument.Parse(output);
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+                Assert.That(await File.ReadAllBytesAsync(artifact)
+                        .ConfigureAwait(true),
+                    Is.EqualTo(retained));
+            }
+
+            await File.WriteAllTextAsync(exportFile,
+                """{"schemaVersion":1,"exports":[],"unknown":true}""",
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (configurationFirstExit, configurationFirstOutput,
+                configurationFirstError) = await RunAsync(
+                Encoding.UTF8.GetBytes("{ invalid source"),
+                "compile-trrm", "-", "--identity", "source-enum-module",
+                "--trrm-schema", "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", exportFile, "--library", "-o",
+                artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(configurationFirstExit, Is.EqualTo(2),
+                $"{configurationFirstOutput}{Environment.NewLine}{configurationFirstError}");
+            using (var document = JsonDocument.Parse(configurationFirstOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            var (absentExit, absentOutput, absentError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", "source-enum-module", "--trrm-schema",
+                "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", exportFile, "--library", "-o",
+                absentArtifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(absentExit, Is.EqualTo(2),
+                $"{absentOutput}{Environment.NewLine}{absentError}");
+            Assert.That(File.Exists(absentArtifact), Is.False);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(absentArtifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmRejectsSourceEnumKeysBeyondTheStandardStringLimitAsync()
+    {
+        const string source
+            = "namespace Example { public enum Color : int32 { Red = 7 } }";
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-export-key-limit-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-export-key-limit-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0x5C, 0xC5];
+        try
+        {
+            var oversizedKey = new string('x', 0x0100_0000);
+            var configuration = "{\"schemaVersion\":1,\"exports\":[{"
+                + "\"namespace\":\"Example\",\"name\":\"Color\","
+                + "\"exportKey\":\"" + oversizedKey + "\","
+                + "\"enumMemberDeclarationKeys\":[\"red\"]}]}";
+            await File.WriteAllTextAsync(exportFile, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(artifact, retained)
+                .ConfigureAwait(true);
+
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", "source-enum-module", "--trrm-schema",
+                "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", exportFile, "--library", "-o",
+                artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.EqualTo(2),
+                $"{output}{Environment.NewLine}{error}");
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmAcceptsTheStandardMaximumEnumKeyAsync()
+    {
+        const string source
+            = "namespace Example { public enum Color : int32 { Red = 7 } }";
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-export-key-maximum-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-export-key-maximum-{Guid.NewGuid():N}.trrm");
+        var maximumKey = new string('k', 0x00FF_FFFF);
+        try
+        {
+            var configuration = "{\"schemaVersion\":1,\"exports\":[{"
+                + "\"namespace\":\"Example\",\"name\":\"Color\","
+                + "\"exportKey\":\"" + maximumKey + "\","
+                + "\"enumMemberDeclarationKeys\":[\"red\"]}]}";
+            await File.WriteAllTextAsync(exportFile, configuration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", "source-enum-module", "--trrm-schema",
+                "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", exportFile, "--library", "-o",
+                artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(exit, Is.Zero,
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateNominalEnumsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForNominalEnumsDraft(
+                        await File.ReadAllBytesAsync(artifact)
+                            .ConfigureAwait(true)));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                maximumKey, out _), Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmPreflightsSourceEnumExportSelectionAndAliasesAsync()
+    {
+        const string source = "public int32 Main() { return 0; }";
+        var missingMap = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"missing-trrm-enum-exports-{Guid.NewGuid():N}.json");
+        var sharedPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"shared-trrm-enum-source-exports-{Guid.NewGuid():N}.txt");
+        var exportFile = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"ordered-trrm-enum-exports-{Guid.NewGuid():N}.json");
+        var layoutManifest = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"ordered-layout-manifest-{Guid.NewGuid():N}.json");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-export-preflight-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xC3, 0x3C];
+        var validConfiguration = JsonSerializer.Serialize(new {
+            schemaVersion = 1,
+            exports = Array.Empty<object>(),
+        });
+        try
+        {
+            await File.WriteAllBytesAsync(artifact, retained)
+                .ConfigureAwait(true);
+            var (missingExit, missingOutput, missingError) = await RunAsync(
+                Encoding.UTF8.GetBytes("public int32 Main() { return 0; }"),
+                "compile-trrm", "-", "--identity", "source-enum-module",
+                "--trrm-source-enum-exports", missingMap, "--library", "-o",
+                artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(missingExit, Is.EqualTo(2),
+                $"{missingOutput}{Environment.NewLine}{missingError}");
+            using (var document = JsonDocument.Parse(missingOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            var (missingFileExit, missingFileOutput, missingFileError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--trrm-source-enum-exports", missingMap, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(missingFileExit, Is.EqualTo(2),
+                $"{missingFileOutput}{Environment.NewLine}{missingFileError}");
+            using (var document = JsonDocument.Parse(missingFileOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            var (wrongSchemaExit, wrongSchemaOutput, wrongSchemaError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-layout-queries-1",
+                    "--trrm-source-enum-exports", missingMap, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(wrongSchemaExit, Is.EqualTo(2),
+                $"{wrongSchemaOutput}{Environment.NewLine}{wrongSchemaError}");
+            using (var document = JsonDocument.Parse(wrongSchemaOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+
+            var (repeatedExit, repeatedOutput, repeatedError) =
+                await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--trrm-source-enum-exports", missingMap,
+                    "--trrm-source-enum-exports", missingMap, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(repeatedExit, Is.EqualTo(2),
+                $"{repeatedOutput}{Environment.NewLine}{repeatedError}");
+            using (var document = JsonDocument.Parse(repeatedOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+
+            var (wrongCommandExit, wrongCommandOutput, wrongCommandError)
+                = await RunAsync([], "run-trrm", "missing.trrm", "--runtime",
+                    "fail-fast", "--trrm-source-enum-exports", missingMap,
+                    "--json").ConfigureAwait(false);
+            Assert.That(wrongCommandExit, Is.EqualTo(2),
+                $"{wrongCommandOutput}{Environment.NewLine}{wrongCommandError}");
+            using (var document = JsonDocument.Parse(wrongCommandOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+
+            var (equalsExit, equalsOutput, equalsError) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", "source-enum-module", "--trrm-schema",
+                "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports=" + missingMap, "--library",
+                "-o", artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(equalsExit, Is.EqualTo(2),
+                $"{equalsOutput}{Environment.NewLine}{equalsError}");
+            using (var document = JsonDocument.Parse(equalsOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+
+            var (dashOperandExit, dashOperandOutput, dashOperandError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--trrm-source-enum-exports", "-missing.json",
+                    "--library", "-o", artifact, "--runtime", "fail-fast",
+                    "--json").ConfigureAwait(false);
+            Assert.That(dashOperandExit, Is.EqualTo(2),
+                $"{dashOperandOutput}{Environment.NewLine}{dashOperandError}");
+            using (var document = JsonDocument.Parse(dashOperandOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            }
+
+            await File.WriteAllTextAsync(sharedPath, validConfiguration,
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (aliasExit, aliasOutput, aliasError) = await RunAsync([],
+                "compile-trrm", sharedPath, "--identity",
+                "source-enum-module", "--trrm-schema",
+                "trrm/1-draft-nominal-enums-1",
+                "--trrm-source-enum-exports", sharedPath, "--library",
+                "-o", artifact, "--runtime", "fail-fast", "--json")
+                .ConfigureAwait(false);
+            Assert.That(aliasExit, Is.EqualTo(2),
+                $"{aliasOutput}{Environment.NewLine}{aliasError}");
+            using (var document = JsonDocument.Parse(aliasOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            var (coreAliasExit, coreAliasOutput, coreAliasError)
+                = await RunAsync(Encoding.UTF8.GetBytes(source),
+                    "compile-trrm", "-", "--identity",
+                    "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--layout-core-manifest", sharedPath,
+                    "--trrm-source-enum-exports", sharedPath, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(coreAliasExit, Is.EqualTo(2),
+                $"{coreAliasOutput}{Environment.NewLine}{coreAliasError}");
+            using (var document = JsonDocument.Parse(coreAliasOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            foreach (var manifestOption
+                in s_trRmCoreManifestAliasOptions)
+            {
+                var (manifestAliasExit, manifestAliasOutput,
+                    manifestAliasError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                    "--identity", "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1", manifestOption,
+                    sharedPath, "--trrm-source-enum-exports", sharedPath,
+                    "--library", "-o", artifact, "--runtime", "fail-fast",
+                    "--json").ConfigureAwait(false);
+                Assert.That(manifestAliasExit, Is.EqualTo(2),
+                    $"{manifestAliasOutput}{Environment.NewLine}{manifestAliasError}");
+                using var document = JsonDocument.Parse(
+                    manifestAliasOutput);
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+                Assert.That(await File.ReadAllBytesAsync(artifact)
+                        .ConfigureAwait(true),
+                    Is.EqualTo(retained));
+            }
+
+            var (outputAliasExit, outputAliasOutput, outputAliasError)
+                = await RunAsync(Encoding.UTF8.GetBytes(source),
+                    "compile-trrm", "-", "--identity",
+                    "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--trrm-source-enum-exports", artifact, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(outputAliasExit, Is.EqualTo(2),
+                $"{outputAliasOutput}{Environment.NewLine}{outputAliasError}");
+            using (var document = JsonDocument.Parse(outputAliasOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+
+            await File.WriteAllTextAsync(exportFile, "{",
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            await File.WriteAllTextAsync(layoutManifest, "{",
+                new UTF8Encoding(false)).ConfigureAwait(true);
+            var (enumFirstExit, enumFirstOutput, enumFirstError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes("{ invalid source"),
+                    "compile-trrm", "-", "--identity",
+                    "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--trrm-source-enum-exports", exportFile,
+                    "--layout-core-manifest", layoutManifest, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(enumFirstExit, Is.EqualTo(2),
+                $"{enumFirstOutput}{Environment.NewLine}{enumFirstError}");
+            using (var document = JsonDocument.Parse(enumFirstOutput))
+            {
+                var message = document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("message").GetString();
+                Assert.That(message, Does.Contain(exportFile));
+            }
+
+            var (layoutFirstExit, layoutFirstOutput, layoutFirstError)
+                = await RunAsync(
+                    Encoding.UTF8.GetBytes("{ invalid source"),
+                    "compile-trrm", "-", "--identity",
+                    "source-enum-module", "--trrm-schema",
+                    "trrm/1-draft-nominal-enums-1",
+                    "--layout-core-manifest", layoutManifest,
+                    "--trrm-source-enum-exports", exportFile, "--library",
+                    "-o", artifact, "--runtime", "fail-fast", "--json")
+                    .ConfigureAwait(false);
+            Assert.That(layoutFirstExit, Is.EqualTo(2),
+                $"{layoutFirstOutput}{Environment.NewLine}{layoutFirstError}");
+            using (var document = JsonDocument.Parse(layoutFirstOutput))
+            {
+                var message = document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("message").GetString();
+                Assert.That(message, Does.Contain(layoutManifest));
+            }
+            Assert.That(await File.ReadAllBytesAsync(artifact)
+                    .ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(sharedPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(exportFile)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(layoutManifest)
+                .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(artifact)
                 .ConfigureAwait(true);
         }
@@ -2480,8 +3775,8 @@ internal sealed partial class CliTests
     public async Task PersistedInitOutputCallsRunAndBuildWithoutProducerSourceAsync()
     {
         const string source = """
-            void Fill(int32 value, init ref<int32> result) {
-                result = value;
+            void Fill(int32 value, ref<init int32> result) {
+                *result = value;
             }
             int32 Observe(bool value) { return value ? 42 : 0; }
             int32 ObserveOne(bool value) { return value ? 1 : 0; }
@@ -2503,7 +3798,7 @@ internal sealed partial class CliTests
                     + Observe(NegativeFive() % Two64() == MinusOne64())
                     + Observe(Minimum64() % MinusOne64() == Zero64())
                     + ObserveOne(int32(FortyTwo64()) == 42)
-                    + ObserveOne(float32(One32()) == float32(1.0)), init result);
+                    + ObserveOne(float32(One32()) == float32(1.0)), ref init result);
                 return result;
             }
             """;
@@ -2541,14 +3836,14 @@ internal sealed partial class CliTests
     public async Task PersistedInitOutputSupportsMixedScalarReferentsAsync()
     {
         const string source = """
-            uint32 Fill(bool enabled, init ref<bool> enabledResult,
-                char16 character, init ref<char16> characterResult,
-                uint64 count, init ref<uint64> countResult,
-                float64 amount, init ref<float64> amountResult) {
-                enabledResult = enabled;
-                characterResult = character;
-                countResult = count;
-                amountResult = amount;
+            uint32 Fill(bool enabled, ref<init bool> enabledResult,
+                char16 character, ref<init char16> characterResult,
+                uint64 count, ref<init uint64> countResult,
+                float64 amount, ref<init float64> amountResult) {
+                *enabledResult = enabled;
+                *characterResult = character;
+                *countResult = count;
+                *amountResult = amount;
                 return uint32.MaxValue;
             }
             int32 Check(bool enabled, char16 character, uint64 count, float64 amount,
@@ -2565,20 +3860,21 @@ internal sealed partial class CliTests
                     && wideCount == 0 && ratio == float32(1.5)
                     && amount == 0.0 ? 42 : 1;
             }
-            bool TryFill(bool success, init ref<bool> flag,
-                init ref<char16> marker, init ref<int32> result,
-                init ref<uint32> smallCount, init ref<int64> signedCount,
-                init ref<uint64> wideCount, init ref<float32> ratio,
-                init ref<float64> conditionalAmount) {
-                flag = false;
-                marker = char16(65);
-                result = 0;
-                smallCount = uint32.MaxValue;
-                signedCount = int64.MinValue;
-                wideCount = 0;
-                ratio = float32(1.5);
-                conditionalAmount = 0.0;
-                return success;
+            bool TryFill(bool success, ref<init bool> flag,
+                ref<init char16> marker, ref<init int32> result,
+                ref<init uint32> smallCount, ref<init int64> signedCount,
+                ref<init uint64> wideCount, ref<init float32> ratio,
+                ref<init float64> conditionalAmount) {
+                if (!success) { return false; }
+                *flag = false;
+                *marker = char16(65);
+                *result = 0;
+                *smallCount = uint32.MaxValue;
+                *signedCount = int64.MinValue;
+                *wideCount = 0;
+                *ratio = float32(1.5);
+                *conditionalAmount = 0.0;
+                return true;
             }
             int32 RunConditional(bool success) {
                 init bool flag;
@@ -2589,9 +3885,9 @@ internal sealed partial class CliTests
                 init uint64 wideCount;
                 init float32 ratio;
                 init float64 amount;
-                if (TryFill(success, init flag, init marker, init result,
-                    init smallCount, init signedCount, init wideCount, init ratio,
-                    init amount)) {
+                if (TryFill(success, ref init flag, ref init marker, ref init result,
+                    ref init smallCount, ref init signedCount, ref init wideCount, ref init ratio,
+                    ref init amount)) {
                     return CheckConditional(flag, marker, result, smallCount,
                         signedCount, wideCount, ratio, amount);
                 } else {
@@ -2603,8 +3899,8 @@ internal sealed partial class CliTests
                 init char16 character;
                 init uint64 count;
                 init float64 amount;
-                uint32 returned = Fill(true, init enabled, char16(65), init character,
-                    uint64.MaxValue, init count, float64(2.5), init amount);
+                uint32 returned = Fill(true, ref init enabled, char16(65), ref init character,
+                    uint64.MaxValue, ref init count, float64(2.5), ref init amount);
                 int32 conditionalFalse = RunConditional(false);
                 int32 conditionalTrue = RunConditional(true);
                 return Check(enabled, character, count, amount, returned,
@@ -2620,7 +3916,8 @@ internal sealed partial class CliTests
             var (compiled, compileOutput, compileError) = await RunAsync(
                 Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
                 "init-output-scalars", "-o", artifact, "--runtime", "fail-fast", "--json").ConfigureAwait(false);
-            Assert.That(compiled, Is.EqualTo(0));
+            Assert.That(compiled, Is.EqualTo(0),
+                $"{compileOutput}{Environment.NewLine}{compileError}");
             Assert.That(compileError, Is.Empty);
 
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
@@ -2650,13 +3947,13 @@ internal sealed partial class CliTests
         var trueArm = failOnTrue ? "require false;" : "return 42;";
         var falseArm = failOnTrue ? "return 42;" : "require false;";
         var source = $$"""
-            bool Select(init ref<int32> result) {
-                result = 7;
+            bool Select(ref<init int32> result) {
+                if ({{condition}}) { *result = 7; }
                 return {{condition}};
             }
             int32 Main() {
                 init int32 result;
-                if (Select(init result)) {
+                if (Select(ref init result)) {
                     {{trueArm}}
                 } else {
                     {{falseArm}}
@@ -2765,10 +4062,10 @@ internal sealed partial class CliTests
     public async Task PersistedInitOutputSignedNegationPreservesOverflowStatusAsync()
     {
         const string source = """
-            void Fill(int32 value, init ref<int32> result) { result = value; }
+            void Fill(int32 value, ref<init int32> result) { *result = value; }
             int32 Main() {
                 init int32 result;
-                Fill(-int32.MinValue, init result);
+                Fill(-int32.MinValue, ref init result);
                 return result;
             }
             """;
@@ -2798,11 +4095,11 @@ internal sealed partial class CliTests
     public async Task PersistedInitOutputIntegerConversionPreservesOverflowStatusAsync()
     {
         const string source = """
-            void Fill(int32 value, init ref<int32> result) { result = value; }
+            void Fill(int32 value, ref<init int32> result) { *result = value; }
             uint64 Maximum() { return uint64.MaxValue; }
             int32 Main() {
                 init int32 result;
-                Fill(int32(Maximum()), init result);
+                Fill(int32(Maximum()), ref init result);
                 return result;
             }
             """;
@@ -2832,11 +4129,11 @@ internal sealed partial class CliTests
     public async Task PersistedInitOutputFloatToIntegerConversionPreservesOverflowStatusAsync()
     {
         const string source = """
-            void Fill(int32 value, init ref<int32> result) { result = value; }
+            void Fill(int32 value, ref<init int32> result) { *result = value; }
             float64 TooLarge() { return float64(4294967296.0); }
             int32 Main() {
                 init int32 result;
-                Fill(int32(TooLarge()), init result);
+                Fill(int32(TooLarge()), ref init result);
                 return result;
             }
             """;

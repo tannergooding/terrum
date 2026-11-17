@@ -18,10 +18,10 @@ internal sealed partial class CliTests
     public async Task ConditionalExpressionsMatchCompiledScannerAsync(string policy)
     {
         const string Source = """
-            bool Fill(init ref<int32> value) { value = 42; return true; }
+            bool Fill(ref<init int32> value) { *value = 42; return true; }
             int32 Main() {
-                init var value;
-                return Fill(init value) ? value : 0;
+                init int32 value;
+                return Fill(ref init value) ? value : 0;
             }
             """;
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

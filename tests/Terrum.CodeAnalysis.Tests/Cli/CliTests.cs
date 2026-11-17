@@ -1641,9 +1641,9 @@ internal sealed partial class CliTests
     [TestCase("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
     [TestCase("int32 Main() { int64 minimum = -9223372036854775808; return int32(minimum % -1); }")]
     [TestCase("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; i < 10; i = i + 1) { sum = sum + i; } return sum; }")]
-    [TestCase("int32 End() { return 1; } int32 Main() { require OwnedInt32Buffer.TryCreate(1, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); ReadonlyInt32BufferView prefix = buffer[..End()]; return prefix.Read(0) + 1; }")]
-    [TestCase("int32 Start() { return 1; } int32 End() { return 2; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[Start()..End()]; return view.Read(0); }")]
-    [TestCase("int32 Start() { return 1; } int32 End() { return 0; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[^Start()..^End()]; return view.Read(0); }")]
+    [TestCase("int32 End() { return 1; } int32 Main() { init OwnedInt32Buffer raw; require OwnedInt32Buffer.TryCreate(1, ref init raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); ReadonlyInt32BufferView prefix = buffer[..End()]; return prefix.Read(0) + 1; }")]
+    [TestCase("int32 Start() { return 1; } int32 End() { return 2; } int32 Main() { init OwnedInt32Buffer raw; require OwnedInt32Buffer.TryCreate(2, ref init raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[Start()..End()]; return view.Read(0); }")]
+    [TestCase("int32 Start() { return 1; } int32 End() { return 0; } int32 Main() { init OwnedInt32Buffer raw; require OwnedInt32Buffer.TryCreate(2, ref init raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[^Start()..^End()]; return view.Read(0); }")]
     [TestCase("float32 Echo(float32 value) { return value; } int32 Main() { _ = Echo(float32(0x1.fp+2)); return 42; }")]
     [TestCase("float64 Widen(float32 value) { return float64(value); } float32 Narrow(float64 value) { return float32(value); } int32 Main() { _ = Narrow(Widen(0.1)); return 42; }")]
     public async Task NativeScannerFeedsTheOfficialCompilerWithoutChangingEmissionAsync(string source)
@@ -2678,8 +2678,24 @@ internal sealed partial class CliTests
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start CLI.");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.BaseStream.WriteAsync(input).ConfigureAwait(true);
-        process.StandardInput.Close();
+        IOException? inputFailure = null;
+        try
+        {
+            await process.StandardInput.BaseStream.WriteAsync(input)
+                .ConfigureAwait(true);
+        }
+        catch (IOException exception)
+        {
+            inputFailure = exception;
+        }
+        try
+        {
+            process.StandardInput.Close();
+        }
+        catch (IOException exception)
+        {
+            inputFailure ??= exception;
+        }
 
         try
         {
@@ -2696,6 +2712,13 @@ internal sealed partial class CliTests
             throw;
         }
 
-        return (process.ExitCode, await output.ConfigureAwait(true), await error.ConfigureAwait(true));
+        var standardOutput = await output.ConfigureAwait(true);
+        var standardError = await error.ConfigureAwait(true);
+        if (inputFailure is not null && process.ExitCode == 0)
+        {
+            throw inputFailure;
+        }
+
+        return (process.ExitCode, standardOutput, standardError);
     }
 }

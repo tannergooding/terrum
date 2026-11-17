@@ -12,7 +12,8 @@ public static partial class TrRmExecutableCompiler
 {
     internal static byte[] EmitNominalEnumsDraftDeclarationLibrary(
         BoundProgram program, string moduleIdentity,
-        uint moduleTargetRequirement)
+        uint moduleTargetRequirement,
+        NominalEnumsDraftSourceEnumExports? sourceEnumExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -25,6 +26,8 @@ public static partial class TrRmExecutableCompiler
             || program.InvocationProfileId is not null
             || program.IsInvocationSourceBound
             || !BoundEnumTypes.IsValidTable(program.EnumDefinitions)
+            || BoundEnumTypes.HasStandardDeclarations(
+                program.EnumDefinitions)
             || moduleTargetRequirement > 1
             || program.RuntimePolicy is not (BoundRuntimePolicy.FailFast
                 or BoundRuntimePolicy.CheckedExceptions))
@@ -32,6 +35,7 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "NominalEnumsDraft declaration emission requires only valid public enum declarations.");
         }
+        sourceEnumExports?.ValidateProgram(program);
 
         var coreRegistration = program.NativeCoreRegistration;
         if (coreRegistration is not null
@@ -47,7 +51,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var stringRows = new List<(string Text, int Encoding)> {
-            ("", 0), (moduleIdentity, 0),
+            ("", 0), (moduleIdentity, GetStringEncoding(moduleIdentity)),
         };
         var stringRowsByText = new Dictionary<string, int>(StringComparer.Ordinal) {
             [""] = 1,
@@ -71,11 +75,24 @@ public static partial class TrRmExecutableCompiler
             if (!stringRowsByText.TryGetValue(text, out var row))
             {
                 row = stringRows.Count + 1;
-                stringRows.Add((text, 0));
+                stringRows.Add((text, GetStringEncoding(text)));
                 stringRowsByText.Add(text, row);
             }
 
             return row;
+        }
+
+        static int GetStringEncoding(string text)
+        {
+            foreach (var character in text)
+            {
+                if (character > 0x7F)
+                {
+                    return 1;
+                }
+            }
+
+            return 0;
         }
 
         CoreProviderModuleOrigin GetProviderOrigin(string identity)
@@ -140,7 +157,30 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < program.EnumDefinitions.Length; index++)
         {
             var definition = program.EnumDefinitions[index];
-            var coreIdentity = GetCoreIdentity(definition);
+            CoreDeclarationIdentity? coreIdentity
+                = definition.Identity
+                    is BoundEnumDeclarationIdentity.Core core
+                    ? core.Value : null;
+            NominalEnumsDraftSourceEnumExport? sourceEnumExport = null;
+            string providerIdentity;
+            string exportKey;
+            if (coreIdentity is CoreDeclarationIdentity existingIdentity)
+            {
+                providerIdentity = existingIdentity.ProviderIdentity;
+                exportKey = existingIdentity.ExportKey;
+            }
+            else if (sourceEnumExports is not null
+                && sourceEnumExports.TryGet(definition,
+                    out sourceEnumExport))
+            {
+                providerIdentity = moduleIdentity;
+                exportKey = sourceEnumExport.ExportKey;
+            }
+            else
+            {
+                throw Unsupported(
+                    "NominalEnumsDraft cannot serialize an unassigned private or source enum identity.");
+            }
             var separator = definition.Name.LastIndexOf(
                 '.', StringComparison.Ordinal);
             var namespaceName = separator < 0
@@ -186,26 +226,39 @@ public static partial class TrRmExecutableCompiler
             for (var ordinal = 0; ordinal < definition.Members.Length; ordinal++)
             {
                 var member = definition.Members[ordinal];
+                var memberDeclarationKey
+                    = sourceEnumExport is null
+                        ? member.DeclarationKey
+                            ?? throw Unsupported(
+                                "A nominal enum member has no selected declaration key.")
+                        : GetSourceMemberKey(sourceEnumExport, member,
+                            ordinal);
                 enumMembersToWrite.Add(new TrRmEnumMemberDefRow(typeDefRow,
                     ordinal,
-                    GetStringRow(member.DeclarationKey),
-                    GetStringRow(member.Name), member.Value));
+                    GetStringRow(memberDeclarationKey),
+                    GetStringRow(member.Name),
+                    checked((int)member.Value)));
             }
             var memberCount = definition.Members.Length;
             enumDefsToWrite.Add(new TrRmEnumDefRow(typeDefRow,
                 0xF200_0008, definition.IsFlags ? 1u : 0u,
                 memberFirst, memberCount));
 
-            var exportKey = GetStringRow(coreIdentity.ExportKey);
-            if (StringComparer.Ordinal.Equals(
-                    coreIdentity.ProviderIdentity, moduleIdentity))
+            var exportKeyRow = GetStringRow(exportKey);
+            if (StringComparer.Ordinal.Equals(providerIdentity, moduleIdentity))
             {
                 exportsToWrite.Add(new TrRmExportRow(
-                    0x1300_0000u | (uint)typeDefRow, exportKey));
+                    0x1300_0000u | (uint)typeDefRow, exportKeyRow));
             }
             else
             {
-                var providerIdentity = coreIdentity.ProviderIdentity;
+                if (coreIdentity is not CoreDeclarationIdentity importedIdentity
+                    || importedIdentity.ProviderIdentity != providerIdentity
+                    || importedIdentity.ExportKey != exportKey)
+                {
+                    throw Unsupported(
+                        "A source enum cannot be emitted as an imported Standard declaration.");
+                }
                 if (!moduleRefByProvider.TryGetValue(
                         providerIdentity, out var moduleRefRow))
                 {
@@ -232,7 +285,7 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
-                importsToWrite.Add(new TrRmImportRow(moduleRefRow, exportKey,
+                importsToWrite.Add(new TrRmImportRow(moduleRefRow, exportKeyRow,
                     0x1300_0000u | (uint)typeDefRow));
             }
         }
@@ -377,6 +430,27 @@ public static partial class TrRmExecutableCompiler
             .ValidateNominalEnumsDraftAndGetExecutionTables(
                 TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
         return artifact;
+
+        static string GetSourceMemberKey(
+            NominalEnumsDraftSourceEnumExport sourceEnumExport,
+            BoundEnumMemberDefinition member, int ordinal)
+        {
+            if ((uint)ordinal
+                    >= (uint)sourceEnumExport.MemberDeclarations.Length
+                || (uint)ordinal
+                    >= (uint)sourceEnumExport.MemberDeclarationKeys.Length
+                || member.Identity
+                    is not BoundEnumMemberIdentity.Source sourceMember
+                || !ReferenceEquals(sourceMember.Value,
+                    sourceEnumExport.MemberDeclarations[ordinal]))
+            {
+                throw new ArgumentException(
+                    "A source enum member no longer matches its captured declaration-key assignment.",
+                    nameof(member));
+            }
+
+            return sourceEnumExport.MemberDeclarationKeys[ordinal];
+        }
     }
 
     internal static byte[] EmitScalarFrozenValuesDraftConstantReturn(

@@ -44,6 +44,39 @@ internal sealed class TrRmMethodDefTableReaderTests
     }
 
     [Test]
+    public void PI1ReceiverAccessFlagRequiresAnInstanceReceiver()
+    {
+        var names = new TrRmStringTableReader(Names(), 2);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 1, 0);
+        var typeRow = new byte[44];
+        Write(typeRow, 0, 1);
+        Write(typeRow, 4, 2);
+        Write(typeRow, 8, 8);
+        var types = new TrRmTypeDefTableReader(typeRow, 1,
+            names, modules, 0, 0, 0, 0);
+        var typeSpecs = TypeSpecs();
+        var signature = Signature();
+        Write(signature, 4, 1);
+        var signatures = new TrRmMethodSigTableReader(signature, 1,
+            typeSpecs, 0, 0);
+        var method = new byte[28];
+        Write(method, 0, 1);
+        Write(method, 4, 2);
+        Write(method, 8, 1);
+        Write(method, 12, 6);
+        var schema = TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft;
+
+        var methods = new TrRmMethodDefTableReader(method, 1, names,
+            modules, types, signatures, 0, 0, schema);
+        Assert.That(methods.GetFlags(1), Is.EqualTo(6));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CreateWithSchema(method, schema, receiverTypeSpec: 0));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CreateWithSchema(method, TrRmArtifactSchema.Standard,
+                receiverTypeSpec: 1));
+    }
+
+    [Test]
     public void GenericSignatureCannotBeSharedBetweenMethodDefinitions()
     {
         var rows = new byte[56];
@@ -183,6 +216,26 @@ internal sealed class TrRmMethodDefTableReaderTests
         var signatures = new TrRmMethodSigTableReader(signature ?? Signature(), 1, typeSpecs, 0, genericCount);
         _ = new TrRmMethodDefTableReader(bytes, methodCount, names, modules, types,
             signatures, 0, bodyCount);
+    }
+
+    private static void CreateWithSchema(byte[] method, TrRmArtifactSchema schema,
+        uint receiverTypeSpec)
+    {
+        var names = new TrRmStringTableReader(Names(), 2);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 1, 0);
+        var typeRow = new byte[44];
+        Write(typeRow, 0, 1);
+        Write(typeRow, 4, 2);
+        Write(typeRow, 8, 8);
+        var types = new TrRmTypeDefTableReader(typeRow, 1,
+            names, modules, 0, 0, 0, 0);
+        var typeSpecs = TypeSpecs();
+        var signature = Signature();
+        Write(signature, 4, receiverTypeSpec);
+        var signatures = new TrRmMethodSigTableReader(signature, 1,
+            typeSpecs, 0, 0);
+        _ = new TrRmMethodDefTableReader(method, 1, names, modules, types,
+            signatures, 0, 0, schema);
     }
 
     private static TrRmTypeSpecTableReader TypeSpecs()

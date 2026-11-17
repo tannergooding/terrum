@@ -112,15 +112,32 @@ public readonly ref struct TrRmImportTableReader
         _recordCount = recordCount;
         _resourceLedger = resourceLedger;
         _resourceLedger?.ConsumeWork((ulong)recordCount);
-        var allowsTypeDefAliases = profileAware
+        var tracksImportAliases = profileAware
             && (schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
-                or TrRmArtifactSchema.LocalAggregateLayoutDraft);
-        if (allowsTypeDefAliases)
+                or TrRmArtifactSchema.LocalAggregateLayoutDraft
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft
+                or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft
+                or TrRmArtifactSchema.GenericMethodCallsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft
+                or TrRmArtifactSchema.Standard);
+        if (tracksImportAliases)
         {
             resourceLedger?.ConsumeWork(
                 checked(((ulong)recordCount * 3UL) + 3UL));
@@ -181,6 +198,12 @@ public readonly ref struct TrRmImportTableReader
             }
             _resourceLedger?.ConsumeWork(2);
             var definitionKind = expected >> 24;
+            var allowsStandardLayoutQueryAliases = profileAware
+                && (schema is TrRmArtifactSchema.Standard
+                    or TrRmArtifactSchema.InitializationReferencePointerLoadNativeParameterDraft)
+                && TrRmFeatureManifestValidator.Requires(features, modules,
+                    module, TrRmFeatureTableReader.LayoutQueriesFeatureId,
+                    schema);
             var missingLayoutQueriesFeature = profileAware
                 && definitionKind == 0x14
                 && TrRmFeatureTableReader.TryGetRuleRevision(
@@ -213,7 +236,7 @@ public readonly ref struct TrRmImportTableReader
             var binding = new TrRmImportBinding(
                 references.GetProducerIdentity(moduleRefRow), exportKey,
                 lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy);
-            if (allowsTypeDefAliases)
+            if (tracksImportAliases)
             {
                 if (!_importTriples!.Add((moduleRefRow, exportKey, expected)))
                 {
@@ -225,7 +248,34 @@ public readonly ref struct TrRmImportTableReader
 
             if (!_expected.TryAdd(expected, binding))
             {
-                if (!allowsTypeDefAliases || expected >> 24 != 0x13)
+                var allowsAlias = (schema is
+                        TrRmArtifactSchema.GenericMethodCallsDraft
+                        or TrRmArtifactSchema.GenericMethodCallsParameterLabelsDraft
+                        or TrRmArtifactSchema.GenericMethodCallsParameterLabelsReceiverAccessDraft
+                        or TrRmArtifactSchema.C1ParameterLabelsReceiverAccessDraft
+                        or TrRmArtifactSchema.C1M1ParameterLabelsReceiverAccessDraft
+                        or TrRmArtifactSchema.C1M1ConstructionParameterLabelsReceiverAccessDraft
+                        or TrRmArtifactSchema.C1M1Construction2ParameterLabelsReceiverAccessDraft
+                        or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateDraft
+                        or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateDraft
+                        or TrRmArtifactSchema.C1M1ConstructionL1R1EnumClosureDraft
+                        or TrRmArtifactSchema.C1M1Construction2L1R1EnumClosureDraft
+                        or TrRmArtifactSchema.C1M1ConstructionL1R1PropertyInitializedStateEnumClosureDraft
+                        or TrRmArtifactSchema.C1M1Construction2L1R1PropertyInitializedStateEnumClosureDraft)
+                    && definitionKind == 0x16
+                    || (allowsStandardLayoutQueryAliases
+                    ? definitionKind is 0x13 or 0x14
+                    : (schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationDraft
+                        or TrRmArtifactSchema.LocalAggregateLayoutDraft
+                        or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutDraft
+                        or TrRmArtifactSchema.InitializationReferenceLocalFieldLayoutNestedFieldDestinationsDraft)
+                        && definitionKind == 0x13);
+                if (!allowsAlias)
                 {
                     throw InvalidImport();
                 }
