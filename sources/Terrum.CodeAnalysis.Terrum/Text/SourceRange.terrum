@@ -14,14 +14,14 @@ public struct SourceRange
         Length = length;
     }
 
-    public static bool TryCreate(int32 start, int32 length, init ref<SourceRange> range)
+    public static bool TryCreate(int32 start, int32 length, ref<init SourceRange> range)
     {
         if (start < 0 || length < 0 || start > int32.MaxValue - length)
         {
             return false;
         }
 
-        range = new SourceRange(start, length);
+        *range = new SourceRange(start, length);
 
         return true;
     }

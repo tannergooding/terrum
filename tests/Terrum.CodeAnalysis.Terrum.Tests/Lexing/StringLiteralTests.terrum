@@ -5,23 +5,33 @@ int32 CheckStringLiterals()
     mut int32 fixture = 0;
     while (fixture < Host.ExpectedLiterals.Length / 4)
     {
+        init SourceRange spelling;
+        init StringLiteral literal;
+        init int32 byteLength;
+        init int32 unitLength;
+        init int32 utf16ByteLength;
+        init int32 asciiLength;
+        init int32 latin1Length;
+        init int32 utf32Length;
+        init StringLiteral unexpected;
         int32 start = Host.ExpectedLiterals[fixture * 4];
         int32 length = Host.ExpectedLiterals[fixture * 4 + 1];
         int32 count = Host.ExpectedLiterals[fixture * 4 + 2];
         int32 firstScalar = Host.ExpectedLiterals[fixture * 4 + 3];
-        require SourceRange.TryCreate(start, length, init var spelling);
-        if (StringLiteral.TryCreate(spelling, init var literal))
+        require SourceRange.TryCreate(start, length, ref init spelling);
+        if (StringLiteral.TryCreate(spelling, ref init literal))
         {
             if (count < 0 || literal.ScalarCount != count
                 || literal.Spelling.Start != start || literal.Spelling.Length != length)
             {
                 return 1;
             }
-            require literal.TryGetUtf8Length(init var byteLength);
+            require literal.TryGetUtf8Length(ref init byteLength);
             int32 expectedStart = Host.ExpectedUtf8Records[fixture * 2];
             int32 expectedLength = Host.ExpectedUtf8Records[fixture * 2 + 1];
             if (byteLength != expectedLength) { return 16; }
-            require OwnedInt32Buffer.TryCreate(byteLength, out var workspace);
+            init OwnedInt32Buffer workspace;
+            require OwnedInt32Buffer.TryCreate(byteLength, ref init workspace);
             mut OwnedInt32Buffer encoded = literal.EncodeUtf8(move workspace);
             if (encoded.Count != byteLength || encoded.Capacity != byteLength) { return 17; }
             for (mut int32 byteIndex = 0; byteIndex < byteLength; byteIndex = byteIndex + 1)
@@ -33,11 +43,12 @@ int32 CheckStringLiterals()
             }
             encoded = literal.EncodeUtf8(move encoded);
             if (encoded.Count != byteLength || encoded.Capacity != byteLength) { return 19; }
-            require literal.TryGetUtf16Length(init var unitLength);
+            require literal.TryGetUtf16Length(ref init unitLength);
             int32 expectedUnitStart = Host.ExpectedUtf16Records[fixture * 2];
             int32 expectedUnitLength = Host.ExpectedUtf16Records[fixture * 2 + 1];
             if (unitLength != expectedUnitLength) { return 20; }
-            require OwnedInt32Buffer.TryCreate(unitLength, out var unitWorkspace);
+            init OwnedInt32Buffer unitWorkspace;
+            require OwnedInt32Buffer.TryCreate(unitLength, ref init unitWorkspace);
             mut OwnedInt32Buffer encodedUnits = literal.EncodeUtf16(move unitWorkspace);
             if (encodedUnits.Count != unitLength || encodedUnits.Capacity != unitLength) { return 21; }
             for (mut int32 unitIndex = 0; unitIndex < unitLength; unitIndex = unitIndex + 1)
@@ -49,11 +60,12 @@ int32 CheckStringLiterals()
             }
             encodedUnits = literal.EncodeUtf16(move encodedUnits);
             if (encodedUnits.Count != unitLength || encodedUnits.Capacity != unitLength) { return 23; }
-            require literal.TryGetUtf16ByteLength(init var utf16ByteLength);
+            require literal.TryGetUtf16ByteLength(ref init utf16ByteLength);
             int32 expectedUtf16ByteStart = Host.ExpectedUtf16ByteRecords[fixture * 2];
             int32 expectedUtf16ByteLength = Host.ExpectedUtf16ByteRecords[fixture * 2 + 1];
             if (utf16ByteLength != expectedUtf16ByteLength) { return 33; }
-            require OwnedInt32Buffer.TryCreate(utf16ByteLength, out var utf16ByteWorkspace);
+            init OwnedInt32Buffer utf16ByteWorkspace;
+            require OwnedInt32Buffer.TryCreate(utf16ByteLength, ref init utf16ByteWorkspace);
             mut OwnedInt32Buffer encodedUtf16Bytes = literal.EncodeUtf16LeBytes(move utf16ByteWorkspace);
             if (encodedUtf16Bytes.Count != utf16ByteLength
                 || encodedUtf16Bytes.Capacity != utf16ByteLength) { return 34; }
@@ -70,7 +82,8 @@ int32 CheckStringLiterals()
             int32 expectedUtf16BeStart = Host.ExpectedUtf16BeRecords[fixture * 2];
             int32 expectedUtf16BeLength = Host.ExpectedUtf16BeRecords[fixture * 2 + 1];
             if (utf16ByteLength != expectedUtf16BeLength) { return 42; }
-            require OwnedInt32Buffer.TryCreate(utf16ByteLength, out var utf16BeWorkspace);
+            init OwnedInt32Buffer utf16BeWorkspace;
+            require OwnedInt32Buffer.TryCreate(utf16ByteLength, ref init utf16BeWorkspace);
             mut OwnedInt32Buffer encodedUtf16Be = literal.EncodeUtf16BeBytes(move utf16BeWorkspace);
             if (encodedUtf16Be.Count != utf16ByteLength
                 || encodedUtf16Be.Capacity != utf16ByteLength) { return 43; }
@@ -86,10 +99,11 @@ int32 CheckStringLiterals()
                 || encodedUtf16Be.Capacity != utf16ByteLength) { return 45; }
             int32 expectedAsciiStart = Host.ExpectedAsciiRecords[fixture * 2];
             int32 expectedAsciiLength = Host.ExpectedAsciiRecords[fixture * 2 + 1];
-            if (literal.TryGetAsciiLength(init var asciiLength))
+            if (literal.TryGetAsciiLength(ref init asciiLength))
             {
                 if (expectedAsciiLength < 0 || asciiLength != expectedAsciiLength) { return 24; }
-                require OwnedInt32Buffer.TryCreate(asciiLength, out var asciiWorkspace);
+                init OwnedInt32Buffer asciiWorkspace;
+                require OwnedInt32Buffer.TryCreate(asciiLength, ref init asciiWorkspace);
                 mut OwnedInt32Buffer ascii = literal.EncodeAscii(move asciiWorkspace);
                 if (ascii.Count != asciiLength || ascii.Capacity != asciiLength) { return 25; }
                 for (mut int32 asciiIndex = 0; asciiIndex < asciiLength; asciiIndex = asciiIndex + 1)
@@ -108,10 +122,11 @@ int32 CheckStringLiterals()
             }
             int32 expectedLatin1Start = Host.ExpectedLatin1Records[fixture * 2];
             int32 expectedLatin1Length = Host.ExpectedLatin1Records[fixture * 2 + 1];
-            if (literal.TryGetLatin1Length(init var latin1Length))
+            if (literal.TryGetLatin1Length(ref init latin1Length))
             {
                 if (expectedLatin1Length < 0 || latin1Length != expectedLatin1Length) { return 37; }
-                require OwnedInt32Buffer.TryCreate(latin1Length, out var latin1Workspace);
+                init OwnedInt32Buffer latin1Workspace;
+                require OwnedInt32Buffer.TryCreate(latin1Length, ref init latin1Workspace);
                 mut OwnedInt32Buffer latin1 = literal.EncodeLatin1(move latin1Workspace);
                 if (latin1.Count != latin1Length || latin1.Capacity != latin1Length) { return 38; }
                 for (mut int32 index = 0; index < latin1Length; index = index + 1)
@@ -128,11 +143,12 @@ int32 CheckStringLiterals()
             {
                 return 41;
             }
-            require literal.TryGetUtf32ByteLength(init var utf32Length);
+            require literal.TryGetUtf32ByteLength(ref init utf32Length);
             int32 expectedUtf32Start = Host.ExpectedUtf32Records[fixture * 2];
             int32 expectedUtf32Length = Host.ExpectedUtf32Records[fixture * 2 + 1];
             if (utf32Length != expectedUtf32Length) { return 29; }
-            require OwnedInt32Buffer.TryCreate(utf32Length, out var utf32Workspace);
+            init OwnedInt32Buffer utf32Workspace;
+            require OwnedInt32Buffer.TryCreate(utf32Length, ref init utf32Workspace);
             mut OwnedInt32Buffer utf32 = literal.EncodeUtf32LeBytes(move utf32Workspace);
             if (utf32.Count != utf32Length || utf32.Capacity != utf32Length) { return 30; }
             for (mut int32 utf32Index = 0; utf32Index < utf32Length; utf32Index = utf32Index + 1)
@@ -147,7 +163,8 @@ int32 CheckStringLiterals()
             int32 expectedUtf32BeStart = Host.ExpectedUtf32BeRecords[fixture * 2];
             int32 expectedUtf32BeLength = Host.ExpectedUtf32BeRecords[fixture * 2 + 1];
             if (utf32Length != expectedUtf32BeLength) { return 46; }
-            require OwnedInt32Buffer.TryCreate(utf32Length, out var utf32BeWorkspace);
+            init OwnedInt32Buffer utf32BeWorkspace;
+            require OwnedInt32Buffer.TryCreate(utf32Length, ref init utf32BeWorkspace);
             mut OwnedInt32Buffer utf32Be = literal.EncodeUtf32BeBytes(move utf32BeWorkspace);
             if (utf32Be.Count != utf32Length || utf32Be.Capacity != utf32Length) { return 47; }
             for (mut int32 index = 0; index < utf32Length; index = index + 1)
@@ -163,9 +180,16 @@ int32 CheckStringLiterals()
             mut int32 at = start - 1;
             while (at <= spelling.End)
             {
-                if (literal.TryReadScalar(at, init var scalar, init var next))
+                init int32 scalar;
+                init int32 next;
+                init int32 unexpectedScalar;
+                init int32 unexpectedNext;
+                if (literal.TryReadScalar(at, ref init scalar, ref init next))
                 {
-                    require literal.TryReadScalar(at, init var initScalar, init var initNext);
+                    init int32 initScalar;
+                    init int32 initNext;
+                    require literal.TryReadScalar(at, ref init initScalar,
+                        ref init initNext);
                     if (seen >= count) { return 2; }
                     int32 record = (firstScalar + seen) * 3;
                     if (at != Host.ExpectedScalars[record]
@@ -177,22 +201,35 @@ int32 CheckStringLiterals()
                     }
                     seen = seen + 1;
                 }
-                else if (literal.TryReadScalar(at, init var unexpectedScalar, init var unexpectedNext))
+                else if (literal.TryReadScalar(at, ref init unexpectedScalar,
+                    ref init unexpectedNext))
                 {
                     return 15;
                 }
                 at = at + 1;
             }
             if (seen != count) { return 4; }
-            if (literal.TryReadScalar(int32.MinValue, init var before, init var beforeNext)
-                || literal.TryReadScalar(int32.MaxValue, init var after, init var afterNext))
+            init int32 before;
+            init int32 beforeNext;
+            init int32 after;
+            init int32 afterNext;
+            if (literal.TryReadScalar(int32.MinValue, ref init before,
+                    ref init beforeNext)
+                || literal.TryReadScalar(int32.MaxValue, ref init after,
+                    ref init afterNext))
             {
                 return 5;
             }
             mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
             mut int32 streamed = 0;
-            while (cursor.TryRead(init var scalar, init var next))
+            while (true)
             {
+                init int32 scalar;
+                init StringLiteralCursor next;
+                if (!cursor.TryRead(ref init scalar, ref init next))
+                {
+                    break;
+                }
                 if (streamed >= count) { return 8; }
                 int32 record = (firstScalar + streamed) * 3;
                 if (cursor.Position != Host.ExpectedScalars[record]
@@ -210,8 +247,15 @@ int32 CheckStringLiterals()
             }
             cursor = StringLiteralCursor.Create(literal);
             streamed = 0;
-            while (cursor.TryRead(init var streamScalar, init var streamNext))
+            while (true)
             {
+                init int32 streamScalar;
+                init StringLiteralCursor streamNext;
+                if (!cursor.TryRead(ref init streamScalar,
+                    ref init streamNext))
+                {
+                    break;
+                }
                 if (streamed >= count) { return 12; }
                 int32 record = (firstScalar + streamed) * 3;
                 if (cursor.Position != Host.ExpectedScalars[record]
@@ -228,19 +272,26 @@ int32 CheckStringLiterals()
                 return 14;
             }
         }
-        else if (count >= 0 || StringLiteral.TryCreate(spelling, init var unexpected))
+        else if (count >= 0 || StringLiteral.TryCreate(spelling,
+            ref init unexpected))
         {
             return 6;
         }
         fixture = fixture + 1;
     }
 
-    require SourceRange.TryCreate(int32.MaxValue, 0, init var distant);
-    require SourceRange.TryCreate(0, int32.MaxValue, init var excessive);
-    require SourceRange.TryCreate(Host.Source.Length, 2, init var past);
-    if (StringLiteral.TryCreate(distant, init var distantLiteral)
-        || StringLiteral.TryCreate(excessive, init var excessiveLiteral)
-        || StringLiteral.TryCreate(past, init var pastLiteral))
+    init SourceRange distant;
+    init SourceRange excessive;
+    init SourceRange past;
+    init StringLiteral distantLiteral;
+    init StringLiteral excessiveLiteral;
+    init StringLiteral pastLiteral;
+    require SourceRange.TryCreate(int32.MaxValue, 0, ref init distant);
+    require SourceRange.TryCreate(0, int32.MaxValue, ref init excessive);
+    require SourceRange.TryCreate(Host.Source.Length, 2, ref init past);
+    if (StringLiteral.TryCreate(distant, ref init distantLiteral)
+        || StringLiteral.TryCreate(excessive, ref init excessiveLiteral)
+        || StringLiteral.TryCreate(past, ref init pastLiteral))
     {
         return 7;
     }

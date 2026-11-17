@@ -2,6 +2,11 @@ namespace Terrum.CodeAnalysis;
 
 bool TryWriteBootstrapInt32MainPeImage()
 {
+    init int32 parsedCallChainArgumentCount;
+    init bool parsedCallChainMultiplication;
+    init int32 parsedCallChainForwardingCount;
+    init int32 parameterlessForwardingCount;
+    init int32 parsedStackArgumentCount;
     if (Host.BootstrapImageLength.Length != 1)
     {
         return false;
@@ -40,9 +45,9 @@ bool TryWriteBootstrapInt32MainPeImage()
     mut bool hasCallChain = false;
     mut bool hasParameterlessCallChain = false;
     if (TryGetBootstrapInt32MainCallChainCountForLength(
-        codeLength, init var parsedCallChainArgumentCount,
-        init var parsedCallChainMultiplication,
-        init var parsedCallChainForwardingCount))
+        codeLength, ref init parsedCallChainArgumentCount,
+        ref init parsedCallChainMultiplication,
+        ref init parsedCallChainForwardingCount))
     {
         hasCallChain = true;
         callChainArgumentCount = parsedCallChainArgumentCount;
@@ -50,7 +55,7 @@ bool TryWriteBootstrapInt32MainPeImage()
         callChainForwardingCount = parsedCallChainForwardingCount;
     }
     else if (TryGetBootstrapInt32MainParameterlessCallChainCountForLength(
-        codeLength, init var parameterlessForwardingCount))
+        codeLength, ref init parameterlessForwardingCount))
     {
         hasParameterlessCallChain = true;
         callChainForwardingCount = parameterlessForwardingCount;
@@ -193,7 +198,7 @@ bool TryWriteBootstrapInt32MainPeImage()
         hasStackArgumentCall = true;
     }
     else if (TryGetBootstrapInt32MainStackArgumentCountForLength(
-            codeLength, init var parsedStackArgumentCount))
+            codeLength, ref init parsedStackArgumentCount))
     {
         stackArgumentCount = parsedStackArgumentCount;
         hasStackArgumentCall = true;
@@ -249,11 +254,14 @@ bool TryWriteBootstrapInt32MainPeImage()
         mut int32 forwardingFunctionEnd = 28;
         if (hasCallChain)
         {
+            init int32 parsedMainFunctionEnd;
+            init int32 parsedForwardingFunctionEnd;
+            init int32 chainCodeLength;
             if (!TryGetBootstrapInt32MainCallChainLayoutForDepth(
                     callChainArgumentCount, callChainMultiplication,
                     callChainForwardingCount,
-                    init var parsedMainFunctionEnd, init var parsedForwardingFunctionEnd,
-                    init var chainCodeLength)
+                    ref init parsedMainFunctionEnd, ref init parsedForwardingFunctionEnd,
+                    ref init chainCodeLength)
                 || chainCodeLength != codeLength)
             {
                 return false;
@@ -395,7 +403,7 @@ bool TryWriteBootstrapInt32MainPeImage()
 }
 
 bool TryGetBootstrapInt32MainStackArgumentCountForLength(
-    int32 codeLength, init ref<int32> argumentCount)
+    int32 codeLength, ref<init int32> argumentCount)
 {
     // Search each instruction-width profile; the helper opcode distinguishes equal-sized candidates.
     mut int32 high = codeLength / 4;
@@ -418,9 +426,10 @@ bool TryGetBootstrapInt32MainStackArgumentCountForLength(
             searchIteration < 16 && low <= searchHigh;
             searchIteration = searchIteration + 1)
         {
+            init int32 expectedLength;
             int32 candidateCount = low + (searchHigh - low) / 2;
             if (!TryGetBootstrapInt32MainPeStackArgumentCodeLength(
-                    candidateCount, multiplication, init var expectedLength))
+                    candidateCount, multiplication, ref init expectedLength))
             {
                 return false;
             }
@@ -452,12 +461,12 @@ bool TryGetBootstrapInt32MainStackArgumentCountForLength(
     {
         return false;
     }
-    argumentCount = foundArgumentCount;
+    *argumentCount = foundArgumentCount;
     return true;
 }
 
 bool TryGetBootstrapInt32MainPeStackArgumentCodeLength(
-    int32 argumentCount, bool multiplication, init ref<int32> codeLength)
+    int32 argumentCount, bool multiplication, ref<init int32> codeLength)
 {
     if (argumentCount < 1 || argumentCount > Host.BootstrapCodeBytes.Length / 4
         || argumentCount > 0xFFFF)
@@ -477,25 +486,27 @@ bool TryGetBootstrapInt32MainPeStackArgumentCodeLength(
     }
     bool largeFrame = stackFrameSize > 0x7F;
     bool probeFrame = stackFrameSize >= 0x1000;
-    codeLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    mut int32 computedCodeLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
     for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
         argumentIndex = argumentIndex + 1)
     {
         if (argumentIndex < 2)
         {
-            codeLength = codeLength + 5;
+            computedCodeLength = computedCodeLength + 5;
         }
         else if (argumentIndex < 4)
         {
-            codeLength = codeLength + 6;
+            computedCodeLength = computedCodeLength + 6;
         }
         else
         {
             int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
-            codeLength = codeLength + (callerStackOffset > 0x7F ? 11 : 8);
+            computedCodeLength = computedCodeLength
+                + (callerStackOffset > 0x7F ? 11 : 8);
         }
     }
-    codeLength = codeLength + (largeFrame ? 13 : 10) + 3;
+    computedCodeLength = computedCodeLength
+        + (largeFrame ? 13 : 10) + 3;
     for (mut int32 argumentIndex = 1; argumentIndex < argumentCount;
         argumentIndex = argumentIndex + 1)
     {
@@ -503,32 +514,35 @@ bool TryGetBootstrapInt32MainPeStackArgumentCodeLength(
         {
             if (argumentIndex == 1)
             {
-                codeLength = codeLength + 3;
+                computedCodeLength = computedCodeLength + 3;
             }
             else if (argumentIndex < 4)
             {
-                codeLength = codeLength + 4;
+                computedCodeLength = computedCodeLength + 4;
             }
             else
             {
                 int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
-                codeLength = codeLength + (helperStackOffset > 0x7F ? 8 : 5);
+                computedCodeLength = computedCodeLength
+                    + (helperStackOffset > 0x7F ? 8 : 5);
             }
         }
         else if (argumentIndex == 1)
         {
-            codeLength = codeLength + 2;
+            computedCodeLength = computedCodeLength + 2;
         }
         else if (argumentIndex < 4)
         {
-            codeLength = codeLength + 3;
+            computedCodeLength = computedCodeLength + 3;
         }
         else
         {
             int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
-            codeLength = codeLength + (helperStackOffset > 0x7F ? 7 : 4);
+            computedCodeLength = computedCodeLength
+                + (helperStackOffset > 0x7F ? 7 : 4);
         }
     }
+    *codeLength = computedCodeLength;
     return true;
 }
 
@@ -590,8 +604,9 @@ bool TryValidateBootstrapInt32MainStackArgumentHelperHeader(
 
 bool TryValidateBootstrapInt32MainStackArgumentCallForLength(int32 codeLength)
 {
+    init int32 argumentCount;
     if (!TryGetBootstrapInt32MainStackArgumentCountForLength(
-            codeLength, init var argumentCount))
+            codeLength, ref init argumentCount))
     {
         return false;
     }
@@ -921,9 +936,8 @@ bool TryValidateBootstrapInt32MainStackArgumentCall(int32 argumentCount, int32 s
 }
 
 bool TryGetBootstrapInt32MainParameterlessCallChainCountForLength(
-    int32 codeLength, init ref<int32> forwardingCount)
+    int32 codeLength, ref<init int32> forwardingCount)
 {
-    forwardingCount = 0;
     if (codeLength < 34 || codeLength > Host.BootstrapCodeBytes.Length)
     {
         return false;
@@ -960,17 +974,14 @@ bool TryGetBootstrapInt32MainParameterlessCallChainCountForLength(
             return false;
         }
     }
-    forwardingCount = helperOffset / 14 - 1;
+    *forwardingCount = helperOffset / 14 - 1;
     return true;
 }
 
 bool TryGetBootstrapInt32MainCallChainCountForLength(int32 codeLength,
-    init ref<int32> argumentCount, init ref<bool> multiplication,
-    init ref<int32> forwardingCount)
+    ref<init int32> argumentCount, ref<init bool> multiplication,
+    ref<init int32> forwardingCount)
 {
-    argumentCount = 0;
-    multiplication = false;
-    forwardingCount = 0;
     if (codeLength < 4 || codeLength > Host.BootstrapCodeBytes.Length)
     {
         return false;
@@ -1030,10 +1041,13 @@ bool TryGetBootstrapInt32MainCallChainCountForLength(int32 codeLength,
         candidateArgumentCount <= lastCandidateCount;
         candidateArgumentCount = candidateArgumentCount + 1)
     {
+        init int32 mainFunctionEnd;
+        init int32 firstForwardingEnd;
+        init int32 singleForwardingCodeLength;
         if (!TryGetBootstrapInt32MainCallChainLayoutForDepth(
                 candidateArgumentCount, false, 1,
-                init var mainFunctionEnd, init var firstForwardingEnd,
-                init var singleForwardingCodeLength))
+                ref init mainFunctionEnd, ref init firstForwardingEnd,
+                ref init singleForwardingCodeLength))
         {
             continue;
         }
@@ -1041,10 +1055,11 @@ bool TryGetBootstrapInt32MainCallChainCountForLength(int32 codeLength,
         for (mut int32 operationIndex = 0; operationIndex < 2;
             operationIndex = operationIndex + 1)
         {
+            init int32 baseCodeLength;
             bool candidateMultiplication = operationIndex == 1;
             if (!TryGetBootstrapInt32MainPeStackArgumentCodeLength(
                     candidateArgumentCount, candidateMultiplication,
-                    init var baseCodeLength)
+                    ref init baseCodeLength)
                 || codeLength < baseCodeLength)
             {
                 continue;
@@ -1077,29 +1092,30 @@ bool TryGetBootstrapInt32MainCallChainCountForLength(int32 codeLength,
     {
         return false;
     }
-    argumentCount = foundArgumentCount;
-    multiplication = foundMultiplication;
-    forwardingCount = foundForwardingCount;
+    *argumentCount = foundArgumentCount;
+    *multiplication = foundMultiplication;
+    *forwardingCount = foundForwardingCount;
     return true;
 }
 
 bool TryGetBootstrapInt32MainCallChainLayout(int32 argumentCount,
-    bool multiplication, init ref<int32> mainFunctionEnd,
-    init ref<int32> forwardingFunctionEnd, init ref<int32> codeLength)
+    bool multiplication, ref<init int32> mainFunctionEnd,
+    ref<init int32> forwardingFunctionEnd, ref<init int32> codeLength)
 {
     return TryGetBootstrapInt32MainCallChainLayoutForDepth(
-        argumentCount, multiplication, 1, init mainFunctionEnd,
-        init forwardingFunctionEnd, init codeLength);
+        argumentCount, multiplication, 1, ref init *mainFunctionEnd,
+        ref init *forwardingFunctionEnd, ref init *codeLength);
 }
 
 bool TryGetBootstrapInt32MainCallChainLayoutForDepth(int32 argumentCount,
     bool multiplication, int32 forwardingCount,
-    init ref<int32> mainFunctionEnd, init ref<int32> forwardingFunctionEnd,
-    init ref<int32> codeLength)
+    ref<init int32> mainFunctionEnd, ref<init int32> forwardingFunctionEnd,
+    ref<init int32> codeLength)
 {
+    init int32 baseCodeLength;
     if (forwardingCount < 1
         || !TryGetBootstrapInt32MainPeStackArgumentCodeLength(
-            argumentCount, multiplication, init var baseCodeLength))
+            argumentCount, multiplication, ref init baseCodeLength))
     {
         return false;
     }
@@ -1130,7 +1146,7 @@ bool TryGetBootstrapInt32MainCallChainLayoutForDepth(int32 argumentCount,
             callOffset = callOffset + (outgoingOffset > 0x7F ? 11 : 8);
         }
     }
-    mainFunctionEnd = callOffset + 5 + epilogueLength;
+    int32 mainFunctionEndValue = callOffset + 5 + epilogueLength;
     mut int32 forwardingLength = prologLength + 5 + epilogueLength;
     for (mut int32 index = 4; index < argumentCount; index = index + 1)
     {
@@ -1140,24 +1156,32 @@ bool TryGetBootstrapInt32MainCallChainLayoutForDepth(int32 argumentCount,
             + (incomingOffset > 0x7F ? 7 : 4)
             + (outgoingOffset > 0x7F ? 7 : 4);
     }
-    if (forwardingLength > int32.MaxValue - mainFunctionEnd
-        || baseCodeLength < mainFunctionEnd
+    if (forwardingLength > int32.MaxValue - mainFunctionEndValue
+        || baseCodeLength < mainFunctionEndValue
         || forwardingCount > (int32.MaxValue - baseCodeLength) / forwardingLength)
     {
         return false;
     }
-    forwardingFunctionEnd = mainFunctionEnd + forwardingLength;
-    codeLength = baseCodeLength + forwardingCount * forwardingLength;
+    int32 forwardingFunctionEndValue
+        = mainFunctionEndValue + forwardingLength;
+    int32 codeLengthValue
+        = baseCodeLength + forwardingCount * forwardingLength;
+    *mainFunctionEnd = mainFunctionEndValue;
+    *forwardingFunctionEnd = forwardingFunctionEndValue;
+    *codeLength = codeLengthValue;
     return true;
 }
 
 bool TryValidateBootstrapInt32MainCallChain(int32 argumentCount,
     bool expectedMultiplication, int32 forwardingCount, int32 codeLength)
 {
+    init int32 mainFunctionEnd;
+    init int32 forwardingFunctionEnd;
+    init int32 expectedCodeLength;
     if (!TryGetBootstrapInt32MainCallChainLayoutForDepth(
             argumentCount, expectedMultiplication, forwardingCount,
-            init var mainFunctionEnd, init var forwardingFunctionEnd,
-            init var expectedCodeLength)
+            ref init mainFunctionEnd, ref init forwardingFunctionEnd,
+            ref init expectedCodeLength)
         || codeLength != expectedCodeLength)
     {
         return false;

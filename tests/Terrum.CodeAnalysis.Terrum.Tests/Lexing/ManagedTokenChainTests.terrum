@@ -5,19 +5,22 @@ public bool CheckManagedTokenChain()
     // The runner repeats this fixture, so discard graphs from its previous iteration.
     ManagedHeap.Collect();
 
+    init Token absentOnEmpty;
+    init Token invalidatedEmpty;
     require ManagedTokenChain.TryCreate(out var chain);
     if (chain.Count != 0 || chain.Version != 0 || chain.TryClear())
     {
         return false;
     }
     require chain.TryCreateCursor(out var emptyCursor);
-    if (!emptyCursor.IsCurrent || emptyCursor.TryPeek(init var absentOnEmpty))
+    if (!emptyCursor.IsCurrent
+        || emptyCursor.TryPeek(ref init absentOnEmpty))
     {
         return false;
     }
     if (!chain.TryAppend(7, 10, 2) || !chain.TryAppend(8, 12, 1)
         || chain.Count != 2 || chain.Version != 2 || emptyCursor.IsCurrent
-        || emptyCursor.TryPeek(init var invalidatedEmpty))
+        || emptyCursor.TryPeek(ref init invalidatedEmpty))
     {
         return false;
     }
@@ -27,12 +30,17 @@ public bool CheckManagedTokenChain()
     {
         return false;
     }
-    if (chain.TryGet(-1, init var negative) || chain.TryGet(2, init var pastEnd))
+    init Token negative;
+    init Token pastEnd;
+    if (chain.TryGet(-1, ref init negative)
+        || chain.TryGet(2, ref init pastEnd))
     {
         return false;
     }
-    require chain.TryGet(0, init var firstCopy);
-    require chain.TryGet(1, init var secondCopy);
+    init Token firstCopy;
+    init Token secondCopy;
+    require chain.TryGet(0, ref init firstCopy);
+    require chain.TryGet(1, ref init secondCopy);
     if (firstCopy.Kind != 7 || firstCopy.Range.Start != 10
         || firstCopy.Range.Length != 2 || firstCopy.Range.End != 12
         || secondCopy.Kind != 8 || secondCopy.Range.Start != 12
@@ -61,42 +69,61 @@ public bool CheckManagedTokenChain()
     require cursorChain.TryAppend(9, 2, 1);
     {
         require cursorChain.TryCreateCursor(out var cursor);
-        if (cursor.TryPeekAhead(-1, init var negativeDistance)
-            || cursor.TryPeekAhead(3, init var outside))
+        init Token negativeDistance;
+        init Token outside;
+        init Token third;
+        init Token second;
+        init Token mismatch;
+        init Token first;
+        init Token next;
+        init Token remaining;
+        init Token beyond;
+        init Token lastRead;
+        init Token atEnd;
+        init Token invalidatedByAppend;
+        init Token invalidatedByClear;
+        init Token visibleAfterClear;
+        init Token readableAfterClear;
+        init Token appendedAfterClear;
+        if (cursor.TryPeekAhead(-1, ref init negativeDistance)
+            || cursor.TryPeekAhead(3, ref init outside))
         {
             return false;
         }
-        require cursor.TryPeekAhead(2, init var third);
-        require cursor.TryPeekAhead(1, init var second);
+        require cursor.TryPeekAhead(2, ref init third);
+        require cursor.TryPeekAhead(1, ref init second);
         if (third.Kind != 9 || second.Kind != 8
-            || cursor.TryReadKind(8, init var mismatch))
+            || cursor.TryReadKind(8, ref init mismatch))
         {
             return false;
         }
-        require cursor.TryReadKind(7, init var first);
+        require cursor.TryReadKind(7, ref init first);
         if (first.Kind != 7 || first.Range.Start != 0)
         {
             return false;
         }
-        require cursor.TryRead(init var next);
+        require cursor.TryRead(ref init next);
         if (next.Kind != 8 || next.Range.Start != 1)
         {
             return false;
         }
-        require cursor.TryPeek(init var remaining);
-        if (remaining.Kind != 9 || cursor.TryPeekAhead(2, init var beyond))
+        require cursor.TryPeek(ref init remaining);
+        if (remaining.Kind != 9
+            || cursor.TryPeekAhead(2, ref init beyond))
         {
             return false;
         }
-        require cursor.TryReadKind(9, init var lastRead);
-        if (lastRead.Kind != 9 || cursor.TryRead(init var atEnd) || !cursor.IsCurrent)
+        require cursor.TryReadKind(9, ref init lastRead);
+        if (lastRead.Kind != 9 || cursor.TryRead(ref init atEnd)
+            || !cursor.IsCurrent)
         {
             return false;
         }
 
         require cursorChain.TryCreateCursor(out var staleByAppend);
         require cursorChain.TryAppend(10, 3, 1);
-        if (staleByAppend.IsCurrent || staleByAppend.TryPeek(init var invalidatedByAppend))
+        if (staleByAppend.IsCurrent
+            || staleByAppend.TryPeek(ref init invalidatedByAppend))
         {
             return false;
         }
@@ -104,20 +131,21 @@ public bool CheckManagedTokenChain()
         require cursorChain.TryCreateCursor(out var staleByClear);
         require cursorChain.TryClear();
         if (cursorChain.Count != 0 || cursorChain.Version != 5
-            || staleByClear.IsCurrent || staleByClear.TryRead(init var invalidatedByClear))
+            || staleByClear.IsCurrent
+            || staleByClear.TryRead(ref init invalidatedByClear))
         {
             return false;
         }
         require cursorChain.TryAppend(11, 4, 1);
         if (cursorChain.Count != 1 || cursorChain.Version != 6
             || staleByClear.IsCurrent
-            || staleByClear.TryPeek(init var visibleAfterClear)
-            || staleByClear.TryRead(init var readableAfterClear))
+            || staleByClear.TryPeek(ref init visibleAfterClear)
+            || staleByClear.TryRead(ref init readableAfterClear))
         {
             return false;
         }
         require cursorChain.TryCreateCursor(out var freshAfterClear);
-        require freshAfterClear.TryRead(init var appendedAfterClear);
+        require freshAfterClear.TryRead(ref init appendedAfterClear);
         if (!freshAfterClear.IsCurrent || appendedAfterClear.Kind != 11
             || appendedAfterClear.Range.Start != 4 || appendedAfterClear.Range.Length != 1)
         {
@@ -142,20 +170,23 @@ public bool CheckManagedTokenChain()
     {
         return false;
     }
-    require fullCursor.TryPeek(init var firstAfterRejectedAppend);
+    init Token firstAfterRejectedAppend;
+    require fullCursor.TryPeek(ref init firstAfterRejectedAppend);
     if (firstAfterRejectedAppend.Kind != 0
         || firstAfterRejectedAppend.Range.Start != 0)
     {
         return false;
     }
-    require cursorChain.TryGet(63, init var last);
+    init Token last;
+    require cursorChain.TryGet(63, ref init last);
     if (last.Kind != 63 || last.Range.Start != 63 || last.Range.Length != 1)
     {
         return false;
     }
     require cursorChain.TryClear();
+    init Token invalidated;
     if (cursorChain.Count != 0 || cursorChain.Version != 72
-        || fullCursor.IsCurrent || fullCursor.TryPeek(init var invalidated)
+        || fullCursor.IsCurrent || fullCursor.TryPeek(ref init invalidated)
         || ManagedHeap.Collect() != 64)
     {
         return false;

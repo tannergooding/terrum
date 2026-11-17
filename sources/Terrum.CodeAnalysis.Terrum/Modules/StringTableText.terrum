@@ -1,49 +1,57 @@
 namespace Terrum.CodeAnalysis;
 
 public static bool TryGetStringTableNameScalarCount(int32 recordCount, int32 row,
-    init ref<int32> scalarCount)
+    ref<init int32> scalarCount)
 {
-    if (!TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+    init int32 rowStart;
+    init int32 rowLength;
+    if (!TryGetIndexedStringRow(recordCount, row, ref init rowStart, ref init rowLength))
     {
         return false;
     }
 
-    return TryGetStringNameScalarCount(rowStart, rowLength, init scalarCount);
+    return TryGetStringNameScalarCount(rowStart, rowLength, ref init *scalarCount);
 }
 
 public static bool TryGetStringTableNamespaceScalarCount(int32 recordCount, int32 row,
-    init ref<int32> scalarCount)
+    ref<init int32> scalarCount)
 {
-    if (!TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+    init int32 rowStart;
+    init int32 rowLength;
+    if (!TryGetIndexedStringRow(recordCount, row, ref init rowStart, ref init rowLength))
     {
         return false;
     }
 
-    return TryGetStringNamespaceScalarCount(rowStart, rowLength, init scalarCount);
+    return TryGetStringNamespaceScalarCount(rowStart, rowLength, ref init *scalarCount);
 }
 
 public static bool TryReadStringTableNameScalarAt(int32 recordCount, int32 row, int32 scalarIndex,
-    init ref<int32> scalar)
+    ref<init int32> scalar)
 {
+    init int32 rowStart;
+    init int32 rowLength;
     if (scalarIndex < 0
-        || !TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+        || !TryGetIndexedStringRow(recordCount, row, ref init rowStart, ref init rowLength))
     {
         return false;
     }
 
-    return TryReadStringNameScalarAt(rowStart, rowLength, scalarIndex, init scalar);
+    return TryReadStringNameScalarAt(rowStart, rowLength, scalarIndex, ref init *scalar);
 }
 
 public static bool TryReadStringTableNamespaceScalarAt(int32 recordCount, int32 row, int32 scalarIndex,
-    init ref<int32> scalar)
+    ref<init int32> scalar)
 {
+    init int32 rowStart;
+    init int32 rowLength;
     if (scalarIndex < 0
-        || !TryGetIndexedStringRow(recordCount, row, init var rowStart, init var rowLength))
+        || !TryGetIndexedStringRow(recordCount, row, ref init rowStart, ref init rowLength))
     {
         return false;
     }
 
-    return TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, init scalar);
+    return TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, ref init *scalar);
 }
 
 bool TryValidateStringTableTextIndex(int32 recordCount)
@@ -53,31 +61,35 @@ bool TryValidateStringTableTextIndex(int32 recordCount)
 
 // Use after validating this exact index against the unchanged Host.Rows.
 bool TryGetValidatedStringTableTextRow(int32 recordCount, int32 row,
-    init ref<int32> rowStart, init ref<int32> rowLength)
+    ref<init int32> rowStart, ref<init int32> rowLength)
 {
+    init int32 dataRelativeStart;
+    init int32 selectedLength;
     if (!TryGetValidatedVariableTableRowExtent(recordCount, 8, 4, row,
-        init var dataRelativeStart, init var selectedLength))
+        ref init dataRelativeStart, ref init selectedLength))
     {
         return false;
     }
 
     int32 indexByteLength = (recordCount + 1) * 4;
-    rowStart = indexByteLength + dataRelativeStart;
-    rowLength = selectedLength;
+    *rowStart = indexByteLength + dataRelativeStart;
+    *rowLength = selectedLength;
     return true;
 }
 
 bool TryGetIndexedStringRow(int32 recordCount, int32 row,
-    init ref<int32> rowStart, init ref<int32> rowLength)
+    ref<init int32> rowStart, ref<init int32> rowLength)
 {
+    init int32 dataRelativeStart;
+    init int32 selectedLength;
     if (!TryGetVariableTableRowExtent(recordCount, 8, 4, row,
-        init var dataRelativeStart, init var selectedLength))
+        ref init dataRelativeStart, ref init selectedLength))
     {
         return false;
     }
 
     int32 indexByteLength = (recordCount + 1) * 4;
-    rowStart = indexByteLength + dataRelativeStart;
-    rowLength = selectedLength;
+    *rowStart = indexByteLength + dataRelativeStart;
+    *rowLength = selectedLength;
     return true;
 }

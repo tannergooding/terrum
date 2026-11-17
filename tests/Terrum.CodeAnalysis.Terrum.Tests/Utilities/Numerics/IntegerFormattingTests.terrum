@@ -3,19 +3,22 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public bool CheckIntegerFormatting()
 {
-    require TryGetInt64BaseLength(int64.MinValue, 16, init var minimumLength);
+    init int32 minimumLength;
+    init int32 reusableLength;
+    require TryGetInt64BaseLength(int64.MinValue, 16, ref init minimumLength);
     if (minimumLength != 17
-        || TryGetChar16BaseLength(char16(65), 1, init var reusableLength))
+        || TryGetChar16BaseLength(char16(65), 1, ref init reusableLength))
     {
         return false;
     }
-    require TryGetChar16BaseLength(char16(65), 16, init reusableLength);
+    require TryGetChar16BaseLength(char16(65), 16, ref init reusableLength);
     if (reusableLength != 2)
     {
         return false;
     }
 
-    require OwnedInt32Buffer.TryCreate(minimumLength, out var workspace);
+    init OwnedInt32Buffer workspace;
+    require OwnedInt32Buffer.TryCreate(minimumLength, ref init workspace);
     mut OwnedInt32Buffer digits = FormatInt64BaseUpper(int64.MinValue, 16, move workspace);
     if (digits.Count != minimumLength || digits.Capacity != minimumLength
         || digits.Read(0) != 45 || digits.Read(1) != 56)

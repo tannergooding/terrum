@@ -25,18 +25,22 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
 
     for (mut int32 profile = 1; profile <= targetProfileCount; profile = profile + 1)
     {
+        init uint32 profileId;
+        init uint32 revision;
         int32 offset = (profile - 1) * 8;
-        if (!TryReadTargetProfileWord(offset, 0, init var profileId)
-            || !TryReadTargetProfileWord(offset, 4, init var revision)
+        if (!TryReadTargetProfileWord(offset, 0, ref init profileId)
+            || !TryReadTargetProfileWord(offset, 4, ref init revision)
             || profileId == 0 || revision == 0)
         {
             return false;
         }
         for (mut int32 prior = 1; prior < profile; prior = prior + 1)
         {
+            init uint32 priorId;
+            init uint32 priorRevision;
             int32 priorOffset = (prior - 1) * 8;
-            if (!TryReadTargetProfileWord(priorOffset, 0, init var priorId)
-                || !TryReadTargetProfileWord(priorOffset, 4, init var priorRevision)
+            if (!TryReadTargetProfileWord(priorOffset, 0, ref init priorId)
+                || !TryReadTargetProfileWord(priorOffset, 4, ref init priorRevision)
                 || (profileId == priorId && revision == priorRevision))
             {
                 return false;
@@ -55,9 +59,11 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
 
     for (mut int32 type = 1; type <= typeDefCount; type = type + 1)
     {
+        init uint32 firstLayout;
+        init uint32 typeLayoutCount;
         int32 typeStart = (type - 1) * 44;
-        if (!TryReadTypeDefTableWord(typeStart, 28, init var firstLayout)
-            || !TryReadTypeDefTableWord(typeStart, 32, init var typeLayoutCount)
+        if (!TryReadTypeDefTableWord(typeStart, 28, ref init firstLayout)
+            || !TryReadTypeDefTableWord(typeStart, 32, ref init typeLayoutCount)
             || firstLayout == 0 || typeLayoutCount == 0
             || int64(firstLayout) + int64(typeLayoutCount) - 1 > 0xFF_FFFF
             || int64(firstLayout) + int64(typeLayoutCount) > int64(layoutCount) + 1)
@@ -69,13 +75,14 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
         for (mut int32 row = int32(firstLayout);
             row < int32(firstLayout + typeLayoutCount); row = row + 1)
         {
+            init uint32 profile;
             if (Host.LayoutOwners[row] != 0)
             {
                 return false;
             }
             Host.LayoutOwners[row] = type;
             int32 rowStart = (row - 1) * 28;
-            if (!TryReadLayoutTableWord(rowStart, 4, init var profile)
+            if (!TryReadLayoutTableWord(rowStart, 4, ref init profile)
                 || profile > uint32(targetProfileCount))
             {
                 return false;
@@ -83,8 +90,9 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
             defaultCount += profile == 0 ? 1 : 0;
             for (mut int32 prior = int32(firstLayout); prior < row; prior = prior + 1)
             {
+                init uint32 priorProfile;
                 if (!TryReadLayoutTableWord((prior - 1) * 28, 4,
-                        init var priorProfile)
+                        ref init priorProfile)
                     || priorProfile == profile)
                 {
                     return false;
@@ -99,16 +107,27 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
 
     for (mut int32 layout = 1; layout <= layoutCount; layout = layout + 1)
     {
+        init uint32 owner;
+        init uint32 profile;
+        init int32 kind;
+        init int32 flags;
+        init uint32 reserved;
+        init uint32 alignment;
+        init uint32 pack;
+        init uint32 fieldFirst;
+        init uint32 layoutFieldCountForRow;
+        init uint32 fieldFirstForType;
+        init uint32 fieldCountForType;
         int32 rowStart = (layout - 1) * 28;
-        if (!TryReadLayoutTableWord(rowStart, 0, init var owner)
-            || !TryReadLayoutTableWord(rowStart, 4, init var profile)
-            || !TryReadLayoutTableByte(rowStart + 8, init var kind)
-            || !TryReadLayoutTableByte(rowStart + 9, init var flags)
-            || !TryReadLayoutTableHalfWord(rowStart + 10, init var reserved)
-            || !TryReadLayoutTableWord(rowStart, 12, init var alignment)
-            || !TryReadLayoutTableWord(rowStart, 16, init var pack)
-            || !TryReadLayoutTableWord(rowStart, 20, init var fieldFirst)
-            || !TryReadLayoutTableWord(rowStart, 24, init var layoutFieldCountForRow)
+        if (!TryReadLayoutTableWord(rowStart, 0, ref init owner)
+            || !TryReadLayoutTableWord(rowStart, 4, ref init profile)
+            || !TryReadLayoutTableByte(rowStart + 8, ref init kind)
+            || !TryReadLayoutTableByte(rowStart + 9, ref init flags)
+            || !TryReadLayoutTableHalfWord(rowStart + 10, ref init reserved)
+            || !TryReadLayoutTableWord(rowStart, 12, ref init alignment)
+            || !TryReadLayoutTableWord(rowStart, 16, ref init pack)
+            || !TryReadLayoutTableWord(rowStart, 20, ref init fieldFirst)
+            || !TryReadLayoutTableWord(rowStart, 24, ref init layoutFieldCountForRow)
             || owner == 0 || owner != uint32(Host.LayoutOwners[layout])
             || profile > uint32(targetProfileCount) || kind > 4
             || (flags & 0xFE) != 0 || reserved != 0
@@ -126,8 +145,8 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
         }
 
         int32 typeStart = (int32(owner) - 1) * 44;
-        if (!TryReadTypeDefTableWord(typeStart, 12, init var fieldFirstForType)
-            || !TryReadTypeDefTableWord(typeStart, 16, init var fieldCountForType))
+        if (!TryReadTypeDefTableWord(typeStart, 12, ref init fieldFirstForType)
+            || !TryReadTypeDefTableWord(typeStart, 16, ref init fieldCountForType))
         {
             return false;
         }
@@ -136,7 +155,8 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
         for (mut int32 field = int32(fieldFirstForType);
             field < int32(fieldFirstForType + fieldCountForType); field = field + 1)
         {
-            if (!TryReadFieldDefWord((field - 1) * 16, 12, init var fieldFlags)
+            init uint32 fieldFlags;
+            if (!TryReadFieldDefWord((field - 1) * 16, 12, ref init fieldFlags)
                 || (fieldFlags & 0xFFFF_FFF0) != 0 || (fieldFlags & 3) == 3)
             {
                 return false;
@@ -150,29 +170,34 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
 
         for (mut int32 ordinal = 0; ordinal < int32(layoutFieldCountForRow); ordinal = ordinal + 1)
         {
+            init uint32 ownerLayout;
+            init uint32 fieldOrdinal;
+            init uint32 fieldDef;
+            init uint32 fieldFlags;
             int32 layoutField = int32(fieldFirst) + ordinal;
             if (Host.LayoutFieldOwners[layoutField] != 0)
             {
                 return false;
             }
             int32 fieldRowStart = (layoutField - 1) * 12;
-            if (!TryReadLayoutFieldWord(fieldRowStart, 0, init var ownerLayout)
-                || !TryReadLayoutFieldWord(fieldRowStart, 4, init var fieldOrdinal)
-                || !TryReadLayoutFieldWord(fieldRowStart, 8, init var fieldDef)
+            if (!TryReadLayoutFieldWord(fieldRowStart, 0, ref init ownerLayout)
+                || !TryReadLayoutFieldWord(fieldRowStart, 4, ref init fieldOrdinal)
+                || !TryReadLayoutFieldWord(fieldRowStart, 8, ref init fieldDef)
                 || ownerLayout != uint32(layout) || fieldOrdinal != uint32(ordinal)
                 || fieldDef == 0
                 || fieldDef > uint32(Host.FieldOwners.Length - 1)
                 || Host.FieldOwners[int32(fieldDef)] != int32(owner)
                 || !TryReadFieldDefWord((int32(fieldDef) - 1) * 16, 12,
-                    init var fieldFlags)
+                    ref init fieldFlags)
                 || (fieldFlags & 8) != 0)
             {
                 return false;
             }
             for (mut int32 prior = 0; prior < ordinal; prior = prior + 1)
             {
+                init uint32 priorFieldDef;
                 int32 priorRowStart = (int32(fieldFirst) + prior - 1) * 12;
-                if (!TryReadLayoutFieldWord(priorRowStart, 8, init var priorFieldDef)
+                if (!TryReadLayoutFieldWord(priorRowStart, 8, ref init priorFieldDef)
                     || priorFieldDef == fieldDef)
                 {
                     return false;
@@ -193,113 +218,131 @@ public static bool TryValidateLayoutTable(int32 moduleCount, int32 stringCount,
     return true;
 }
 
-bool TryReadLayoutTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadLayoutTableWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Layouts.Length - 28
         || offset < 0 || offset > 24
-        || !TryReadLayoutTableByte(rowStart + offset, init var first)
-        || !TryReadLayoutTableByte(rowStart + offset + 1, init var second)
-        || !TryReadLayoutTableByte(rowStart + offset + 2, init var third)
-        || !TryReadLayoutTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadLayoutTableByte(rowStart + offset, ref init first)
+        || !TryReadLayoutTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadLayoutTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadLayoutTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadLayoutTableHalfWord(int32 offset, init ref<uint32> value)
+bool TryReadLayoutTableHalfWord(int32 offset, ref<init uint32> value)
 {
-    if (!TryReadLayoutTableByte(offset, init var first)
-        || !TryReadLayoutTableByte(offset + 1, init var second))
+    init int32 first;
+    init int32 second;
+    if (!TryReadLayoutTableByte(offset, ref init first)
+        || !TryReadLayoutTableByte(offset + 1, ref init second))
     {
         return false;
     }
-    value = uint32(first) | (uint32(second) << 8);
+    *value = uint32(first) | (uint32(second) << 8);
     return true;
 }
 
-bool TryReadLayoutTableByte(int32 offset, init ref<int32> value)
+bool TryReadLayoutTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.Layouts.Length) { return false; }
     int32 part = Host.Layouts[offset];
     if (part < 0 || part > 255) { return false; }
-    value = part;
+    *value = part;
     return true;
 }
 
-bool TryReadTargetProfileWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadTargetProfileWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.TargetProfiles.Length - 8
         || offset < 0 || offset > 4
-        || !TryReadTargetProfileByte(rowStart + offset, init var first)
-        || !TryReadTargetProfileByte(rowStart + offset + 1, init var second)
-        || !TryReadTargetProfileByte(rowStart + offset + 2, init var third)
-        || !TryReadTargetProfileByte(rowStart + offset + 3, init var fourth))
+        || !TryReadTargetProfileByte(rowStart + offset, ref init first)
+        || !TryReadTargetProfileByte(rowStart + offset + 1, ref init second)
+        || !TryReadTargetProfileByte(rowStart + offset + 2, ref init third)
+        || !TryReadTargetProfileByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadTargetProfileByte(int32 offset, init ref<int32> value)
+bool TryReadTargetProfileByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.TargetProfiles.Length) { return false; }
     int32 part = Host.TargetProfiles[offset];
     if (part < 0 || part > 255) { return false; }
-    value = part;
+    *value = part;
     return true;
 }
 
-bool TryReadLayoutFieldWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadLayoutFieldWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.LayoutFields.Length - 12
         || offset < 0 || offset > 8
-        || !TryReadLayoutFieldByte(rowStart + offset, init var first)
-        || !TryReadLayoutFieldByte(rowStart + offset + 1, init var second)
-        || !TryReadLayoutFieldByte(rowStart + offset + 2, init var third)
-        || !TryReadLayoutFieldByte(rowStart + offset + 3, init var fourth))
+        || !TryReadLayoutFieldByte(rowStart + offset, ref init first)
+        || !TryReadLayoutFieldByte(rowStart + offset + 1, ref init second)
+        || !TryReadLayoutFieldByte(rowStart + offset + 2, ref init third)
+        || !TryReadLayoutFieldByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadLayoutFieldByte(int32 offset, init ref<int32> value)
+bool TryReadLayoutFieldByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.LayoutFields.Length) { return false; }
     int32 part = Host.LayoutFields[offset];
     if (part < 0 || part > 255) { return false; }
-    value = part;
+    *value = part;
     return true;
 }
 
-bool TryReadFieldDefWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadFieldDefWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.FieldDefs.Length - 16
         || offset < 0 || offset > 12
-        || !TryReadFieldDefByte(rowStart + offset, init var first)
-        || !TryReadFieldDefByte(rowStart + offset + 1, init var second)
-        || !TryReadFieldDefByte(rowStart + offset + 2, init var third)
-        || !TryReadFieldDefByte(rowStart + offset + 3, init var fourth))
+        || !TryReadFieldDefByte(rowStart + offset, ref init first)
+        || !TryReadFieldDefByte(rowStart + offset + 1, ref init second)
+        || !TryReadFieldDefByte(rowStart + offset + 2, ref init third)
+        || !TryReadFieldDefByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadFieldDefByte(int32 offset, init ref<int32> value)
+bool TryReadFieldDefByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.FieldDefs.Length) { return false; }
     int32 part = Host.FieldDefs[offset];
     if (part < 0 || part > 255) { return false; }
-    value = part;
+    *value = part;
     return true;
 }

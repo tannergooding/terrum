@@ -18,22 +18,24 @@ unique struct StringRowTextCursor
     }
 
     public static bool TryCreateName(int32 rowStart, int32 rowLength,
-        init ref<StringRowTextCursor> result)
+        ref<init StringRowTextCursor> result)
     {
-        return TryCreate(rowStart, rowLength, false, init result);
+        return TryCreate(rowStart, rowLength, false, ref init *result);
     }
 
     public static bool TryCreateNamespace(int32 rowStart, int32 rowLength,
-        init ref<StringRowTextCursor> result)
+        ref<init StringRowTextCursor> result)
     {
-        return TryCreate(rowStart, rowLength, true, init result);
+        return TryCreate(rowStart, rowLength, true, ref init *result);
     }
 
-    public mut bool TryRead(init ref<int32> scalar)
+    public mut bool TryRead(ref<init int32> scalar)
     {
+        init int32 value;
+        init int32 bytesRead;
         if (_remainingScalarCount <= 0
             || !TryDecodeStringRowScalarAtOffset(_byteOffset, _remainingByteLength, _encoding,
-                init var value, init var bytesRead)
+                ref init value, ref init bytesRead)
             || bytesRead > _remainingByteLength)
         {
             return false;
@@ -42,21 +44,25 @@ unique struct StringRowTextCursor
         _byteOffset = _byteOffset + bytesRead;
         _remainingByteLength = _remainingByteLength - bytesRead;
         _remainingScalarCount = _remainingScalarCount - 1;
-        scalar = value;
+        *scalar = value;
         return true;
     }
 
     static bool TryCreate(int32 rowStart, int32 rowLength, bool allowEmpty,
-        init ref<StringRowTextCursor> result)
+        ref<init StringRowTextCursor> result)
     {
+        init int32 encoding;
+        init int32 contentByteLength;
+        init int32 scalarCount;
+        init int32 unusedScalar;
         if (!TryAnalyzeStringRowText(rowStart, rowLength, allowEmpty, -1,
-            init var encoding, init var contentByteLength,
-            init var scalarCount, init var unusedScalar))
+            ref init encoding, ref init contentByteLength,
+            ref init scalarCount, ref init unusedScalar))
         {
             return false;
         }
 
-        result = new StringRowTextCursor(rowStart + 4, contentByteLength, encoding, scalarCount);
+        *result = new StringRowTextCursor(rowStart + 4, contentByteLength, encoding, scalarCount);
         return true;
     }
 }

@@ -1,10 +1,17 @@
 namespace Terrum.CodeAnalysis;
 
 public static bool TryGetArtifactSection(int32 queryKind,
-    init ref<int32> found, init ref<int32> sectionStart,
-    init ref<int32> sectionLength, init ref<int32> recordCount,
-    init ref<int32> sectionFlags)
+    ref<init int32> found, ref<init int32> sectionStart,
+    ref<init int32> sectionLength, ref<init int32> recordCount,
+    ref<init int32> sectionFlags)
 {
+    init uint32 magic;
+    init uint32 major;
+    init uint32 minor;
+    init uint32 headerLength;
+    init uint32 directoryCount;
+    init uint32 totalLength;
+    init uint32 directoryOffset;
     if (queryKind < 0 || queryKind > 0xFFFF || Host.Artifact.Length < 32)
     {
         return false;
@@ -18,15 +25,15 @@ public static bool TryGetArtifactSection(int32 queryKind,
         }
     }
 
-    if (!TryReadArtifactWord(0, init var magic) || magic != 0x4D52_5254
-        || !TryReadArtifactHalfWord(4, init var major) || major != 1
-        || !TryReadArtifactHalfWord(6, init var minor) || minor != 0
-        || !TryReadArtifactWord(8, init var headerLength) || headerLength != 32
-        || !TryReadArtifactWord(12, init var directoryCount)
+    if (!TryReadArtifactWord(0, ref init magic) || magic != 0x4D52_5254
+        || !TryReadArtifactHalfWord(4, ref init major) || major != 1
+        || !TryReadArtifactHalfWord(6, ref init minor) || minor != 0
+        || !TryReadArtifactWord(8, ref init headerLength) || headerLength != 32
+        || !TryReadArtifactWord(12, ref init directoryCount)
         || directoryCount == 0 || directoryCount > 32790
-        || !TryReadArtifactWord(16, init var totalLength)
+        || !TryReadArtifactWord(16, ref init totalLength)
         || totalLength != uint32(Host.Artifact.Length)
-        || !TryReadArtifactWord(20, init var directoryOffset)
+        || !TryReadArtifactWord(20, ref init directoryOffset)
         || directoryOffset != 32)
     {
         return false;
@@ -34,7 +41,8 @@ public static bool TryGetArtifactSection(int32 queryKind,
 
     for (mut int32 offset = 24; offset < 32; offset = offset + 1)
     {
-        if (!TryReadArtifactByte(offset, init var reserved) || reserved != 0)
+        init int32 reserved;
+        if (!TryReadArtifactByte(offset, ref init reserved) || reserved != 0)
         {
             return false;
         }
@@ -66,14 +74,19 @@ public static bool TryGetArtifactSection(int32 queryKind,
     mut bool moduleFound = false;
     for (mut int32 entry = 1; entry <= entryCount; entry = entry + 1)
     {
+        init uint32 kind;
+        init uint32 flags;
+        init uint32 count;
+        init uint32 start;
+        init uint32 length;
         int32 directoryRowStart = 32 + (entry - 1) * 16;
-        if (!TryReadArtifactHalfWord(directoryRowStart, init var kind)
+        if (!TryReadArtifactHalfWord(directoryRowStart, ref init kind)
             || int32(kind) <= previousKind
-            || !TryReadArtifactHalfWord(directoryRowStart + 2, init var flags)
-            || !TryReadArtifactWord(directoryRowStart + 4, init var count)
+            || !TryReadArtifactHalfWord(directoryRowStart + 2, ref init flags)
+            || !TryReadArtifactWord(directoryRowStart + 4, ref init count)
             || count == 0 || count > 0xFF_FFFF
-            || !TryReadArtifactWord(directoryRowStart + 8, init var start)
-            || !TryReadArtifactWord(directoryRowStart + 12, init var length)
+            || !TryReadArtifactWord(directoryRowStart + 8, ref init start)
+            || !TryReadArtifactWord(directoryRowStart + 12, ref init length)
             || length == 0 || start < uint32(directoryEnd)
             || start > uint32(Host.Artifact.Length)
             || length > uint32(Host.Artifact.Length) - start)
@@ -99,7 +112,8 @@ public static bool TryGetArtifactSection(int32 queryKind,
         }
         for (mut int32 offset = cursor; offset < int32(start); offset = offset + 1)
         {
-            if (!TryReadArtifactByte(offset, init var padding) || padding != 0)
+            init int32 padding;
+            if (!TryReadArtifactByte(offset, ref init padding) || padding != 0)
             {
                 return false;
             }
@@ -124,6 +138,7 @@ public static bool TryGetArtifactSection(int32 queryKind,
 
     for (mut int32 entry = 1; entry <= entryCount; entry = entry + 1)
     {
+        init uint32 slotCount;
         if (Host.SectionFlags[entry] != 2)
         {
             continue;
@@ -133,7 +148,7 @@ public static bool TryGetArtifactSection(int32 queryKind,
         int32 slotSectionLength = Host.SectionLengths[entry];
         int32 sectionKind = Host.SectionKinds[entry];
         if (slotSectionLength < 4
-            || !TryReadArtifactWord(slotSectionStart, init var slotCount)
+            || !TryReadArtifactWord(slotSectionStart, ref init slotCount)
             || int64(4) + int64(slotCount) * 16 > int64(slotSectionLength)
             || (sectionKind == 0x7F00
                 && int64(4) + int64(slotCount) * 16
@@ -144,13 +159,19 @@ public static bool TryGetArtifactSection(int32 queryKind,
 
         for (mut int32 slot = 0; slot < int32(slotCount); slot = slot + 1)
         {
+            init uint32 targetKind;
+            init uint32 selector;
+            init uint32 targetRow;
+            init uint32 block;
+            init uint32 reserved;
+            init uint32 ordinal;
             int32 slotOffset = slotSectionStart + 4 + slot * 16;
-            if (!TryReadArtifactHalfWord(slotOffset, init var targetKind)
-                || !TryReadArtifactHalfWord(slotOffset + 2, init var selector)
-                || !TryReadArtifactWord(slotOffset + 4, init var targetRow)
-                || !TryReadArtifactWord(slotOffset + 8, init var block)
-                || !TryReadArtifactHalfWord(slotOffset + 10, init var reserved)
-                || !TryReadArtifactWord(slotOffset + 12, init var ordinal))
+            if (!TryReadArtifactHalfWord(slotOffset, ref init targetKind)
+                || !TryReadArtifactHalfWord(slotOffset + 2, ref init selector)
+                || !TryReadArtifactWord(slotOffset + 4, ref init targetRow)
+                || !TryReadArtifactWord(slotOffset + 8, ref init block)
+                || !TryReadArtifactHalfWord(slotOffset + 10, ref init reserved)
+                || !TryReadArtifactWord(slotOffset + 12, ref init ordinal))
             {
                 return false;
             }
@@ -198,19 +219,19 @@ public static bool TryGetArtifactSection(int32 queryKind,
 
     if (low <= entryCount && Host.SectionKinds[low] == queryKind)
     {
-        found = 1;
-        sectionStart = Host.SectionStarts[low];
-        sectionLength = Host.SectionLengths[low];
-        recordCount = Host.SectionCounts[low];
-        sectionFlags = Host.SectionFlags[low];
+        *found = 1;
+        *sectionStart = Host.SectionStarts[low];
+        *sectionLength = Host.SectionLengths[low];
+        *recordCount = Host.SectionCounts[low];
+        *sectionFlags = Host.SectionFlags[low];
     }
     else
     {
-        found = 0;
-        sectionStart = 0;
-        sectionLength = 0;
-        recordCount = 0;
-        sectionFlags = 0;
+        *found = 0;
+        *sectionStart = 0;
+        *sectionLength = 0;
+        *recordCount = 0;
+        *sectionFlags = 0;
     }
 
     return true;
@@ -303,9 +324,11 @@ bool TryValidateArtifactFeatures()
         int32 featureStart = Host.SectionStarts[FindArtifactSection(0x0004)];
         for (mut int32 row = 0; row < int32(featureCount); row = row + 1)
         {
+            init uint32 featureId;
+            init uint32 ruleRevision;
             int32 rowStart = featureStart + row * 8;
-            if (!TryReadArtifactWord(rowStart, init var featureId)
-                || !TryReadArtifactWord(rowStart + 4, init var ruleRevision)
+            if (!TryReadArtifactWord(rowStart, ref init featureId)
+                || !TryReadArtifactWord(rowStart + 4, ref init ruleRevision)
                 || featureId == 0 || ruleRevision == 0)
             {
                 return false;
@@ -317,9 +340,11 @@ bool TryValidateArtifactFeatures()
     uint32 moduleCount = GetArtifactSectionCount(0x0001);
     for (mut int32 row = 0; row < int32(moduleCount); row = row + 1)
     {
+        init uint32 featureFirst;
+        init uint32 moduleFeatureCount;
         int32 rowStart = moduleStart + row * 48;
-        if (!TryReadArtifactWord(rowStart + 24, init var featureFirst)
-            || !TryReadArtifactWord(rowStart + 28, init var moduleFeatureCount))
+        if (!TryReadArtifactWord(rowStart + 24, ref init featureFirst)
+            || !TryReadArtifactWord(rowStart + 28, ref init moduleFeatureCount))
         {
             return false;
         }
@@ -341,34 +366,40 @@ bool TryValidateArtifactFeatures()
     return true;
 }
 
-bool TryReadArtifactHalfWord(int32 offset, init ref<uint32> value)
+bool TryReadArtifactHalfWord(int32 offset, ref<init uint32> value)
 {
-    if (!TryReadArtifactByte(offset, init var first)
-        || !TryReadArtifactByte(offset + 1, init var second))
+    init int32 first;
+    init int32 second;
+    if (!TryReadArtifactByte(offset, ref init first)
+        || !TryReadArtifactByte(offset + 1, ref init second))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8);
+    *value = uint32(first) | (uint32(second) << 8);
     return true;
 }
 
-bool TryReadArtifactWord(int32 offset, init ref<uint32> value)
+bool TryReadArtifactWord(int32 offset, ref<init uint32> value)
 {
-    if (!TryReadArtifactByte(offset, init var first)
-        || !TryReadArtifactByte(offset + 1, init var second)
-        || !TryReadArtifactByte(offset + 2, init var third)
-        || !TryReadArtifactByte(offset + 3, init var fourth))
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
+    if (!TryReadArtifactByte(offset, ref init first)
+        || !TryReadArtifactByte(offset + 1, ref init second)
+        || !TryReadArtifactByte(offset + 2, ref init third)
+        || !TryReadArtifactByte(offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadArtifactByte(int32 offset, init ref<int32> value)
+bool TryReadArtifactByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.Artifact.Length)
     {
@@ -381,6 +412,6 @@ bool TryReadArtifactByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }

@@ -13,14 +13,17 @@ public unique struct SourceLineIndex
         _length = length;
     }
 
-    public static bool TryCreate(init ref<SourceLineIndex> index)
+    public static bool TryCreate(ref<init SourceLineIndex> index)
     {
         mut int32 lineCount = 0;
         mut int32 position = 0;
         mut bool finalBreakIsCrLf = false;
         while (true)
         {
-            require TryReadSourceLine(position, init var content, init var includingBreak);
+            init SourceRange content;
+            init SourceRange includingBreak;
+            require TryReadSourceLine(position, ref init content,
+                ref init includingBreak);
             if (lineCount == int32.MaxValue)
             {
                 return false;
@@ -35,7 +38,8 @@ public unique struct SourceLineIndex
         }
 
         int32 finalStart = position;
-        if (!OwnedInt32Buffer.TryCreate(lineCount, out var created))
+        init OwnedInt32Buffer created;
+        if (!OwnedInt32Buffer.TryCreate(lineCount, ref init created))
         {
             return false;
         }
@@ -57,7 +61,10 @@ public unique struct SourceLineIndex
             position = 0;
             while (filled < lineCount - 1)
             {
-                require TryReadSourceLine(position, init var content, init var includingBreak);
+                init SourceRange content;
+                init SourceRange includingBreak;
+                require TryReadSourceLine(position, ref init content,
+                    ref init includingBreak);
                 position = includingBreak.End;
                 mut int32 lineStart = position;
                 if (includingBreak.Length - content.Length == 2)
@@ -77,7 +84,7 @@ public unique struct SourceLineIndex
                 require starts.TryAppend(lineStart);
             }
         }
-        index = new SourceLineIndex(move starts, lineCount, Host.Source.Length);
+        *index = new SourceLineIndex(move starts, lineCount, Host.Source.Length);
         return true;
     }
 
@@ -86,7 +93,8 @@ public unique struct SourceLineIndex
         return _lineCount;
     }
 
-    public bool TryGetPosition(int32 position, init ref<int32> line, init ref<int32> character)
+    public bool TryGetPosition(int32 position, ref<init int32> line,
+        ref<init int32> character)
     {
         if (position < 0 || position > _length)
         {
@@ -110,12 +118,13 @@ public unique struct SourceLineIndex
             }
         }
 
-        line = low;
-        character = position - DecodeStart(starts.Read(low));
+        *line = low;
+        *character = position - DecodeStart(starts.Read(low));
         return true;
     }
 
-    public bool TryGetOffset(int32 line, int32 character, init ref<int32> offset)
+    public bool TryGetOffset(int32 line, int32 character,
+        ref<init int32> offset)
     {
         if (line < 0 || line >= _lineCount || character < 0)
         {
@@ -136,11 +145,12 @@ public unique struct SourceLineIndex
             return false;
         }
 
-        offset = start + character;
+        *offset = start + character;
         return true;
     }
 
-    public bool TryGetLineExtent(int32 line, init ref<SourceRange> includingBreak)
+    public bool TryGetLineExtent(int32 line,
+        ref<init SourceRange> includingBreak)
     {
         if (line < 0 || line >= _lineCount)
         {
@@ -154,13 +164,16 @@ public unique struct SourceLineIndex
         {
             end = DecodeStart(starts.Read(line + 1));
         }
-        require SourceRange.TryCreate(start, end - start, init includingBreak);
+        require SourceRange.TryCreate(start, end - start,
+            ref init *includingBreak);
         return true;
     }
 
-    public bool TryGetLineContentExtent(int32 line, init ref<SourceRange> content)
+    public bool TryGetLineContentExtent(int32 line,
+        ref<init SourceRange> content)
     {
-        if (!TryGetLineExtent(line, init var includingBreak))
+        init SourceRange includingBreak;
+        if (!TryGetLineExtent(line, ref init includingBreak))
         {
             return false;
         }
@@ -176,7 +189,8 @@ public unique struct SourceLineIndex
             }
         }
 
-        require SourceRange.TryCreate(start, includingBreak.Length - breakWidth, init content);
+        require SourceRange.TryCreate(start,
+            includingBreak.Length - breakWidth, ref init *content);
         return true;
     }
 

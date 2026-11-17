@@ -5,7 +5,10 @@ public bool CheckSourceDiagnosticLocation()
     mut int32 position = 0;
     while (position <= Host.Source.Length)
     {
-        if (!TryGetSourceDiagnosticLocation(position, init var line, init var column))
+        init int32 line;
+        init int32 column;
+        if (!TryGetSourceDiagnosticLocation(position, ref init line,
+            ref init column))
         {
             return false;
         }
@@ -19,11 +22,20 @@ public bool CheckSourceDiagnosticLocation()
         position = position + 1;
     }
 
-    if (TryGetSourceDiagnosticLocation(-1, init var beforeLine, init var beforeColumn)
+    init int32 beforeLine;
+    init int32 beforeColumn;
+    init int32 afterLine;
+    init int32 afterColumn;
+    init int32 maximumLine;
+    init int32 maximumColumn;
+    if (TryGetSourceDiagnosticLocation(-1, ref init beforeLine,
+            ref init beforeColumn)
         || beforeLine is init || beforeColumn is init
-        || TryGetSourceDiagnosticLocation(Host.Source.Length + 1, init var afterLine, init var afterColumn)
+        || TryGetSourceDiagnosticLocation(Host.Source.Length + 1,
+            ref init afterLine, ref init afterColumn)
         || afterLine is init || afterColumn is init
-        || TryGetSourceDiagnosticLocation(int32.MaxValue, init var maximumLine, init var maximumColumn)
+        || TryGetSourceDiagnosticLocation(int32.MaxValue,
+            ref init maximumLine, ref init maximumColumn)
         || maximumLine is init || maximumColumn is init)
     {
         return false;

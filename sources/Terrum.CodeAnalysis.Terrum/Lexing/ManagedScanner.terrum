@@ -37,7 +37,8 @@ bool IsValidScannerToken(int32 index, int32 count, int32 previousEnd,
 }
 
 // Only a complete, validated snapshot of the fixed host records escapes.
-bool TryBuildManagedTokenChain(int32 count, init ref<write ManagedTokenChain> result)
+bool TryBuildManagedTokenChain(int32 count,
+    ref<init write ManagedTokenChain> result)
 {
     if (Host.Diagnostics[0] != 0 || count < 1 || count > 64
         || count * 3 > Host.Tokens.Length)
@@ -66,26 +67,28 @@ bool TryBuildManagedTokenChain(int32 count, init ref<write ManagedTokenChain> re
         previousEnd = start + length;
     }
 
-    result = chain;
+    *result = chain;
     return true;
 }
 
-bool TryScanManaged(init ref<write ManagedTokenChain> result)
+bool TryScanManaged(ref<init write ManagedTokenChain> result)
 {
     int32 count = Scan();
-    if (!TryBuildManagedTokenChain(count, init var chain))
+    init write ManagedTokenChain chain;
+    if (!TryBuildManagedTokenChain(count, ref init chain))
     {
         return false;
     }
-    result = chain;
+    *result = chain;
     return true;
 }
 
-bool TryScanManagedCursor(init ref<write ManagedTokenCursor> result)
+bool TryScanManagedCursor(ref<init write ManagedTokenCursor> result)
 {
-    if (!TryScanManaged(init var chain))
+    init write ManagedTokenChain chain;
+    if (!TryScanManaged(ref init chain))
     {
         return false;
     }
-    return chain.TryCreateCursorInit(init result);
+    return chain.TryCreateCursorInit(ref init *result);
 }

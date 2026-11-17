@@ -7,11 +7,12 @@ bool TokensAttach(Token receiver, Token opener)
 
 // Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool,
 // 6=char16, 7=float32, 8=float64.
-bool TryGetScalarType(Token type, init ref<int32> scalarType)
+bool TryGetScalarType(Token type, ref<init int32> scalarType)
 {
-    if (TryGetPrimitiveScalarType(type, init var primitive))
+    init int32 primitive;
+    if (TryGetPrimitiveScalarType(type, ref init primitive))
     {
-        scalarType = primitive;
+        *scalarType = primitive;
         return true;
     }
     if (type.Kind != 2 || Host.FrontendProgram.Length != 25025)
@@ -26,8 +27,9 @@ bool TryGetScalarType(Token type, init ref<int32> scalarType)
     for (mut int32 index = count - 1; index >= 0; index = index - 1)
     {
         int32 entry = Host.FrontendProgram.Length - 1 - (index + 1) * 5;
+        init SourceRange nameSpan;
         require SourceRange.TryCreate(Host.FrontendProgram[entry],
-            Host.FrontendProgram[entry + 1], init var nameSpan);
+            Host.FrontendProgram[entry + 1], ref init nameSpan);
         if (SameTokenSpelling(type, new Token(2, nameSpan)))
         {
             int32 selected = Host.FrontendProgram[entry + 4];
@@ -35,14 +37,14 @@ bool TryGetScalarType(Token type, init ref<int32> scalarType)
             {
                 return false;
             }
-            scalarType = selected;
+            *scalarType = selected;
             return true;
         }
     }
     return false;
 }
 
-bool TryGetPrimitiveScalarType(Token type, init ref<int32> scalarType)
+bool TryGetPrimitiveScalarType(Token type, ref<init int32> scalarType)
 {
     if (type.Kind != 2)
     {
@@ -107,7 +109,7 @@ bool TryGetPrimitiveScalarType(Token type, init ref<int32> scalarType)
     {
         return false;
     }
-    scalarType = selected;
+    *scalarType = selected;
     return true;
 }
 
@@ -170,7 +172,7 @@ uint64 DecodeScannerMagnitude(int32 low, int32 high)
     return uint64(highBits) * 4294967296 + uint64(lowBits);
 }
 
-bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, init ref<int64> value)
+bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, ref<init int64> value)
 {
     uint64 signBit = uint64(int64.MaxValue) + 1;
     if (!based && magnitude > uint64(int64.MaxValue))
@@ -179,11 +181,11 @@ bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, init ref<int64> value
     }
     if (magnitude >= signBit)
     {
-        value = int64(magnitude - signBit) + int64.MinValue;
+        *value = int64(magnitude - signBit) + int64.MinValue;
     }
     else
     {
-        value = int64(magnitude);
+        *value = int64(magnitude);
     }
     return true;
 }
@@ -198,45 +200,45 @@ bool EvaluateScalarComparison(int32 operation, bool equal, bool less, bool great
         || operation == 70 && !less;
 }
 
-bool TryAddScalarInt32(int32 first, int32 second, init ref<int32> sum)
+bool TryAddScalarInt32(int32 first, int32 second, ref<init int32> sum)
 {
     int64 wide = int64(first) + int64(second);
     if (wide < int64(int32.MinValue) || wide > int64(int32.MaxValue))
     {
         return false;
     }
-    sum = int32(wide);
+    *sum = int32(wide);
     return true;
 }
 
-bool TryAddScalarUInt32(uint32 first, uint32 second, init ref<uint32> sum)
+bool TryAddScalarUInt32(uint32 first, uint32 second, ref<init uint32> sum)
 {
     uint64 wide = uint64(first) + uint64(second);
     if (wide > uint64(uint32.MaxValue))
     {
         return false;
     }
-    sum = uint32(wide);
+    *sum = uint32(wide);
     return true;
 }
 
-bool TryAddScalarInt64(int64 first, int64 second, init ref<int64> sum)
+bool TryAddScalarInt64(int64 first, int64 second, ref<init int64> sum)
 {
     if ((second > 0 && first > int64.MaxValue - second)
         || (second < 0 && first < int64.MinValue - second))
     {
         return false;
     }
-    sum = first + second;
+    *sum = first + second;
     return true;
 }
 
-bool TryAddScalarUInt64(uint64 first, uint64 second, init ref<uint64> sum)
+bool TryAddScalarUInt64(uint64 first, uint64 second, ref<init uint64> sum)
 {
     if (first > uint64.MaxValue - second)
     {
         return false;
     }
-    sum = first + second;
+    *sum = first + second;
     return true;
 }

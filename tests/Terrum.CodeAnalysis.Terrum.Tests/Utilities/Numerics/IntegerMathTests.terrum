@@ -3,6 +3,10 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public bool CheckIntegerMath()
 {
+    init int32 absolute32;
+    init int32 minimumAbsolute32;
+    init int64 absolute64;
+    init int64 minimumAbsolute64;
     if (AbsInt32(-7) != 7 || SignInt32(int32.MinValue) != -1 || SignInt32(0) != 0
         || MinInt32(int32.MinValue, int32.MaxValue) != int32.MinValue
         || MaxInt32(int32.MinValue, int32.MaxValue) != int32.MaxValue
@@ -16,8 +20,8 @@ public bool CheckIntegerMath()
         return false;
     }
 
-    require TryAbsInt32(-7, init var absolute32);
-    if (absolute32 != 7 || TryAbsInt32(int32.MinValue, init var minimumAbsolute32))
+    require TryAbsInt32(-7, ref init absolute32);
+    if (absolute32 != 7 || TryAbsInt32(int32.MinValue, ref init minimumAbsolute32))
     {
         return false;
     }
@@ -33,7 +37,7 @@ public bool CheckIntegerMath()
         return false;
     }
 
-    require TryAbsInt64(-7, init var absolute64);
+    require TryAbsInt64(-7, ref init absolute64);
     return absolute64 == 7
-        && !TryAbsInt64(int64.MinValue, init var minimumAbsolute64);
+        && !TryAbsInt64(int64.MinValue, ref init minimumAbsolute64);
 }

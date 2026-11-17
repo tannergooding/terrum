@@ -12,7 +12,7 @@ public unique struct TokenSnapshot
     }
 
     internal static bool TryCreateValidated(OwnedInt32Buffer records, int32 count,
-        init ref<TokenSnapshot> result)
+        ref<init TokenSnapshot> result)
     {
         if (count < 1 || count > int32.MaxValue / 3 || records.Count != count * 3)
         {
@@ -33,7 +33,7 @@ public unique struct TokenSnapshot
             previousEnd = start + length;
         }
 
-        result = new TokenSnapshot(move records, count);
+        *result = new TokenSnapshot(move records, count);
         return true;
     }
 
@@ -42,7 +42,7 @@ public unique struct TokenSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, init ref<Token> token)
+    public bool TryGet(int32 index, ref<init Token> token)
     {
         if (index < 0 || index >= _count)
         {
@@ -50,14 +50,16 @@ public unique struct TokenSnapshot
         }
 
         int32 offset = index * 3;
-        require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
-            init var range);
-        token = new Token(_records.Read(offset), range);
+        init SourceRange range;
+        require SourceRange.TryCreate(_records.Read(offset + 1),
+            _records.Read(offset + 2), ref init range);
+        *token = new Token(_records.Read(offset), range);
         return true;
     }
 
-    // Scalar input only treats init-ref's type delimiters as generic punctuation.
+    // Scalar input only treats canonical ref<init T> delimiters as generic punctuation.
     // Its operand-ending token kinds determine unary versus binary/update roles.
+    // `ref init *place` is a scoped initialization-reference reborrow.
     // A colon attached to an identifier before a same-line loop keyword introduces its label.
     public SourceRange GetScalarOperatorSpacingError()
     {
@@ -66,15 +68,19 @@ public unique struct TokenSnapshot
         {
             return run;
         }
-        require TryGet(0, init var first);
+        init Token first;
+        require TryGet(0, ref init first);
         mut Token previous = first;
         if (_count > 2)
         {
-            require TryGet(1, init var second);
+            init Token second;
+            require TryGet(1, ref init second);
             mut Token current = second;
             for (mut int32 index = 1; index < _count - 1; index = index + 1)
             {
-                require TryGet(index + 1, init var next);
+                init Token next;
+                init Token argumentStart;
+                require TryGet(index + 1, ref init next);
                 int32 kind = current.Kind;
                 bool operandEnd = IsScalarOperandEnd(previous.Kind);
                 mut bool prefix = kind == 62 || kind == 63;
@@ -90,11 +96,20 @@ public unique struct TokenSnapshot
                     if (operandEnd) { postfix = true; }
                     else { prefix = true; }
                 }
-                if (kind >= 59 && kind <= 61) { separated = true; }
+                if (kind == 59)
+                {
+                    if (IsInitReferenceReborrow(index, previous)) { prefix = true; }
+                    else if (operandEnd) { separated = true; }
+                    else { prefix = true; }
+                }
+                else if (kind == 60 || kind == 61)
+                {
+                    separated = true;
+                }
                 if (kind == 55 || kind == 56) { separated = true; }
                 if (kind == 55 && previous.Kind == 2
                     && previous.Range.End == current.Range.Start && index >= 2
-                    && TryGet(index - 2, init var argumentStart)
+                    && TryGet(index - 2, ref init argumentStart)
                     && (argumentStart.Kind == 46 || argumentStart.Kind == 53))
                 {
                     separated = false;
@@ -137,7 +152,8 @@ public unique struct TokenSnapshot
                 current = next;
             }
         }
-        require SourceRange.TryCreate(0, 0, init var empty);
+        init SourceRange empty;
+        require SourceRange.TryCreate(0, 0, ref init empty);
         return empty;
     }
 
@@ -145,19 +161,38 @@ public unique struct TokenSnapshot
     {
         if (operation.Kind == 67 && previous.Kind == 14 && index >= 2)
         {
-            if (!TryGet(index - 2, init var mode))
+            init Token initialization;
+            if (!TryGet(index + 1, ref init initialization))
             {
                 return false;
             }
-            return IsInitKeyword(mode);
+            return IsInitKeyword(initialization);
         }
-        if (operation.Kind != 69 || previous.Kind != 2 || index < 4
-            || !TryGet(index - 2, init var less) || !TryGet(index - 3, init var refKeyword)
-            || !TryGet(index - 4, init var mode))
+        if (operation.Kind != 69 || previous.Kind != 2 || index < 4)
         {
             return false;
         }
-        return less.Kind == 67 && refKeyword.Kind == 14 && IsInitKeyword(mode);
+        init Token less;
+        init Token initialization;
+        init Token refKeyword;
+        if (!TryGet(index - 3, ref init less)
+            || !TryGet(index - 2, ref init initialization)
+            || !TryGet(index - 4, ref init refKeyword))
+        {
+            return false;
+        }
+        return less.Kind == 67 && refKeyword.Kind == 14
+            && IsInitKeyword(initialization);
+    }
+
+    private bool IsInitReferenceReborrow(int32 index, Token previous)
+    {
+        if (previous.Kind != 2 || index < 2 || !IsInitKeyword(previous))
+        {
+            return false;
+        }
+        init Token refKeyword;
+        return TryGet(index - 2, ref init refKeyword) && refKeyword.Kind == 14;
     }
 
     private bool IsInitKeyword(Token token)
@@ -176,7 +211,8 @@ public unique struct TokenSnapshot
         mut int32 index = 0;
         while (index < _count - 1)
         {
-            require TryGet(index, init var first);
+            init Token first;
+            require TryGet(index, ref init first);
             if (!IsPunctuationGlyph(PeekUnit(first.Range.Start)))
             {
                 index = index + 1;
@@ -188,7 +224,8 @@ public unique struct TokenSnapshot
             index = index + 1;
             while (index < _count - 1)
             {
-                require TryGet(index, init var next);
+                init Token next;
+                require TryGet(index, ref init next);
                 if (next.Range.Start != end
                     || !IsPunctuationGlyph(PeekUnit(next.Range.Start)))
                 {
@@ -202,11 +239,14 @@ public unique struct TokenSnapshot
             if (records != 1 || matched == -1 || matched % 8 != end - start
                 || matched / 8 != first.Kind)
             {
-                require SourceRange.TryCreate(start, end - start, init var error);
+                init SourceRange error;
+                require SourceRange.TryCreate(start, end - start,
+                    ref init error);
                 return error;
             }
         }
-        require SourceRange.TryCreate(0, 0, init var empty);
+        init SourceRange empty;
+        require SourceRange.TryCreate(0, 0, ref init empty);
         return empty;
     }
 
@@ -218,7 +258,8 @@ public unique struct TokenSnapshot
         return kind == 86 || kind == 87;
     }
 
-    public static bool TryBuild(int32 count, init ref<TokenSnapshot> result)
+    public static bool TryBuild(int32 count,
+        ref<init TokenSnapshot> result)
     {
         if (Host.Diagnostics[0] != 0 || count < 1
             || count > int32.MaxValue / 3 || count > Host.Tokens.Length / 3)
@@ -226,7 +267,8 @@ public unique struct TokenSnapshot
             return false;
         }
 
-        if (!OwnedInt32Buffer.TryCreate(count * 3, out var created))
+        init OwnedInt32Buffer created;
+        if (!OwnedInt32Buffer.TryCreate(count * 3, ref init created))
         {
             return false;
         }
@@ -243,11 +285,11 @@ public unique struct TokenSnapshot
             require records.TryAppend(length);
         }
 
-        return TryCreateValidated(move records, count, init result);
+        return TryCreateValidated(move records, count, ref init *result);
     }
 
-    public static bool TryScan(init ref<TokenSnapshot> result)
+    public static bool TryScan(ref<init TokenSnapshot> result)
     {
-        return TryBuild(Scan(), init result);
+        return TryBuild(Scan(), ref init *result);
     }
 }

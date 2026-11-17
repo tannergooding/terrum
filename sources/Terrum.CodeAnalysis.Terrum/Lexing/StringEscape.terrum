@@ -19,7 +19,8 @@ public struct StringEscapeDecodeResult
         ErrorLength = errorLength;
     }
 
-    public static bool TryAnalyze(SourceRange spelling, init ref<StringEscapeDecodeResult> result)
+    public static bool TryAnalyze(SourceRange spelling,
+        ref<init StringEscapeDecodeResult> result)
     {
         if (spelling.Start < 0 || spelling.Length < 0 || spelling.Start > Host.Source.Length
             || spelling.Length > Host.Source.Length - spelling.Start || spelling.Length == 0
@@ -30,7 +31,7 @@ public struct StringEscapeDecodeResult
 
         if (spelling.Length == 1)
         {
-            return TryPublish(5, 0, 1, 1, false, init result);
+            return TryPublish(5, 0, 1, 1, false, ref init *result);
         }
 
         int32 escapedAt = spelling.Start + 1;
@@ -44,7 +45,7 @@ public struct StringEscapeDecodeResult
         }
         if (scalar < 0)
         {
-            return TryPublish(5, 0, 2, 2, true, init result);
+            return TryPublish(5, 0, 2, 2, true, ref init *result);
         }
 
         if (escaped == 110) { scalar = 10; }
@@ -59,9 +60,13 @@ public struct StringEscapeDecodeResult
             mut int32 at = escapedAt + 1;
             mut int32 digits = 0;
             mut uint32 value = 0;
-            while (digits < required && at < spelling.End
-                && TryGetHexDigit(Host.Source[at], init var digit))
+            while (digits < required && at < spelling.End)
             {
+                init int32 digit;
+                if (!TryGetHexDigit(Host.Source[at], ref init digit))
+                {
+                    break;
+                }
                 value = (value << 4) | uint32(digit);
                 at = at + 1;
                 digits = digits + 1;
@@ -70,29 +75,34 @@ public struct StringEscapeDecodeResult
             if (digits != required || value > uint32(0x10FFFF)
                 || (value >= uint32(0xD800) && value <= uint32(0xDFFF)))
             {
-                return TryPublish(5, 0, at - spelling.Start, at - spelling.Start,
-                    false, init result);
+                return TryPublish(5, 0, at - spelling.Start,
+                    at - spelling.Start, false, ref init *result);
             }
-            return TryPublish(0, int32(value), at - spelling.Start, 0, false, init result);
+            return TryPublish(0, int32(value), at - spelling.Start, 0,
+                false, ref init *result);
         }
         else if (escaped != 110 && escaped != 114 && escaped != 116
             && escaped != 92 && escaped != 34 && escaped != 48)
         {
-            return TryPublish(5, 0, 1 + width, 1 + width, false, init result);
+            return TryPublish(5, 0, 1 + width, 1 + width, false,
+                ref init *result);
         }
 
-        return TryPublish(0, scalar, 1 + width, 0, false, init result);
+        return TryPublish(0, scalar, 1 + width, 0, false,
+            ref init *result);
     }
 
     private static bool TryPublish(int32 errorCode, int32 scalar, int32 consumedLength,
-        int32 errorLength, bool hasUnpairedUtf16, init ref<StringEscapeDecodeResult> result)
+        int32 errorLength, bool hasUnpairedUtf16,
+        ref<init StringEscapeDecodeResult> result)
     {
         mut int32 encodedScalar = scalar;
         if (hasUnpairedUtf16)
         {
             encodedScalar = -1;
         }
-        result = new StringEscapeDecodeResult(errorCode, encodedScalar, consumedLength, errorLength);
+        *result = new StringEscapeDecodeResult(errorCode, encodedScalar,
+            consumedLength, errorLength);
         return true;
     }
 }

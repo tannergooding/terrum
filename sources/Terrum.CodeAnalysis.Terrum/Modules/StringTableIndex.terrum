@@ -1,8 +1,8 @@
 namespace Terrum.CodeAnalysis;
 
 public static bool TryGetStringTableRowLayout(int32 recordCount, int32 row,
-    init ref<int32> rowStart, init ref<int32> rowLength,
-    init ref<int32> encoding, init ref<int32> contentByteLength)
+    ref<init int32> rowStart, ref<init int32> rowLength,
+    ref<init int32> encoding, ref<init int32> contentByteLength)
 {
     if (recordCount <= 0 || row <= 0 || row > recordCount
         || !TryValidateStringTableIndex(recordCount))
@@ -11,7 +11,7 @@ public static bool TryGetStringTableRowLayout(int32 recordCount, int32 row,
     }
 
     return TryGetValidatedStringTableRowLayout(recordCount, row,
-        init rowStart, init rowLength, init encoding, init contentByteLength);
+        ref init *rowStart, ref init *rowLength, ref init *encoding, ref init *contentByteLength);
 }
 
 bool TryValidateStringTableIndex(int32 recordCount)
@@ -24,10 +24,14 @@ bool TryValidateStringTableIndex(int32 recordCount)
     int32 indexByteLength = (recordCount + 1) * 4;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
+        init int32 start;
+        init int32 length;
+        init int32 rowEncoding;
+        init int32 rowContentLength;
         if (!TryGetValidatedVariableTableRowExtent(recordCount, 8, 4, row,
-            init var start, init var length)
+            ref init start, ref init length)
             || !TryGetStringRowLayout(indexByteLength + start, length,
-            init var rowEncoding, init var rowContentLength))
+            ref init rowEncoding, ref init rowContentLength))
         {
             return false;
         }
@@ -38,25 +42,29 @@ bool TryValidateStringTableIndex(int32 recordCount)
 
 // Use only after validating this exact variable-table index and every String row layout.
 bool TryGetValidatedStringTableRowLayout(int32 recordCount, int32 row,
-    init ref<int32> rowStart, init ref<int32> rowLength,
-    init ref<int32> encoding, init ref<int32> contentByteLength)
+    ref<init int32> rowStart, ref<init int32> rowLength,
+    ref<init int32> encoding, ref<init int32> contentByteLength)
 {
+    init int32 selectedStart;
+    init int32 selectedLength;
     if (!TryGetValidatedVariableTableRowExtent(recordCount, 8, 4, row,
-        init var selectedStart, init var selectedLength))
+        ref init selectedStart, ref init selectedLength))
     {
         return false;
     }
 
     int32 indexByteLength = (recordCount + 1) * 4;
+    init int32 selectedEncoding;
+    init int32 selectedContentLength;
     if (!TryGetStringRowLayout(indexByteLength + selectedStart, selectedLength,
-        init var selectedEncoding, init var selectedContentLength))
+        ref init selectedEncoding, ref init selectedContentLength))
     {
         return false;
     }
 
-    rowStart = selectedStart;
-    rowLength = selectedLength;
-    encoding = selectedEncoding;
-    contentByteLength = selectedContentLength;
+    *rowStart = selectedStart;
+    *rowLength = selectedLength;
+    *encoding = selectedEncoding;
+    *contentByteLength = selectedContentLength;
     return true;
 }

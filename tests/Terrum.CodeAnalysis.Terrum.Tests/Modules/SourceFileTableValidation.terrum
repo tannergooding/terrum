@@ -40,8 +40,14 @@ bool TryValidateSourceFileRowsAfterModuleValidation(int32 recordCount, int32 str
 
 bool TryValidateSourceFileRow(int32 row, int32 stringCount, int32 stringIndexByteLength)
 {
-    if (!TryReadSourceFileTableWord(row, 0, init var path)
-        || !TryReadSourceFileTableWord(row, 4, init var digestBlob)
+    init uint32 path;
+    init uint32 digestBlob;
+    init int32 pathStart;
+    init int32 pathLength;
+    init int32 pathEncoding;
+    init int32 pathContentLength;
+    if (!TryReadSourceFileTableWord(row, 0, ref init path)
+        || !TryReadSourceFileTableWord(row, 4, ref init digestBlob)
         || path == 0 || path > 0xFF_FFFF || path > uint32(stringCount)
         || digestBlob != 0)
     {
@@ -49,8 +55,8 @@ bool TryValidateSourceFileRow(int32 row, int32 stringCount, int32 stringIndexByt
     }
 
     if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
-            int32(path), init var pathStart, init var pathLength,
-            init var pathEncoding, init var pathContentLength)
+            int32(path), ref init pathStart, ref init pathLength,
+            ref init pathEncoding, ref init pathContentLength)
         || !TryValidateModuleIdentityText(pathStart, pathContentLength, pathEncoding))
     {
         return false;
@@ -59,8 +65,12 @@ bool TryValidateSourceFileRow(int32 row, int32 stringCount, int32 stringIndexByt
     return true;
 }
 
-bool TryReadSourceFileTableWord(int32 row, int32 offset, init ref<uint32> value)
+bool TryReadSourceFileTableWord(int32 row, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (row <= 0)
     {
         return false;
@@ -69,20 +79,20 @@ bool TryReadSourceFileTableWord(int32 row, int32 offset, init ref<uint32> value)
     int32 rowStart = (row - 1) * 8;
     if (rowStart < 0 || rowStart > Host.SourceFiles.Length - 8
         || offset < 0 || offset > 4
-        || !TryReadSourceFileTableByte(rowStart + offset, init var first)
-        || !TryReadSourceFileTableByte(rowStart + offset + 1, init var second)
-        || !TryReadSourceFileTableByte(rowStart + offset + 2, init var third)
-        || !TryReadSourceFileTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadSourceFileTableByte(rowStart + offset, ref init first)
+        || !TryReadSourceFileTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadSourceFileTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadSourceFileTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadSourceFileTableByte(int32 offset, init ref<int32> value)
+bool TryReadSourceFileTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.SourceFiles.Length)
     {
@@ -95,6 +105,6 @@ bool TryReadSourceFileTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }

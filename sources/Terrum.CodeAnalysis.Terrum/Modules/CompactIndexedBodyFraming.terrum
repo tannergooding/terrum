@@ -1,133 +1,153 @@
 namespace Terrum.CodeAnalysis;
 
 public static bool TryGetCompactIndexedBodyFrame(int32 recordCount, int32 row,
-    int32 typeSpecCount, init ref<int32> blockCount, init ref<int32> operationCount)
+    int32 typeSpecCount, ref<init int32> blockCount, ref<init int32> operationCount)
 {
+    init mut int32 bodyDataStart;
+    init mut int32 bodyLength;
     if (recordCount <= 0 || recordCount > 16777215
         || recordCount > Host.BodyRows.Length / 4 - 1
         || typeSpecCount < 0 || typeSpecCount > 16777215
         || !TryGetBodyTableRowExtent(recordCount, row,
-            init var bodyDataStart, init var bodyLength))
+            ref init bodyDataStart, ref init bodyLength))
     {
         return false;
     }
 
+    init mut int32 ignoredBlockOperationCount;
     return TryAnalyzeCompactIndexedBodyFrame(recordCount, bodyDataStart, bodyLength,
-        typeSpecCount, 0, 0, init var ignoredBlockOperationCount,
-        init blockCount, init operationCount);
+        typeSpecCount, 0, 0, ref init ignoredBlockOperationCount,
+        ref init *blockCount, ref init *operationCount);
 }
 
 // The one-based destination slot is a completion marker; block N's count is
 // stored at destinationStart + N and is valid only when the marker is nonzero.
 public static bool TryWriteCompactIndexedBodyOperationCounts(int32 recordCount,
     int32 row, int32 typeSpecCount, int32 destinationStart,
-    init ref<int32> blockCount, init ref<int32> operationCount)
+    ref<init int32> blockCount, ref<init int32> operationCount)
 {
     if (destinationStart <= 0 || destinationStart >= Host.BodyBlockOperationCounts.Length)
     {
         return false;
     }
     Host.BodyBlockOperationCounts[destinationStart] = 0;
+    init mut int32 bodyDataStart;
+    init mut int32 bodyLength;
     if (recordCount <= 0 || recordCount > 16777215
         || recordCount > Host.BodyRows.Length / 4 - 1
         || typeSpecCount < 0 || typeSpecCount > 16777215
         || !TryGetBodyTableRowExtent(recordCount, row,
-            init var bodyDataStart, init var bodyLength))
+            ref init bodyDataStart, ref init bodyLength))
     {
         return false;
     }
 
+    init mut int32 ignoredBlockOperationCount;
     return TryAnalyzeCompactIndexedBodyFrame(recordCount, bodyDataStart, bodyLength,
-        typeSpecCount, 0, destinationStart, init var ignoredBlockOperationCount,
-        init blockCount, init operationCount);
+        typeSpecCount, 0, destinationStart, ref init ignoredBlockOperationCount,
+        ref init *blockCount, ref init *operationCount);
 }
 
 public static bool TryGetCompactIndexedBodyBlockOperationCount(int32 recordCount,
     int32 row, int32 typeSpecCount, int32 block,
-    init ref<int32> operationCount)
+    ref<init int32> operationCount)
 {
+    init mut int32 bodyDataStart;
+    init mut int32 bodyLength;
     if (recordCount <= 0 || recordCount > 16777215
         || recordCount > Host.BodyRows.Length / 4 - 1
         || typeSpecCount < 0 || typeSpecCount > 16777215 || block <= 0
         || !TryGetBodyTableRowExtent(recordCount, row,
-            init var bodyDataStart, init var bodyLength))
+            ref init bodyDataStart, ref init bodyLength))
     {
         return false;
     }
 
+    init mut int32 ignoredBlockCount;
+    init mut int32 ignoredOperationCount;
     return TryAnalyzeCompactIndexedBodyFrame(recordCount, bodyDataStart, bodyLength,
-        typeSpecCount, block, 0, init operationCount,
-        init var ignoredBlockCount, init var ignoredOperationCount);
+        typeSpecCount, block, 0, ref init *operationCount,
+        ref init ignoredBlockCount, ref init ignoredOperationCount);
 }
 
 // Use after validating this exact Body index with TryValidateBodyTableIndex.
 bool TryGetValidatedCompactIndexedBodyFrame(int32 recordCount, int32 row,
-    int32 typeSpecCount, init ref<int32> blockCount, init ref<int32> operationCount)
+    int32 typeSpecCount, ref<init int32> blockCount, ref<init int32> operationCount)
 {
+    init mut int32 bodyDataStart;
+    init mut int32 bodyLength;
     if (recordCount <= 0 || recordCount > 16777215
         || recordCount > Host.BodyRows.Length / 4 - 1
         || typeSpecCount < 0 || typeSpecCount > 16777215
         || !TryGetValidatedBodyTableRowExtent(recordCount, row,
-            init var bodyDataStart, init var bodyLength))
+            ref init bodyDataStart, ref init bodyLength))
     {
         return false;
     }
 
+    init mut int32 ignoredBlockOperationCount;
     return TryAnalyzeCompactIndexedBodyFrame(recordCount, bodyDataStart, bodyLength,
-        typeSpecCount, 0, 0, init var ignoredBlockOperationCount,
-        init blockCount, init operationCount);
+        typeSpecCount, 0, 0, ref init ignoredBlockOperationCount,
+        ref init *blockCount, ref init *operationCount);
 }
 
 // Use after validating this exact Body index with TryValidateBodyTableIndex.
 bool TryWriteValidatedCompactIndexedBodyOperationCounts(int32 recordCount,
     int32 row, int32 typeSpecCount, int32 destinationStart,
-    init ref<int32> blockCount, init ref<int32> operationCount)
+    ref<init int32> blockCount, ref<init int32> operationCount)
 {
     if (destinationStart <= 0 || destinationStart >= Host.BodyBlockOperationCounts.Length)
     {
         return false;
     }
     Host.BodyBlockOperationCounts[destinationStart] = 0;
+    init mut int32 bodyDataStart;
+    init mut int32 bodyLength;
     if (recordCount <= 0 || recordCount > 16777215
         || recordCount > Host.BodyRows.Length / 4 - 1
         || typeSpecCount < 0 || typeSpecCount > 16777215
         || !TryGetValidatedBodyTableRowExtent(recordCount, row,
-            init var bodyDataStart, init var bodyLength))
+            ref init bodyDataStart, ref init bodyLength))
     {
         return false;
     }
 
+    init mut int32 ignoredBlockOperationCount;
     return TryAnalyzeCompactIndexedBodyFrame(recordCount, bodyDataStart, bodyLength,
-        typeSpecCount, 0, destinationStart, init var ignoredBlockOperationCount,
-        init blockCount, init operationCount);
+        typeSpecCount, 0, destinationStart, ref init ignoredBlockOperationCount,
+        ref init *blockCount, ref init *operationCount);
 }
 
 // Use after validating this exact Body index with TryValidateBodyTableIndex.
 bool TryGetValidatedCompactIndexedBodyBlockOperationCount(int32 recordCount,
     int32 row, int32 typeSpecCount, int32 block,
-    init ref<int32> operationCount)
+    ref<init int32> operationCount)
 {
+    init mut int32 bodyDataStart;
+    init mut int32 bodyLength;
     if (recordCount <= 0 || recordCount > 16777215
         || recordCount > Host.BodyRows.Length / 4 - 1
         || typeSpecCount < 0 || typeSpecCount > 16777215 || block <= 0
         || !TryGetValidatedBodyTableRowExtent(recordCount, row,
-            init var bodyDataStart, init var bodyLength))
+            ref init bodyDataStart, ref init bodyLength))
     {
         return false;
     }
 
+    init mut int32 ignoredBlockCount;
+    init mut int32 ignoredOperationCount;
     return TryAnalyzeCompactIndexedBodyFrame(recordCount, bodyDataStart, bodyLength,
-        typeSpecCount, block, 0, init operationCount,
-        init var ignoredBlockCount, init var ignoredOperationCount);
+        typeSpecCount, block, 0, ref init *operationCount,
+        ref init ignoredBlockCount, ref init ignoredOperationCount);
 }
 
 bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     int32 bodyLength, int32 typeSpecCount, int32 selectedBlock,
     int32 countDestinationStart,
-    init ref<int32> selectedBlockOperationCount,
-    init ref<int32> blockCount, init ref<int32> operationCount)
+    ref<init int32> selectedBlockOperationCount,
+    ref<init int32> blockCount, ref<init int32> operationCount)
 {
-    selectedBlockOperationCount = 0;
+    mut int32 selectedBlockOperations = 0;
     int32 indexLength = (recordCount + 1) * 4;
     int32 dataLength = Host.BodyRows.Length - indexLength;
     if (bodyDataStart < 0 || bodyLength < 1
@@ -138,7 +158,8 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
 
     int32 bodyStart = indexLength + bodyDataStart;
     int32 end = bodyStart + bodyLength;
-    if (!TryReadCompactIndexedByte(bodyStart, end, init var bodyLayout)
+    init mut uint32 bodyLayout;
+    if (!TryReadCompactIndexedByte(bodyStart, end, ref init bodyLayout)
         || (bodyLayout & 0xFC) != 0x08 || (bodyLayout & 3) == 3)
     {
         return false;
@@ -149,14 +170,22 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     uint32 sentinel = width == 1 ? 0xFF
         : width == 2 ? 0xFFFF : 0xFFFF_FFFF;
     mut int32 position = bodyStart + 1;
+    init mut int32 afterBlockCount;
+    init mut int32 encodedBlockCount;
+    init mut int32 afterValueCount;
+    init mut int32 encodedValueCount;
+    init mut int32 afterRegionCount;
+    init mut int32 encodedRegionCount;
+    init mut int32 afterTypeCount;
+    init mut int32 encodedTypeCount;
     if (!TryReadCompactIndexedCount(position, end, width,
-            init var afterBlockCount, init var encodedBlockCount)
+            ref init afterBlockCount, ref init encodedBlockCount)
         || !TryReadCompactIndexedCount(afterBlockCount, end, width,
-            init var afterValueCount, init var encodedValueCount)
+            ref init afterValueCount, ref init encodedValueCount)
         || !TryReadCompactIndexedCount(afterValueCount, end, width,
-            init var afterRegionCount, init var encodedRegionCount)
+            ref init afterRegionCount, ref init encodedRegionCount)
         || !TryReadCompactIndexedCount(afterRegionCount, end, width,
-            init var afterTypeCount, init var encodedTypeCount))
+            ref init afterTypeCount, ref init encodedTypeCount))
     {
         return false;
     }
@@ -179,8 +208,10 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
 
     for (mut int32 typeIndex = 0; typeIndex < types; typeIndex = typeIndex + 1)
     {
+        init mut int32 afterTypeReference;
+        init mut uint32 typeReference;
         if (!TryReadCompactIndexedWord(position, end, 4,
-                init var afterTypeReference, init var typeReference)
+                ref init afterTypeReference, ref init typeReference)
             || typeReference == 0 || typeReference > uint32(typeSpecCount))
         {
             return false;
@@ -196,16 +227,25 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     }
     for (mut int32 region = 1; region <= regions; region = region + 1)
     {
-        if (!TryReadCompactIndexedByte(position, end, init var kind)
+        init mut uint32 kind;
+        init mut int32 afterParent;
+        init mut int32 parent;
+        init mut int32 afterEntry;
+        init mut int32 entryBlock;
+        init mut int32 afterExit;
+        init mut int32 exitBlock;
+        init mut int32 afterCleanup;
+        init mut int32 cleanupBlock;
+        if (!TryReadCompactIndexedByte(position, end, ref init kind)
             || kind == 0 || kind > 7
             || !TryReadCompactIndexedCount(position + 1, end, width,
-                init var afterParent, init var parent)
+                ref init afterParent, ref init parent)
             || !TryReadCompactIndexedCount(afterParent, end, width,
-                init var afterEntry, init var entryBlock)
+                ref init afterEntry, ref init entryBlock)
             || !TryReadCompactIndexedCount(afterEntry, end, width,
-                init var afterExit, init var exitBlock)
+                ref init afterExit, ref init exitBlock)
             || !TryReadCompactIndexedCount(afterExit, end, width,
-                init var afterCleanup, init var cleanupBlock)
+                ref init afterCleanup, ref init cleanupBlock)
             || parent >= region || entryBlock > blocks
             || exitBlock > blocks || cleanupBlock > blocks)
         {
@@ -221,10 +261,14 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     }
     for (mut int32 value = 0; value < values; value = value + 1)
     {
+        init mut int32 afterTypeId;
+        init mut int32 typeId;
+        init mut int32 afterUseCount;
+        init mut int32 useCount;
         if (!TryReadCompactIndexedCount(position, end, width,
-                init var afterTypeId, init var typeId)
+                ref init afterTypeId, ref init typeId)
             || !TryReadCompactIndexedCount(afterTypeId, end, width,
-                init var afterUseCount, init var useCount)
+                ref init afterUseCount, ref init useCount)
             || typeId == 0 || typeId > types || useCount > blocks)
         {
             return false;
@@ -264,15 +308,19 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     int32 blockDataStart = position;
     int32 blockDataLength = end - blockDataStart;
 
+    init mut uint32 firstValueStart;
+    init mut uint32 finalValueStart;
+    init mut uint32 firstBlockOffset;
+    init mut uint32 finalBlockOffset;
     if (!TryReadCompactIndexedLocalAt(startsPosition, end, width, 0,
-            init var firstValueStart)
+            ref init firstValueStart)
         || !TryReadCompactIndexedLocalAt(startsPosition, end, width, blocks,
-            init var finalValueStart)
+            ref init finalValueStart)
         || firstValueStart != 0 || finalValueStart != uint32(values)
         || !TryReadCompactIndexedLocalAt(offsetsPosition, end, width, 0,
-            init var firstBlockOffset)
+            ref init firstBlockOffset)
         || !TryReadCompactIndexedLocalAt(offsetsPosition, end, width, blocks,
-            init var finalBlockOffset)
+            ref init finalBlockOffset)
         || firstBlockOffset != 0 || finalBlockOffset != uint32(blockDataLength))
     {
         return false;
@@ -281,8 +329,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     mut uint32 previousValueStart = firstValueStart;
     for (mut int32 block = 1; block <= blocks; block = block + 1)
     {
+        init mut uint32 nextValueStart;
         if (!TryReadCompactIndexedLocalAt(startsPosition, end, width, block,
-                init var nextValueStart)
+                ref init nextValueStart)
             || nextValueStart < previousValueStart
             || nextValueStart > uint32(values))
         {
@@ -294,8 +343,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     mut uint32 previousBlockOffset = firstBlockOffset;
     for (mut int32 block = 1; block <= blocks; block = block + 1)
     {
+        init mut uint32 nextBlockOffset;
         if (!TryReadCompactIndexedLocalAt(offsetsPosition, end, width, block,
-                init var nextBlockOffset)
+                ref init nextBlockOffset)
             || nextBlockOffset <= previousBlockOffset
             || nextBlockOffset > uint32(blockDataLength))
         {
@@ -307,16 +357,21 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
     mut int32 totalOperations = 0;
     for (mut int32 block = 1; block <= blocks; block = block + 1)
     {
+        init mut uint32 blockOffsetValue;
+        init mut uint32 nextBlockOffsetValue;
+        init mut uint32 terminatorOffsetValue;
+        init mut uint32 firstBlockValue;
+        init mut uint32 afterBlockValue;
         if (!TryReadCompactIndexedLocalAt(offsetsPosition, end, width, block - 1,
-                init var blockOffsetValue)
+                ref init blockOffsetValue)
             || !TryReadCompactIndexedLocalAt(offsetsPosition, end, width, block,
-                init var nextBlockOffsetValue)
+                ref init nextBlockOffsetValue)
             || !TryReadCompactIndexedLocalAt(terminatorsPosition, end, width, block - 1,
-                init var terminatorOffsetValue)
+                ref init terminatorOffsetValue)
             || !TryReadCompactIndexedLocalAt(startsPosition, end, width, block - 1,
-                init var firstBlockValue)
+                ref init firstBlockValue)
             || !TryReadCompactIndexedLocalAt(startsPosition, end, width, block,
-                init var afterBlockValue)
+                ref init afterBlockValue)
             || nextBlockOffsetValue <= blockOffsetValue
             || nextBlockOffsetValue > uint32(blockDataLength)
             || terminatorOffsetValue >= nextBlockOffsetValue - blockOffsetValue)
@@ -334,8 +389,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         for (mut int32 valueIndex = definitionCursor; valueIndex < definitionEnd;
                 valueIndex = valueIndex + 1)
         {
+            init mut uint32 definitionOffset;
             if (!TryReadCompactIndexedLocalAt(definitionsPosition, end, width, valueIndex,
-                    init var definitionOffset))
+                    ref init definitionOffset))
             {
                 return false;
             }
@@ -359,7 +415,8 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
             }
         }
 
-        if (!TryReadCompactIndexedByte(blockStart, blockEnd, init var presence)
+        init mut uint32 presence;
+        if (!TryReadCompactIndexedByte(blockStart, blockEnd, ref init presence)
             || (presence & 0xE0) != 0)
         {
             return false;
@@ -368,8 +425,10 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         mut int32 cursor = blockStart + 1;
         if ((presence & 1) != 0)
         {
+            init mut int32 afterRegionId;
+            init mut int32 regionId;
             if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
-                    init var afterRegionId, init var regionId)
+                    ref init afterRegionId, ref init regionId)
                 || regionId == 0 || regionId > regions)
             {
                 return false;
@@ -379,8 +438,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
 
         if ((presence & 2) != 0)
         {
+            init mut int32 afterParameters;
             if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
-                    init var afterParameters))
+                    ref init afterParameters))
             {
                 return false;
             }
@@ -388,8 +448,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         }
         if ((presence & 4) != 0)
         {
+            init mut int32 afterLiveIns;
             if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
-                    init var afterLiveIns))
+                    ref init afterLiveIns))
             {
                 return false;
             }
@@ -397,8 +458,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         }
         if ((presence & 8) != 0)
         {
+            init mut int32 afterLiveOuts;
             if (!TryReadCompactIndexedList(cursor, blockEnd, width, values,
-                    init var afterLiveOuts))
+                    ref init afterLiveOuts))
             {
                 return false;
             }
@@ -408,8 +470,10 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         mut int32 maximumLastUse = 0;
         if ((presence & 16) != 0)
         {
+            init mut int32 afterLastUseCount;
+            init mut int32 lastUseCount;
             if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
-                    init var afterLastUseCount, init var lastUseCount)
+                    ref init afterLastUseCount, ref init lastUseCount)
                 || lastUseCount == 0 || lastUseCount > values
                 || lastUseCount > (blockEnd - afterLastUseCount) / (2 * width))
             {
@@ -419,10 +483,14 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
             cursor = afterLastUseCount;
             for (mut int32 useIndex = 0; useIndex < lastUseCount; useIndex = useIndex + 1)
             {
+                init mut int32 afterUsedValue;
+                init mut int32 usedValue;
+                init mut int32 afterLastUse;
+                init mut int32 lastUse;
                 if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
-                        init var afterUsedValue, init var usedValue)
+                        ref init afterUsedValue, ref init usedValue)
                     || !TryReadCompactIndexedCount(afterUsedValue, blockEnd, width,
-                        init var afterLastUse, init var lastUse)
+                        ref init afterLastUse, ref init lastUse)
                     || usedValue == 0 || usedValue > values || lastUse > blockEnd - blockStart)
                 {
                     return false;
@@ -436,8 +504,10 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
             }
         }
 
+        init mut int32 afterOperationCount;
+        init mut int32 encodedOperations;
         if (!TryReadCompactIndexedCount(cursor, blockEnd, width,
-                init var afterOperationCount, init var encodedOperations)
+                ref init afterOperationCount, ref init encodedOperations)
             || encodedOperations > (terminatorPosition - afterOperationCount) / 2
             || totalOperations > 2147483647 - encodedOperations)
         {
@@ -447,7 +517,7 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         int32 operations = encodedOperations;
         if (block == selectedBlock)
         {
-            selectedBlockOperationCount = operations;
+            selectedBlockOperations = operations;
         }
         if (maximumLastUse > operations)
         {
@@ -459,8 +529,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
                 definitionIndex < definitionEnd;
                 definitionIndex = definitionIndex + 1)
         {
+            init mut uint32 definitionOffset;
             if (!TryReadCompactIndexedLocalAt(definitionsPosition, end, width,
-                    definitionIndex, init var definitionOffset)
+                    definitionIndex, ref init definitionOffset)
                 || definitionOffset != sentinel)
             {
                 break;
@@ -471,12 +542,18 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         for (mut int32 ordinal = 0; ordinal < operations; ordinal = ordinal + 1)
         {
             int32 instructionStart = cursor;
+            init mut int32 afterInstruction;
+            init mut uint32 opcode;
+            init mut int32 referenceWidth;
+            init mut int32 countWidth;
+            init mut int32 dataWidth;
+            init mut int32 afterOperation;
             if (!TryReadCompactIndexedOperation(cursor, terminatorPosition,
-                    init var afterInstruction, init var opcode,
-                    init var referenceWidth, init var countWidth, init var dataWidth)
+                    ref init afterInstruction, ref init opcode,
+                    ref init referenceWidth, ref init countWidth, ref init dataWidth)
                 || !TrySkipCompactIndexedOperation(afterInstruction, terminatorPosition,
                     opcode, referenceWidth, countWidth, dataWidth,
-                    init var afterOperation))
+                    ref init afterOperation))
             {
                 return false;
             }
@@ -484,8 +561,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
             uint32 relativeInstructionStart = uint32(instructionStart - blockStart);
             for (; definitionCursor < definitionEnd; definitionCursor = definitionCursor + 1)
             {
+                init mut uint32 definitionOffset;
                 if (!TryReadCompactIndexedLocalAt(definitionsPosition, end, width,
-                        definitionCursor, init var definitionOffset))
+                        definitionCursor, ref init definitionOffset))
                 {
                     return false;
                 }
@@ -506,13 +584,19 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
             return false;
         }
 
+        init mut int32 afterTerminatorInstruction;
+        init mut uint32 terminator;
+        init mut int32 terminatorReferenceWidth;
+        init mut int32 terminatorCountWidth;
+        init mut int32 terminatorDataWidth;
+        init mut int32 afterTerminator;
         if (!TryReadCompactIndexedTerminator(cursor, blockEnd,
-                init var afterTerminatorInstruction, init var terminator,
-                init var terminatorReferenceWidth, init var terminatorCountWidth,
-                init var terminatorDataWidth)
+                ref init afterTerminatorInstruction, ref init terminator,
+                ref init terminatorReferenceWidth, ref init terminatorCountWidth,
+                ref init terminatorDataWidth)
             || !TrySkipCompactIndexedTerminator(afterTerminatorInstruction, blockEnd,
                 terminator, terminatorReferenceWidth, terminatorCountWidth,
-                terminatorDataWidth, blocks, values, init var afterTerminator)
+                terminatorDataWidth, blocks, values, ref init afterTerminator)
             || afterTerminator != blockEnd)
         {
             return false;
@@ -525,8 +609,9 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
         totalOperations = totalOperations + operations;
     }
 
-    blockCount = blocks;
-    operationCount = totalOperations;
+    *selectedBlockOperationCount = selectedBlockOperations;
+    *blockCount = blocks;
+    *operationCount = totalOperations;
     if (countDestinationStart > 0)
     {
         Host.BodyBlockOperationCounts[countDestinationStart] = blocks;
@@ -535,11 +620,12 @@ bool TryAnalyzeCompactIndexedBodyFrame(int32 recordCount, int32 bodyDataStart,
 }
 
 bool TryReadCompactIndexedOperation(int32 start, int32 end,
-    init ref<int32> nextPosition, init ref<uint32> opcode,
-    init ref<int32> referenceWidth, init ref<int32> countWidth,
-    init ref<int32> dataWidth)
+    ref<init int32> nextPosition, ref<init uint32> opcode,
+    ref<init int32> referenceWidth, ref<init int32> countWidth,
+    ref<init int32> dataWidth)
 {
-    if (!TryReadCompactIndexedByte(start, end, init var firstByte))
+    init mut uint32 firstByte;
+    if (!TryReadCompactIndexedByte(start, end, ref init firstByte))
     {
         return false;
     }
@@ -551,17 +637,19 @@ bool TryReadCompactIndexedOperation(int32 start, int32 end,
             return false;
         }
 
-        nextPosition = start + 1;
-        opcode = firstByte;
-        referenceWidth = 1;
-        countWidth = 1;
-        dataWidth = firstByte == 1 || firstByte == 2 ? 1 : 0;
+        *nextPosition = start + 1;
+        *opcode = firstByte;
+        *referenceWidth = 1;
+        *countWidth = 1;
+        *dataWidth = firstByte == 1 || firstByte == 2 ? 1 : 0;
         return true;
     }
 
+    init mut uint32 layout;
+    init mut uint32 wideOpcode;
     if (start > end - 3
-        || !TryReadCompactIndexedByte(start + 1, end, init var layout)
-        || !TryReadCompactIndexedByte(start + 2, end, init var wideOpcode)
+        || !TryReadCompactIndexedByte(start + 1, end, ref init layout)
+        || !TryReadCompactIndexedByte(start + 2, end, ref init wideOpcode)
         || layout == 0 || (layout & 0xC0) != 0
         || (layout & 3) == 3 || ((layout >> 2) & 3) == 3
         || wideOpcode == 0 || wideOpcode > 0x18
@@ -582,20 +670,22 @@ bool TryReadCompactIndexedOperation(int32 start, int32 end,
 
     int32 referenceCode = int32(layout & 3);
     int32 countCode = int32((layout >> 2) & 3);
-    nextPosition = start + 3;
-    opcode = wideOpcode;
-    referenceWidth = referenceCode == 0 ? 1 : referenceCode == 1 ? 2 : 4;
-    countWidth = countCode == 0 ? 1 : countCode == 1 ? 2 : 4;
-    dataWidth = dataWidthValue;
+    *nextPosition = start + 3;
+    *opcode = wideOpcode;
+    *referenceWidth = referenceCode == 0 ? 1 : referenceCode == 1 ? 2 : 4;
+    *countWidth = countCode == 0 ? 1 : countCode == 1 ? 2 : 4;
+    *dataWidth = dataWidthValue;
     return true;
 }
 
 bool TrySkipCompactIndexedOperation(int32 start, int32 end, uint32 opcode,
     int32 referenceWidth, int32 countWidth, int32 dataWidth,
-    init ref<int32> nextPosition)
+    ref<init int32> nextPosition)
 {
+    init mut int32 afterResult;
+    init mut int32 ignoredResult;
     if (!TryReadCompactIndexedCount(start, end, referenceWidth,
-            init var afterResult, init var ignoredResult))
+            ref init afterResult, ref init ignoredResult))
     {
         return false;
     }
@@ -643,15 +733,17 @@ bool TrySkipCompactIndexedOperation(int32 start, int32 end, uint32 opcode,
     }
     else if (opcode == 0x13)
     {
+        init mut int32 afterArgumentCount;
+        init mut int32 argumentCount;
         if (!TryReadCompactIndexedCount(position + referenceWidth, end, countWidth,
-                init var afterArgumentCount, init var argumentCount)
+                ref init afterArgumentCount, ref init argumentCount)
             || argumentCount > (end - afterArgumentCount) / referenceWidth)
         {
             return false;
         }
 
         return TrySkipCompactIndexedBytes(afterArgumentCount, end,
-            argumentCount * referenceWidth, init nextPosition);
+            argumentCount * referenceWidth, ref init *nextPosition);
     }
     else if (opcode == 0x0C || opcode == 0x0E || opcode == 0x0F
         || opcode == 0x14 || opcode == 0x16)
@@ -660,35 +752,41 @@ bool TrySkipCompactIndexedOperation(int32 start, int32 end, uint32 opcode,
     }
     else if (opcode == 0x12)
     {
+        init mut int32 afterMethod;
+        init mut int32 method;
         if (!TryReadCompactIndexedCount(position, end, referenceWidth,
-                init var afterMethod, init var method))
+                ref init afterMethod, ref init method))
         {
             return false;
         }
         position = afterMethod;
         if (method == 0)
         {
-            if (!TrySkipCompactIndexedBytes(position, end, 4, init var afterPackedMethod))
+            init mut int32 afterPackedMethod;
+            if (!TrySkipCompactIndexedBytes(position, end, 4, ref init afterPackedMethod))
             {
                 return false;
             }
             position = afterPackedMethod;
         }
 
+        init mut int32 afterArgumentCount;
+        init mut int32 argumentCount;
         if (!TryReadCompactIndexedCount(position, end, countWidth,
-                init var afterArgumentCount, init var argumentCount)
+                ref init afterArgumentCount, ref init argumentCount)
             || argumentCount > (end - afterArgumentCount) / referenceWidth)
         {
             return false;
         }
 
         return TrySkipCompactIndexedBytes(afterArgumentCount, end,
-            argumentCount * referenceWidth, init nextPosition);
+            argumentCount * referenceWidth, ref init *nextPosition);
     }
     else if (opcode == 0x18)
     {
+        init mut int32 afterSecondResult;
         if (!TrySkipCompactIndexedBytes(position, end, referenceWidth,
-                init var afterSecondResult))
+                ref init afterSecondResult))
         {
             return false;
         }
@@ -700,39 +798,43 @@ bool TrySkipCompactIndexedOperation(int32 start, int32 end, uint32 opcode,
         return false;
     }
 
+    init mut int32 afterOperation;
     if (!TrySkipCompactIndexedBytes(position, end,
-            referenceCount * referenceWidth + byteCount, init var afterOperation))
+            referenceCount * referenceWidth + byteCount, ref init afterOperation))
     {
         return false;
     }
 
-    nextPosition = afterOperation;
+    *nextPosition = afterOperation;
     return true;
 }
 
 bool TryReadCompactIndexedTerminator(int32 start, int32 end,
-    init ref<int32> nextPosition, init ref<uint32> opcode,
-    init ref<int32> referenceWidth, init ref<int32> countWidth,
-    init ref<int32> dataWidth)
+    ref<init int32> nextPosition, ref<init uint32> opcode,
+    ref<init int32> referenceWidth, ref<init int32> countWidth,
+    ref<init int32> dataWidth)
 {
-    if (!TryReadCompactIndexedByte(start, end, init var firstByte))
+    init mut uint32 firstByte;
+    if (!TryReadCompactIndexedByte(start, end, ref init firstByte))
     {
         return false;
     }
 
     if (firstByte != 0xF0)
     {
-        nextPosition = start + 1;
-        opcode = firstByte;
-        referenceWidth = 1;
-        countWidth = 1;
-        dataWidth = firstByte == 0x82 ? 1 : 0;
+        *nextPosition = start + 1;
+        *opcode = firstByte;
+        *referenceWidth = 1;
+        *countWidth = 1;
+        *dataWidth = firstByte == 0x82 ? 1 : 0;
         return true;
     }
 
+    init mut uint32 layout;
+    init mut uint32 wideOpcode;
     if (start > end - 3
-        || !TryReadCompactIndexedByte(start + 1, end, init var layout)
-        || !TryReadCompactIndexedByte(start + 2, end, init var wideOpcode)
+        || !TryReadCompactIndexedByte(start + 1, end, ref init layout)
+        || !TryReadCompactIndexedByte(start + 2, end, ref init wideOpcode)
         || layout == 0 || (layout & 0xC0) != 0
         || (layout & 3) == 3 || ((layout >> 2) & 3) == 3
         || wideOpcode < 0x80 || wideOpcode > 0x83
@@ -745,33 +847,36 @@ bool TryReadCompactIndexedTerminator(int32 start, int32 end,
     int32 referenceCode = int32(layout & 3);
     int32 countCode = int32((layout >> 2) & 3);
     int32 dataCode = int32((layout >> 4) & 3);
-    nextPosition = start + 3;
-    opcode = wideOpcode;
-    referenceWidth = referenceCode == 0 ? 1 : referenceCode == 1 ? 2 : 4;
-    countWidth = countCode == 0 ? 1 : countCode == 1 ? 2 : 4;
-    dataWidth = wideOpcode == 0x82 ? 1 << dataCode : 0;
+    *nextPosition = start + 3;
+    *opcode = wideOpcode;
+    *referenceWidth = referenceCode == 0 ? 1 : referenceCode == 1 ? 2 : 4;
+    *countWidth = countCode == 0 ? 1 : countCode == 1 ? 2 : 4;
+    *dataWidth = wideOpcode == 0x82 ? 1 << dataCode : 0;
     return true;
 }
 
 bool TrySkipCompactIndexedTerminator(int32 start, int32 end, uint32 opcode,
     int32 referenceWidth, int32 countWidth, int32 dataWidth,
-    int32 blockCount, int32 valueCount, init ref<int32> nextPosition)
+    int32 blockCount, int32 valueCount, ref<init int32> nextPosition)
 {
     mut int32 position = start;
     if (opcode == 0x80)
     {
         return TrySkipCompactIndexedEdge(position, end, referenceWidth, countWidth,
-            blockCount, valueCount, init nextPosition);
+            blockCount, valueCount, ref init *nextPosition);
     }
     if (opcode == 0x81)
     {
+        init mut int32 afterCondition;
+        init mut int32 condition;
+        init mut int32 afterTrueEdge;
         if (!TryReadCompactIndexedCount(position, end, referenceWidth,
-                init var afterCondition, init var condition)
+                ref init afterCondition, ref init condition)
             || condition == 0 || condition > valueCount
             || !TrySkipCompactIndexedEdge(afterCondition, end, referenceWidth, countWidth,
-                blockCount, valueCount, init var afterTrueEdge)
+                blockCount, valueCount, ref init afterTrueEdge)
             || !TrySkipCompactIndexedEdge(afterTrueEdge, end, referenceWidth, countWidth,
-                blockCount, valueCount, init nextPosition))
+                blockCount, valueCount, ref init *nextPosition))
         {
             return false;
         }
@@ -779,11 +884,15 @@ bool TrySkipCompactIndexedTerminator(int32 start, int32 end, uint32 opcode,
     }
     if (opcode == 0x82)
     {
+        init mut int32 afterSelector;
+        init mut int32 selector;
+        init mut int32 afterCaseCount;
+        init mut int32 caseCount;
         if (!TryReadCompactIndexedCount(position, end, referenceWidth,
-                init var afterSelector, init var selector)
+                ref init afterSelector, ref init selector)
             || selector == 0 || selector > valueCount
             || !TryReadCompactIndexedCount(afterSelector, end, countWidth,
-                init var afterCaseCount, init var caseCount)
+                ref init afterCaseCount, ref init caseCount)
             || caseCount > (end - afterCaseCount) / (dataWidth + referenceWidth + countWidth))
         {
             return false;
@@ -792,10 +901,12 @@ bool TrySkipCompactIndexedTerminator(int32 start, int32 end, uint32 opcode,
         position = afterCaseCount;
         for (mut int32 caseIndex = 0; caseIndex < caseCount; caseIndex = caseIndex + 1)
         {
+            init mut int32 afterPattern;
+            init mut int32 afterCaseEdge;
             if (!TrySkipCompactIndexedBytes(position, end, dataWidth,
-                    init var afterPattern)
+                    ref init afterPattern)
                 || !TrySkipCompactIndexedEdge(afterPattern, end, referenceWidth, countWidth,
-                    blockCount, valueCount, init var afterCaseEdge))
+                    blockCount, valueCount, ref init afterCaseEdge))
             {
                 return false;
             }
@@ -803,26 +914,29 @@ bool TrySkipCompactIndexedTerminator(int32 start, int32 end, uint32 opcode,
         }
 
         return TrySkipCompactIndexedEdge(position, end, referenceWidth, countWidth,
-            blockCount, valueCount, init nextPosition);
+            blockCount, valueCount, ref init *nextPosition);
     }
     if (opcode == 0x83)
     {
+        init mut int32 afterResult;
+        init mut int32 result;
         if (!TryReadCompactIndexedCount(position, end, referenceWidth,
-                init var afterResult, init var result)
+                ref init afterResult, ref init result)
             || result > valueCount)
         {
             return false;
         }
 
-        nextPosition = afterResult;
+        *nextPosition = afterResult;
         return true;
     }
+    init mut uint32 failureReason;
     if (opcode == 0x87 && referenceWidth == 1 && dataWidth == 0
         && countWidth == 1
-        && TryReadCompactIndexedByte(position, end, init var failureReason)
+        && TryReadCompactIndexedByte(position, end, ref init failureReason)
         && failureReason >= 1 && failureReason <= 4)
     {
-        nextPosition = position + 1;
+        *nextPosition = position + 1;
         return true;
     }
 
@@ -830,13 +944,17 @@ bool TrySkipCompactIndexedTerminator(int32 start, int32 end, uint32 opcode,
 }
 
 bool TrySkipCompactIndexedEdge(int32 start, int32 end, int32 referenceWidth,
-    int32 countWidth, int32 blockCount, int32 valueCount, init ref<int32> nextPosition)
+    int32 countWidth, int32 blockCount, int32 valueCount, ref<init int32> nextPosition)
 {
+    init mut int32 afterTarget;
+    init mut int32 target;
+    init mut int32 afterArgumentCount;
+    init mut int32 argumentCount;
     if (!TryReadCompactIndexedCount(start, end, referenceWidth,
-            init var afterTarget, init var target)
+            ref init afterTarget, ref init target)
         || target == 0 || target > blockCount
         || !TryReadCompactIndexedCount(afterTarget, end, countWidth,
-            init var afterArgumentCount, init var argumentCount)
+            ref init afterArgumentCount, ref init argumentCount)
         || argumentCount > valueCount
         || argumentCount > (end - afterArgumentCount) / referenceWidth)
     {
@@ -846,8 +964,10 @@ bool TrySkipCompactIndexedEdge(int32 start, int32 end, int32 referenceWidth,
     mut int32 position = afterArgumentCount;
     for (mut int32 argument = 0; argument < argumentCount; argument = argument + 1)
     {
+        init mut int32 afterValue;
+        init mut int32 value;
         if (!TryReadCompactIndexedCount(position, end, referenceWidth,
-                init var afterValue, init var value)
+                ref init afterValue, ref init value)
             || value == 0 || value > valueCount)
         {
             return false;
@@ -855,15 +975,17 @@ bool TrySkipCompactIndexedEdge(int32 start, int32 end, int32 referenceWidth,
         position = afterValue;
     }
 
-    nextPosition = position;
+    *nextPosition = position;
     return true;
 }
 
 bool TryReadCompactIndexedList(int32 start, int32 end, int32 width,
-    int32 maximumValue, init ref<int32> nextPosition)
+    int32 maximumValue, ref<init int32> nextPosition)
 {
+    init mut int32 afterCount;
+    init mut int32 count;
     if (!TryReadCompactIndexedCount(start, end, width,
-            init var afterCount, init var count)
+            ref init afterCount, ref init count)
         || count == 0 || count > maximumValue
         || count > (end - afterCount) / width)
     {
@@ -873,8 +995,10 @@ bool TryReadCompactIndexedList(int32 start, int32 end, int32 width,
     mut int32 position = afterCount;
     for (mut int32 index = 0; index < count; index = index + 1)
     {
+        init mut int32 afterValue;
+        init mut int32 value;
         if (!TryReadCompactIndexedCount(position, end, width,
-                init var afterValue, init var value)
+                ref init afterValue, ref init value)
             || value == 0 || value > maximumValue)
         {
             return false;
@@ -882,31 +1006,34 @@ bool TryReadCompactIndexedList(int32 start, int32 end, int32 width,
         position = afterValue;
     }
 
-    nextPosition = position;
+    *nextPosition = position;
     return true;
 }
 
 bool TryReadCompactIndexedCount(int32 start, int32 end, int32 width,
-    init ref<int32> nextPosition, init ref<int32> value)
+    ref<init int32> nextPosition, ref<init int32> value)
 {
+    init mut int32 afterValue;
+    init mut uint32 rawValue;
     if (!TryReadCompactIndexedWord(start, end, width,
-            init var afterValue, init var rawValue)
+            ref init afterValue, ref init rawValue)
         || rawValue > 2147483647)
     {
         return false;
     }
 
-    nextPosition = afterValue;
-    value = int32(rawValue);
+    *nextPosition = afterValue;
+    *value = int32(rawValue);
     return true;
 }
 
 bool TryReadCompactIndexedLocalAt(int32 start, int32 end, int32 width,
-    int32 index, init ref<uint32> value)
+    int32 index, ref<init uint32> value)
 {
+    init mut int32 ignored;
     if (index < 0 || index > (end - start) / width
         || !TryReadCompactIndexedWord(start + index * width, end, width,
-            init var ignored, init value))
+            ref init ignored, ref init *value))
     {
         return false;
     }
@@ -915,7 +1042,7 @@ bool TryReadCompactIndexedLocalAt(int32 start, int32 end, int32 width,
 }
 
 bool TryReadCompactIndexedWord(int32 start, int32 end, int32 width,
-    init ref<int32> nextPosition, init ref<uint32> value)
+    ref<init int32> nextPosition, ref<init uint32> value)
 {
     if ((width != 1 && width != 2 && width != 4)
         || start < 0 || end > Host.BodyRows.Length || start > end - width)
@@ -926,20 +1053,21 @@ bool TryReadCompactIndexedWord(int32 start, int32 end, int32 width,
     mut uint32 result = 0;
     for (mut int32 index = 0; index < width; index = index + 1)
     {
-        if (!TryReadCompactIndexedByte(start + index, end, init var part))
+        init mut uint32 part;
+        if (!TryReadCompactIndexedByte(start + index, end, ref init part))
         {
             return false;
         }
         result = result | (part << (index * 8));
     }
 
-    nextPosition = start + width;
-    value = result;
+    *nextPosition = start + width;
+    *value = result;
     return true;
 }
 
 bool TrySkipCompactIndexedBytes(int32 start, int32 end, int32 byteCount,
-    init ref<int32> nextPosition)
+    ref<init int32> nextPosition)
 {
     if (byteCount < 0 || start < 0 || end > Host.BodyRows.Length
         || start > end - byteCount)
@@ -949,17 +1077,18 @@ bool TrySkipCompactIndexedBytes(int32 start, int32 end, int32 byteCount,
 
     for (mut int32 index = 0; index < byteCount; index = index + 1)
     {
-        if (!TryReadCompactIndexedByte(start + index, end, init var ignored))
+        init mut uint32 ignored;
+        if (!TryReadCompactIndexedByte(start + index, end, ref init ignored))
         {
             return false;
         }
     }
 
-    nextPosition = start + byteCount;
+    *nextPosition = start + byteCount;
     return true;
 }
 
-bool TryReadCompactIndexedByte(int32 index, int32 end, init ref<uint32> value)
+bool TryReadCompactIndexedByte(int32 index, int32 end, ref<init uint32> value)
 {
     if (index < 0 || index >= end || end > Host.BodyRows.Length)
     {
@@ -972,6 +1101,6 @@ bool TryReadCompactIndexedByte(int32 index, int32 end, init ref<uint32> value)
         return false;
     }
 
-    value = uint32(byteValue);
+    *value = uint32(byteValue);
     return true;
 }

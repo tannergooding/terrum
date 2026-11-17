@@ -15,9 +15,9 @@ public SourceRange SelectRangeCopyForAbiTest(bool takeFirst, SourceRange first, 
 
 
 public bool TrySelectTokenCopyInitForAbiTest(
-    int32 index, Token first, Token second, init ref<Token> result)
+    int32 index, Token first, Token second, ref<init Token> result)
 {
-    return TrySelectCopyInit<Token>(index, first, second, init result);
+    return TrySelectCopyInit<Token>(index, first, second, ref init result);
 }
 
 

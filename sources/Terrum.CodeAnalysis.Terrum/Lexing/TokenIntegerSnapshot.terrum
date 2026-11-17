@@ -31,7 +31,8 @@ bool MatchesSourceMagnitude(int32 tokenIndex, int32 status, int32 low, int32 hig
         }
     }
 
-    if (!TryParseUInt64Base(start, length, radix, init var magnitude))
+    init uint64 magnitude;
+    if (!TryParseUInt64Base(start, length, radix, ref init magnitude))
     {
         return status == 1 && low == 0 && high == 0;
     }
@@ -41,7 +42,7 @@ bool MatchesSourceMagnitude(int32 tokenIndex, int32 status, int32 low, int32 hig
         && high == EncodeWord(uint32(magnitude >> 32));
 }
 
-bool TryGetIntegerRecordCount(int32 tokenCount, init ref<int32> count)
+bool TryGetIntegerRecordCount(int32 tokenCount, ref<init int32> count)
 {
     if (Host.Diagnostics[0] != 0 || tokenCount < 1
         || tokenCount > Host.Tokens.Length / 3
@@ -58,7 +59,7 @@ bool TryGetIntegerRecordCount(int32 tokenCount, init ref<int32> count)
         return false;
     }
 
-    count = found;
+    *count = found;
     return true;
 }
 
@@ -119,8 +120,9 @@ public unique struct TokenIntegerSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, init ref<int32> tokenIndex,
-        init ref<bool> overflow, init ref<int32> low, init ref<int32> high)
+    public bool TryGet(int32 index, ref<init int32> tokenIndex,
+        ref<init bool> overflow, ref<init int32> low,
+        ref<init int32> high)
     {
         if (index < 0 || index >= _count)
         {
@@ -128,15 +130,15 @@ public unique struct TokenIntegerSnapshot
         }
 
         int32 offset = index * 4;
-        tokenIndex = _records.Read(offset);
-        overflow = _records.Read(offset + 1) == 1;
-        low = _records.Read(offset + 2);
-        high = _records.Read(offset + 3);
+        *tokenIndex = _records.Read(offset);
+        *overflow = _records.Read(offset + 1) == 1;
+        *low = _records.Read(offset + 2);
+        *high = _records.Read(offset + 3);
         return true;
     }
 
-    public bool TryFind(int32 tokenIndex, init ref<bool> overflow,
-        init ref<int32> low, init ref<int32> high)
+    public bool TryFind(int32 tokenIndex, ref<init bool> overflow,
+        ref<init int32> low, ref<init int32> high)
     {
         mut int32 first = 0;
         mut int32 end = _count;
@@ -159,15 +161,16 @@ public unique struct TokenIntegerSnapshot
         }
 
         int32 offset = first * 4;
-        overflow = _records.Read(offset + 1) == 1;
-        low = _records.Read(offset + 2);
-        high = _records.Read(offset + 3);
+        *overflow = _records.Read(offset + 1) == 1;
+        *low = _records.Read(offset + 2);
+        *high = _records.Read(offset + 3);
         return true;
     }
 
     public static bool TryValidate(int32 tokenCount)
     {
-        if (!TryGetIntegerRecordCount(tokenCount, init var count))
+        init int32 count;
+        if (!TryGetIntegerRecordCount(tokenCount, ref init count))
         {
             return false;
         }
@@ -198,10 +201,13 @@ public unique struct TokenIntegerSnapshot
         return recordIndex == count;
     }
 
-    public static bool TryBuild(int32 tokenCount, init ref<TokenIntegerSnapshot> result)
+    public static bool TryBuild(int32 tokenCount,
+        ref<init TokenIntegerSnapshot> result)
     {
-        if (!TryGetIntegerRecordCount(tokenCount, init var count)
-            || !OwnedInt32Buffer.TryCreate(count * 4, out var created))
+        init int32 count;
+        init OwnedInt32Buffer created;
+        if (!TryGetIntegerRecordCount(tokenCount, ref init count)
+            || !OwnedInt32Buffer.TryCreate(count * 4, ref init created))
         {
             return false;
         }
@@ -243,29 +249,34 @@ public unique struct TokenIntegerSnapshot
             return false;
         }
 
-        result = new TokenIntegerSnapshot(move records, count);
+        *result = new TokenIntegerSnapshot(move records, count);
         return true;
     }
 }
 
 bool TryBuildCompilerInput(int32 count,
-    init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia,
-    init ref<TokenIntegerSnapshot> integers)
+    ref<init TokenSnapshot> tokens, ref<init TokenTriviaSnapshot> trivia,
+    ref<init TokenIntegerSnapshot> integers)
 {
-    if (!TryBuildLossless(count, init var scanned, init var leading)
-        || !TokenIntegerSnapshot.TryBuild(count, init var magnitudes))
+    init TokenSnapshot scanned;
+    init TokenTriviaSnapshot leading;
+    init TokenIntegerSnapshot magnitudes;
+    if (!TryBuildLossless(count, ref init scanned, ref init leading)
+        || !TokenIntegerSnapshot.TryBuild(count, ref init magnitudes))
     {
         return false;
     }
 
-    tokens = move scanned;
-    trivia = move leading;
-    integers = move magnitudes;
+    *tokens = move scanned;
+    *trivia = move leading;
+    *integers = move magnitudes;
     return true;
 }
 
-bool TryScanCompilerInput(init ref<TokenSnapshot> tokens,
-    init ref<TokenTriviaSnapshot> trivia, init ref<TokenIntegerSnapshot> integers)
+bool TryScanCompilerInput(ref<init TokenSnapshot> tokens,
+    ref<init TokenTriviaSnapshot> trivia,
+    ref<init TokenIntegerSnapshot> integers)
 {
-    return TryBuildCompilerInput(Scan(), init tokens, init trivia, init integers);
+    return TryBuildCompilerInput(Scan(), ref init *tokens,
+        ref init *trivia, ref init *integers);
 }

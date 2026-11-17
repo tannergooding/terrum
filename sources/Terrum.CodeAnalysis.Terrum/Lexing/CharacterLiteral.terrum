@@ -15,7 +15,8 @@ public struct CharacterLiteralDecodeResult
         ErrorSpan = errorSpan;
     }
 
-    public static bool TryAnalyze(SourceRange spelling, init ref<CharacterLiteralDecodeResult> result)
+    public static bool TryAnalyze(SourceRange spelling,
+        ref<init CharacterLiteralDecodeResult> result)
     {
         if (spelling.Start < 0 || spelling.Length < 0 || spelling.Start > Host.Source.Length
             || spelling.Length > Host.Source.Length - spelling.Start)
@@ -25,14 +26,16 @@ public struct CharacterLiteralDecodeResult
 
         if (spelling.Length < 2)
         {
-            return TryPublishError(1, spelling.Start, spelling.Length, init result);
+            return TryPublishError(1, spelling.Start, spelling.Length,
+                ref init *result);
         }
 
         int32 start = spelling.Start;
         int32 end = spelling.End - 1;
         if (Host.Source[start] != char16(39) || Host.Source[end] != char16(39))
         {
-            return TryPublishError(1, start, spelling.Length, init result);
+            return TryPublishError(1, start, spelling.Length,
+                ref init *result);
         }
 
         mut int32 at = start + 1;
@@ -47,7 +50,8 @@ public struct CharacterLiteralDecodeResult
                 at = at + 1;
                 if (at >= end)
                 {
-                    return TryPublishError(5, scalarStart, at - scalarStart, init result);
+                    return TryPublishError(5, scalarStart, at - scalarStart,
+                        ref init *result);
                 }
 
                 int32 escape = int32(Host.Source[at]);
@@ -64,9 +68,13 @@ public struct CharacterLiteralDecodeResult
                     int32 required = escape == 117 ? 4 : 8;
                     mut int32 digits = 0;
                     mut uint32 value = 0;
-                    while (digits < required && at < end
-                        && TryGetHexDigit(Host.Source[at], init var digit))
+                    while (digits < required && at < end)
                     {
+                        init int32 digit;
+                        if (!TryGetHexDigit(Host.Source[at], ref init digit))
+                        {
+                            break;
+                        }
                         value = (value << 4) | uint32(digit);
                         at = at + 1;
                         digits = digits + 1;
@@ -75,13 +83,15 @@ public struct CharacterLiteralDecodeResult
                     if (digits != required || value > uint32(0x10FFFF)
                         || (value >= uint32(0xD800) && value <= uint32(0xDFFF)))
                     {
-                        return TryPublishError(5, scalarStart, at - scalarStart, init result);
+                        return TryPublishError(5, scalarStart,
+                            at - scalarStart, ref init *result);
                     }
                     decoded = int32(value);
                 }
                 else
                 {
-                    return TryPublishError(5, scalarStart, at - scalarStart, init result);
+                    return TryPublishError(5, scalarStart,
+                        at - scalarStart, ref init *result);
                 }
             }
             else
@@ -97,7 +107,8 @@ public struct CharacterLiteralDecodeResult
                     decoded = ReadUtf16Scalar(at, end);
                     if (decoded < 0)
                     {
-                        return TryPublishError(1, scalarStart, 1, init result);
+                        return TryPublishError(1, scalarStart, 1,
+                            ref init *result);
                     }
                     at = at + Utf16ScalarWidth(decoded);
                 }
@@ -105,7 +116,8 @@ public struct CharacterLiteralDecodeResult
 
             if (scalarCount != 0)
             {
-                return TryPublishError(1, scalarStart, at - scalarStart, init result);
+                return TryPublishError(1, scalarStart, at - scalarStart,
+                    ref init *result);
             }
             scalar = decoded;
             scalarCount = 1;
@@ -113,33 +125,37 @@ public struct CharacterLiteralDecodeResult
 
         if (scalarCount == 0)
         {
-            return TryPublishError(1, start, spelling.Length, init result);
+            return TryPublishError(1, start, spelling.Length,
+                ref init *result);
         }
 
-        require SourceRange.TryCreate(0, 0, init var empty);
-        result = new CharacterLiteralDecodeResult(0, scalar, empty);
+        init SourceRange empty;
+        require SourceRange.TryCreate(0, 0, ref init empty);
+        *result = new CharacterLiteralDecodeResult(0, scalar, empty);
         return true;
     }
 
     private static bool TryPublishError(int32 errorCode, int32 start, int32 length,
-        init ref<CharacterLiteralDecodeResult> result)
+        ref<init CharacterLiteralDecodeResult> result)
     {
-        if (!SourceRange.TryCreate(start, length, init var errorSpan))
+        init SourceRange errorSpan;
+        if (!SourceRange.TryCreate(start, length, ref init errorSpan))
         {
             return false;
         }
-        result = new CharacterLiteralDecodeResult(errorCode, 0, errorSpan);
+        *result = new CharacterLiteralDecodeResult(errorCode, 0, errorSpan);
         return true;
     }
 }
 
-bool TryDecodeCharacterLiteral(SourceRange spelling, init ref<int32> scalar)
+bool TryDecodeCharacterLiteral(SourceRange spelling, ref<init int32> scalar)
 {
-    if (!CharacterLiteralDecodeResult.TryAnalyze(spelling, init var decoded)
+    init CharacterLiteralDecodeResult decoded;
+    if (!CharacterLiteralDecodeResult.TryAnalyze(spelling, ref init decoded)
         || decoded.ErrorCode != 0)
     {
         return false;
     }
-    scalar = decoded.Scalar;
+    *scalar = decoded.Scalar;
     return true;
 }

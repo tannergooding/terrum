@@ -2,6 +2,19 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public bool CheckCharacterFacts()
 {
+    init int32 zero;
+    init int32 nine;
+    init int32 upperA;
+    init int32 upperF;
+    init int32 lowerA;
+    init int32 lowerF;
+    init int32 beforeDigits;
+    init int32 afterDigits;
+    init int32 beforeUpper;
+    init int32 afterUpper;
+    init int32 beforeLower;
+    init int32 afterLower;
+
     if (!IsAsciiDigit(char16(48)) || !IsAsciiDigit(char16(57))
         || IsAsciiDigit(char16(47)) || IsAsciiDigit(char16(58))
         || !IsLineBreak(char16(10)) || !IsLineBreak(char16(13))
@@ -20,20 +33,20 @@ public bool CheckCharacterFacts()
         return false;
     }
 
-    require TryGetHexDigit(char16(48), init var zero);
-    require TryGetHexDigit(char16(57), init var nine);
-    require TryGetHexDigit(char16(65), init var upperA);
-    require TryGetHexDigit(char16(70), init var upperF);
-    require TryGetHexDigit(char16(97), init var lowerA);
-    require TryGetHexDigit(char16(102), init var lowerF);
+    require TryGetHexDigit(char16(48), ref init zero);
+    require TryGetHexDigit(char16(57), ref init nine);
+    require TryGetHexDigit(char16(65), ref init upperA);
+    require TryGetHexDigit(char16(70), ref init upperF);
+    require TryGetHexDigit(char16(97), ref init lowerA);
+    require TryGetHexDigit(char16(102), ref init lowerF);
     if (zero != 0 || nine != 9 || upperA != 10 || upperF != 15
         || lowerA != 10 || lowerF != 15
-        || TryGetHexDigit(char16(47), init var beforeDigits)
-        || TryGetHexDigit(char16(58), init var afterDigits)
-        || TryGetHexDigit(char16(64), init var beforeUpper)
-        || TryGetHexDigit(char16(71), init var afterUpper)
-        || TryGetHexDigit(char16(96), init var beforeLower)
-        || TryGetHexDigit(char16(103), init var afterLower))
+        || TryGetHexDigit(char16(47), ref init beforeDigits)
+        || TryGetHexDigit(char16(58), ref init afterDigits)
+        || TryGetHexDigit(char16(64), ref init beforeUpper)
+        || TryGetHexDigit(char16(71), ref init afterUpper)
+        || TryGetHexDigit(char16(96), ref init beforeLower)
+        || TryGetHexDigit(char16(103), ref init afterLower))
     {
         return false;
     }
@@ -69,15 +82,20 @@ public bool CheckCharacterFacts()
         }
         if (expectedHex >= 0)
         {
-            require TryGetHexDigit(codeUnit, init var actualHex);
+            init int32 actualHex;
+            require TryGetHexDigit(codeUnit, ref init actualHex);
             if (actualHex != expectedHex)
             {
                 return false;
             }
         }
-        else if (TryGetHexDigit(codeUnit, init var invalidHex))
+        else
         {
-            return false;
+            init int32 invalidHex;
+            if (TryGetHexDigit(codeUnit, ref init invalidHex))
+            {
+                return false;
+            }
         }
     }
 

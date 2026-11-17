@@ -17,7 +17,8 @@ public unique struct TokenDiagnosticSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, init ref<int32> code, init ref<SourceRange> span)
+    public bool TryGet(int32 index, ref<init int32> code,
+        ref<init SourceRange> span)
     {
         if (index < 0 || index >= _count)
         {
@@ -25,23 +26,25 @@ public unique struct TokenDiagnosticSnapshot
         }
 
         int32 offset = index * 3;
-        require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
-            init var found);
-        code = _records.Read(offset);
-        span = found;
+        init SourceRange found;
+        require SourceRange.TryCreate(_records.Read(offset + 1),
+            _records.Read(offset + 2), ref init found);
+        *code = _records.Read(offset);
+        *span = found;
         return true;
     }
 
-    public static bool TryBuild(init ref<TokenDiagnosticSnapshot> result)
+    public static bool TryBuild(ref<init TokenDiagnosticSnapshot> result)
     {
         if (Host.Diagnostics.Length < 1)
         {
             return false;
         }
         int32 count = Host.Diagnostics[0];
+        init OwnedInt32Buffer created;
         if (count < 0 || count > Host.Source.Length || count > int32.MaxValue / 3
             || count > (Host.Diagnostics.Length - 1) / 3
-            || !OwnedInt32Buffer.TryCreate(count * 3, out var created))
+            || !OwnedInt32Buffer.TryCreate(count * 3, ref init created))
         {
             return false;
         }
@@ -64,16 +67,16 @@ public unique struct TokenDiagnosticSnapshot
             require records.TryAppend(length);
         }
 
-        result = new TokenDiagnosticSnapshot(move records, count);
+        *result = new TokenDiagnosticSnapshot(move records, count);
         return true;
     }
 
-    public static bool TryScan(init ref<TokenDiagnosticSnapshot> result)
+    public static bool TryScan(ref<init TokenDiagnosticSnapshot> result)
     {
         if (Scan() < 1)
         {
             return false;
         }
-        return TryBuild(init result);
+        return TryBuild(ref init *result);
     }
 }

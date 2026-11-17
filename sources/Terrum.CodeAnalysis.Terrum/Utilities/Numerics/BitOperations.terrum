@@ -95,7 +95,7 @@ public bool IsPow2UInt32(uint32 value)
     return value != 0 && (value & (value - 1)) == 0;
 }
 
-public bool TryRoundUpToPowerOfTwoUInt32(uint32 value, init ref<uint32> result)
+public bool TryRoundUpToPowerOfTwoUInt32(uint32 value, ref<init uint32> result)
 {
     if (value == 0 || value > 0x80000000)
     {
@@ -108,7 +108,7 @@ public bool TryRoundUpToPowerOfTwoUInt32(uint32 value, init ref<uint32> result)
     rounded = rounded | (rounded >>> 4);
     rounded = rounded | (rounded >>> 8);
     rounded = rounded | (rounded >>> 16);
-    result = rounded + 1;
+    *result = rounded + 1;
     return true;
 }
 
@@ -211,7 +211,7 @@ public bool IsPow2UInt64(uint64 value)
     return value != 0 && (value & (value - 1)) == 0;
 }
 
-public bool TryRoundUpToPowerOfTwoUInt64(uint64 value, init ref<uint64> result)
+public bool TryRoundUpToPowerOfTwoUInt64(uint64 value, ref<init uint64> result)
 {
     if (value == 0 || value > 0x8000000000000000)
     {
@@ -225,6 +225,6 @@ public bool TryRoundUpToPowerOfTwoUInt64(uint64 value, init ref<uint64> result)
     rounded = rounded | (rounded >>> 8);
     rounded = rounded | (rounded >>> 16);
     rounded = rounded | (rounded >>> 32);
-    result = rounded + 1;
+    *result = rounded + 1;
     return true;
 }

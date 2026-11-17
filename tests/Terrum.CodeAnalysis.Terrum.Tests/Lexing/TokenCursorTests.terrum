@@ -4,7 +4,8 @@ namespace Terrum.CodeAnalysis.Tests;
 public bool CheckTokenCursor()
 {
     int32 tokenCount = Scan();
-    if (!TokenSnapshot.TryBuild(tokenCount, init var scanned))
+    init TokenSnapshot scanned;
+    if (!TokenSnapshot.TryBuild(tokenCount, ref init scanned))
     {
         return false;
     }
@@ -14,50 +15,54 @@ public bool CheckTokenCursor()
     mut bool passed = true;
 
     init Token negative;
-    if (cursor.TryGet(-1, init negative) || negative is init)
+    if (cursor.TryGet(-1, ref init negative) || negative is init)
     {
         passed = false;
     }
 
     init Token outside;
-    if (cursor.TryGet(3, init outside) || outside is init)
+    if (cursor.TryGet(3, ref init outside) || outside is init)
     {
         passed = false;
     }
 
-    if (!cursor.TryGet(1, init var indexed)
+    init Token indexed;
+    if (!cursor.TryGet(1, ref init indexed)
         || indexed.Kind != 3 || indexed.Range.Start != 6 || indexed.Range.Length != 2)
     {
         passed = false;
     }
 
-    if (!cursor.TryRead(init var first)
+    init Token first;
+    if (!cursor.TryRead(ref init first)
         || first.Kind != 2 || first.Range.Start != 0 || first.Range.Length != 5)
     {
         passed = false;
     }
 
     init Token remaining;
-    if (!cursor.TryGet(0, init remaining)
+    if (!cursor.TryGet(0, ref init remaining)
         || remaining.Kind != 3 || remaining.Range.Start != 6 || remaining.Range.Length != 2)
     {
         passed = false;
     }
 
-    if (!cursor.TryRead(init var second)
+    init Token second;
+    if (!cursor.TryRead(ref init second)
         || second.Kind != 3 || second.Range.Start != 6 || second.Range.Length != 2)
     {
         passed = false;
     }
 
-    if (!cursor.TryRead(init var eof)
+    init Token eof;
+    if (!cursor.TryRead(ref init eof)
         || eof.Kind != 0 || eof.Range.Start != 8 || eof.Range.Length != 0)
     {
         passed = false;
     }
 
     init Token exhausted;
-    if (cursor.TryRead(init exhausted) || exhausted is init)
+    if (cursor.TryRead(ref init exhausted) || exhausted is init)
     {
         passed = false;
     }

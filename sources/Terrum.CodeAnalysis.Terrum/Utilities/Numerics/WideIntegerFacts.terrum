@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
-public static bool TryAddInt64(int64 left, int64 right, init ref<int64> result)
+public static bool TryAddInt64(int64 left, int64 right, ref<init int64> result)
 {
     if (right > 0 && left > int64.MaxValue - right)
     {
@@ -12,11 +12,11 @@ public static bool TryAddInt64(int64 left, int64 right, init ref<int64> result)
         return false;
     }
 
-    result = left + right;
+    *result = left + right;
     return true;
 }
 
-public static bool TrySubtractInt64(int64 left, int64 right, init ref<int64> result)
+public static bool TrySubtractInt64(int64 left, int64 right, ref<init int64> result)
 {
     if (right < 0 && left > int64.MaxValue + right)
     {
@@ -28,24 +28,24 @@ public static bool TrySubtractInt64(int64 left, int64 right, init ref<int64> res
         return false;
     }
 
-    result = left - right;
+    *result = left - right;
     return true;
 }
 
-public static bool TryNegateInt64(int64 value, init ref<int64> result)
+public static bool TryNegateInt64(int64 value, ref<init int64> result)
 {
-    return TrySubtractInt64(0, value, init result);
+    return TrySubtractInt64(0, value, ref init *result);
 }
 
-public static bool TryAbsoluteInt64(int64 value, init ref<int64> result)
+public static bool TryAbsoluteInt64(int64 value, ref<init int64> result)
 {
     if (value >= 0)
     {
-        result = value;
+        *result = value;
         return true;
     }
 
-    return TryNegateInt64(value, init result);
+    return TryNegateInt64(value, ref init *result);
 }
 
 public static uint64 MagnitudeInt64(int64 value)
@@ -58,7 +58,7 @@ public static uint64 MagnitudeInt64(int64 value)
     return uint64(value);
 }
 
-public static bool TryMultiplyInt64(int64 left, int64 right, init ref<int64> result)
+public static bool TryMultiplyInt64(int64 left, int64 right, ref<init int64> result)
 {
     if (left > 0)
     {
@@ -83,55 +83,55 @@ public static bool TryMultiplyInt64(int64 left, int64 right, init ref<int64> res
         }
     }
 
-    result = left * right;
+    *result = left * right;
     return true;
 }
 
-public static bool TryAddUInt64(uint64 left, uint64 right, init ref<uint64> result)
+public static bool TryAddUInt64(uint64 left, uint64 right, ref<init uint64> result)
 {
     if (left > uint64.MaxValue - right)
     {
         return false;
     }
 
-    result = left + right;
+    *result = left + right;
     return true;
 }
 
-public static bool TrySubtractUInt64(uint64 left, uint64 right, init ref<uint64> result)
+public static bool TrySubtractUInt64(uint64 left, uint64 right, ref<init uint64> result)
 {
     if (left < right)
     {
         return false;
     }
 
-    result = left - right;
+    *result = left - right;
     return true;
 }
 
-public static bool TryMultiplyUInt64(uint64 left, uint64 right, init ref<uint64> result)
+public static bool TryMultiplyUInt64(uint64 left, uint64 right, ref<init uint64> result)
 {
     if (right != 0 && left > uint64.MaxValue / right)
     {
         return false;
     }
 
-    result = left * right;
+    *result = left * right;
     return true;
 }
 
-public static bool TryDivideInt64(int64 left, int64 right, init ref<int64> result)
+public static bool TryDivideInt64(int64 left, int64 right, ref<init int64> result)
 {
     if (right == 0 || (left == int64.MinValue && right == -1))
     {
         return false;
     }
 
-    result = left / right;
+    *result = left / right;
     return true;
 }
 
-public static bool TryRemainderInt64(int64 left, int64 right, init ref<int64> result)
+public static bool TryRemainderInt64(int64 left, int64 right, ref<init int64> result)
 {
     if (right == 0)
     {
@@ -140,38 +140,38 @@ public static bool TryRemainderInt64(int64 left, int64 right, init ref<int64> re
 
     if (left == int64.MinValue && right == -1)
     {
-        result = 0;
+        *result = 0;
         return true;
     }
 
-    result = left % right;
+    *result = left % right;
     return true;
 }
 
-public static bool TryDivideUInt64(uint64 left, uint64 right, init ref<uint64> result)
+public static bool TryDivideUInt64(uint64 left, uint64 right, ref<init uint64> result)
 {
     if (right == 0)
     {
         return false;
     }
 
-    result = left / right;
+    *result = left / right;
     return true;
 }
 
-public static bool TryRemainderUInt64(uint64 left, uint64 right, init ref<uint64> result)
+public static bool TryRemainderUInt64(uint64 left, uint64 right, ref<init uint64> result)
 {
     if (right == 0)
     {
         return false;
     }
 
-    result = left % right;
+    *result = left % right;
     return true;
 }
 
 public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maximum,
-    init ref<uint64> result)
+    ref<init uint64> result)
 {
     uint64 widenedDigit = uint64(digit);
     if (digit > 9 || maximum < widenedDigit)
@@ -185,13 +185,13 @@ public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maxim
         return false;
     }
 
-    result = value * 10 + widenedDigit;
+    *result = value * 10 + widenedDigit;
 
     return true;
 }
 
 public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, uint64 maximum,
-    init ref<uint64> result)
+    ref<init uint64> result)
 {
     if (radix < 2 || radix > 36 || digit >= radix)
     {
@@ -200,11 +200,13 @@ public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, u
 
     if (radix == 10)
     {
-        if (!TryAccumulateDecimal(value, digit, maximum, init var decimalResult))
+        init uint64 decimalResult;
+        if (!TryAccumulateDecimal(value, digit, maximum,
+            ref init decimalResult))
         {
             return false;
         }
-        result = decimalResult;
+        *result = decimalResult;
         return true;
     }
 
@@ -214,6 +216,6 @@ public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, u
         return false;
     }
 
-    result = value * uint64(radix) + widenedDigit;
+    *result = value * uint64(radix) + widenedDigit;
     return true;
 }

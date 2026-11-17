@@ -3,52 +3,74 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public static bool CheckWideAddition()
 {
-    if (TryAddInt64(int64.MaxValue, 1, init var tooLarge)
-        || TryAddInt64(int64.MinValue, -1, init var tooSmall))
+    init int64 tooLarge;
+    init int64 tooSmall;
+    init int64 negative;
+    init int64 maximum;
+    init int64 minimum;
+    if (TryAddInt64(int64.MaxValue, 1, ref init tooLarge)
+        || TryAddInt64(int64.MinValue, -1, ref init tooSmall))
     {
         return false;
     }
 
-    require TryAddInt64(int64.MinValue, int64.MaxValue, init var negative);
-    require TryAddInt64(int64.MaxValue, 0, init var maximum);
-    require TryAddInt64(int64.MinValue, 0, init var minimum);
+    require TryAddInt64(int64.MinValue, int64.MaxValue, ref init negative);
+    require TryAddInt64(int64.MaxValue, 0, ref init maximum);
+    require TryAddInt64(int64.MinValue, 0, ref init minimum);
 
     return negative == -1 && maximum == int64.MaxValue && minimum == int64.MinValue;
 }
 
 public static bool CheckWideSubtraction()
 {
-    if (TrySubtractInt64(int64.MaxValue, -1, init var tooLarge)
-        || TrySubtractInt64(int64.MinValue, 1, init var tooSmall))
+    init int64 tooLarge;
+    init int64 tooSmall;
+    init int64 zero;
+    init int64 maximum;
+    init int64 negative;
+    init int64 unchanged;
+    if (TrySubtractInt64(int64.MaxValue, -1, ref init tooLarge)
+        || TrySubtractInt64(int64.MinValue, 1, ref init tooSmall))
     {
         return false;
     }
 
-    require TrySubtractInt64(int64.MinValue, int64.MinValue, init var zero);
-    require TrySubtractInt64(-1, int64.MinValue, init var maximum);
-    require TrySubtractInt64(0, int64.MaxValue, init var negative);
-    require TrySubtractInt64(int64.MaxValue, 0, init var unchanged);
+    require TrySubtractInt64(int64.MinValue, int64.MinValue, ref init zero);
+    require TrySubtractInt64(-1, int64.MinValue, ref init maximum);
+    require TrySubtractInt64(0, int64.MaxValue, ref init negative);
+    require TrySubtractInt64(int64.MaxValue, 0, ref init unchanged);
     return zero == 0 && maximum == int64.MaxValue
         && negative == -int64.MaxValue && unchanged == int64.MaxValue;
 }
 
 public static bool CheckWideMultiplication()
 {
-    if (TryMultiplyInt64(int64.MaxValue, 2, init var positiveOverflow)
-        || TryMultiplyInt64(int64.MinValue, -1, init var negativeTimesNegativeOverflow)
-        || TryMultiplyInt64(int64.MinValue, 2, init var negativeOverflow)
-        || TryMultiplyInt64(-2, int64.MinValue, init var negativeTimesNegativeOverflow2)
-        || TryMultiplyInt64(2, int64.MaxValue, init var reversedPositiveOverflow))
+    init int64 positiveOverflow;
+    init int64 negativeTimesNegativeOverflow;
+    init int64 negativeOverflow;
+    init int64 negativeTimesNegativeOverflow2;
+    init int64 reversedPositiveOverflow;
+    init int64 minimum;
+    init int64 zero;
+    init int64 negative;
+    init int64 positive;
+    init int64 boundary;
+    init int64 square;
+    if (TryMultiplyInt64(int64.MaxValue, 2, ref init positiveOverflow)
+        || TryMultiplyInt64(int64.MinValue, -1, ref init negativeTimesNegativeOverflow)
+        || TryMultiplyInt64(int64.MinValue, 2, ref init negativeOverflow)
+        || TryMultiplyInt64(-2, int64.MinValue, ref init negativeTimesNegativeOverflow2)
+        || TryMultiplyInt64(2, int64.MaxValue, ref init reversedPositiveOverflow))
     {
         return false;
     }
 
-    require TryMultiplyInt64(int64.MinValue, 1, init var minimum);
-    require TryMultiplyInt64(int64.MinValue, 0, init var zero);
-    require TryMultiplyInt64(-1, int64.MaxValue, init var negative);
-    require TryMultiplyInt64(-1, -int64.MaxValue, init var positive);
-    require TryMultiplyInt64(int64.MinValue / 2, 2, init var boundary);
-    require TryMultiplyInt64(3037000499, 3037000499, init var square);
+    require TryMultiplyInt64(int64.MinValue, 1, ref init minimum);
+    require TryMultiplyInt64(int64.MinValue, 0, ref init zero);
+    require TryMultiplyInt64(-1, int64.MaxValue, ref init negative);
+    require TryMultiplyInt64(-1, -int64.MaxValue, ref init positive);
+    require TryMultiplyInt64(int64.MinValue / 2, 2, ref init boundary);
+    require TryMultiplyInt64(3037000499, 3037000499, ref init square);
     return minimum == int64.MinValue && zero == 0
         && negative == -int64.MaxValue && positive == int64.MaxValue
         && boundary == int64.MinValue && square == 9223372030926249001;
@@ -56,22 +78,30 @@ public static bool CheckWideMultiplication()
 
 public static bool CheckWideDivision()
 {
-    if (TryDivideInt64(1, 0, init var divideByZero)
-        || TryDivideInt64(int64.MinValue, -1, init var minimumOverflow)
-        || TryDivideUInt64(1, 0, init var unsignedDivideByZero))
+    init int64 divideByZero;
+    init int64 minimumOverflow;
+    init uint64 unsignedDivideByZero;
+    init int64 negativeQuotient;
+    init int64 minimum;
+    init int64 one;
+    init uint64 unsignedQuotient;
+    init int64 reused;
+    if (TryDivideInt64(1, 0, ref init divideByZero)
+        || TryDivideInt64(int64.MinValue, -1, ref init minimumOverflow)
+        || TryDivideUInt64(1, 0, ref init unsignedDivideByZero))
     {
         return false;
     }
 
-    require TryDivideInt64(-7, 3, init var negativeQuotient);
-    require TryDivideInt64(int64.MinValue, 1, init var minimum);
-    require TryDivideInt64(int64.MinValue, int64.MinValue, init var one);
-    require TryDivideUInt64(uint64.MaxValue, 2, init var unsignedQuotient);
-    if (TryDivideInt64(1, 0, init var reused))
+    require TryDivideInt64(-7, 3, ref init negativeQuotient);
+    require TryDivideInt64(int64.MinValue, 1, ref init minimum);
+    require TryDivideInt64(int64.MinValue, int64.MinValue, ref init one);
+    require TryDivideUInt64(uint64.MaxValue, 2, ref init unsignedQuotient);
+    if (TryDivideInt64(1, 0, ref init reused))
     {
         return false;
     }
-    require TryDivideInt64(7, 3, init reused);
+    require TryDivideInt64(7, 3, ref init reused);
 
     return negativeQuotient == -2 && minimum == int64.MinValue && one == 1
         && unsignedQuotient == 9223372036854775807 && reused == 2;
@@ -79,20 +109,26 @@ public static bool CheckWideDivision()
 
 public static bool CheckWideRemainder()
 {
-    if (TryRemainderInt64(1, 0, init var remainderByZero)
-        || TryRemainderUInt64(1, 0, init var unsignedRemainderByZero))
+    init int64 remainderByZero;
+    init uint64 unsignedRemainderByZero;
+    init int64 negativeRemainder;
+    init int64 minimumRemainder;
+    init uint64 unsignedRemainder;
+    init int64 reused;
+    if (TryRemainderInt64(1, 0, ref init remainderByZero)
+        || TryRemainderUInt64(1, 0, ref init unsignedRemainderByZero))
     {
         return false;
     }
 
-    require TryRemainderInt64(-7, 3, init var negativeRemainder);
-    require TryRemainderInt64(int64.MinValue, -1, init var minimumRemainder);
-    require TryRemainderUInt64(uint64.MaxValue, 10, init var unsignedRemainder);
-    if (TryRemainderInt64(1, 0, init var reused))
+    require TryRemainderInt64(-7, 3, ref init negativeRemainder);
+    require TryRemainderInt64(int64.MinValue, -1, ref init minimumRemainder);
+    require TryRemainderUInt64(uint64.MaxValue, 10, ref init unsignedRemainder);
+    if (TryRemainderInt64(1, 0, ref init reused))
     {
         return false;
     }
-    require TryRemainderInt64(7, 3, init reused);
+    require TryRemainderInt64(7, 3, ref init reused);
 
     return negativeRemainder == -1 && minimumRemainder == 0
         && unsignedRemainder == 5 && reused == 1;
@@ -100,33 +136,41 @@ public static bool CheckWideRemainder()
 
 public static bool CheckWideDecimalAccumulation()
 {
+    init uint64 accumulated;
+    init uint64 overflow;
+    init uint64 notADigit;
+    init uint64 exceedsLimit;
+    init uint64 signedOverflow;
+    init uint64 maximumSigned;
+    init uint64 zero;
+    init uint64 reusable;
     mut uint64 value = 1844674407370955161;
-    require TryAccumulateDecimal(value, 5, uint64.MaxValue, init var accumulated);
+    require TryAccumulateDecimal(value, 5, uint64.MaxValue, ref init accumulated);
     value = accumulated;
     require value == uint64.MaxValue;
 
-    if (TryAccumulateDecimal(value, 0, uint64.MaxValue, init var overflow))
+    if (TryAccumulateDecimal(value, 0, uint64.MaxValue, ref init overflow))
     {
         return false;
     }
 
-    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, init var notADigit)
-        || TryAccumulateDecimal(0, 1, 0, init var exceedsLimit)
+    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, ref init notADigit)
+        || TryAccumulateDecimal(0, 1, 0, ref init exceedsLimit)
         || TryAccumulateDecimal(922337203685477580, 8,
-            uint64(int64.MaxValue), init var signedOverflow))
+            uint64(int64.MaxValue), ref init signedOverflow))
     {
         return false;
     }
 
     require TryAccumulateDecimal(922337203685477580, 7,
-        uint64(int64.MaxValue), init var maximumSigned);
-    require TryAccumulateDecimal(0, 0, 0, init var zero);
+        uint64(int64.MaxValue), ref init maximumSigned);
+    require TryAccumulateDecimal(0, 0, 0, ref init zero);
     value = zero;
-    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, init var reusable))
+    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, ref init reusable))
     {
         return false;
     }
-    require TryAccumulateDecimal(1844674407370955161, 5, uint64.MaxValue, init reusable);
+    require TryAccumulateDecimal(1844674407370955161, 5, uint64.MaxValue, ref init reusable);
 
     return maximumSigned == uint64(int64.MaxValue)
         && reusable == uint64.MaxValue && value == 0;
@@ -134,38 +178,49 @@ public static bool CheckWideDecimalAccumulation()
 
 public static bool CheckWideBaseAccumulation()
 {
+    init uint64 overflow;
+    init uint64 invalidDigit;
+    init uint64 lowBase;
+    init uint64 highBase;
+    init uint64 overLimit;
+    init uint64 lastDigit;
+    init uint64 hexDigit;
+    init uint64 decimalValue;
+    init uint64 zero;
+    init uint64 reusable;
     mut uint64 binary = 0;
     for (mut int32 bit = 0; bit < 64; bit = bit + 1)
     {
-        require TryAccumulateBase(binary, 1, 2, uint64.MaxValue, init var accumulated);
+        init uint64 accumulated;
+        require TryAccumulateBase(binary, 1, 2, uint64.MaxValue, ref init accumulated);
         binary = accumulated;
     }
     if (binary != uint64.MaxValue
-        || TryAccumulateBase(binary, 0, 2, uint64.MaxValue, init var overflow)
-        || TryAccumulateBase(0, 36, 36, uint64.MaxValue, init var invalidDigit)
-        || TryAccumulateBase(0, 1, 1, uint64.MaxValue, init var lowBase)
-        || TryAccumulateBase(0, 1, 37, uint64.MaxValue, init var highBase)
-        || TryAccumulateBase(0, 1, 16, 0, init var overLimit))
+        || TryAccumulateBase(binary, 0, 2, uint64.MaxValue, ref init overflow)
+        || TryAccumulateBase(0, 36, 36, uint64.MaxValue, ref init invalidDigit)
+        || TryAccumulateBase(0, 1, 1, uint64.MaxValue, ref init lowBase)
+        || TryAccumulateBase(0, 1, 37, uint64.MaxValue, ref init highBase)
+        || TryAccumulateBase(0, 1, 16, 0, ref init overLimit))
     {
         return false;
     }
 
-    require TryAccumulateBase(0, 35, 36, 35, init var lastDigit);
-    require TryAccumulateBase(0, 15, 16, 15, init var hexDigit);
+    require TryAccumulateBase(0, 35, 36, 35, ref init lastDigit);
+    require TryAccumulateBase(0, 15, 16, 15, ref init hexDigit);
     require TryAccumulateBase(1844674407370955161, 5, 10,
-        uint64.MaxValue, init var decimalValue);
-    require TryAccumulateBase(0, 0, 2, 0, init var zero);
+        uint64.MaxValue, ref init decimalValue);
+    require TryAccumulateBase(0, 0, 2, 0, ref init zero);
     if (lastDigit != 35 || hexDigit != 15
         || decimalValue != uint64.MaxValue || zero != 0)
     {
         return false;
     }
 
-    if (TryAccumulateBase(0, 1, 1, uint64.MaxValue, init var reusable))
+    if (TryAccumulateBase(0, 1, 1, uint64.MaxValue, ref init reusable))
     {
         return false;
     }
-    require TryAccumulateBase(0, 15, 16, 15, init reusable);
+    require TryAccumulateBase(0, 15, 16, 15, ref init reusable);
     if (reusable != 15)
     {
         return false;
@@ -173,16 +228,21 @@ public static bool CheckWideBaseAccumulation()
 
     for (mut uint32 radix = 2; radix <= 36; radix = radix + 1)
     {
+        init uint64 maximum;
+        init uint64 tooLarge;
+        init uint64 tooWide;
+        init uint64 signedMaximum;
+        init uint64 signedOverflow;
         uint64 divisor = uint64(radix);
         uint64 prefix = uint64.MaxValue / divisor;
         uint32 finalDigit = uint32(uint64.MaxValue % divisor);
         require TryAccumulateBase(prefix, finalDigit, radix,
-            uint64.MaxValue, init var maximum);
+            uint64.MaxValue, ref init maximum);
         if (maximum != uint64.MaxValue
             || TryAccumulateBase(prefix + 1, finalDigit, radix,
-                uint64.MaxValue, init var tooLarge)
+                uint64.MaxValue, ref init tooLarge)
             || TryAccumulateBase(0, radix, radix, uint64.MaxValue,
-                init var tooWide))
+                ref init tooWide))
         {
             return false;
         }
@@ -190,10 +250,10 @@ public static bool CheckWideBaseAccumulation()
         uint64 signedPrefix = uint64(int64.MaxValue) / divisor;
         uint32 signedDigit = uint32(uint64(int64.MaxValue) % divisor);
         require TryAccumulateBase(signedPrefix, signedDigit, radix,
-            uint64(int64.MaxValue), init var signedMaximum);
+            uint64(int64.MaxValue), ref init signedMaximum);
         if (signedMaximum != uint64(int64.MaxValue)
             || TryAccumulateBase(signedPrefix + 1, signedDigit, radix,
-                uint64(int64.MaxValue), init var signedOverflow))
+                uint64(int64.MaxValue), ref init signedOverflow))
         {
             return false;
         }

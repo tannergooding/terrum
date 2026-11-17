@@ -186,10 +186,14 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
             int32 kind = Host.Tokens[at * 3];
             if (depth == 0 && kind == 6)
             {
+                init int32 next;
+                init bool blockMatches;
+                init bool blockHasAlias;
+                init bool functionInBlock;
                 if (!ScalarProgramReaderNamespaceBlock(at, eof,
-                        functionSourceStart, 0, 0, 1, init var next,
-                        init var blockMatches, init var blockHasAlias,
-                        init var functionInBlock)
+                        functionSourceStart, 0, 0, 1, ref init next,
+                        ref init blockMatches, ref init blockHasAlias,
+                        ref init functionInBlock)
                     || functionInBlock)
                 {
                     return false;
@@ -214,6 +218,10 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
     mut bool sawRootScope = false;
     while (at < eof)
     {
+        init int32 next;
+        init bool blockMatches;
+        init bool blockHasAlias;
+        init bool functionInBlock;
         if (Host.Tokens[at * 3] != 6)
         {
             sawRootScope = true;
@@ -318,9 +326,9 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
             return false;
         }
         if (!ScalarProgramReaderNamespaceBlock(at, eof, functionSourceStart,
-                spanStart, spanLength, 1, init var next,
-                init var blockMatches, init var blockHasAlias,
-                init var functionInBlock))
+                spanStart, spanLength, 1, ref init next,
+                ref init blockMatches, ref init blockHasAlias,
+                ref init functionInBlock))
         {
             return false;
         }
@@ -332,14 +340,14 @@ bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
 
 bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
     int32 functionSourceStart, int32 spanStart, int32 spanLength,
-    int32 nestingDepth, init ref<int32> next,
-    init ref<bool> matchesFunctionBlock, init ref<bool> subtreeHasAlias,
-    init ref<bool> functionInBlock)
+    int32 nestingDepth, ref<init int32> next,
+    ref<init bool> matchesFunctionBlock, ref<init bool> subtreeHasAlias,
+    ref<init bool> functionInBlock)
 {
-    next = at;
-    matchesFunctionBlock = false;
-    subtreeHasAlias = false;
-    functionInBlock = false;
+    mut int32 nextValue = at;
+    mut bool matchesBlock = false;
+    mut bool hasAlias = false;
+    mut bool hasFunctionInBlock = false;
     if (nestingDepth > 8 || at < 0 || at >= eof
         || Host.Tokens[at * 3] != 6)
     {
@@ -408,39 +416,48 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
             if (functionSourceStart >= segmentStart
                 && functionSourceStart < tokenStart)
             {
-                functionInBlock = true;
+                hasFunctionInBlock = true;
                 if (nameStartOffset == spanStart
                     && nameEndOffset - nameStartOffset == spanLength)
                 {
-                    matchesFunctionBlock = true;
+                    matchesBlock = true;
                 }
             }
-            next = cursor + 1;
+            nextValue = cursor + 1;
+            *next = nextValue;
+            *matchesFunctionBlock = matchesBlock;
+            *subtreeHasAlias = hasAlias;
+            *functionInBlock = hasFunctionInBlock;
             return true;
         }
         if (declarationDepth == 0 && kind == 6)
         {
+            init int32 childNext;
+            init bool childMatches;
+            init bool childHasAlias;
+            init bool childFunctionInBlock;
             if (functionSourceStart >= segmentStart
                 && functionSourceStart < tokenStart)
             {
-                functionInBlock = true;
+                hasFunctionInBlock = true;
                 if (nameStartOffset == spanStart
                     && nameEndOffset - nameStartOffset == spanLength)
                 {
-                    matchesFunctionBlock = true;
+                    matchesBlock = true;
                 }
             }
             if (!ScalarProgramReaderNamespaceBlock(cursor, eof, functionSourceStart,
                     spanStart, spanLength, nestingDepth + 1,
-                    init var childNext, init var childMatches,
-                    init var childHasAlias, init var childFunctionInBlock)
+                    ref init childNext, ref init childMatches,
+                    ref init childHasAlias, ref init childFunctionInBlock)
                 || childNext <= cursor)
             {
                 return false;
             }
-            matchesFunctionBlock = matchesFunctionBlock || childMatches;
-            subtreeHasAlias = subtreeHasAlias || childHasAlias;
-            functionInBlock = functionInBlock || childFunctionInBlock;
+            matchesBlock = matchesBlock || childMatches;
+            hasAlias = hasAlias || childHasAlias;
+            hasFunctionInBlock = hasFunctionInBlock
+                || childFunctionInBlock;
             childCount = childCount + 1;
             int32 childClose = childNext - 1;
             int32 childCloseOffset = childClose * 3;
@@ -460,7 +477,7 @@ bool ScalarProgramReaderNamespaceBlock(int32 at, int32 eof,
         }
         if (kind == 102)
         {
-            subtreeHasAlias = true;
+            hasAlias = true;
         }
         if (kind == 48 || kind == 49)
         {
@@ -533,9 +550,10 @@ bool ScalarProgramReaderNodeShape(int32 body, int32 operation,
     if (operation == 0 || operation == 103 || operation == 104
         || operation == 107 || operation == 108)
     {
+        init int32 slotType;
         if (right != -1 || third != 0 || high != 0
             || !ScalarProgramReaderSlotType(body, parameterCount, localCount,
-                left, init var slotType))
+                left, ref init slotType))
         {
             return false;
         }
@@ -633,24 +651,33 @@ bool ScalarProgramReaderConditionRoot(int32 body, int32 root, int32 nodeCount)
 }
 
 bool ScalarProgramReaderSlotType(int32 body, int32 parameterCount, int32 localCount,
-    int32 slot, init ref<int32> type)
+    int32 slot, ref<init int32> type)
 {
     if (slot <= 0 || slot > parameterCount + localCount)
     {
         return false;
     }
+    mut int32 slotType = 0;
     if (slot <= parameterCount)
     {
         int32 field = slot == 1 ? 7 : (slot == 2 ? 8 : (slot == 3 ? 34 : 18));
-        type = Host.FrontendProgram[body + field];
+        slotType = Host.FrontendProgram[body + field];
+        if (slotType < 1 || slotType > 8)
+        {
+            return false;
+        }
     }
     else
     {
         int32 local = slot - parameterCount - 1;
-        type = Host.FrontendProgram[body + 300 + local * 4];
-        return type >= 0 && type <= 8;
+        slotType = Host.FrontendProgram[body + 300 + local * 4];
+        if (slotType < 0 || slotType > 8)
+        {
+            return false;
+        }
     }
-    return type >= 1 && type <= 8;
+    *type = slotType;
+    return true;
 }
 
 bool ScalarProgramReaderValidateCall(int32 body, int32 node, int32 target)
@@ -743,7 +770,7 @@ bool ScalarProgramReaderValidateCall(int32 body, int32 node, int32 target)
 bool ScalarProgramReaderValidateFrame(int32 function,
     int32 previousTokenEnd, int32 previousSourceEnd,
     int32 maximumTokenEnd,
-    init ref<int32> nextTokenEnd, init ref<int32> nextSourceEnd)
+    ref<init int32> nextTokenEnd, ref<init int32> nextSourceEnd)
 {
     int32 frame = 4 + function * 780;
     int32 body = frame + 4;
@@ -957,11 +984,12 @@ bool ScalarProgramReaderValidateFrame(int32 function,
         int32 kind = Host.FrontendProgram[offset];
         if (kind == 1 || kind == 27 || kind == 28)
         {
+            init int32 localType;
             int32 slot = Host.FrontendProgram[offset + 1];
             int32 root = Host.FrontendProgram[offset + 2];
             if (slot <= parameterCount
                 || !ScalarProgramReaderSlotType(body, parameterCount, localCount,
-                    slot, init var localType)
+                    slot, ref init localType)
                 || root < 0 || root >= nodeCount)
             {
                 return false;
@@ -974,10 +1002,11 @@ bool ScalarProgramReaderValidateFrame(int32 function,
         }
         else if (kind == 2 || kind == 9)
         {
+            init int32 slotType;
             int32 slot = Host.FrontendProgram[offset + 1];
             int32 root = Host.FrontendProgram[offset + 2];
             if (!ScalarProgramReaderSlotType(body, parameterCount, localCount,
-                    slot, init var slotType)
+                    slot, ref init slotType)
                 || root < 0 || root >= nodeCount
                 || Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, root) + 1]
                     != slotType)
@@ -1082,8 +1111,8 @@ bool ScalarProgramReaderValidateFrame(int32 function,
         return false;
     }
 
-    nextTokenEnd = tokenEnd;
-    nextSourceEnd = sourceStart + sourceLength;
+    *nextTokenEnd = tokenEnd;
+    *nextSourceEnd = sourceStart + sourceLength;
     return true;
 }
 
@@ -1105,9 +1134,11 @@ bool TryDecodeScalarFrontendProgram(int32 recordWordCount, int32 maximumTokenEnd
     mut int32 previousSourceEnd = 0;
     for (mut int32 function = 0; function < Host.FrontendProgram[2]; function = function + 1)
     {
+        init int32 nextTokenEnd;
+        init int32 nextSourceEnd;
         if (!ScalarProgramReaderValidateFrame(function, previousTokenEnd, previousSourceEnd,
                 maximumTokenEnd,
-                init var nextTokenEnd, init var nextSourceEnd))
+                ref init nextTokenEnd, ref init nextSourceEnd))
         {
             return false;
         }

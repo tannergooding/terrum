@@ -5,18 +5,18 @@ public int32 GetSourceTextLength()
     return Host.Source.Length;
 }
 
-public bool TryReadSourceCodeUnit(int32 position, init ref<char16> codeUnit)
+public bool TryReadSourceCodeUnit(int32 position, ref<init char16> codeUnit)
 {
     if (position < 0 || position >= Host.Source.Length)
     {
         return false;
     }
 
-    codeUnit = Host.Source[position];
+    *codeUnit = Host.Source[position];
     return true;
 }
 
-public bool TryGetSourceRange(int32 start, int32 length, init ref<SourceRange> range)
+public bool TryGetSourceRange(int32 start, int32 length, ref<init SourceRange> range)
 {
     if (start < 0 || length < 0 || start > Host.Source.Length
         || length > Host.Source.Length - start)
@@ -24,11 +24,11 @@ public bool TryGetSourceRange(int32 start, int32 length, init ref<SourceRange> r
         return false;
     }
 
-    return SourceRange.TryCreate(start, length, init range);
+    return SourceRange.TryCreate(start, length, ref init *range);
 }
 
-public bool TryReadSourceLine(int32 start, init ref<SourceRange> content,
-    init ref<SourceRange> includingBreak)
+public bool TryReadSourceLine(int32 start, ref<init SourceRange> content,
+    ref<init SourceRange> includingBreak)
 {
     // Host.Source is the immutable UTF-16 snapshot granted for this invocation.
     int32 sourceLength = GetSourceTextLength();
@@ -54,8 +54,8 @@ public bool TryReadSourceLine(int32 start, init ref<SourceRange> content,
         }
     }
 
-    require TryGetSourceRange(start, end - start, init content);
-    require TryGetSourceRange(start, next - start, init includingBreak);
+    require TryGetSourceRange(start, end - start, ref init *content);
+    require TryGetSourceRange(start, next - start, ref init *includingBreak);
 
     return true;
 }

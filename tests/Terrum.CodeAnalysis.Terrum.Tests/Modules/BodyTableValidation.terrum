@@ -1,23 +1,26 @@
 namespace Terrum.CodeAnalysis;
 
 public static bool TryGetBodyTableRowExtent(int32 recordCount, int32 row,
-    init ref<int32> bodyStart, init ref<int32> bodyLength)
+    ref<init int32> bodyStart, ref<init int32> bodyLength)
 {
+    init int32 rowStart;
+    init int32 rowLength;
     if (row <= 0 || row > recordCount
         || !TryValidateBodyTableIndex(recordCount)
         || !TryGetValidatedBodyTableRowExtent(recordCount, row,
-            init var rowStart, init var rowLength))
+            ref init rowStart, ref init rowLength))
     {
         return false;
     }
 
-    bodyStart = rowStart;
-    bodyLength = rowLength;
+    *bodyStart = rowStart;
+    *bodyLength = rowLength;
     return true;
 }
 
 bool TryValidateBodyTableIndex(int32 recordCount)
 {
+    init uint32 firstOffset;
     if (recordCount <= 0 || recordCount > 16777215
         || recordCount > Host.BodyRows.Length / 4 - 1)
     {
@@ -27,7 +30,7 @@ bool TryValidateBodyTableIndex(int32 recordCount)
     int32 indexByteLength = (recordCount + 1) * 4;
     int32 dataByteLength = Host.BodyRows.Length - indexByteLength;
     if (dataByteLength < 1
-        || !TryReadBodyTableOffset(0, init var firstOffset)
+        || !TryReadBodyTableOffset(0, ref init firstOffset)
         || firstOffset != 0)
     {
         return false;
@@ -36,7 +39,8 @@ bool TryValidateBodyTableIndex(int32 recordCount)
     mut uint32 previous = firstOffset;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
-        if (!TryReadBodyTableOffset(row, init var next)
+        init uint32 next;
+        if (!TryReadBodyTableOffset(row, ref init next)
             || next > uint32(dataByteLength)
             || previous > uint32(dataByteLength - 1)
             || next < previous + uint32(1))
@@ -50,8 +54,10 @@ bool TryValidateBodyTableIndex(int32 recordCount)
 }
 
 bool TryGetValidatedBodyTableRowExtent(int32 recordCount, int32 row,
-    init ref<int32> bodyStart, init ref<int32> bodyLength)
+    ref<init int32> bodyStart, ref<init int32> bodyLength)
 {
+    init uint32 start;
+    init uint32 end;
     if (recordCount <= 0 || recordCount > 16777215
         || row <= 0 || row > recordCount
         || recordCount > Host.BodyRows.Length / 4 - 1)
@@ -62,8 +68,8 @@ bool TryGetValidatedBodyTableRowExtent(int32 recordCount, int32 row,
     int32 indexByteLength = (recordCount + 1) * 4;
     int32 dataByteLength = Host.BodyRows.Length - indexByteLength;
     if (dataByteLength < 1
-        || !TryReadBodyTableOffset(row - 1, init var start)
-        || !TryReadBodyTableOffset(row, init var end)
+        || !TryReadBodyTableOffset(row - 1, ref init start)
+        || !TryReadBodyTableOffset(row, ref init end)
         || end > uint32(dataByteLength)
         || start > uint32(dataByteLength - 1)
         || end < start + uint32(1))
@@ -71,12 +77,12 @@ bool TryGetValidatedBodyTableRowExtent(int32 recordCount, int32 row,
         return false;
     }
 
-    bodyStart = int32(start);
-    bodyLength = int32(end - start);
+    *bodyStart = int32(start);
+    *bodyLength = int32(end - start);
     return true;
 }
 
-bool TryReadBodyTableOffset(int32 offsetIndex, init ref<uint32> offset)
+bool TryReadBodyTableOffset(int32 offsetIndex, ref<init uint32> offset)
 {
     if (offsetIndex < 0 || offsetIndex >= Host.BodyRows.Length / 4)
     {
@@ -95,6 +101,6 @@ bool TryReadBodyTableOffset(int32 offsetIndex, init ref<uint32> offset)
         value = value | (uint32(part) << (byteIndex * 8));
     }
 
-    offset = value;
+    *offset = value;
     return true;
 }

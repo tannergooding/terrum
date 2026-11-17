@@ -3,6 +3,12 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public static bool CheckBitOperations()
 {
+    init uint32 rounded32;
+    init uint32 highest32;
+    init uint32 reusable32;
+    init uint64 rounded64;
+    init uint64 highest64;
+    init uint64 reusable64;
     uint32 value32 = 0x01234567;
     if (LeadingZeroCountUInt32(0) != 32 || LeadingZeroCountUInt32(1) != 31
         || LeadingZeroCountUInt32(0x80000000) != 0
@@ -19,18 +25,18 @@ public static bool CheckBitOperations()
         return false;
     }
 
-    require TryRoundUpToPowerOfTwoUInt32(5, init var rounded32);
-    require TryRoundUpToPowerOfTwoUInt32(0x80000000, init var highest32);
+    require TryRoundUpToPowerOfTwoUInt32(5, ref init rounded32);
+    require TryRoundUpToPowerOfTwoUInt32(0x80000000, ref init highest32);
     if (rounded32 != 8 || highest32 != 0x80000000)
     {
         return false;
     }
-    if (TryRoundUpToPowerOfTwoUInt32(0, init var reusable32)
-        || TryRoundUpToPowerOfTwoUInt32(0x80000001, init reusable32))
+    if (TryRoundUpToPowerOfTwoUInt32(0, ref init reusable32)
+        || TryRoundUpToPowerOfTwoUInt32(0x80000001, ref init reusable32))
     {
         return false;
     }
-    require TryRoundUpToPowerOfTwoUInt32(5, init reusable32);
+    require TryRoundUpToPowerOfTwoUInt32(5, ref init reusable32);
     if (reusable32 != 8)
     {
         return false;
@@ -53,14 +59,14 @@ public static bool CheckBitOperations()
         return false;
     }
 
-    require TryRoundUpToPowerOfTwoUInt64(5, init var rounded64);
-    require TryRoundUpToPowerOfTwoUInt64(0x8000000000000000, init var highest64);
+    require TryRoundUpToPowerOfTwoUInt64(5, ref init rounded64);
+    require TryRoundUpToPowerOfTwoUInt64(0x8000000000000000, ref init highest64);
     if (rounded64 != 8 || highest64 != 0x8000000000000000
-        || TryRoundUpToPowerOfTwoUInt64(0, init var reusable64)
-        || TryRoundUpToPowerOfTwoUInt64(0x8000000000000001, init reusable64))
+        || TryRoundUpToPowerOfTwoUInt64(0, ref init reusable64)
+        || TryRoundUpToPowerOfTwoUInt64(0x8000000000000001, ref init reusable64))
     {
         return false;
     }
-    require TryRoundUpToPowerOfTwoUInt64(5, init reusable64);
+    require TryRoundUpToPowerOfTwoUInt64(5, ref init reusable64);
     return reusable64 == 8;
 }

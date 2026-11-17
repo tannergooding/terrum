@@ -30,13 +30,17 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
     }
 
     Host.BodyValueIndexComplete[0] = 0;
+    init mut int32 blockCount;
+    init mut int32 operationCount;
+    init mut int32 bodyDataStart;
+    init mut int32 bodyLength;
     if (parameterCount < 0 || parameterCount > 16777215
         || !TryGetValidatedCompactLinearBodyFrame(recordCount, row, typeSpecCount,
-            init var blockCount, init var operationCount)
+            ref init blockCount, ref init operationCount)
         || blockCount != 1
         || operationCount > 2147483646 - parameterCount
         || !TryGetValidatedBodyTableRowExtent(recordCount, row,
-            init var bodyDataStart, init var bodyLength))
+            ref init bodyDataStart, ref init bodyLength))
     {
         return false;
     }
@@ -45,7 +49,8 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
     int32 bodyStart = bodyIndexLength + bodyDataStart;
     mut int32 position = bodyStart;
     int32 end = bodyStart + bodyLength;
-    if (!TryReadCompactLinearByte(position, end, init var bodyLayout)
+    init mut uint32 bodyLayout;
+    if (!TryReadCompactLinearByte(position, end, ref init bodyLayout)
         || (bodyLayout & 0xFC) != 0x04 || (bodyLayout & 3) == 3)
     {
         return false;
@@ -54,16 +59,20 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
     position = position + 1;
     int32 bodyWidth = (bodyLayout & 3) == 0 ? 1
         : (bodyLayout & 3) == 1 ? 2 : 4;
+    init mut int32 afterTypeCount;
+    init mut uint32 encodedTypeCount;
     if (!TryReadCompactLinearWord(position, end, bodyWidth,
-            init var afterTypeCount, init var encodedTypeCount)
+            ref init afterTypeCount, ref init encodedTypeCount)
         || encodedTypeCount > uint32((end - afterTypeCount) / 4))
     {
         return false;
     }
 
     position = afterTypeCount + int32(encodedTypeCount) * 4;
+    init mut int32 afterOperationCount;
+    init mut uint32 encodedOperationCount;
     if (!TryReadCompactLinearWord(position, end, bodyWidth,
-            init var afterOperationCount, init var encodedOperationCount)
+            ref init afterOperationCount, ref init encodedOperationCount)
         || encodedOperationCount != uint32(operationCount))
     {
         return false;
@@ -76,12 +85,18 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
     mut int32 preflightPosition = operationsStart;
     for (mut int32 ordinal = 0; ordinal < operationCount; ordinal = ordinal + 1)
     {
+        init mut int32 afterInstruction;
+        init mut uint32 opcode;
+        init mut int32 referenceWidth;
+        init mut int32 countWidth;
+        init mut int32 dataWidth;
+        init mut int32 afterOperation;
         if (!TryReadCompactLinearInstruction(preflightPosition, end,
-                init var afterInstruction, init var opcode,
-                init var referenceWidth, init var countWidth, init var dataWidth)
+                ref init afterInstruction, ref init opcode,
+                ref init referenceWidth, ref init countWidth, ref init dataWidth)
             || !TrySkipCompactLinearOperation(afterInstruction, end, opcode,
                 referenceWidth, countWidth, dataWidth,
-                init var afterOperation))
+                ref init afterOperation))
         {
             return false;
         }
@@ -92,8 +107,10 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
         }
         else if (opcode == 0x12)
         {
+            init mut int32 afterResult;
+            init mut uint32 encodedResult;
             if (!TryReadCompactLinearWord(afterInstruction, end, referenceWidth,
-                    init var afterResult, init var encodedResult))
+                    ref init afterResult, ref init encodedResult))
             {
                 return false;
             }
@@ -131,9 +148,14 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
     for (mut int32 ordinal = 0; ordinal < operationCount; ordinal = ordinal + 1)
     {
         int32 operationStart = position;
+        init mut int32 afterInstruction;
+        init mut uint32 opcode;
+        init mut int32 referenceWidth;
+        init mut int32 countWidth;
+        init mut int32 dataWidth;
         if (!TryReadCompactLinearInstruction(position, end,
-                init var afterInstruction, init var opcode,
-                init var referenceWidth, init var countWidth, init var dataWidth)
+                ref init afterInstruction, ref init opcode,
+                ref init referenceWidth, ref init countWidth, ref init dataWidth)
             || (opcode != 1 && opcode != 2 && opcode != 3
                 && opcode != 4 && opcode != 5 && opcode != 6 && opcode != 7
                 && opcode != 8 && opcode != 9 && opcode != 0x0A
@@ -146,8 +168,10 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
             return false;
         }
 
+        init mut int32 afterResult;
+        init mut uint32 encodedResult;
         if (!TryReadCompactLinearWord(afterInstruction, end, referenceWidth,
-                init var afterResult, init var encodedResult)
+                ref init afterResult, ref init encodedResult)
             || (opcode == 0x12
                 ? encodedResult != 0 && encodedResult != uint32(nextValue)
                 : encodedResult != uint32(nextValue)))
@@ -158,9 +182,11 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
         mut int32 operationUsesStart = afterResult;
         if (opcode == 0x18)
         {
+            init mut int32 afterSecondResult;
+            init mut uint32 encodedSecondResult;
             if (nextValue >= valueCount
                 || !TryReadCompactLinearWord(afterResult, end, referenceWidth,
-                    init var afterSecondResult, init var encodedSecondResult)
+                    ref init afterSecondResult, ref init encodedSecondResult)
                 || encodedSecondResult != uint32(nextValue + 1))
             {
                 return false;
@@ -169,8 +195,9 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
             operationUsesStart = afterSecondResult;
         }
 
+        init mut int32 afterOperation;
         if (!TrySkipCompactLinearOperation(afterInstruction, end, opcode,
-                referenceWidth, countWidth, dataWidth, init var afterOperation)
+                referenceWidth, countWidth, dataWidth, ref init afterOperation)
             || !TryIndexCompactLinearOperationUses(operationUsesStart, afterOperation, end,
                 opcode, referenceWidth, countWidth, dataWidth, int32(encodedTypeCount),
                 nextValue - 1, ordinal))
@@ -194,11 +221,16 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
         position = afterOperation;
     }
 
+    init mut int32 afterTerminator;
+    init mut uint32 terminator;
+    init mut int32 terminatorReferenceWidth;
+    init mut int32 terminatorCountWidth;
+    init mut int32 terminatorDataWidth;
     if (nextValue != valueCount + 1
         || !TryReadCompactLinearInstruction(position, end,
-            init var afterTerminator, init var terminator,
-            init var terminatorReferenceWidth, init var terminatorCountWidth,
-            init var terminatorDataWidth)
+            ref init afterTerminator, ref init terminator,
+            ref init terminatorReferenceWidth, ref init terminatorCountWidth,
+            ref init terminatorDataWidth)
         || terminatorCountWidth != 1 || terminatorDataWidth != 0)
     {
         return false;
@@ -206,8 +238,10 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
 
     if (terminator == 0x83)
     {
+        init mut int32 afterReturn;
+        init mut uint32 encodedReturn;
         if (!TryReadCompactLinearWord(afterTerminator, end, terminatorReferenceWidth,
-                init var afterReturn, init var encodedReturn)
+                ref init afterReturn, ref init encodedReturn)
             || encodedReturn > uint32(nextValue - 1))
         {
             return false;
@@ -223,8 +257,9 @@ bool TryBuildValidatedCompactLinearBodyValueIndex(
     }
     else if (terminator == 0x87)
     {
+        init mut uint32 failureReason;
         if (terminatorReferenceWidth != 1
-            || !TryReadCompactLinearByte(afterTerminator, end, init var failureReason)
+            || !TryReadCompactLinearByte(afterTerminator, end, ref init failureReason)
             || failureReason < 1 || failureReason > 4)
         {
             return false;
@@ -253,11 +288,13 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     mut int32 position = start;
     if (opcode == 1 || opcode == 2)
     {
+        init mut int32 afterType;
+        init mut int32 afterData;
         if (dataWidth == 0
             || !TryReadCompactLinearTypeReference(position, end, referenceWidth,
-                typeCount, init var afterType)
+                typeCount, ref init afterType)
             || !TrySkipCompactLinearBytes(afterType, end, dataWidth,
-                init var afterData))
+                ref init afterData))
         {
             return false;
         }
@@ -265,8 +302,9 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 3 || opcode == 0x0A || opcode == 0x17 || opcode == 0x1C)
     {
+        init mut int32 afterUse;
         if (!TryReadCompactLinearValueUse(position, end, referenceWidth,
-                valueCount, ordinal, init var afterUse))
+                valueCount, ordinal, ref init afterUse))
         {
             return false;
         }
@@ -274,8 +312,10 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 0x12)
     {
+        init mut int32 afterMethod;
+        init mut uint32 method;
         if (!TryReadCompactLinearWord(position, operationEnd, referenceWidth,
-                init var afterMethod, init var method))
+                ref init afterMethod, ref init method))
         {
             return false;
         }
@@ -283,16 +323,19 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
         mut int32 argumentCountStart = afterMethod;
         if (method == 0)
         {
+            init mut int32 afterDefinition;
             if (!TrySkipCompactLinearBytes(argumentCountStart, operationEnd, 4,
-                    init var afterDefinition))
+                    ref init afterDefinition))
             {
                 return false;
             }
             argumentCountStart = afterDefinition;
         }
 
+        init mut int32 afterArgumentCount;
+        init mut uint32 argumentCount;
         if (!TryReadCompactLinearWord(argumentCountStart, operationEnd, countWidth,
-                init var afterArgumentCount, init var argumentCount)
+                ref init afterArgumentCount, ref init argumentCount)
             || argumentCount > uint32((operationEnd - afterArgumentCount) / referenceWidth))
         {
             return false;
@@ -301,8 +344,9 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
         position = afterArgumentCount;
         for (mut int32 argument = 0; argument < int32(argumentCount); argument = argument + 1)
         {
+            init mut int32 afterArgument;
             if (!TryReadCompactLinearValueUse(position, operationEnd, referenceWidth,
-                    valueCount, ordinal, init var afterArgument))
+                    valueCount, ordinal, ref init afterArgument))
             {
                 return false;
             }
@@ -311,10 +355,12 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 4)
     {
-        if (!TryReadCompactLinearByte(position, end, init var kind)
+        init mut uint32 kind;
+        init mut int32 afterUse;
+        if (!TryReadCompactLinearByte(position, end, ref init kind)
             || kind < 1 || kind > 3
             || !TryReadCompactLinearValueUse(position + 1, end, referenceWidth,
-                valueCount, ordinal, init var afterUse))
+                valueCount, ordinal, ref init afterUse))
         {
             return false;
         }
@@ -322,15 +368,18 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 5 || opcode == 0x15 || opcode == 0x19 || opcode == 0x1D)
     {
-        if (!TryReadCompactLinearByte(position, end, init var kind)
+        init mut uint32 kind;
+        init mut int32 afterLeft;
+        init mut int32 afterRight;
+        if (!TryReadCompactLinearByte(position, end, ref init kind)
             || (opcode == 5 && (kind < 1 || kind > 12))
             || (opcode == 0x15 && (kind < 1 || kind > 7))
             || (opcode == 0x19 && (kind < 1 || kind > 6))
             || (opcode == 0x1D && (kind < 1 || kind > 4))
             || !TryReadCompactLinearValueUse(position + 1, end, referenceWidth,
-                valueCount, ordinal, init var afterLeft)
+                valueCount, ordinal, ref init afterLeft)
             || !TryReadCompactLinearValueUse(afterLeft, end, referenceWidth,
-                valueCount, ordinal, init var afterRight))
+                valueCount, ordinal, ref init afterRight))
         {
             return false;
         }
@@ -338,10 +387,12 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 0x18)
     {
+        init mut int32 afterLeft;
+        init mut int32 afterRight;
         if (!TryReadCompactLinearValueUse(position, end, referenceWidth,
-                valueCount, ordinal, init var afterLeft)
+                valueCount, ordinal, ref init afterLeft)
             || !TryReadCompactLinearValueUse(afterLeft, end, referenceWidth,
-                valueCount, ordinal, init var afterRight))
+                valueCount, ordinal, ref init afterRight))
         {
             return false;
         }
@@ -349,12 +400,15 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 6)
     {
+        init mut int32 afterType;
+        init mut uint32 policy;
+        init mut int32 afterUse;
         if (!TryReadCompactLinearTypeReference(position, end, referenceWidth,
-                typeCount, init var afterType)
-            || !TryReadCompactLinearByte(afterType, end, init var policy)
+                typeCount, ref init afterType)
+            || !TryReadCompactLinearByte(afterType, end, ref init policy)
             || policy < 1 || policy > 3
             || !TryReadCompactLinearValueUse(afterType + 1, end, referenceWidth,
-                valueCount, ordinal, init var afterUse))
+                valueCount, ordinal, ref init afterUse))
         {
             return false;
         }
@@ -362,12 +416,15 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 7)
     {
+        init mut int32 afterCondition;
+        init mut int32 afterTrue;
+        init mut int32 afterFalse;
         if (!TryReadCompactLinearValueUse(position, end, referenceWidth,
-                valueCount, ordinal, init var afterCondition)
+                valueCount, ordinal, ref init afterCondition)
             || !TryReadCompactLinearValueUse(afterCondition, end, referenceWidth,
-                valueCount, ordinal, init var afterTrue)
+                valueCount, ordinal, ref init afterTrue)
             || !TryReadCompactLinearValueUse(afterTrue, end, referenceWidth,
-                valueCount, ordinal, init var afterFalse))
+                valueCount, ordinal, ref init afterFalse))
         {
             return false;
         }
@@ -375,10 +432,12 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 8)
     {
+        init mut int32 afterType;
+        init mut int32 afterUse;
         if (!TryReadCompactLinearTypeReference(position, end, referenceWidth,
-                typeCount, init var afterType)
+                typeCount, ref init afterType)
             || !TryReadCompactLinearValueUse(afterType, end, referenceWidth,
-                valueCount, ordinal, init var afterUse))
+                valueCount, ordinal, ref init afterUse))
         {
             return false;
         }
@@ -386,8 +445,9 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     }
     else if (opcode == 9)
     {
+        init mut int32 afterType;
         if (!TryReadCompactLinearTypeReference(position, end, referenceWidth,
-                typeCount, init var afterType))
+                typeCount, ref init afterType))
         {
             return false;
         }
@@ -396,10 +456,12 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
     else if (opcode == 0x16 || opcode == 0x1A || opcode == 0x1B
         || opcode == 0x1E || opcode == 0x1F)
     {
+        init mut int32 afterType;
+        init mut int32 afterUse;
         if (!TryReadCompactLinearTypeReference(position, end, referenceWidth,
-                typeCount, init var afterType)
+                typeCount, ref init afterType)
             || !TryReadCompactLinearValueUse(afterType, end, referenceWidth,
-                valueCount, ordinal, init var afterUse))
+                valueCount, ordinal, ref init afterUse))
         {
             return false;
         }
@@ -414,30 +476,34 @@ bool TryIndexCompactLinearOperationUses(int32 start, int32 operationEnd, int32 e
 }
 
 bool TryReadCompactLinearTypeReference(int32 start, int32 end, int32 width,
-    int32 typeCount, init ref<int32> nextPosition)
+    int32 typeCount, ref<init int32> nextPosition)
 {
+    init mut int32 afterReference;
+    init mut uint32 reference;
     if (!TryReadCompactLinearWord(start, end, width,
-            init var afterReference, init var reference)
+            ref init afterReference, ref init reference)
         || reference == 0 || reference > uint32(typeCount))
     {
         return false;
     }
 
-    nextPosition = afterReference;
+    *nextPosition = afterReference;
     return true;
 }
 
 bool TryReadCompactLinearValueUse(int32 start, int32 end, int32 width,
-    int32 valueCount, int32 ordinal, init ref<int32> nextPosition)
+    int32 valueCount, int32 ordinal, ref<init int32> nextPosition)
 {
+    init mut int32 afterValue;
+    init mut uint32 value;
     if (!TryReadCompactLinearWord(start, end, width,
-            init var afterValue, init var value)
+            ref init afterValue, ref init value)
         || !TryRecordCompactLinearValueUse(value, valueCount, ordinal))
     {
         return false;
     }
 
-    nextPosition = afterValue;
+    *nextPosition = afterValue;
     return true;
 }
 

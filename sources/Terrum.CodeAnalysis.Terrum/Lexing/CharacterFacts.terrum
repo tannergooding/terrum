@@ -16,22 +16,22 @@ public static int32 GetDecimalDigit(char16 value)
     return int32(value) - 48;
 }
 
-public static bool TryGetHexDigit(char16 character, init ref<int32> digit)
+public static bool TryGetHexDigit(char16 character, ref<init int32> digit)
 {
     if (character >= char16(48) && character <= char16(57))
     {
-        digit = int32(character) - 48;
+        *digit = int32(character) - 48;
         return true;
     }
 
     if (character >= char16(97) && character <= char16(102))
     {
-        digit = int32(character) - 87;
+        *digit = int32(character) - 87;
         return true;
     }
     if (character >= char16(65) && character <= char16(70))
     {
-        digit = int32(character) - 55;
+        *digit = int32(character) - 55;
         return true;
     }
 

@@ -32,11 +32,15 @@ public static bool TryValidateConstraintTable(int32 recordCount,
 
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
+        init uint32 owner;
+        init int32 kind;
+        init int32 flags;
+        init uint32 payload;
         int32 rowStart = (row - 1) * 12;
-        if (!TryReadConstraintTableWord(rowStart, 0, init var owner)
-            || !TryReadConstraintTableHalfWord(rowStart + 4, init var kind)
-            || !TryReadConstraintTableHalfWord(rowStart + 6, init var flags)
-            || !TryReadConstraintTableWord(rowStart, 8, init var payload)
+        if (!TryReadConstraintTableWord(rowStart, 0, ref init owner)
+            || !TryReadConstraintTableHalfWord(rowStart + 4, ref init kind)
+            || !TryReadConstraintTableHalfWord(rowStart + 6, ref init flags)
+            || !TryReadConstraintTableWord(rowStart, 8, ref init payload)
             || owner != uint32(Host.ConstraintOwners[row])
             || flags != 0 || payload == 0
             || (kind == 1 && payload > uint32(typeSpecCount))
@@ -65,37 +69,43 @@ public static bool TryValidateConstraintTable(int32 recordCount,
     return true;
 }
 
-bool TryReadConstraintTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadConstraintTableWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Constraints.Length - 12
         || offset < 0 || offset > 8
-        || !TryReadConstraintTableByte(rowStart + offset, init var first)
-        || !TryReadConstraintTableByte(rowStart + offset + 1, init var second)
-        || !TryReadConstraintTableByte(rowStart + offset + 2, init var third)
-        || !TryReadConstraintTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadConstraintTableByte(rowStart + offset, ref init first)
+        || !TryReadConstraintTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadConstraintTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadConstraintTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadConstraintTableHalfWord(int32 offset, init ref<int32> value)
+bool TryReadConstraintTableHalfWord(int32 offset, ref<init int32> value)
 {
+    init int32 first;
+    init int32 second;
     if (offset < 0 || offset > Host.Constraints.Length - 2
-        || !TryReadConstraintTableByte(offset, init var first)
-        || !TryReadConstraintTableByte(offset + 1, init var second))
+        || !TryReadConstraintTableByte(offset, ref init first)
+        || !TryReadConstraintTableByte(offset + 1, ref init second))
     {
         return false;
     }
 
-    value = first | (second << 8);
+    *value = first | (second << 8);
     return true;
 }
 
-bool TryReadConstraintTableByte(int32 offset, init ref<int32> value)
+bool TryReadConstraintTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.Constraints.Length)
     {
@@ -108,6 +118,6 @@ bool TryReadConstraintTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }

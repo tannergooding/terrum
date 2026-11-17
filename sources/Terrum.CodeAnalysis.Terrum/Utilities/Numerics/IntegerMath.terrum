@@ -9,13 +9,13 @@ public int32 AbsInt32(int32 value)
     return value;
 }
 
-public bool TryAbsInt32(int32 value, init ref<int32> result)
+public bool TryAbsInt32(int32 value, ref<init int32> result)
 {
     if (value == int32.MinValue)
     {
         return false;
     }
-    result = value < 0 ? -value : value;
+    *result = value < 0 ? -value : value;
     return true;
 }
 
@@ -83,13 +83,13 @@ public int64 AbsInt64(int64 value)
     return value;
 }
 
-public bool TryAbsInt64(int64 value, init ref<int64> result)
+public bool TryAbsInt64(int64 value, ref<init int64> result)
 {
     if (value == int64.MinValue)
     {
         return false;
     }
-    result = value < 0 ? -value : value;
+    *result = value < 0 ? -value : value;
     return true;
 }
 

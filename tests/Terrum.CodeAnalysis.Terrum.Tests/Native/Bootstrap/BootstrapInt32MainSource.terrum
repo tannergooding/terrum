@@ -4,6 +4,11 @@ namespace Terrum.CodeAnalysis;
 
 bool TryEmitBootstrapInt32MainSource()
 {
+    init int32 normalizedTokenCount;
+    init int32 expressionEnd;
+    init int32 initialValue;
+    init int32 initialOperation;
+    init int32 initialRight;
     if (Host.BootstrapCodeLength.Length != 1)
     {
         return false;
@@ -23,7 +28,7 @@ bool TryEmitBootstrapInt32MainSource()
         return false;
     }
     if (!TryNormalizeBootstrapSourceFileScopedNamespace(
-            tokenCount, init var normalizedTokenCount))
+            tokenCount, ref init normalizedTokenCount))
     {
         return false;
     }
@@ -102,8 +107,8 @@ bool TryEmitBootstrapInt32MainSource()
     mut int32 right = 0;
     mut int32 firstLocalValue = 0;
     if (TryParseBootstrapSourceExpression(tokenCount, expressionStart, -1, 0, -1, 0,
-            init var expressionEnd, init var initialValue,
-            init var initialOperation, init var initialRight)
+            ref init expressionEnd, ref init initialValue,
+            ref init initialOperation, ref init initialRight)
         && !BootstrapSourceExpressionOverflows(
             initialValue, initialOperation, initialRight))
     {
@@ -119,8 +124,10 @@ bool TryEmitBootstrapInt32MainSource()
     }
     else
     {
+        init int32 foldedExpressionEnd;
+        init int32 foldedExpressionValue;
         if (!TryParseBootstrapSourceCallArgument(tokenCount, expressionStart, 0,
-                init var foldedExpressionEnd, init var foldedExpressionValue))
+                ref init foldedExpressionEnd, ref init foldedExpressionValue))
         {
             return false;
         }
@@ -134,11 +141,18 @@ bool TryEmitBootstrapInt32MainSource()
 
     if (localBody)
     {
+        init int32 returnEnd;
+        init int32 returnValue;
+        init int32 returnOperation;
+        init int32 returnRight;
+        init bool returnExpressionFolded;
         mut int32 localValue = firstLocalValue;
         if (!BootstrapSourceKind(token, 52, tokenCount))
         {
+            init int32 reparsedFirstEnd;
+            init int32 reparsedFirstValue;
             if (!TryParseBootstrapSourceCallArgument(tokenCount, expressionStart, 0,
-                    init var reparsedFirstEnd, init var reparsedFirstValue)
+                    ref init reparsedFirstEnd, ref init reparsedFirstValue)
                 || !BootstrapSourceKind(reparsedFirstEnd, 52, tokenCount))
             {
                 return false;
@@ -156,6 +170,11 @@ bool TryEmitBootstrapInt32MainSource()
         token = token + 1;
         if (BootstrapSourceTypeName(token, tokenCount))
         {
+            init int32 secondEnd;
+            init int32 secondInitialValue;
+            init int32 secondInitialOperation;
+            init int32 secondInitialRight;
+            init bool secondExpressionFolded;
             token = token + 1;
             secondLocalName = token;
             if (!BootstrapSourceKind(secondLocalName, 2, tokenCount)
@@ -172,9 +191,9 @@ bool TryEmitBootstrapInt32MainSource()
             token = token + 1;
             if (!TryParseBootstrapSourceMainLocalExpression(
                     tokenCount, token, localName, localValue, -1, 0,
-                    1, false, init var secondEnd, init var secondInitialValue,
-                    init var secondInitialOperation, init var secondInitialRight,
-                    init var secondExpressionFolded))
+                    1, false, ref init secondEnd, ref init secondInitialValue,
+                    ref init secondInitialOperation, ref init secondInitialRight,
+                    ref init secondExpressionFolded))
             {
                 return false;
             }
@@ -201,9 +220,9 @@ bool TryEmitBootstrapInt32MainSource()
         int32 returnLocalCount = secondLocalName >= 0 ? 2 : 1;
         if (!TryParseBootstrapSourceMainLocalExpression(
                 tokenCount, token, localName, localValue, secondLocalName, secondLocalValue,
-                returnLocalCount, true, init var returnEnd, init var returnValue,
-                init var returnOperation, init var returnRight,
-                init var returnExpressionFolded))
+                returnLocalCount, true, ref init returnEnd, ref init returnValue,
+                ref init returnOperation, ref init returnRight,
+                ref init returnExpressionFolded))
         {
             return false;
         }
@@ -220,8 +239,10 @@ bool TryEmitBootstrapInt32MainSource()
     }
     if (!localBody && !BootstrapSourceKind(token, 52, tokenCount))
     {
+        init int32 foldedExpressionEnd;
+        init int32 foldedExpressionValue;
         if (!TryParseBootstrapSourceCallArgument(tokenCount, expressionStart, 0,
-                init var foldedExpressionEnd, init var foldedExpressionValue)
+                ref init foldedExpressionEnd, ref init foldedExpressionValue)
             || !BootstrapSourceKind(foldedExpressionEnd, 52, tokenCount))
         {
             return false;
@@ -258,6 +279,8 @@ bool TryEmitBootstrapInt32MainSource()
 
 bool TryEmitBootstrapInt32MainSourceSizedLeaf(int32 tokenCount)
 {
+    init int32 returnEnd;
+    init int32 returnValue;
     mut int32 token = 0;
     if (!BootstrapSourceKind(token, 7, tokenCount)
         || !BootstrapSourceTypeName(token + 1, tokenCount)
@@ -277,6 +300,8 @@ bool TryEmitBootstrapInt32MainSourceSizedLeaf(int32 tokenCount)
     mut int32 localCount = 0;
     while (BootstrapSourceTypeName(token, tokenCount))
     {
+        init int32 initializerEnd;
+        init int32 localValue;
         token = token + 1;
         int32 localName = token;
         if (!BootstrapSourceKind(localName, 2, tokenCount)
@@ -299,7 +324,7 @@ bool TryEmitBootstrapInt32MainSourceSizedLeaf(int32 tokenCount)
         }
         if (!TryParseBootstrapSourceCallArgument(
                 tokenCount, localName + 2, localCount,
-                init var initializerEnd, init var localValue))
+                ref init initializerEnd, ref init localValue))
         {
             return false;
         }
@@ -321,7 +346,7 @@ bool TryEmitBootstrapInt32MainSourceSizedLeaf(int32 tokenCount)
     int32 returnStart = token;
     if (!TryParseBootstrapSourceCallArgument(
             tokenCount, returnStart, localCount,
-            init var returnEnd, init var returnValue))
+            ref init returnEnd, ref init returnValue))
     {
         return false;
     }
@@ -367,11 +392,11 @@ bool TryEmitBootstrapInt32MainSourceSizedLeaf(int32 tokenCount)
 }
 
 bool TryNormalizeBootstrapSourceFileScopedNamespace(
-    int32 tokenCount, init ref<int32> normalizedTokenCount)
+    int32 tokenCount, ref<init int32> normalizedTokenCount)
 {
-    normalizedTokenCount = tokenCount;
     if (!BootstrapSourceKind(0, 6, tokenCount))
     {
+        *normalizedTokenCount = tokenCount;
         return true;
     }
 
@@ -410,15 +435,20 @@ bool TryNormalizeBootstrapSourceFileScopedNamespace(
         Host.Tokens[destinationOffset + 1] = Host.Tokens[sourceOffset + 1];
         Host.Tokens[destinationOffset + 2] = Host.Tokens[sourceOffset + 2];
     }
-    normalizedTokenCount = tokenCount - declarationStart;
+    *normalizedTokenCount = tokenCount - declarationStart;
     return true;
 }
 
 bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
 {
+    init int32 leafName;
+    init int32 argumentCount;
+    init int32 leafBodyArrow;
+    init int32 baseCodeLength;
+    init int32 emittedEnd;
     if (!TryParseBootstrapSourceHelperHeader(
-            tokenCount, 0, -1, init var leafName, init var argumentCount,
-            init var leafBodyArrow)
+            tokenCount, 0, -1, ref init leafName, ref init argumentCount,
+            ref init leafBodyArrow)
         || argumentCount < 1
         || BootstrapSourceMainName(leafName, tokenCount))
     {
@@ -527,10 +557,13 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
     mut int32 token = forwardingDeclaration;
     while (BootstrapSourceKind(forwardingDeclaration, 8, tokenCount))
     {
+        init int32 forwardingName;
+        init int32 forwardingArgumentCount;
+        init int32 forwardingBodyArrow;
         if (!TryParseBootstrapSourceHelperHeader(
                 tokenCount, forwardingDeclaration, argumentCount,
-                init var forwardingName, init var forwardingArgumentCount,
-                init var forwardingBodyArrow)
+                ref init forwardingName, ref init forwardingArgumentCount,
+                ref init forwardingBodyArrow)
             || BootstrapSourceMainName(forwardingName, tokenCount)
             || BootstrapSourceSameIdentifier(
                 leafName, forwardingName, tokenCount))
@@ -540,10 +573,13 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
         mut int32 previousDeclaration = leafToken + 1;
         while (previousDeclaration < forwardingDeclaration)
         {
+            init int32 previousName;
+            init int32 previousArgumentCount;
+            init int32 previousBodyArrow;
             if (!TryParseBootstrapSourceHelperHeader(
                     tokenCount, previousDeclaration, argumentCount,
-                    init var previousName, init var previousArgumentCount,
-                    init var previousBodyArrow)
+                    ref init previousName, ref init previousArgumentCount,
+                    ref init previousBodyArrow)
                 || previousArgumentCount != argumentCount
                 || BootstrapSourceSameIdentifier(
                     previousName, forwardingName, tokenCount))
@@ -664,6 +700,8 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
         token = token + 1;
         while (BootstrapSourceTypeName(token, tokenCount))
         {
+            init int32 initializerEnd;
+            init int32 localValue;
             token = token + 1;
             int32 localName = token;
             if (!BootstrapSourceKind(localName, 2, tokenCount)
@@ -688,7 +726,7 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
             }
             if (!TryParseBootstrapSourceCallArgument(
                     tokenCount, localName + 2, mainLocalCount,
-                    init var initializerEnd, init var localValue))
+                    ref init initializerEnd, ref init localValue))
             {
                 return false;
             }
@@ -720,7 +758,7 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
     token = token + 2;
 
     if (!TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
-            argumentCount, helperMultiplication, init var baseCodeLength))
+            argumentCount, helperMultiplication, ref init baseCodeLength))
     {
         return false;
     }
@@ -782,6 +820,8 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
     for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
         argumentIndex = argumentIndex + 1)
     {
+        init int32 argumentEnd;
+        init int32 foldedArgument;
         if (argumentIndex > 0)
         {
             if (!BootstrapSourceKind(token, 53, tokenCount))
@@ -792,7 +832,7 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
         }
         if (!TryParseBootstrapSourceCallArgument(tokenCount, token,
                 mainLocalCount,
-                init var argumentEnd, init var foldedArgument))
+                ref init argumentEnd, ref init foldedArgument))
         {
             return false;
         }
@@ -894,7 +934,7 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
     }
     if (!TryWriteBootstrapParameterizedHelperBody(
             helperOffset, argumentCount, helperSubtraction,
-            helperMultiplication, init var emittedEnd)
+            helperMultiplication, ref init emittedEnd)
         || emittedEnd != codeLength)
     {
         return false;
@@ -904,10 +944,9 @@ bool TryEmitBootstrapInt32MainSourceCallChain(int32 tokenCount)
 }
 
 bool TryParseBootstrapSourceHelperHeader(int32 tokenCount, int32 declarationToken,
-    int32 expectedArgumentCount, init ref<int32> nameToken,
-    init ref<int32> argumentCount, init ref<int32> bodyArrow)
+    int32 expectedArgumentCount, ref<init int32> nameToken,
+    ref<init int32> argumentCount, ref<init int32> bodyArrow)
 {
-    bodyArrow = -1;
     if (!BootstrapSourceKind(declarationToken, 8, tokenCount)
         || !BootstrapSourceTypeName(declarationToken + 1, tokenCount)
         || !BootstrapSourceKind(declarationToken + 2, 2, tokenCount)
@@ -916,12 +955,12 @@ bool TryParseBootstrapSourceHelperHeader(int32 tokenCount, int32 declarationToke
         return false;
     }
 
-    nameToken = declarationToken + 2;
+    mut int32 bodyArrowValue = -1;
     mut int32 count = 0;
     mut int32 parameterToken = declarationToken + 4;
     if (BootstrapSourceKind(parameterToken, 47, tokenCount))
     {
-        bodyArrow = parameterToken + 1;
+        bodyArrowValue = parameterToken + 1;
     }
     else
     {
@@ -936,7 +975,7 @@ bool TryParseBootstrapSourceHelperHeader(int32 tokenCount, int32 declarationToke
             int32 separatorToken = parameterToken + 2;
             if (BootstrapSourceKind(separatorToken, 47, tokenCount))
             {
-                bodyArrow = separatorToken + 1;
+                bodyArrowValue = separatorToken + 1;
                 break;
             }
             if (!BootstrapSourceKind(separatorToken, 53, tokenCount))
@@ -945,13 +984,17 @@ bool TryParseBootstrapSourceHelperHeader(int32 tokenCount, int32 declarationToke
             }
         }
     }
-    if (bodyArrow < 0
-        || expectedArgumentCount >= 0 && count != expectedArgumentCount)
+    if (bodyArrowValue < 0
+        || expectedArgumentCount >= 0 && count != expectedArgumentCount
+        || !BootstrapSourceKind(bodyArrowValue, 82, tokenCount))
     {
         return false;
     }
-    argumentCount = count;
-    return BootstrapSourceKind(bodyArrow, 82, tokenCount);
+
+    *nameToken = declarationToken + 2;
+    *argumentCount = count;
+    *bodyArrow = bodyArrowValue;
+    return true;
 }
 
 int32 BootstrapInt32MainCallArgumentLength(int32 argumentIndex)
@@ -1179,6 +1222,10 @@ bool TryEmitBootstrapInt32MainSourceHelperCall(int32 tokenCount)
 bool TryEmitBootstrapInt32MainSourceHelperCallLegacy(
     int32 tokenCount, int32 helperArgumentCount)
 {
+    init int32 helperBodyEnd;
+    init int32 helperValue;
+    init int32 helperOperation;
+    init int32 helperRight;
     int32 helperName = 2;
     if (helperArgumentCount != 0
         || !BootstrapSourceKind(0, 8, tokenCount)
@@ -1188,8 +1235,8 @@ bool TryEmitBootstrapInt32MainSourceHelperCallLegacy(
         || !BootstrapSourceKind(3, 46, tokenCount)
         || !BootstrapSourceKind(4, 47, tokenCount)
         || !TryParseBootstrapParameterlessHelperBody(
-            tokenCount, helperName, init var helperBodyEnd, init var helperValue,
-            init var helperOperation, init var helperRight))
+            tokenCount, helperName, ref init helperBodyEnd, ref init helperValue,
+            ref init helperOperation, ref init helperRight))
     {
         return false;
     }
@@ -1199,9 +1246,12 @@ bool TryEmitBootstrapInt32MainSourceHelperCallLegacy(
     mut int32 mainCallTarget = helperName;
     while (BootstrapSourceKind(token, 8, tokenCount))
     {
+        init int32 forwardingName;
+        init int32 forwardingArgumentCount;
+        init int32 forwardingBodyArrow;
         if (!TryParseBootstrapSourceHelperHeader(
-                tokenCount, token, 0, init var forwardingName,
-                init var forwardingArgumentCount, init var forwardingBodyArrow)
+                tokenCount, token, 0, ref init forwardingName,
+                ref init forwardingArgumentCount, ref init forwardingBodyArrow)
             || BootstrapSourceMainName(forwardingName, tokenCount)
             || BootstrapSourceSameIdentifier(helperName, forwardingName, tokenCount))
         {
@@ -1252,6 +1302,8 @@ bool TryEmitBootstrapInt32MainSourceHelperCallLegacy(
         token = token + 1;
         while (BootstrapSourceTypeName(token, tokenCount))
         {
+            init int32 localEnd;
+            init int32 localValue;
             token = token + 1;
             int32 localName = token;
             if (!BootstrapSourceKind(localName, 2, tokenCount)
@@ -1285,7 +1337,7 @@ bool TryEmitBootstrapInt32MainSourceHelperCallLegacy(
             }
             if (!TryParseBootstrapSourceCallArgument(
                     tokenCount, localName + 2, mainLocalCount,
-                    init var localEnd, init var localValue))
+                    ref init localEnd, ref init localValue))
             {
                 return false;
             }
@@ -1368,22 +1420,28 @@ bool TryEmitBootstrapInt32MainSourceHelperCallLegacy(
 }
 
 bool TryParseBootstrapParameterlessHelperBody(int32 tokenCount, int32 helperName,
-    init ref<int32> endToken, init ref<int32> value,
-    init ref<int32> operation, init ref<int32> right)
+    ref<init int32> endToken, ref<init int32> value,
+    ref<init int32> operation, ref<init int32> right)
 {
+    init int32 returnEnd;
+    init int32 returnValue;
     if (BootstrapSourceKind(5, 82, tokenCount))
     {
+        init int32 expressionEnd;
+        init int32 expressionValue;
+        init int32 expressionOperation;
+        init int32 expressionRight;
         if (!TryParseBootstrapParameterlessHelperReturnExpression(
-                tokenCount, init var expressionEnd, init var expressionValue,
-                init var expressionOperation, init var expressionRight)
+                tokenCount, ref init expressionEnd, ref init expressionValue,
+                ref init expressionOperation, ref init expressionRight)
             || !BootstrapSourceKind(expressionEnd, 52, tokenCount))
         {
             return false;
         }
-        endToken = expressionEnd;
-        value = expressionValue;
-        operation = expressionOperation;
-        right = expressionRight;
+        *endToken = expressionEnd;
+        *value = expressionValue;
+        *operation = expressionOperation;
+        *right = expressionRight;
         return true;
     }
     if (!BootstrapSourceKind(5, 48, tokenCount))
@@ -1395,6 +1453,8 @@ bool TryParseBootstrapParameterlessHelperBody(int32 tokenCount, int32 helperName
     mut int32 localCount = 0;
     while (BootstrapSourceTypeName(token, tokenCount))
     {
+        init int32 initializerEnd;
+        init int32 localValue;
         token = token + 1;
         int32 localName = token;
         if (!BootstrapSourceKind(localName, 2, tokenCount)
@@ -1418,7 +1478,7 @@ bool TryParseBootstrapParameterlessHelperBody(int32 tokenCount, int32 helperName
         }
         if (!TryParseBootstrapSourceCallArgument(
                 tokenCount, localName + 2, localCount,
-                init var initializerEnd, init var localValue))
+                ref init initializerEnd, ref init localValue))
         {
             return false;
         }
@@ -1441,7 +1501,7 @@ bool TryParseBootstrapParameterlessHelperBody(int32 tokenCount, int32 helperName
     int32 returnStart = token;
     if (!TryParseBootstrapSourceCallArgument(
             tokenCount, returnStart, localCount,
-            init var returnEnd, init var returnValue))
+            ref init returnEnd, ref init returnValue))
     {
         return false;
     }
@@ -1470,49 +1530,58 @@ bool TryParseBootstrapParameterlessHelperBody(int32 tokenCount, int32 helperName
         return false;
     }
 
-    endToken = token + 1;
-    value = returnValue;
-    operation = 0;
-    right = 0;
+    *endToken = token + 1;
+    *value = returnValue;
+    *operation = 0;
+    *right = 0;
     return true;
 }
 
 bool TryParseBootstrapParameterlessHelperReturnExpression(int32 tokenCount,
-    init ref<int32> endToken, init ref<int32> value,
-    init ref<int32> operation, init ref<int32> right)
+    ref<init int32> endToken, ref<init int32> value,
+    ref<init int32> operation, ref<init int32> right)
 {
+    init int32 simpleEnd;
+    init int32 simpleValue;
+    init int32 simpleOperation;
+    init int32 simpleRight;
+    init int32 foldedEnd;
+    init int32 foldedValue;
     if (TryParseBootstrapSourceExpression(tokenCount, 6, -1, 0, -1, 0,
-            init var simpleEnd, init var simpleValue,
-            init var simpleOperation, init var simpleRight)
+            ref init simpleEnd, ref init simpleValue,
+            ref init simpleOperation, ref init simpleRight)
         && (simpleOperation == 0 || simpleOperation == 57 || simpleOperation == 58)
         && !BootstrapSourceExpressionOverflows(simpleValue, simpleOperation, simpleRight)
         && BootstrapSourceKind(simpleEnd, 52, tokenCount))
     {
-        endToken = simpleEnd;
-        value = simpleValue;
-        operation = simpleOperation;
-        right = simpleRight;
+        *endToken = simpleEnd;
+        *value = simpleValue;
+        *operation = simpleOperation;
+        *right = simpleRight;
         return true;
     }
 
     if (!TryParseBootstrapSourceCallArgument(
-            tokenCount, 6, 0, init var foldedEnd, init var foldedValue)
+            tokenCount, 6, 0, ref init foldedEnd, ref init foldedValue)
         || !BootstrapSourceKind(foldedEnd, 52, tokenCount))
     {
         return false;
     }
-    endToken = foldedEnd;
-    value = foldedValue;
-    operation = 0;
-    right = 0;
+    *endToken = foldedEnd;
+    *value = foldedValue;
+    *operation = 0;
+    *right = 0;
     return true;
 }
 
 bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
     int32 tokenCount, int32 helperName, int32 helperArgumentCount, int32 helperBodyArrow)
 {
+    init int32 codeLength;
+    init int32 operationCodeLength;
+    init int32 emittedEnd;
     if (!TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
-            helperArgumentCount, false, init var codeLength))
+            helperArgumentCount, false, ref init codeLength))
     {
         return false;
     }
@@ -1645,6 +1714,8 @@ bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
         token = token + 1;
         while (BootstrapSourceTypeName(token, tokenCount))
         {
+            init int32 localEnd;
+            init int32 localValue;
             token = token + 1;
             int32 localName = token;
             if (!BootstrapSourceKind(localName, 2, tokenCount)
@@ -1668,7 +1739,7 @@ bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
             }
             if (!TryParseBootstrapSourceCallArgument(
                     tokenCount, localName + 2, mainLocalCount,
-                    init var localEnd, init var localValue))
+                    ref init localEnd, ref init localValue))
             {
                 return false;
             }
@@ -1701,7 +1772,7 @@ bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
     token = token + 2;
 
     if (!TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
-            helperArgumentCount, helperMultiplication, init var operationCodeLength)
+            helperArgumentCount, helperMultiplication, ref init operationCodeLength)
         || operationCodeLength > Host.BootstrapCodeBytes.Length)
     {
         return false;
@@ -1745,6 +1816,8 @@ bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
     for (mut int32 argumentIndex = 0; argumentIndex < helperArgumentCount;
         argumentIndex = argumentIndex + 1)
     {
+        init int32 argumentEnd;
+        init int32 foldedArgument;
         if (argumentIndex > 0)
         {
             if (!BootstrapSourceKind(token, 53, tokenCount))
@@ -1755,7 +1828,7 @@ bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
         }
         if (!TryParseBootstrapSourceCallArgument(tokenCount, token,
                 mainLocalCount,
-                init var argumentEnd, init var foldedArgument))
+                ref init argumentEnd, ref init foldedArgument))
         {
             return false;
         }
@@ -1951,7 +2024,7 @@ bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
     int32 helperOffset = setupOffset + (largeFrame ? 13 : 10);
     if (!TryWriteBootstrapParameterizedHelperBody(
             helperOffset, helperArgumentCount, helperSubtraction,
-            helperMultiplication, init var emittedEnd)
+            helperMultiplication, ref init emittedEnd)
         || emittedEnd != operationCodeLength)
     {
         return false;
@@ -1962,7 +2035,7 @@ bool TryEmitBootstrapInt32MainStackArgumentHelperCall(
 
 bool TryWriteBootstrapParameterizedHelperBody(int32 helperOffset,
     int32 helperArgumentCount, bool helperSubtraction, bool helperMultiplication,
-    init ref<int32> emittedEnd)
+    ref<init int32> emittedEnd)
 {
     if (helperOffset < 0 || helperOffset >= Host.BootstrapCodeBytes.Length)
     {
@@ -2076,12 +2149,17 @@ bool TryWriteBootstrapParameterizedHelperBody(int32 helperOffset,
         }
     }
     Host.BootstrapCodeBytes[stackReadOffset] = 0xC3;
-    emittedEnd = stackReadOffset + 1;
-    return emittedEnd <= Host.BootstrapCodeBytes.Length;
+    int32 emittedEndValue = stackReadOffset + 1;
+    if (emittedEndValue > Host.BootstrapCodeBytes.Length)
+    {
+        return false;
+    }
+    *emittedEnd = emittedEndValue;
+    return true;
 }
 
 bool TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
-    int32 argumentCount, bool multiplication, init ref<int32> codeLength)
+    int32 argumentCount, bool multiplication, ref<init int32> codeLength)
 {
     if (argumentCount < 1 || argumentCount > Host.BootstrapCodeBytes.Length / 4)
     {
@@ -2104,25 +2182,27 @@ bool TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
     }
     bool largeFrame = stackFrameSize > 0x7F;
     bool probeFrame = stackFrameSize >= 0x1000;
-    codeLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
+    mut int32 computedCodeLength = probeFrame ? 0x32 : largeFrame ? 7 : 4;
     for (mut int32 argumentIndex = 0; argumentIndex < argumentCount;
         argumentIndex = argumentIndex + 1)
     {
         if (argumentIndex < 2)
         {
-            codeLength = codeLength + 5;
+            computedCodeLength = computedCodeLength + 5;
         }
         else if (argumentIndex < 4)
         {
-            codeLength = codeLength + 6;
+            computedCodeLength = computedCodeLength + 6;
         }
         else
         {
             int32 callerStackOffset = 0x20 + (argumentIndex - 4) * 8;
-            codeLength = codeLength + (callerStackOffset > 0x7F ? 11 : 8);
+            computedCodeLength = computedCodeLength
+                + (callerStackOffset > 0x7F ? 11 : 8);
         }
     }
-    codeLength = codeLength + (largeFrame ? 13 : 10) + 3;
+    computedCodeLength = computedCodeLength
+        + (largeFrame ? 13 : 10) + 3;
     for (mut int32 argumentIndex = 1; argumentIndex < argumentCount;
         argumentIndex = argumentIndex + 1)
     {
@@ -2130,45 +2210,50 @@ bool TryGetBootstrapInt32MainSourceStackArgumentCodeLength(
         {
             if (argumentIndex == 1)
             {
-                codeLength = codeLength + 3;
+                computedCodeLength = computedCodeLength + 3;
             }
             else if (argumentIndex < 4)
             {
-                codeLength = codeLength + 4;
+                computedCodeLength = computedCodeLength + 4;
             }
             else
             {
                 int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
-                codeLength = codeLength + (helperStackOffset > 0x7F ? 8 : 5);
+                computedCodeLength = computedCodeLength
+                    + (helperStackOffset > 0x7F ? 8 : 5);
             }
         }
         else if (argumentIndex == 1)
         {
-            codeLength = codeLength + 2;
+            computedCodeLength = computedCodeLength + 2;
         }
         else if (argumentIndex < 4)
         {
-            codeLength = codeLength + 3;
+            computedCodeLength = computedCodeLength + 3;
         }
         else
         {
             int32 helperStackOffset = 0x28 + (argumentIndex - 4) * 8;
-            codeLength = codeLength + (helperStackOffset > 0x7F ? 7 : 4);
+            computedCodeLength = computedCodeLength
+                + (helperStackOffset > 0x7F ? 7 : 4);
         }
     }
+    *codeLength = computedCodeLength;
     return true;
 }
 
 bool TryParseBootstrapSourceSignedOperand(int32 tokenCount, int32 startToken,
     int32 localName, int32 localValue, int32 secondLocalName, int32 secondLocalValue,
-    init ref<int32> endToken, init ref<int32> value)
+    ref<init int32> endToken, ref<init int32> value)
 {
+    init int32 parsedValue;
     bool negative = BootstrapSourceKind(startToken, 58, tokenCount);
     if (negative && BootstrapSourceKind(startToken + 1, 2, tokenCount))
     {
+        init int32 localOperand;
         if (!TryReadBootstrapSourceOperand(tokenCount, startToken + 1, false,
                 localName, localValue, secondLocalName, secondLocalValue,
-                init var localOperand))
+                ref init localOperand))
         {
             return false;
         }
@@ -2176,8 +2261,8 @@ bool TryParseBootstrapSourceSignedOperand(int32 tokenCount, int32 startToken,
         {
             return false;
         }
-        endToken = startToken + 2;
-        value = -localOperand;
+        *endToken = startToken + 2;
+        *value = -localOperand;
         return true;
     }
 
@@ -2187,7 +2272,7 @@ bool TryParseBootstrapSourceSignedOperand(int32 tokenCount, int32 startToken,
         operandToken = operandToken + 1;
     }
     if (!TryReadBootstrapSourceOperand(tokenCount, operandToken, negative,
-            localName, localValue, secondLocalName, secondLocalValue, init var parsedValue))
+            localName, localValue, secondLocalName, secondLocalValue, ref init parsedValue))
     {
         return false;
     }
@@ -2196,21 +2281,23 @@ bool TryParseBootstrapSourceSignedOperand(int32 tokenCount, int32 startToken,
     {
         result = -result;
     }
-    endToken = operandToken + 1;
-    value = result;
+    *endToken = operandToken + 1;
+    *value = result;
     return true;
 }
 
 bool TryParseBootstrapSourceExpression(int32 tokenCount, int32 startToken,
     int32 localName, int32 localValue, int32 secondLocalName, int32 secondLocalValue,
-    init ref<int32> endToken, init ref<int32> value,
-    init ref<int32> operation, init ref<int32> right)
+    ref<init int32> endToken, ref<init int32> value,
+    ref<init int32> operation, ref<init int32> right)
 {
+    init int32 operandEnd;
+    init int32 parsedValue;
     bool negative = BootstrapSourceKind(startToken, 58, tokenCount);
     mut int32 token = startToken;
     if (!TryParseBootstrapSourceSignedOperand(tokenCount, startToken,
             localName, localValue, secondLocalName, secondLocalValue,
-            init var operandEnd, init var parsedValue))
+            ref init operandEnd, ref init parsedValue))
     {
         return false;
     }
@@ -2225,10 +2312,11 @@ bool TryParseBootstrapSourceExpression(int32 tokenCount, int32 startToken,
         || BootstrapSourceKind(token, 60, tokenCount)
         || BootstrapSourceKind(token, 61, tokenCount)))
     {
+        init int32 parsedRight;
         parsedOperation = Host.Tokens[token * 3];
         token = token + 1;
         if (!TryReadBootstrapSourceOperand(tokenCount, token, false,
-                localName, localValue, secondLocalName, secondLocalValue, init var parsedRight))
+                localName, localValue, secondLocalName, secondLocalValue, ref init parsedRight))
         {
             return false;
         }
@@ -2243,34 +2331,40 @@ bool TryParseBootstrapSourceExpression(int32 tokenCount, int32 startToken,
             return false;
         }
     }
-    endToken = token;
-    value = result;
-    operation = parsedOperation;
-    right = rightValue;
+    *endToken = token;
+    *value = result;
+    *operation = parsedOperation;
+    *right = rightValue;
     return true;
 }
 
 bool TryParseBootstrapSourceMainLocalExpression(int32 tokenCount, int32 startToken,
     int32 localName, int32 localValue, int32 secondLocalName, int32 secondLocalValue,
     int32 localCount, bool requireLocal,
-    init ref<int32> endToken, init ref<int32> value,
-    init ref<int32> operation, init ref<int32> right, init ref<bool> folded)
+    ref<init int32> endToken, ref<init int32> value,
+    ref<init int32> operation, ref<init int32> right, ref<init bool> folded)
 {
+    init int32 legacyEnd;
+    init int32 legacyValue;
+    init int32 legacyOperation;
+    init int32 legacyRight;
+    init int32 foldedEnd;
+    init int32 foldedValue;
     if (TryParseBootstrapSourceExpression(tokenCount, startToken,
             localName, localValue, secondLocalName, secondLocalValue,
-            init var legacyEnd, init var legacyValue,
-            init var legacyOperation, init var legacyRight)
+            ref init legacyEnd, ref init legacyValue,
+            ref init legacyOperation, ref init legacyRight)
         && BootstrapSourceKind(legacyEnd, 52, tokenCount)
         && !BootstrapSourceExpressionOverflows(
             legacyValue, legacyOperation, legacyRight)
         && (!requireLocal || BootstrapSourceMainExpressionReferencesLocal(
             tokenCount, startToken, legacyEnd, localName, secondLocalName)))
     {
-        endToken = legacyEnd;
-        value = legacyValue;
-        operation = legacyOperation;
-        right = legacyRight;
-        folded = false;
+        *endToken = legacyEnd;
+        *value = legacyValue;
+        *operation = legacyOperation;
+        *right = legacyRight;
+        *folded = false;
         return true;
     }
 
@@ -2293,18 +2387,18 @@ bool TryParseBootstrapSourceMainLocalExpression(int32 tokenCount, int32 startTok
         Host.BootstrapMainLocalValues[1] = secondLocalValue;
     }
     if (!TryParseBootstrapSourceCallArgument(tokenCount, startToken, localCount,
-            init var foldedEnd, init var foldedValue)
+            ref init foldedEnd, ref init foldedValue)
         || !BootstrapSourceKind(foldedEnd, 52, tokenCount)
         || requireLocal && !BootstrapSourceMainExpressionReferencesLocal(
             tokenCount, startToken, foldedEnd, localName, secondLocalName))
     {
         return false;
     }
-    endToken = foldedEnd;
-    value = foldedValue;
-    operation = 0;
-    right = 0;
-    folded = true;
+    *endToken = foldedEnd;
+    *value = foldedValue;
+    *operation = 0;
+    *right = 0;
+    *folded = true;
     return true;
 }
 
@@ -2326,8 +2420,9 @@ bool BootstrapSourceMainExpressionReferencesLocal(
 }
 
 bool TryReadBootstrapSourceCallOperand(int32 tokenCount, int32 token,
-    bool allowMinimumMagnitude, int32 localCount, init ref<int32> value)
+    bool allowMinimumMagnitude, int32 localCount, ref<init int32> value)
 {
+    init int32 parsedValue;
     if (localCount < 0
         || localCount > Host.BootstrapMainLocalNames.Length
         || localCount > Host.BootstrapMainLocalValues.Length)
@@ -2339,33 +2434,35 @@ bool TryReadBootstrapSourceCallOperand(int32 tokenCount, int32 token,
         if (BootstrapSourceSameIdentifier(
             Host.BootstrapMainLocalNames[local], token, tokenCount))
         {
-            value = Host.BootstrapMainLocalValues[local];
+            *value = Host.BootstrapMainLocalValues[local];
             return true;
         }
     }
     if (!TryReadBootstrapSourceInt32(
-            tokenCount, token, allowMinimumMagnitude, init var parsedValue))
+            tokenCount, token, allowMinimumMagnitude, ref init parsedValue))
     {
         return false;
     }
-    value = parsedValue;
+    *value = parsedValue;
     return true;
 }
 
 bool TryParseBootstrapSourceCallSignedOperand(int32 tokenCount, int32 startToken,
-    int32 localCount, init ref<int32> endToken, init ref<int32> value)
+    int32 localCount, ref<init int32> endToken, ref<init int32> value)
 {
+    init int32 parsedValue;
     bool negative = BootstrapSourceKind(startToken, 58, tokenCount);
     if (negative && BootstrapSourceKind(startToken + 1, 2, tokenCount))
     {
+        init int32 localOperand;
         if (!TryReadBootstrapSourceCallOperand(
-                tokenCount, startToken + 1, false, localCount, init var localOperand)
+                tokenCount, startToken + 1, false, localCount, ref init localOperand)
             || localOperand == int32.MinValue)
         {
             return false;
         }
-        endToken = startToken + 2;
-        value = -localOperand;
+        *endToken = startToken + 2;
+        *value = -localOperand;
         return true;
     }
 
@@ -2375,7 +2472,7 @@ bool TryParseBootstrapSourceCallSignedOperand(int32 tokenCount, int32 startToken
         operandToken = operandToken + 1;
     }
     if (!TryReadBootstrapSourceCallOperand(
-            tokenCount, operandToken, negative, localCount, init var parsedValue))
+            tokenCount, operandToken, negative, localCount, ref init parsedValue))
     {
         return false;
     }
@@ -2384,14 +2481,14 @@ bool TryParseBootstrapSourceCallSignedOperand(int32 tokenCount, int32 startToken
     {
         result = -result;
     }
-    endToken = operandToken + 1;
-    value = result;
+    *endToken = operandToken + 1;
+    *value = result;
     return true;
 }
 
 bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
     int32 localCount,
-    init ref<int32> endToken, init ref<int32> value)
+    ref<init int32> endToken, ref<init int32> value)
 {
     mut int32 token = startToken;
     mut int32 valueCount = 0;
@@ -2402,6 +2499,8 @@ bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
     {
         if (expectOperand)
         {
+            init int32 operandEnd;
+            init int32 operand;
             if (BootstrapSourceKind(token, 58, tokenCount)
                 && BootstrapSourceKind(token + 1, 46, tokenCount))
             {
@@ -2430,7 +2529,7 @@ bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
             }
             if (!TryParseBootstrapSourceCallSignedOperand(tokenCount, token,
                     localCount,
-                    init var operandEnd, init var operand))
+                    ref init operandEnd, ref init operand))
             {
                 return false;
             }
@@ -2457,8 +2556,9 @@ bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
                 && BootstrapSourceCallArgumentPrecedence(
                     Host.BootstrapCallArgumentOperators[operatorCount - 1]) >= precedence)
             {
+                init int32 reducedValueCount;
                 if (!TryReduceBootstrapSourceCallArgument(
-                        valueCount, operatorCount, init var reducedValueCount))
+                        valueCount, operatorCount, ref init reducedValueCount))
                 {
                     return false;
                 }
@@ -2480,8 +2580,9 @@ bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
                 && Host.BootstrapCallArgumentOperators[operatorCount - 1] != 46
                 && Host.BootstrapCallArgumentOperators[operatorCount - 1] != -46)
             {
+                init int32 reducedValueCount;
                 if (!TryReduceBootstrapSourceCallArgument(
-                        valueCount, operatorCount, init var reducedValueCount))
+                        valueCount, operatorCount, ref init reducedValueCount))
                 {
                     return false;
                 }
@@ -2521,10 +2622,11 @@ bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
     }
     while (operatorCount > 0)
     {
+        init int32 reducedValueCount;
         if (Host.BootstrapCallArgumentOperators[operatorCount - 1] == 46
             || Host.BootstrapCallArgumentOperators[operatorCount - 1] == -46
             || !TryReduceBootstrapSourceCallArgument(
-                valueCount, operatorCount, init var reducedValueCount))
+                valueCount, operatorCount, ref init reducedValueCount))
         {
             return false;
         }
@@ -2535,8 +2637,8 @@ bool TryParseBootstrapSourceCallArgument(int32 tokenCount, int32 startToken,
     {
         return false;
     }
-    value = Host.BootstrapCallArgumentValues[0];
-    endToken = token;
+    *value = Host.BootstrapCallArgumentValues[0];
+    *endToken = token;
     return true;
 }
 
@@ -2550,7 +2652,7 @@ int32 BootstrapSourceCallArgumentPrecedence(int32 operation)
 }
 
 bool TryReduceBootstrapSourceCallArgument(
-    int32 valueCount, int32 operatorCount, init ref<int32> reducedValueCount)
+    int32 valueCount, int32 operatorCount, ref<init int32> reducedValueCount)
 {
     if (valueCount < 2 || operatorCount < 1)
     {
@@ -2570,7 +2672,7 @@ bool TryReduceBootstrapSourceCallArgument(
     }
     Host.BootstrapCallArgumentValues[valueCount - 2] =
         BootstrapSourceExpressionValue(left, operation, right);
-    reducedValueCount = valueCount - 1;
+    *reducedValueCount = valueCount - 1;
     return true;
 }
 
@@ -2641,24 +2743,25 @@ bool BootstrapSourceExpressionOverflows(int32 value, int32 operation, int32 righ
 bool TryReadBootstrapSourceOperand(int32 tokenCount, int32 token,
     bool allowMinimumMagnitude, int32 localName, int32 localValue,
     int32 secondLocalName, int32 secondLocalValue,
-    init ref<int32> value)
+    ref<init int32> value)
 {
+    init int32 parsedValue;
     if (BootstrapSourceSameIdentifier(localName, token, tokenCount))
     {
-        value = localValue;
+        *value = localValue;
         return true;
     }
     if (BootstrapSourceSameIdentifier(secondLocalName, token, tokenCount))
     {
-        value = secondLocalValue;
+        *value = secondLocalValue;
         return true;
     }
     if (!TryReadBootstrapSourceInt32(
-            tokenCount, token, allowMinimumMagnitude, init var parsedValue))
+            tokenCount, token, allowMinimumMagnitude, ref init parsedValue))
     {
         return false;
     }
-    value = parsedValue;
+    *value = parsedValue;
     return true;
 }
 
@@ -2734,8 +2837,9 @@ bool BootstrapSourceSameIdentifier(int32 left, int32 right, int32 tokenCount)
 }
 
 bool TryReadBootstrapSourceInt32(int32 tokenCount, int32 token, bool allowMinimumMagnitude,
-    init ref<int32> value)
+    ref<init int32> value)
 {
+    init uint32 magnitude;
     if (token < 0 || token >= tokenCount - 1)
     {
         return false;
@@ -2766,19 +2870,19 @@ bool TryReadBootstrapSourceInt32(int32 tokenCount, int32 token, bool allowMinimu
             length = length - 2;
         }
     }
-    if (!TryParseUInt32Base(start, length, radix, init var magnitude))
+    if (!TryParseUInt32Base(start, length, radix, ref init magnitude))
     {
         return false;
     }
 
     if (magnitude <= 2147483647)
     {
-        value = int32(magnitude);
+        *value = int32(magnitude);
         return true;
     }
     if (allowMinimumMagnitude && magnitude == 2147483648)
     {
-        value = int32.MinValue;
+        *value = int32.MinValue;
         return true;
     }
     return false;

@@ -17,7 +17,8 @@ public unique struct TokenTriviaSnapshot
         return _count;
     }
 
-    public bool TryGet(int32 index, init ref<Token> trivia, init ref<int32> owner)
+    public bool TryGet(int32 index, ref<init Token> trivia,
+        ref<init int32> owner)
     {
         if (index < 0 || index >= _count)
         {
@@ -25,14 +26,16 @@ public unique struct TokenTriviaSnapshot
         }
 
         int32 offset = index * 4;
-        require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
-            init var range);
-        trivia = new Token(_records.Read(offset), range);
-        owner = _records.Read(offset + 3);
+        init SourceRange range;
+        require SourceRange.TryCreate(_records.Read(offset + 1),
+            _records.Read(offset + 2), ref init range);
+        *trivia = new Token(_records.Read(offset), range);
+        *owner = _records.Read(offset + 3);
         return true;
     }
 
-    public static bool TryBuild(int32 tokenCount, init ref<TokenTriviaSnapshot> result)
+    public static bool TryBuild(int32 tokenCount,
+        ref<init TokenTriviaSnapshot> result)
     {
         if (Host.Diagnostics[0] != 0 || tokenCount < 1
             || tokenCount > Host.Tokens.Length / 3
@@ -42,9 +45,10 @@ public unique struct TokenTriviaSnapshot
         }
 
         int32 count = Host.Trivia[0];
+        init OwnedInt32Buffer created;
         if (count < 0 || count > (Host.Trivia.Length - 1) / 4
             || count > int32.MaxValue / 4
-            || !OwnedInt32Buffer.TryCreate(count * 4, out var created))
+            || !OwnedInt32Buffer.TryCreate(count * 4, ref init created))
         {
             return false;
         }
@@ -95,12 +99,13 @@ public unique struct TokenTriviaSnapshot
             return false;
         }
 
-        result = new TokenTriviaSnapshot(move records, count);
+        *result = new TokenTriviaSnapshot(move records, count);
         return true;
     }
 
     internal static bool TryBuildLossless(int32 tokenCount,
-        init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia)
+        ref<init TokenSnapshot> tokens,
+        ref<init TokenTriviaSnapshot> trivia)
     {
         if (Host.Diagnostics[0] != 0 || tokenCount < 1
             || tokenCount > int32.MaxValue / 3
@@ -117,12 +122,16 @@ public unique struct TokenTriviaSnapshot
             return false;
         }
 
-        if (!OwnedInt32Buffer.TryCreate(tokenCount * 3, out var tokenRecords))
+        init OwnedInt32Buffer tokenRecords;
+        if (!OwnedInt32Buffer.TryCreate(tokenCount * 3,
+                ref init tokenRecords))
         {
             return false;
         }
         mut OwnedInt32Buffer ownedTokens = move tokenRecords;
-        if (!OwnedInt32Buffer.TryCreate(triviaCount * 4, out var triviaRecords))
+        init OwnedInt32Buffer triviaRecords;
+        if (!OwnedInt32Buffer.TryCreate(triviaCount * 4,
+                ref init triviaRecords))
         {
             return false;
         }
@@ -176,24 +185,28 @@ public unique struct TokenTriviaSnapshot
             return false;
         }
 
-        if (!TokenSnapshot.TryCreateValidated(move ownedTokens, tokenCount, init var scanned))
+        init TokenSnapshot scanned;
+        if (!TokenSnapshot.TryCreateValidated(move ownedTokens, tokenCount,
+            ref init scanned))
         {
             return false;
         }
         mut TokenTriviaSnapshot leading = new TokenTriviaSnapshot(move ownedTrivia, triviaCount);
-        tokens = move scanned;
-        trivia = move leading;
+        *tokens = move scanned;
+        *trivia = move leading;
         return true;
     }
 }
 
 bool TryBuildLossless(int32 count,
-    init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia)
+    ref<init TokenSnapshot> tokens, ref<init TokenTriviaSnapshot> trivia)
 {
-    return TokenTriviaSnapshot.TryBuildLossless(count, init tokens, init trivia);
+    return TokenTriviaSnapshot.TryBuildLossless(count,
+        ref init *tokens, ref init *trivia);
 }
 
-bool TryScanLossless(init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia)
+bool TryScanLossless(ref<init TokenSnapshot> tokens,
+    ref<init TokenTriviaSnapshot> trivia)
 {
-    return TryBuildLossless(Scan(), init tokens, init trivia);
+    return TryBuildLossless(Scan(), ref init *tokens, ref init *trivia);
 }

@@ -1,6 +1,7 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
-bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, init ref<uint64> result)
+bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum,
+    ref<init uint64> result)
 {
     if (start < 0 || length <= 0 || start > Host.Source.Length
         || length > Host.Source.Length - start || radix < 2 || radix > 36)
@@ -64,42 +65,50 @@ bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, 
         value = value * divisor + uint64(digit);
     }
 
-    result = value;
+    *result = value;
     return true;
 }
 
-public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, init ref<uint64> result)
+public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix,
+    ref<init uint64> result)
 {
-    if (!TryParseMagnitude(start, length, radix, uint64.MaxValue, init var parsed))
+    init uint64 parsed;
+    if (!TryParseMagnitude(start, length, radix, uint64.MaxValue,
+        ref init parsed))
     {
         return false;
     }
-    result = parsed;
+    *result = parsed;
     return true;
 }
 
-public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, init ref<uint32> result)
+public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix,
+    ref<init uint32> result)
 {
-    if (!TryParseMagnitude(start, length, radix, uint64(uint32.MaxValue), init var parsed))
+    init uint64 parsed;
+    if (!TryParseMagnitude(start, length, radix,
+        uint64(uint32.MaxValue), ref init parsed))
     {
         return false;
     }
-    result = uint32(parsed);
+    *result = uint32(parsed);
     return true;
 }
 
-public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix, init ref<char16> result)
+public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix,
+    ref<init char16> result)
 {
-    if (!TryParseMagnitude(start, length, radix, 65535, init var parsed))
+    init uint64 parsed;
+    if (!TryParseMagnitude(start, length, radix, 65535, ref init parsed))
     {
         return false;
     }
-    result = char16(parsed);
+    *result = char16(parsed);
     return true;
 }
 
 bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
-    int64 minimum, int64 maximum, init ref<int64> result)
+    int64 minimum, int64 maximum, ref<init int64> result)
 {
     if (start < 0 || length <= 0 || start >= Host.Source.Length)
     {
@@ -122,44 +131,50 @@ bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
         magnitudeLimit = MagnitudeInt64(minimum);
     }
 
-    if (!TryParseMagnitude(digitStart, digitLength, radix, magnitudeLimit, init var magnitude))
+    init uint64 magnitude;
+    if (!TryParseMagnitude(digitStart, digitLength, radix,
+        magnitudeLimit, ref init magnitude))
     {
         return false;
     }
 
     if (negative && magnitude == magnitudeLimit)
     {
-        result = minimum;
+        *result = minimum;
     }
     else if (negative)
     {
-        result = -int64(magnitude);
+        *result = -int64(magnitude);
     }
     else
     {
-        result = int64(magnitude);
+        *result = int64(magnitude);
     }
     return true;
 }
 
-public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, init ref<int64> result)
+public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix,
+    ref<init int64> result)
 {
+    init int64 parsed;
     if (!TryParseSignedBase(start, length, radix,
-        int64.MinValue, int64.MaxValue, init var parsed))
+        int64.MinValue, int64.MaxValue, ref init parsed))
     {
         return false;
     }
-    result = parsed;
+    *result = parsed;
     return true;
 }
 
-public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, init ref<int32> result)
+public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix,
+    ref<init int32> result)
 {
+    init int64 parsed;
     if (!TryParseSignedBase(start, length, radix,
-        int64(int32.MinValue), int64(int32.MaxValue), init var parsed))
+        int64(int32.MinValue), int64(int32.MaxValue), ref init parsed))
     {
         return false;
     }
-    result = int32(parsed);
+    *result = int32(parsed);
     return true;
 }

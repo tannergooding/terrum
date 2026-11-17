@@ -7,6 +7,7 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
     int32 layoutCount, int32 contractCount, int32 methodSigCount,
     int32 bodyCount, int32 sourceFileRecordCount)
 {
+    init uint32 slotCount;
     if (recordCount <= 0 || recordCount > 0xFF_FFFF
         || sourceFileRecordCount != sourceFileCount
         || Host.SourceMaps.Length < 4
@@ -20,7 +21,7 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
         return false;
     }
 
-    if (!TryReadSourceMapTableWord(0, init var slotCount)
+    if (!TryReadSourceMapTableWord(0, ref init slotCount)
         || slotCount == 0
         || slotCount > uint32((Host.SourceMaps.Length - 4) / 16))
     {
@@ -51,11 +52,19 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
     mut int32 previousFileModule = 0;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
+        init uint32 instructionSlot;
+        init uint32 fileSlot;
+        init uint32 startUtf16;
+        init uint32 lengthUtf16;
+        init int32 instructionKind;
+        init int32 fileKind;
+        init uint32 bodyRow;
+        init uint32 fileRow;
         int32 rowOffset = rowStart + (row - 1) * 16;
-        if (!TryReadSourceMapTableWord(rowOffset, init var instructionSlot)
-            || !TryReadSourceMapTableWord(rowOffset + 4, init var fileSlot)
-            || !TryReadSourceMapTableWord(rowOffset + 8, init var startUtf16)
-            || !TryReadSourceMapTableWord(rowOffset + 12, init var lengthUtf16)
+        if (!TryReadSourceMapTableWord(rowOffset, ref init instructionSlot)
+            || !TryReadSourceMapTableWord(rowOffset + 4, ref init fileSlot)
+            || !TryReadSourceMapTableWord(rowOffset + 8, ref init startUtf16)
+            || !TryReadSourceMapTableWord(rowOffset + 12, ref init lengthUtf16)
             || instructionSlot <= previousInstructionSlot
             || instructionSlot > slotCount
             || fileSlot == 0
@@ -67,12 +76,12 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
 
         int32 instructionOffset = 4 + (int32(instructionSlot) - 1) * 16;
         int32 fileOffset = 4 + (int32(fileSlot) - 1) * 16;
-        if (!TryReadSourceMapTableHalfWord(instructionOffset, init var instructionKind)
-            || !TryReadSourceMapTableHalfWord(fileOffset, init var fileKind)
+        if (!TryReadSourceMapTableHalfWord(instructionOffset, ref init instructionKind)
+            || !TryReadSourceMapTableHalfWord(fileOffset, ref init fileKind)
             || instructionKind != 0
             || fileKind != 0x001F
-            || !TryReadSourceMapTableWord(instructionOffset + 4, init var bodyRow)
-            || !TryReadSourceMapTableWord(fileOffset + 4, init var fileRow))
+            || !TryReadSourceMapTableWord(instructionOffset + 4, ref init bodyRow)
+            || !TryReadSourceMapTableWord(fileOffset + 4, ref init fileRow))
         {
             return false;
         }
@@ -80,8 +89,9 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
         int32 bodyRowInt = int32(bodyRow);
         if (bodyRowInt != previousBodyRow)
         {
+            init int32 bodyModule;
             if (!TryGetSourceMapBodyModule(bodyRowInt, moduleCount,
-                typeDefCount, methodDefCount, bodyCount, init var bodyModule))
+                typeDefCount, methodDefCount, bodyCount, ref init bodyModule))
             {
                 return false;
             }
@@ -92,8 +102,9 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
         int32 fileRowInt = int32(fileRow);
         if (fileRowInt != previousFileRow)
         {
+            init int32 fileModule;
             if (!TryGetSourceMapFileModule(fileRowInt, moduleCount,
-                sourceFileCount, init var fileModule))
+                sourceFileCount, ref init fileModule))
             {
                 return false;
             }
@@ -116,13 +127,14 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
 bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
     int32 bodyCount)
 {
+    init uint32 slotCount;
     if (methodDefCount < 0 || methodDefCount > 0xFF_FFFF
         || bodyCount < 0 || bodyCount > 0xFF_FFFF
         || Host.BodyOwners.Length != bodyCount + 1
         || Host.SourceMapOperationBlockStarts.Length != methodDefCount + 1
         || Host.SourceMapOperationBlockCounts.Length != methodDefCount + 1
         || Host.SourceMaps.Length < 4
-        || !TryReadSourceMapTableWord(0, init var slotCount)
+        || !TryReadSourceMapTableWord(0, ref init slotCount)
         || slotCount > uint32((Host.SourceMaps.Length - 4) / 16))
     {
         return false;
@@ -138,9 +150,15 @@ bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
 
     for (mut int32 slot = 1; slot <= slotCountInt; slot = slot + 1)
     {
+        init int32 kind;
+        init int32 selector;
+        init uint32 bodyRow;
+        init int32 block;
+        init int32 reserved;
+        init uint32 ordinal;
         int32 slotOffset = 4 + (slot - 1) * 16;
-        if (!TryReadSourceMapTableHalfWord(slotOffset, init var kind)
-            || !TryReadSourceMapTableHalfWord(slotOffset + 2, init var selector))
+        if (!TryReadSourceMapTableHalfWord(slotOffset, ref init kind)
+            || !TryReadSourceMapTableHalfWord(slotOffset + 2, ref init selector))
         {
             return false;
         }
@@ -151,10 +169,10 @@ bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
         }
 
         if (selector != 1
-            || !TryReadSourceMapTableWord(slotOffset + 4, init var bodyRow)
-            || !TryReadSourceMapTableHalfWord(slotOffset + 8, init var block)
-            || !TryReadSourceMapTableHalfWord(slotOffset + 10, init var reserved)
-            || !TryReadSourceMapTableWord(slotOffset + 12, init var ordinal)
+            || !TryReadSourceMapTableWord(slotOffset + 4, ref init bodyRow)
+            || !TryReadSourceMapTableHalfWord(slotOffset + 8, ref init block)
+            || !TryReadSourceMapTableHalfWord(slotOffset + 10, ref init reserved)
+            || !TryReadSourceMapTableWord(slotOffset + 12, ref init ordinal)
             || bodyRow == 0 || bodyRow > uint32(bodyCount) || reserved != 0)
         {
             return false;
@@ -190,36 +208,44 @@ bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
 bool TryValidateSourceMapSlot(int32 slot, int32 sourceFileCount,
     int32 methodDefCount, int32 typeDefCount, int32 moduleCount, int32 bodyCount)
 {
+    init int32 kind;
+    init int32 selector;
+    init uint32 target;
+    init int32 block;
+    init int32 reserved;
+    init uint32 ordinal;
     int32 slotOffset = 4 + (slot - 1) * 16;
-    if (!TryReadSourceMapTableHalfWord(slotOffset, init var kind)
-        || !TryReadSourceMapTableHalfWord(slotOffset + 2, init var selector)
-        || !TryReadSourceMapTableWord(slotOffset + 4, init var target)
-        || !TryReadSourceMapTableHalfWord(slotOffset + 8, init var block)
-        || !TryReadSourceMapTableHalfWord(slotOffset + 10, init var reserved)
-        || !TryReadSourceMapTableWord(slotOffset + 12, init var ordinal))
+    if (!TryReadSourceMapTableHalfWord(slotOffset, ref init kind)
+        || !TryReadSourceMapTableHalfWord(slotOffset + 2, ref init selector)
+        || !TryReadSourceMapTableWord(slotOffset + 4, ref init target)
+        || !TryReadSourceMapTableHalfWord(slotOffset + 8, ref init block)
+        || !TryReadSourceMapTableHalfWord(slotOffset + 10, ref init reserved)
+        || !TryReadSourceMapTableWord(slotOffset + 12, ref init ordinal))
     {
         return false;
     }
 
     if (kind == 0 && selector == 1)
     {
+        init int32 bodyModule;
         if (target == 0 || target > uint32(bodyCount) || reserved != 0)
         {
             return false;
         }
         return TryGetSourceMapBodyModule(int32(target), moduleCount,
-            typeDefCount, methodDefCount, bodyCount, init var bodyModule);
+            typeDefCount, methodDefCount, bodyCount, ref init bodyModule);
     }
 
     if (kind == 0x001F && selector == 0)
     {
+        init int32 fileModule;
         if (int32(block) != 0 || reserved != 0 || ordinal != 0 || target == 0
             || target > uint32(sourceFileCount))
         {
             return false;
         }
         return TryGetSourceMapFileModule(int32(target), moduleCount,
-            sourceFileCount, init var fileModule);
+            sourceFileCount, ref init fileModule);
     }
 
     return false;
@@ -227,7 +253,7 @@ bool TryValidateSourceMapSlot(int32 slot, int32 sourceFileCount,
 
 bool TryGetSourceMapBodyModule(int32 bodyRow, int32 moduleCount,
     int32 typeDefCount, int32 methodDefCount, int32 bodyCount,
-    init ref<int32> ownerModule)
+    ref<init int32> ownerModule)
 {
     if (bodyRow <= 0 || bodyRow > bodyCount
         || bodyRow >= Host.BodyOwners.Length)
@@ -245,10 +271,14 @@ bool TryGetSourceMapBodyModule(int32 bodyRow, int32 moduleCount,
     mut int32 high = moduleCount;
     while (low <= high)
     {
+        init int32 methodStart;
+        init int32 methodEnd;
+        init int32 typeStart;
+        init int32 typeEnd;
         int32 middle = low + (high - low) / 2;
         if (!TryGetMethodDefModuleRanges(middle, moduleCount, typeDefCount,
-            methodDefCount, init var methodStart, init var methodEnd,
-            init var typeStart, init var typeEnd))
+            methodDefCount, ref init methodStart, ref init methodEnd,
+            ref init typeStart, ref init typeEnd))
         {
             return false;
         }
@@ -263,7 +293,7 @@ bool TryGetSourceMapBodyModule(int32 bodyRow, int32 moduleCount,
         }
         else
         {
-            ownerModule = middle;
+            *ownerModule = middle;
             return true;
         }
     }
@@ -272,7 +302,7 @@ bool TryGetSourceMapBodyModule(int32 bodyRow, int32 moduleCount,
 }
 
 bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
-    int32 sourceFileCount, init ref<int32> ownerModule)
+    int32 sourceFileCount, ref<init int32> ownerModule)
 {
     if (fileRow <= 0 || fileRow > sourceFileCount)
     {
@@ -283,9 +313,10 @@ bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
     mut int32 high = moduleCount;
     while (low <= high)
     {
+        init uint32 firstFile;
         int32 middle = low + (high - low) / 2;
         int32 rowStart = (middle - 1) * 48;
-        if (!TryReadModuleTableWord(rowStart, 44, init var firstFile))
+        if (!TryReadModuleTableWord(rowStart, 44, ref init firstFile))
         {
             return false;
         }
@@ -293,7 +324,8 @@ bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
         mut uint32 fileEnd = uint32(sourceFileCount + 1);
         if (middle < moduleCount)
         {
-            if (!TryReadModuleTableWord(middle * 48, 44, init var nextFileStart))
+            init uint32 nextFileStart;
+            if (!TryReadModuleTableWord(middle * 48, 44, ref init nextFileStart))
             {
                 return false;
             }
@@ -310,7 +342,7 @@ bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
         }
         else
         {
-            ownerModule = middle;
+            *ownerModule = middle;
             return true;
         }
     }
@@ -318,36 +350,42 @@ bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
     return false;
 }
 
-bool TryReadSourceMapTableWord(int32 offset, init ref<uint32> value)
+bool TryReadSourceMapTableWord(int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (offset < 0 || offset > Host.SourceMaps.Length - 4
-        || !TryReadSourceMapTableByte(offset, init var first)
-        || !TryReadSourceMapTableByte(offset + 1, init var second)
-        || !TryReadSourceMapTableByte(offset + 2, init var third)
-        || !TryReadSourceMapTableByte(offset + 3, init var fourth))
+        || !TryReadSourceMapTableByte(offset, ref init first)
+        || !TryReadSourceMapTableByte(offset + 1, ref init second)
+        || !TryReadSourceMapTableByte(offset + 2, ref init third)
+        || !TryReadSourceMapTableByte(offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadSourceMapTableHalfWord(int32 offset, init ref<int32> value)
+bool TryReadSourceMapTableHalfWord(int32 offset, ref<init int32> value)
 {
+    init int32 first;
+    init int32 second;
     if (offset < 0 || offset > Host.SourceMaps.Length - 2
-        || !TryReadSourceMapTableByte(offset, init var first)
-        || !TryReadSourceMapTableByte(offset + 1, init var second))
+        || !TryReadSourceMapTableByte(offset, ref init first)
+        || !TryReadSourceMapTableByte(offset + 1, ref init second))
     {
         return false;
     }
 
-    value = first | (second << 8);
+    *value = first | (second << 8);
     return true;
 }
 
-bool TryReadSourceMapTableByte(int32 offset, init ref<int32> value)
+bool TryReadSourceMapTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.SourceMaps.Length)
     {
@@ -360,6 +398,6 @@ bool TryReadSourceMapTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }

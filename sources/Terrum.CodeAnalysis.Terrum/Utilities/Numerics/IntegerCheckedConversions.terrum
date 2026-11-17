@@ -1,186 +1,186 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
-public static bool TryConvertInt32ToInt64(int32 value, init ref<int64> result)
+public static bool TryConvertInt32ToInt64(int32 value, ref<init int64> result)
 {
-    result = int64(value);
+    *result = int64(value);
     return true;
 }
 
-public static bool TryConvertInt32ToUInt64(int32 value, init ref<uint64> result)
+public static bool TryConvertInt32ToUInt64(int32 value, ref<init uint64> result)
 {
     if (value < 0)
     {
         return false;
     }
 
-    result = uint64(value);
+    *result = uint64(value);
     return true;
 }
 
-public static bool TryConvertUInt32ToInt64(uint32 value, init ref<int64> result)
+public static bool TryConvertUInt32ToInt64(uint32 value, ref<init int64> result)
 {
-    result = int64(value);
+    *result = int64(value);
     return true;
 }
 
-public static bool TryConvertUInt32ToUInt64(uint32 value, init ref<uint64> result)
+public static bool TryConvertUInt32ToUInt64(uint32 value, ref<init uint64> result)
 {
-    result = uint64(value);
+    *result = uint64(value);
     return true;
 }
 
-public static bool TryConvertUInt32ToInt32(uint32 value, init ref<int32> result)
+public static bool TryConvertUInt32ToInt32(uint32 value, ref<init int32> result)
 {
     if (value > uint32(int32.MaxValue))
     {
         return false;
     }
 
-    result = int32(value);
+    *result = int32(value);
     return true;
 }
 
-public static bool TryConvertInt32ToUInt32(int32 value, init ref<uint32> result)
+public static bool TryConvertInt32ToUInt32(int32 value, ref<init uint32> result)
 {
     if (value < 0)
     {
         return false;
     }
 
-    result = uint32(value);
+    *result = uint32(value);
     return true;
 }
 
-public static bool TryConvertInt64ToInt32(int64 value, init ref<int32> result)
+public static bool TryConvertInt64ToInt32(int64 value, ref<init int32> result)
 {
     if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
     {
         return false;
     }
 
-    result = int32(value);
+    *result = int32(value);
     return true;
 }
 
-public static bool TryConvertInt64ToUInt32(int64 value, init ref<uint32> result)
+public static bool TryConvertInt64ToUInt32(int64 value, ref<init uint32> result)
 {
     if (value < 0 || value > int64(uint32.MaxValue))
     {
         return false;
     }
 
-    result = uint32(value);
+    *result = uint32(value);
     return true;
 }
 
-public static bool TryConvertUInt64ToInt32(uint64 value, init ref<int32> result)
+public static bool TryConvertUInt64ToInt32(uint64 value, ref<init int32> result)
 {
     if (value > uint64(int32.MaxValue))
     {
         return false;
     }
 
-    result = int32(value);
+    *result = int32(value);
     return true;
 }
 
-public static bool TryConvertUInt64ToUInt32(uint64 value, init ref<uint32> result)
+public static bool TryConvertUInt64ToUInt32(uint64 value, ref<init uint32> result)
 {
     if (value > uint64(uint32.MaxValue))
     {
         return false;
     }
 
-    result = uint32(value);
+    *result = uint32(value);
     return true;
 }
 
-public static bool TryConvertUInt64ToInt64(uint64 value, init ref<int64> result)
+public static bool TryConvertUInt64ToInt64(uint64 value, ref<init int64> result)
 {
     if (value > uint64(int64.MaxValue))
     {
         return false;
     }
 
-    result = int64(value);
+    *result = int64(value);
     return true;
 }
 
-public static bool TryConvertInt64ToUInt64(int64 value, init ref<uint64> result)
+public static bool TryConvertInt64ToUInt64(int64 value, ref<init uint64> result)
 {
     if (value < 0)
     {
         return false;
     }
 
-    result = uint64(value);
+    *result = uint64(value);
     return true;
 }
 
-public static bool TryConvertInt32ToChar16(int32 value, init ref<char16> result)
+public static bool TryConvertInt32ToChar16(int32 value, ref<init char16> result)
 {
     if (value < 0 || value > 65535)
     {
         return false;
     }
 
-    result = char16(value);
+    *result = char16(value);
     return true;
 }
 
-public static bool TryConvertUInt32ToChar16(uint32 value, init ref<char16> result)
+public static bool TryConvertUInt32ToChar16(uint32 value, ref<init char16> result)
 {
     if (value > 65535)
     {
         return false;
     }
 
-    result = char16(value);
+    *result = char16(value);
     return true;
 }
 
-public static bool TryConvertInt64ToChar16(int64 value, init ref<char16> result)
+public static bool TryConvertInt64ToChar16(int64 value, ref<init char16> result)
 {
     if (value < 0 || value > 65535)
     {
         return false;
     }
 
-    result = char16(value);
+    *result = char16(value);
     return true;
 }
 
-public static bool TryConvertUInt64ToChar16(uint64 value, init ref<char16> result)
+public static bool TryConvertUInt64ToChar16(uint64 value, ref<init char16> result)
 {
     if (value > 65535)
     {
         return false;
     }
 
-    result = char16(value);
+    *result = char16(value);
     return true;
 }
 
-public static bool TryConvertChar16ToInt32(char16 value, init ref<int32> result)
+public static bool TryConvertChar16ToInt32(char16 value, ref<init int32> result)
 {
-    result = int32(value);
+    *result = int32(value);
     return true;
 }
 
-public static bool TryConvertChar16ToUInt32(char16 value, init ref<uint32> result)
+public static bool TryConvertChar16ToUInt32(char16 value, ref<init uint32> result)
 {
-    result = uint32(value);
+    *result = uint32(value);
     return true;
 }
 
-public static bool TryConvertChar16ToInt64(char16 value, init ref<int64> result)
+public static bool TryConvertChar16ToInt64(char16 value, ref<init int64> result)
 {
-    result = int64(value);
+    *result = int64(value);
     return true;
 }
 
-public static bool TryConvertChar16ToUInt64(char16 value, init ref<uint64> result)
+public static bool TryConvertChar16ToUInt64(char16 value, ref<init uint64> result)
 {
-    result = uint64(value);
+    *result = uint64(value);
     return true;
 }

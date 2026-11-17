@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
-public static bool TryAddInt32(int32 left, int32 right, init ref<int32> result)
+public static bool TryAddInt32(int32 left, int32 right, ref<init int32> result)
 {
     int64 value = int64(left) + int64(right);
     if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
@@ -8,11 +8,11 @@ public static bool TryAddInt32(int32 left, int32 right, init ref<int32> result)
         return false;
     }
 
-    result = int32(value);
+    *result = int32(value);
     return true;
 }
 
-public static bool TrySubtractInt32(int32 left, int32 right, init ref<int32> result)
+public static bool TrySubtractInt32(int32 left, int32 right, ref<init int32> result)
 {
     int64 value = int64(left) - int64(right);
     if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
@@ -20,24 +20,24 @@ public static bool TrySubtractInt32(int32 left, int32 right, init ref<int32> res
         return false;
     }
 
-    result = int32(value);
+    *result = int32(value);
     return true;
 }
 
-public static bool TryNegateInt32(int32 value, init ref<int32> result)
+public static bool TryNegateInt32(int32 value, ref<init int32> result)
 {
-    return TrySubtractInt32(0, value, init result);
+    return TrySubtractInt32(0, value, ref init *result);
 }
 
-public static bool TryAbsoluteInt32(int32 value, init ref<int32> result)
+public static bool TryAbsoluteInt32(int32 value, ref<init int32> result)
 {
     if (value >= 0)
     {
-        result = value;
+        *result = value;
         return true;
     }
 
-    return TryNegateInt32(value, init result);
+    return TryNegateInt32(value, ref init *result);
 }
 
 public static uint32 MagnitudeInt32(int32 value)
@@ -50,7 +50,7 @@ public static uint32 MagnitudeInt32(int32 value)
     return uint32(value);
 }
 
-public static bool TryMultiplyInt32(int32 left, int32 right, init ref<int32> result)
+public static bool TryMultiplyInt32(int32 left, int32 right, ref<init int32> result)
 {
     int64 value = int64(left) * int64(right);
     if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
@@ -58,11 +58,11 @@ public static bool TryMultiplyInt32(int32 left, int32 right, init ref<int32> res
         return false;
     }
 
-    result = int32(value);
+    *result = int32(value);
     return true;
 }
 
-public static bool TryAddUInt32(uint32 left, uint32 right, init ref<uint32> result)
+public static bool TryAddUInt32(uint32 left, uint32 right, ref<init uint32> result)
 {
     uint64 value = uint64(left) + uint64(right);
     if (value > uint64(uint32.MaxValue))
@@ -70,22 +70,22 @@ public static bool TryAddUInt32(uint32 left, uint32 right, init ref<uint32> resu
         return false;
     }
 
-    result = uint32(value);
+    *result = uint32(value);
     return true;
 }
 
-public static bool TrySubtractUInt32(uint32 left, uint32 right, init ref<uint32> result)
+public static bool TrySubtractUInt32(uint32 left, uint32 right, ref<init uint32> result)
 {
     if (left < right)
     {
         return false;
     }
 
-    result = left - right;
+    *result = left - right;
     return true;
 }
 
-public static bool TryMultiplyUInt32(uint32 left, uint32 right, init ref<uint32> result)
+public static bool TryMultiplyUInt32(uint32 left, uint32 right, ref<init uint32> result)
 {
     uint64 value = uint64(left) * uint64(right);
     if (value > uint64(uint32.MaxValue))
@@ -93,22 +93,22 @@ public static bool TryMultiplyUInt32(uint32 left, uint32 right, init ref<uint32>
         return false;
     }
 
-    result = uint32(value);
+    *result = uint32(value);
     return true;
 }
 
-public static bool TryDivideInt32(int32 left, int32 right, init ref<int32> result)
+public static bool TryDivideInt32(int32 left, int32 right, ref<init int32> result)
 {
     if (right == 0 || (left == int32.MinValue && right == -1))
     {
         return false;
     }
 
-    result = left / right;
+    *result = left / right;
     return true;
 }
 
-public static bool TryRemainderInt32(int32 left, int32 right, init ref<int32> result)
+public static bool TryRemainderInt32(int32 left, int32 right, ref<init int32> result)
 {
     if (right == 0)
     {
@@ -117,32 +117,32 @@ public static bool TryRemainderInt32(int32 left, int32 right, init ref<int32> re
 
     if (left == int32.MinValue && right == -1)
     {
-        result = 0;
+        *result = 0;
         return true;
     }
 
-    result = left % right;
+    *result = left % right;
     return true;
 }
 
-public static bool TryDivideUInt32(uint32 left, uint32 right, init ref<uint32> result)
+public static bool TryDivideUInt32(uint32 left, uint32 right, ref<init uint32> result)
 {
     if (right == 0)
     {
         return false;
     }
 
-    result = left / right;
+    *result = left / right;
     return true;
 }
 
-public static bool TryRemainderUInt32(uint32 left, uint32 right, init ref<uint32> result)
+public static bool TryRemainderUInt32(uint32 left, uint32 right, ref<init uint32> result)
 {
     if (right == 0)
     {
         return false;
     }
 
-    result = left % right;
+    *result = left % right;
     return true;
 }

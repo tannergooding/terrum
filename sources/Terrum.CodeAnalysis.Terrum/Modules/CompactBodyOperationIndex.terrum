@@ -49,13 +49,17 @@ public static bool TryBuildCompactBodySourceMapOperationIndex(
             return false;
         }
 
+        init mut int32 linearBlocks;
+        init mut int32 ignoredLinearOperationCount;
+        init mut int32 indexedBlocks;
+        init mut int32 ignoredIndexedOperationCount;
         if (TryGetValidatedCompactLinearBodyFrame(bodyCount, body, typeSpecCount,
-                init var linearBlocks, init var ignoredLinearOperationCount))
+                ref init linearBlocks, ref init ignoredLinearOperationCount))
         {
             Host.SourceMapOperationBlockCounts[method] = linearBlocks;
         }
         else if (TryGetValidatedCompactIndexedBodyFrame(bodyCount, body,
-                typeSpecCount, init var indexedBlocks, init var ignoredIndexedOperationCount)
+                typeSpecCount, ref init indexedBlocks, ref init ignoredIndexedOperationCount)
             && indexedBlocks > 0)
         {
             Host.SourceMapOperationBlockCounts[method] = indexedBlocks;
@@ -92,8 +96,12 @@ public static bool TryBuildCompactBodySourceMapOperationIndex(
             return false;
         }
 
+        init mut int32 linearBlocks;
+        init mut int32 linearOperationCount;
+        init mut int32 indexedBlocks;
+        init mut int32 ignoredOperationCount;
         if (TryGetValidatedCompactLinearBodyFrame(bodyCount, body, typeSpecCount,
-                init var linearBlocks, init var linearOperationCount))
+                ref init linearBlocks, ref init linearOperationCount))
         {
             if (linearBlocks != Host.SourceMapOperationBlockCounts[method])
             {
@@ -102,7 +110,7 @@ public static bool TryBuildCompactBodySourceMapOperationIndex(
             Host.SourceMapOperationCounts[firstOperationCount] = linearOperationCount;
         }
         else if (TryWriteValidatedCompactIndexedBodyOperationCounts(bodyCount, body,
-                typeSpecCount, 1, init var indexedBlocks, init var ignoredOperationCount)
+                typeSpecCount, 1, ref init indexedBlocks, ref init ignoredOperationCount)
             && indexedBlocks == Host.SourceMapOperationBlockCounts[method]
             && Host.BodyBlockOperationCounts[1] == indexedBlocks)
         {

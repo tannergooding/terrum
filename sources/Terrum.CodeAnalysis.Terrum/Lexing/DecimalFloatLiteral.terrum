@@ -223,7 +223,8 @@ int64 ParseDecimalFloatLiteralOrMinusOne(int32 start, int32 length, bool isFloat
     }
 
     uint64 hiddenBit = uint64(1) << fractionBits;
-    require OwnedInt32Buffer.TryCreate(183, out var created);
+    init OwnedInt32Buffer created;
+    require OwnedInt32Buffer.TryCreate(183, ref init created);
     mut OwnedInt32Buffer workspace = InitializeDecimalFloatWorkspace(move created);
 
     mut int64 binaryExponent = FloorDividePositive(

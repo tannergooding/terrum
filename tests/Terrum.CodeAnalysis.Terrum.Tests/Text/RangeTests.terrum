@@ -3,7 +3,8 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public static bool CheckSourceRange()
 {
-    if (!SourceRange.TryCreate(2, 3, init var range))
+    init SourceRange range;
+    if (!SourceRange.TryCreate(2, 3, ref init range))
     {
         return false;
     }
@@ -13,35 +14,43 @@ public static bool CheckSourceRange()
         return false;
     }
 
-    if (!SourceRange.TryCreate(2, 3, init var initialized)
+    init SourceRange initialized;
+    if (!SourceRange.TryCreate(2, 3, ref init initialized)
         || initialized.Start != range.Start || initialized.Length != range.Length
         || initialized.End != range.End)
     {
         return false;
     }
 
-    if (SourceRange.TryCreate(-1, 0, init var negative))
+    init SourceRange negative;
+    if (SourceRange.TryCreate(-1, 0, ref init negative))
     {
         return false;
     }
 
-    if (SourceRange.TryCreate(int32.MaxValue, 1, init var overflowing))
+    init SourceRange overflowing;
+    if (SourceRange.TryCreate(int32.MaxValue, 1, ref init overflowing))
     {
         return false;
     }
 
-    if (SourceRange.TryCreate(-1, 0, init var negativeInit)
-        || SourceRange.TryCreate(int32.MaxValue, 1, init var overflowingInit))
+    init SourceRange negativeInit;
+    init SourceRange overflowingInit;
+    if (SourceRange.TryCreate(-1, 0, ref init negativeInit)
+        || SourceRange.TryCreate(int32.MaxValue, 1,
+            ref init overflowingInit))
     {
         return false;
     }
 
-    if (!SourceRange.TryCreate(int32.MaxValue, 0, init var end))
+    init SourceRange end;
+    if (!SourceRange.TryCreate(int32.MaxValue, 0, ref init end))
     {
         return false;
     }
 
+    init SourceRange final;
     return end.End == int32.MaxValue
-        && SourceRange.TryCreate(int32.MaxValue, 0, init var final)
+        && SourceRange.TryCreate(int32.MaxValue, 0, ref init final)
         && final.End == end.End;
 }

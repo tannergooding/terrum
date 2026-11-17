@@ -52,9 +52,22 @@ public static bool TryValidateExportTable(int32 recordCount,
 
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
+        init uint32 definition;
+        init uint32 key;
+        init int32 ownerModule;
+        init uint32 unusedBody;
+        init uint32 visibility;
+        init int32 ownerType;
+        init uint32 ownerFlags;
+        init int32 keyOffset;
+        init int32 keyLength;
+        init int32 keyEncoding;
+        init int32 keyContentLength;
+        init int32 keyScalarCount;
+        init int32 unusedScalar;
         int32 rowStart = (row - 1) * 8;
-        if (!TryReadExportTableWord(rowStart, 0, init var definition)
-            || !TryReadExportTableWord(rowStart, 4, init var key))
+        if (!TryReadExportTableWord(rowStart, 0, ref init definition)
+            || !TryReadExportTableWord(rowStart, 4, ref init key))
         {
             return false;
         }
@@ -65,11 +78,11 @@ public static bool TryValidateExportTable(int32 recordCount,
         if (!TryGetImportDefinitionModule(definition, moduleCount,
             typeDefCount, fieldDefCount, methodDefCount, propertyDefCount,
             interfaceDefCount, associatedTypeDefCount,
-            init var ownerModule, init var unusedBody)
+            ref init ownerModule, ref init unusedBody)
             || !TryGetExportVisibilityOwner(definition,
                 typeDefCount, fieldDefCount, methodDefCount, propertyDefCount,
                 interfaceDefCount, associatedTypeDefCount,
-                init var visibility, init var ownerType)
+                ref init visibility, ref init ownerType)
             || visibility != 2
             || IsExpectedImportDefinition(definition, importRecordCount))
         {
@@ -78,7 +91,7 @@ public static bool TryValidateExportTable(int32 recordCount,
         if (ownerType != 0)
         {
             uint32 definitionKind = definition >> 24;
-            if (!TryReadTypeDefTableWord((ownerType - 1) * 44, 8, init var ownerFlags)
+            if (!TryReadTypeDefTableWord((ownerType - 1) * 44, 8, ref init ownerFlags)
                 || (ownerFlags & 3) != 2
                 || ((definitionKind == 0x14 || definitionKind == 0x20)
                     && IsExpectedImportDefinition(
@@ -88,14 +101,14 @@ public static bool TryValidateExportTable(int32 recordCount,
             }
         }
         if (!TryGetValidatedVariableTableRowExtent(stringCount, 8, 4, int32(key),
-            init var keyOffset, init var keyLength))
+            ref init keyOffset, ref init keyLength))
         {
             return false;
         }
         int32 keyStart = (stringCount + 1) * 4 + int32(keyOffset);
         if (!TryAnalyzeStringRowText(keyStart, keyLength, false, -1,
-            init var keyEncoding, init var keyContentLength,
-            init var keyScalarCount, init var unusedScalar))
+            ref init keyEncoding, ref init keyContentLength,
+            ref init keyScalarCount, ref init unusedScalar))
         {
             return false;
         }
@@ -114,7 +127,7 @@ bool TryGetExportVisibilityOwner(uint32 definition,
     int32 typeDefCount, int32 fieldDefCount, int32 methodDefCount,
     int32 propertyDefCount,
     int32 interfaceDefCount, int32 associatedTypeDefCount,
-    init ref<uint32> visibility, init ref<int32> ownerType)
+    ref<init uint32> visibility, ref<init int32> ownerType)
 {
     uint32 table = definition >> 24;
     uint32 row = definition & 0xFF_FFFF;
@@ -125,72 +138,79 @@ bool TryGetExportVisibilityOwner(uint32 definition,
 
     if (table == 0x13)
     {
+        init uint32 flags;
         if (row > uint32(typeDefCount)
             || !TryReadTypeDefTableWord((int32(row) - 1) * 44, 8,
-                init var flags))
+                ref init flags))
         {
             return false;
         }
-        visibility = flags & 3;
-        ownerType = 0;
+        *visibility = flags & 3;
+        *ownerType = 0;
         return true;
     }
 
     if (table == 0x16)
     {
+        init uint32 flags;
+        init uint32 owner;
         if (row > uint32(methodDefCount)
             || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 12,
-                init var flags)
+                ref init flags)
             || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 0,
-                init var owner))
+                ref init owner))
         {
             return false;
         }
-        visibility = flags & 3;
-        ownerType = int32(owner);
+        *visibility = flags & 3;
+        *ownerType = int32(owner);
         return true;
     }
 
     if (table == 0x14)
     {
+        init uint32 flags;
         if (!TryGetFieldOwnerType(int32(row), typeDefCount, fieldDefCount,
-            init ownerType)
+            ref init *ownerType)
             || !TryReadFieldDefTableWord((int32(row) - 1) * 16, 12,
-                init var flags))
+                ref init flags))
         {
             return false;
         }
 
-        visibility = flags & 3;
+        *visibility = flags & 3;
         return true;
     }
 
     if (table == 0x1E)
     {
+        init uint32 flags;
+        init uint32 owner;
         if (row > uint32(propertyDefCount)
             || !TryReadPropertyTableWord((int32(row) - 1) * 20, 16,
-                init var flags)
+                ref init flags)
             || !TryReadPropertyTableWord((int32(row) - 1) * 20, 0,
-                init var owner))
+                ref init owner))
         {
             return false;
         }
-        visibility = flags & 3;
-        ownerType = int32(owner);
+        *visibility = flags & 3;
+        *ownerType = int32(owner);
         return true;
     }
 
     if (table == 0x20)
     {
+        init uint32 flags;
         if (!TryGetAssociatedTypeOwnerType(int32(row), typeDefCount,
-            interfaceDefCount, associatedTypeDefCount, init ownerType)
-            || !TryReadTypeDefTableWord((ownerType - 1) * 44, 8,
-                init var flags))
+            interfaceDefCount, associatedTypeDefCount, ref init *ownerType)
+            || !TryReadTypeDefTableWord((*ownerType - 1) * 44, 8,
+                ref init flags))
         {
             return false;
         }
 
-        visibility = flags & 3;
+        *visibility = flags & 3;
         return true;
     }
 
@@ -222,7 +242,8 @@ bool TrySortAndCheckExportKeys(int32 recordCount)
 
     for (mut int32 row = 2; row <= recordCount; row = row + 1)
     {
-        if (!TryCompareExportSlots(row - 1, row, init var comparison))
+        init int32 comparison;
+        if (!TryCompareExportSlots(row - 1, row, ref init comparison))
         {
             return false;
         }
@@ -240,11 +261,13 @@ bool TrySiftExportKeyHeap(int32 root, int32 heapEnd)
     mut int32 current = root;
     while (current <= heapEnd / 2)
     {
+        init int32 parentComparison;
         mut int32 child = current * 2;
         if (child < heapEnd)
         {
+            init int32 childComparison;
             if (!TryCompareExportSlots(child, child + 1,
-                init var childComparison))
+                ref init childComparison))
             {
                 return false;
             }
@@ -254,7 +277,7 @@ bool TrySiftExportKeyHeap(int32 root, int32 heapEnd)
             }
         }
 
-        if (!TryCompareExportSlots(current, child, init var parentComparison))
+        if (!TryCompareExportSlots(current, child, ref init parentComparison))
         {
             return false;
         }
@@ -270,25 +293,25 @@ bool TrySiftExportKeyHeap(int32 root, int32 heapEnd)
     return true;
 }
 
-bool TryCompareExportSlots(int32 first, int32 second, init ref<int32> comparison)
+bool TryCompareExportSlots(int32 first, int32 second, ref<init int32> comparison)
 {
     int32 firstModule = Host.ExportModules[first];
     int32 secondModule = Host.ExportModules[second];
     if (firstModule < secondModule)
     {
-        comparison = -1;
+        *comparison = -1;
         return true;
     }
     if (firstModule > secondModule)
     {
-        comparison = 1;
+        *comparison = 1;
         return true;
     }
 
-    return TryCompareExportKeyText(first, second, init comparison);
+    return TryCompareExportKeyText(first, second, ref init *comparison);
 }
 
-bool TryCompareExportKeyText(int32 first, int32 second, init ref<int32> comparison)
+bool TryCompareExportKeyText(int32 first, int32 second, ref<init int32> comparison)
 {
     int32 firstStart = Host.ExportKeyStarts[first];
     int32 secondStart = Host.ExportKeyStarts[second];
@@ -302,23 +325,27 @@ bool TryCompareExportKeyText(int32 first, int32 second, init ref<int32> comparis
     while (firstPosition < firstContentLength
         && secondPosition < secondContentLength)
     {
+        init int32 firstScalar;
+        init int32 firstBytesRead;
+        init int32 secondScalar;
+        init int32 secondBytesRead;
         if (!TryDecodeStringRowScalar(firstStart, firstPosition,
             firstContentLength, firstEncoding,
-            init var firstScalar, init var firstBytesRead)
+            ref init firstScalar, ref init firstBytesRead)
             || !TryDecodeStringRowScalar(secondStart, secondPosition,
                 secondContentLength, secondEncoding,
-                init var secondScalar, init var secondBytesRead))
+                ref init secondScalar, ref init secondBytesRead))
         {
             return false;
         }
         if (firstScalar < secondScalar)
         {
-            comparison = -1;
+            *comparison = -1;
             return true;
         }
         if (firstScalar > secondScalar)
         {
-            comparison = 1;
+            *comparison = 1;
             return true;
         }
 
@@ -328,15 +355,15 @@ bool TryCompareExportKeyText(int32 first, int32 second, init ref<int32> comparis
 
     if (firstPosition < firstContentLength)
     {
-        comparison = 1;
+        *comparison = 1;
     }
     else if (secondPosition < secondContentLength)
     {
-        comparison = -1;
+        *comparison = -1;
     }
     else
     {
-        comparison = 0;
+        *comparison = 0;
     }
     return true;
 }
@@ -360,24 +387,28 @@ void SwapExportKeys(int32 first, int32 second)
     Host.ExportKeyContentLengths[second] = value;
 }
 
-bool TryReadExportTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadExportTableWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Exports.Length - 8
         || offset < 0 || offset > 4
-        || !TryReadExportTableByte(rowStart + offset, init var first)
-        || !TryReadExportTableByte(rowStart + offset + 1, init var second)
-        || !TryReadExportTableByte(rowStart + offset + 2, init var third)
-        || !TryReadExportTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadExportTableByte(rowStart + offset, ref init first)
+        || !TryReadExportTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadExportTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadExportTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadExportTableByte(int32 offset, init ref<int32> value)
+bool TryReadExportTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.Exports.Length)
     {
@@ -390,6 +421,6 @@ bool TryReadExportTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }

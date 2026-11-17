@@ -4,6 +4,11 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public bool CheckCopyAlgorithms()
 {
+    init int64 initialized;
+    init SourceRange firstRange;
+    init SourceRange secondRange;
+    init SourceRange initializedRange;
+    init Token initializedToken;
     int64 selected = SelectCopy(true, int64.MinValue, int64.MaxValue);
     bool selectedBoolean = SelectCopy(false, true, false);
     char16 selectedCodeUnit = SelectCopy(true, char16(55296), char16(65));
@@ -16,11 +21,11 @@ public bool CheckCopyAlgorithms()
         return false;
     }
 
-    if (TrySelectCopyInit(2, int64(40), int64(42), init var initialized))
+    if (TrySelectCopyInit(2, int64(40), int64(42), ref init initialized))
     {
         return false;
     }
-    require TrySelectCopyInit(1, int64(40), int64(42), init initialized);
+    require TrySelectCopyInit(1, int64(40), int64(42), ref init initialized);
     mut int64 outDestination = 40;
     if (TrySelectCopy(-1, int64(40), int64(42), out outDestination))
     {
@@ -34,18 +39,18 @@ public bool CheckCopyAlgorithms()
         return false;
     }
 
-    require SourceRange.TryCreate(12, 5, init var firstRange);
-    require SourceRange.TryCreate(42, 7, init var secondRange);
+    require SourceRange.TryCreate(12, 5, ref init firstRange);
+    require SourceRange.TryCreate(42, 7, ref init secondRange);
     SourceRange selectedRange = SelectCopy(false, firstRange, secondRange);
     if (selectedRange.Start != 42 || selectedRange.Length != 7)
     {
         return false;
     }
-    if (TrySelectCopyInit(2, firstRange, secondRange, init var initializedRange))
+    if (TrySelectCopyInit(2, firstRange, secondRange, ref init initializedRange))
     {
         return false;
     }
-    require TrySelectCopyInit(1, firstRange, secondRange, init initializedRange);
+    require TrySelectCopyInit(1, firstRange, secondRange, ref init initializedRange);
     require TrySelectCopy(0, firstRange, secondRange, out var copiedRange);
     if (initializedRange.Start != 42 || initializedRange.Length != 7
         || copiedRange.Start != 12 || copiedRange.Length != 5)
@@ -62,11 +67,11 @@ public bool CheckCopyAlgorithms()
         return false;
     }
 
-    if (TrySelectCopyInit(2, first, second, init var initializedToken))
+    if (TrySelectCopyInit(2, first, second, ref init initializedToken))
     {
         return false;
     }
-    require TrySelectCopyInit(0, first, second, init initializedToken);
+    require TrySelectCopyInit(0, first, second, ref init initializedToken);
     if (initializedToken.Kind != 1 || initializedToken.Range.Start != 12
         || initializedToken.Range.Length != 5)
     {

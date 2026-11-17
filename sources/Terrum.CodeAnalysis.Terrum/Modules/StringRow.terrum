@@ -1,22 +1,22 @@
 namespace Terrum.CodeAnalysis;
 
 bool TryMeasureStringRow(StringLiteral literal, int32 flags,
-    init ref<int32> contentBytes, init ref<int32> unitWidth, init ref<int32> rowBytes)
+    ref<init int32> contentBytes, ref<init int32> unitWidth, ref<init int32> rowBytes)
 {
-    return TryMeasureStringRowCore(literal, flags, true, false, init contentBytes,
-        init unitWidth, init rowBytes);
+    return TryMeasureStringRowCore(literal, flags, true, false,
+        ref init *contentBytes, ref init *unitWidth, ref init *rowBytes);
 }
 
 bool TryMeasureStringTextRow(StringLiteral literal, int32 flags, bool allowEmpty,
-    init ref<int32> contentBytes, init ref<int32> unitWidth, init ref<int32> rowBytes)
+    ref<init int32> contentBytes, ref<init int32> unitWidth, ref<init int32> rowBytes)
 {
-    return TryMeasureStringRowCore(literal, flags, allowEmpty, true, init contentBytes,
-        init unitWidth, init rowBytes);
+    return TryMeasureStringRowCore(literal, flags, allowEmpty, true,
+        ref init *contentBytes, ref init *unitWidth, ref init *rowBytes);
 }
 
 bool TryMeasureStringRowCore(StringLiteral literal, int32 flags, bool allowEmpty,
-    bool rejectEmbeddedZero, init ref<int32> contentBytes, init ref<int32> unitWidth,
-    init ref<int32> rowBytes)
+    bool rejectEmbeddedZero, ref<init int32> contentBytes, ref<init int32> unitWidth,
+    ref<init int32> rowBytes)
 {
     mut int32 bytes = 0;
     mut int32 width = 1;
@@ -32,8 +32,15 @@ bool TryMeasureStringRowCore(StringLiteral literal, int32 flags, bool allowEmpty
         return false;
     }
     mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
-    while (cursor.TryRead(init var scalar, init var next))
+    while (true)
     {
+        init int32 scalar;
+        init StringLiteralCursor next;
+        if (!cursor.TryRead(ref init scalar, ref init next))
+        {
+            break;
+        }
+
         if (rejectEmbeddedZero && scalar == 0)
         {
             return false;
@@ -69,62 +76,71 @@ bool TryMeasureStringRowCore(StringLiteral literal, int32 flags, bool allowEmpty
         return false;
     }
     int32 extent = 4 + bytes + width;
-    contentBytes = bytes;
-    unitWidth = width;
-    rowBytes = extent + ((4 - (extent & 3)) & 3);
+    *contentBytes = bytes;
+    *unitWidth = width;
+    *rowBytes = extent + ((4 - (extent & 3)) & 3);
     return true;
 }
 
 public static bool TryGetStringRowByteLength(StringLiteral literal, int32 flags,
-    init ref<int32> byteLength)
+    ref<init int32> byteLength)
 {
-    if (!TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
-        init var rowBytes))
+    init int32 contentBytes;
+    init int32 unitWidth;
+    init int32 rowBytes;
+    if (!TryMeasureStringRow(literal, flags, ref init contentBytes, ref init unitWidth,
+        ref init rowBytes))
     {
         return false;
     }
-    byteLength = rowBytes;
+    *byteLength = rowBytes;
     return true;
 }
 
 public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 flags,
-    init ref<int32> byteLength)
+    ref<init int32> byteLength)
 {
-    if (!TryMeasureStringTextRow(literal, flags, false, init var contentBytes,
-            init var unitWidth, init var rowBytes))
+    init int32 contentBytes;
+    init int32 unitWidth;
+    init int32 rowBytes;
+    if (!TryMeasureStringTextRow(literal, flags, false, ref init contentBytes,
+            ref init unitWidth, ref init rowBytes))
     {
         return false;
     }
-    byteLength = rowBytes;
+    *byteLength = rowBytes;
     return true;
 }
 
 public static bool TryGetStringNamespaceRowByteLength(StringLiteral literal, int32 flags,
-    init ref<int32> byteLength)
+    ref<init int32> byteLength)
 {
-    if (!TryMeasureStringTextRow(literal, flags, true, init var contentBytes,
-            init var unitWidth, init var rowBytes))
+    init int32 contentBytes;
+    init int32 unitWidth;
+    init int32 rowBytes;
+    if (!TryMeasureStringTextRow(literal, flags, true, ref init contentBytes,
+            ref init unitWidth, ref init rowBytes))
     {
         return false;
     }
-    byteLength = rowBytes;
+    *byteLength = rowBytes;
     return true;
 }
 
 public static bool TryCompareStringNames(StringLiteral left, StringLiteral right,
-    init ref<bool> equal)
+    ref<init bool> equal)
 {
-    return TryCompareStringText(left, right, false, init equal);
+    return TryCompareStringText(left, right, false, ref init *equal);
 }
 
 public static bool TryCompareStringNamespaces(StringLiteral left, StringLiteral right,
-    init ref<bool> equal)
+    ref<init bool> equal)
 {
-    return TryCompareStringText(left, right, true, init equal);
+    return TryCompareStringText(left, right, true, ref init *equal);
 }
 
 bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmpty,
-    init ref<bool> equal)
+    ref<init bool> equal)
 {
     if (!allowEmpty && (left.ScalarCount == 0 || right.ScalarCount == 0))
     {
@@ -134,13 +150,22 @@ bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmp
     mut StringLiteralCursor leftCursor = StringLiteralCursor.Create(left);
     mut StringLiteralCursor rightCursor = StringLiteralCursor.Create(right);
     mut bool same = true;
-    while (leftCursor.TryRead(init var leftScalar, init var leftNext))
+    while (true)
     {
+        init int32 leftScalar;
+        init StringLiteralCursor leftNext;
+        if (!leftCursor.TryRead(ref init leftScalar, ref init leftNext))
+        {
+            break;
+        }
+
         if (leftScalar == 0)
         {
             return false;
         }
-        if (rightCursor.TryRead(init var rightScalar, init var rightNext))
+        init int32 rightScalar;
+        init StringLiteralCursor rightNext;
+        if (rightCursor.TryRead(ref init rightScalar, ref init rightNext))
         {
             if (rightScalar == 0)
             {
@@ -158,8 +183,15 @@ bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmp
         }
         leftCursor = leftNext;
     }
-    while (rightCursor.TryRead(init var remaining, init var following))
+    while (true)
     {
+        init int32 remaining;
+        init StringLiteralCursor following;
+        if (!rightCursor.TryRead(ref init remaining, ref init following))
+        {
+            break;
+        }
+
         if (remaining == 0)
         {
             return false;
@@ -167,15 +199,18 @@ bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmp
         same = false;
         rightCursor = following;
     }
-    equal = same;
+    *equal = same;
     return true;
 }
 
 public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flags,
     OwnedInt32Buffer workspace)
 {
-    require TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
-        init var rowBytes);
+    init int32 contentBytes;
+    init int32 unitWidth;
+    init int32 rowBytes;
+    require TryMeasureStringRow(literal, flags, ref init contentBytes, ref init unitWidth,
+        ref init rowBytes);
     return EncodeMeasuredStringRow(literal, flags, contentBytes, unitWidth, rowBytes,
         move workspace);
 }
@@ -215,18 +250,25 @@ OwnedInt32Buffer EncodeMeasuredStringRow(StringLiteral literal, int32 flags,
 public static OwnedInt32Buffer EncodeStringNameRow(StringLiteral literal, int32 flags,
     OwnedInt32Buffer workspace)
 {
-    require TryMeasureStringTextRow(literal, flags, false, init var contentBytes,
-        init var unitWidth, init var rowBytes);
+    init int32 contentBytes;
+    init int32 unitWidth;
+    init int32 rowBytes;
+    require TryMeasureStringTextRow(literal, flags, false, ref init contentBytes,
+        ref init unitWidth, ref init rowBytes);
     return EncodeMeasuredStringRow(literal, flags, contentBytes, unitWidth, rowBytes,
         move workspace);
 }
 
 bool TryBuildStringTextRowUtf8(SourceRange spelling, bool allowEmpty,
-    OwnedInt32Buffer workspace, init ref<OwnedInt32Buffer> row)
+    OwnedInt32Buffer workspace, ref<init OwnedInt32Buffer> row)
 {
-    if (!StringLiteral.TryCreate(spelling, init var literal)
-        || !TryMeasureStringTextRow(literal, 1, allowEmpty, init var contentBytes,
-            init var unitWidth, init var rowBytes)
+    init StringLiteral literal;
+    init int32 contentBytes;
+    init int32 unitWidth;
+    init int32 rowBytes;
+    if (!StringLiteral.TryCreate(spelling, ref init literal)
+        || !TryMeasureStringTextRow(literal, 1, allowEmpty, ref init contentBytes,
+            ref init unitWidth, ref init rowBytes)
         || workspace.Capacity < rowBytes)
     {
         return false;
@@ -234,27 +276,30 @@ bool TryBuildStringTextRowUtf8(SourceRange spelling, bool allowEmpty,
 
     OwnedInt32Buffer completed = EncodeMeasuredStringRow(literal, 1, contentBytes,
         unitWidth, rowBytes, move workspace);
-    row = move completed;
+    *row = move completed;
     return true;
 }
 
 public static bool TryBuildStringNameRowUtf8(SourceRange spelling,
-    OwnedInt32Buffer workspace, init ref<OwnedInt32Buffer> row)
+    OwnedInt32Buffer workspace, ref<init OwnedInt32Buffer> row)
 {
-    return TryBuildStringTextRowUtf8(spelling, false, move workspace, init row);
+    return TryBuildStringTextRowUtf8(spelling, false, move workspace, ref init *row);
 }
 
 public static bool TryBuildStringNamespaceRowUtf8(SourceRange spelling,
-    OwnedInt32Buffer workspace, init ref<OwnedInt32Buffer> row)
+    OwnedInt32Buffer workspace, ref<init OwnedInt32Buffer> row)
 {
-    return TryBuildStringTextRowUtf8(spelling, true, move workspace, init row);
+    return TryBuildStringTextRowUtf8(spelling, true, move workspace, ref init *row);
 }
 
 public static OwnedInt32Buffer EncodeStringNamespaceRow(StringLiteral literal, int32 flags,
     OwnedInt32Buffer workspace)
 {
-    require TryMeasureStringTextRow(literal, flags, true, init var contentBytes,
-        init var unitWidth, init var rowBytes);
+    init int32 contentBytes;
+    init int32 unitWidth;
+    init int32 rowBytes;
+    require TryMeasureStringTextRow(literal, flags, true, ref init contentBytes,
+        ref init unitWidth, ref init rowBytes);
     return EncodeMeasuredStringRow(literal, flags, contentBytes, unitWidth, rowBytes,
         move workspace);
 }

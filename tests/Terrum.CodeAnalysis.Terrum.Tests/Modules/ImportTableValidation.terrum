@@ -46,10 +46,21 @@ public static bool TryValidateImportTable(int32 recordCount,
 
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
+        init uint32 moduleRef;
+        init uint32 key;
+        init uint32 expected;
+        init int32 keyOffset;
+        init int32 keyLength;
+        init int32 keyScalarCount;
+        init int32 expectedModule;
+        init uint32 body;
+        init int32 referenceModule;
+        init uint32 target;
+        init uint32 policy;
         int32 rowStart = (row - 1) * 12;
-        if (!TryReadImportTableWord(rowStart, 0, init var moduleRef)
-            || !TryReadImportTableWord(rowStart, 4, init var key)
-            || !TryReadImportTableWord(rowStart, 8, init var expected))
+        if (!TryReadImportTableWord(rowStart, 0, ref init moduleRef)
+            || !TryReadImportTableWord(rowStart, 4, ref init key)
+            || !TryReadImportTableWord(rowStart, 8, ref init expected))
         {
             return false;
         }
@@ -59,33 +70,33 @@ public static bool TryValidateImportTable(int32 recordCount,
             return false;
         }
         if (!TryGetValidatedVariableTableRowExtent(stringCount, 8, 4, int32(key),
-            init var keyOffset, init var keyLength))
+            ref init keyOffset, ref init keyLength))
         {
             return false;
         }
         if (!TryGetStringNameScalarCount((stringCount + 1) * 4 + int32(keyOffset),
-            keyLength, init var keyScalarCount))
+            keyLength, ref init keyScalarCount))
         {
             return false;
         }
         if (!TryGetImportDefinitionModule(expected, moduleCount,
             typeDefCount, fieldDefCount, methodDefCount, propertyDefCount,
             interfaceDefCount, associatedTypeDefCount,
-            init var expectedModule, init var body))
+            ref init expectedModule, ref init body))
         {
             return false;
         }
         if (!TryGetImportModuleRefOwner(int32(moduleRef), moduleCount,
-            moduleRefCount, init var referenceModule)
+            moduleRefCount, ref init referenceModule)
             || expectedModule != referenceModule
             || ((expected >> 24 == 0x16 || expected >> 24 == 0x1E) && body != 0))
         {
             return false;
         }
         if (!TryReadModuleRefTableWord(int32(moduleRef), 4,
-            init var target)
+            ref init target)
             || !TryReadModuleRefTableWord(int32(moduleRef), 8,
-                init var policy))
+                ref init policy))
         {
             return false;
         }
@@ -102,14 +113,16 @@ public static bool TryValidateImportTable(int32 recordCount,
 
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
-        if (!TryReadImportTableWord((row - 1) * 12, 8, init var expected))
+        init uint32 expected;
+        if (!TryReadImportTableWord((row - 1) * 12, 8, ref init expected))
         {
             return false;
         }
         if (expected >> 24 == 0x14)
         {
+            init int32 fieldOwner;
             if (!TryGetFieldOwnerType(int32(expected & 0xFF_FFFF),
-                typeDefCount, fieldDefCount, init var fieldOwner)
+                typeDefCount, fieldDefCount, ref init fieldOwner)
                 || !IsExpectedImportDefinition(
                     0x1300_0000 | uint32(fieldOwner), recordCount))
             {
@@ -118,10 +131,11 @@ public static bool TryValidateImportTable(int32 recordCount,
         }
         else if (expected >> 24 == 0x20)
         {
+            init int32 ownerType;
             if (!TryGetAssociatedTypeOwnerType(
                 int32(expected & 0xFF_FFFF), typeDefCount,
                 interfaceDefCount, associatedTypeDefCount,
-                init var ownerType)
+                ref init ownerType)
                 || !IsExpectedImportDefinition(
                     0x1300_0000 | uint32(ownerType), recordCount))
             {
@@ -165,7 +179,7 @@ public static bool IsExpectedImportDefinition(uint32 reference, int32 recordCoun
 }
 
 public static bool TryGetExpectedImportRequirements(uint32 reference,
-    int32 recordCount, init ref<uint32> targetRequirement, init ref<uint32> runtimePolicy)
+    int32 recordCount, ref<init uint32> targetRequirement, ref<init uint32> runtimePolicy)
 {
     if (recordCount < 0
         || Host.ImportExpectedDefinitions.Length != recordCount + 1
@@ -183,8 +197,8 @@ public static bool TryGetExpectedImportRequirements(uint32 reference,
         uint32 candidate = uint32(Host.ImportExpectedDefinitions[middle]);
         if (candidate == reference)
         {
-            targetRequirement = uint32(Host.ImportExpectedTargets[middle]);
-            runtimePolicy = uint32(Host.ImportExpectedPolicies[middle]);
+            *targetRequirement = uint32(Host.ImportExpectedTargets[middle]);
+            *runtimePolicy = uint32(Host.ImportExpectedPolicies[middle]);
             return true;
         }
         if (candidate < reference)
@@ -204,7 +218,7 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
     int32 typeDefCount, int32 fieldDefCount, int32 methodDefCount,
     int32 propertyDefCount,
     int32 interfaceDefCount, int32 associatedTypeDefCount,
-    init ref<int32> ownerModule, init ref<uint32> body)
+    ref<init int32> ownerModule, ref<init uint32> body)
 {
     uint32 table = reference >> 24;
     uint32 row = reference & 0xFF_FFFF;
@@ -217,11 +231,11 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
     {
         if (row > uint32(typeDefCount)
             || !TryGetImportTableOwnerModule(int32(row), moduleCount, typeDefCount, 36,
-                init ownerModule))
+                ref init *ownerModule))
         {
             return false;
         }
-        body = 0;
+        *body = 0;
         return true;
     }
 
@@ -229,8 +243,8 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
     {
         if (row > uint32(methodDefCount)
             || !TryGetImportTableOwnerModule(int32(row), moduleCount, methodDefCount, 40,
-                init ownerModule)
-            || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 24, init body))
+                ref init *ownerModule)
+            || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 24, ref init *body))
         {
             return false;
         }
@@ -239,26 +253,29 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
 
     if (table == 0x14)
     {
+        init int32 ownerType;
         if (!TryGetFieldOwnerType(int32(row), typeDefCount, fieldDefCount,
-            init var ownerType)
+            ref init ownerType)
             || !TryGetImportTableOwnerModule(ownerType, moduleCount,
-                typeDefCount, 36, init ownerModule))
+                typeDefCount, 36, ref init *ownerModule))
         {
             return false;
         }
 
-        body = 0;
+        *body = 0;
         return true;
     }
 
     if (table == 0x1E)
     {
+        init uint32 ownerType;
+        init uint32 getter;
         if (row > uint32(propertyDefCount)
-            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 0, init var ownerType)
+            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 0, ref init ownerType)
             || !TryGetImportTableOwnerModule(int32(ownerType), moduleCount, typeDefCount, 36,
-                init ownerModule)
-            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 12, init var getter)
-            || !TryReadMethodDefTableWord((int32(getter) - 1) * 28, 24, init body))
+                ref init *ownerModule)
+            || !TryReadPropertyTableWord((int32(row) - 1) * 20, 12, ref init getter)
+            || !TryReadMethodDefTableWord((int32(getter) - 1) * 28, 24, ref init *body))
         {
             return false;
         }
@@ -267,15 +284,16 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
 
     if (table == 0x20)
     {
+        init int32 ownerType;
         if (!TryGetAssociatedTypeOwnerType(int32(row), typeDefCount,
-            interfaceDefCount, associatedTypeDefCount, init var ownerType)
+            interfaceDefCount, associatedTypeDefCount, ref init ownerType)
             || !TryGetImportTableOwnerModule(ownerType, moduleCount,
-                typeDefCount, 36, init ownerModule))
+                typeDefCount, 36, ref init *ownerModule))
         {
             return false;
         }
 
-        body = 0;
+        *body = 0;
         return true;
     }
 
@@ -284,61 +302,68 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
 
 bool TryGetAssociatedTypeOwnerType(int32 row, int32 typeDefCount,
     int32 interfaceDefCount, int32 associatedTypeDefCount,
-    init ref<int32> ownerType)
+    ref<init int32> ownerType)
 {
+    init uint32 ownerInterface;
+    init uint32 declaredOwner;
+    init uint32 associatedFirst;
+    init uint32 associatedCount;
+    init uint32 flags;
     if (row <= 0 || row > associatedTypeDefCount
         || interfaceDefCount <= 0
         || !TryReadAssociatedTypeDefTableWord((row - 1) * 12, 0,
-            init var ownerInterface)
+            ref init ownerInterface)
         || ownerInterface == 0 || ownerInterface > uint32(interfaceDefCount)
         || !TryReadInterfaceDefTableWord(
-            (int32(ownerInterface) - 1) * 48, 0, init var declaredOwner)
+            (int32(ownerInterface) - 1) * 48, 0, ref init declaredOwner)
         || declaredOwner == 0 || declaredOwner > uint32(typeDefCount)
         || !TryReadInterfaceDefTableWord(
-            (int32(ownerInterface) - 1) * 48, 24, init var associatedFirst)
+            (int32(ownerInterface) - 1) * 48, 24, ref init associatedFirst)
         || !TryReadInterfaceDefTableWord(
-            (int32(ownerInterface) - 1) * 48, 28, init var associatedCount)
+            (int32(ownerInterface) - 1) * 48, 28, ref init associatedCount)
         || associatedFirst == 0 || associatedCount == 0
         || associatedFirst > uint32(associatedTypeDefCount)
         || associatedCount > uint32(associatedTypeDefCount) - associatedFirst + 1
         || uint32(row) < associatedFirst
         || uint32(row) - associatedFirst >= associatedCount
         || !TryReadTypeDefTableWord(
-            (int32(declaredOwner) - 1) * 44, 8, init var flags)
+            (int32(declaredOwner) - 1) * 44, 8, ref init flags)
         || ((flags >> 2) & 3) != 3)
     {
         return false;
     }
 
-    ownerType = int32(declaredOwner);
+    *ownerType = int32(declaredOwner);
     return true;
 }
 
 bool TryGetFieldOwnerType(int32 row, int32 typeDefCount,
-    int32 fieldDefCount, init ref<int32> ownerType)
+    int32 fieldDefCount, ref<init int32> ownerType)
 {
+    init uint32 owner;
     if (row <= 0 || row > fieldDefCount
-        || !TryReadFieldDefTableWord((row - 1) * 16, 0, init var owner)
+        || !TryReadFieldDefTableWord((row - 1) * 16, 0, ref init owner)
         || owner == 0 || owner > uint32(typeDefCount)
         || owner != uint32(Host.FieldOwners[row]))
     {
         return false;
     }
 
-    ownerType = int32(owner);
+    *ownerType = int32(owner);
     return true;
 }
 
 bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
-    int32 tableCount, int32 cursorOffset, init ref<int32> ownerModule)
+    int32 tableCount, int32 cursorOffset, ref<init int32> ownerModule)
 {
     mut int32 low = 1;
     mut int32 high = moduleCount;
     while (low <= high)
     {
+        init uint32 start;
         int32 middle = low + (high - low) / 2;
         if (!TryReadModuleTableWord((middle - 1) * 48, cursorOffset,
-            init var start))
+            ref init start))
         {
             return false;
         }
@@ -346,7 +371,8 @@ bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
         mut uint32 end = uint32(tableCount + 1);
         if (middle < moduleCount)
         {
-            if (!TryReadModuleTableWord(middle * 48, cursorOffset, init var nextStart))
+            init uint32 nextStart;
+            if (!TryReadModuleTableWord(middle * 48, cursorOffset, ref init nextStart))
             {
                 return false;
             }
@@ -363,7 +389,7 @@ bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
         }
         else
         {
-            ownerModule = middle;
+            *ownerModule = middle;
             return true;
         }
     }
@@ -372,9 +398,9 @@ bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
 }
 
 bool TryGetImportModuleRefOwner(int32 row, int32 moduleCount,
-    int32 moduleRefCount, init ref<int32> ownerModule)
+    int32 moduleRefCount, ref<init int32> ownerModule)
     => TryGetImportTableOwnerModule(row, moduleCount, moduleRefCount, 32,
-        init ownerModule);
+        ref init *ownerModule);
 
 bool TrySortAndCheckImportExpectations(int32 recordCount)
 {
@@ -441,24 +467,28 @@ void SwapImportExpectations(int32 first, int32 second)
     Host.ImportExpectedPolicies[second] = value;
 }
 
-bool TryReadImportTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadImportTableWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.Imports.Length - 12
         || offset < 0 || offset > 8
-        || !TryReadImportTableByte(rowStart + offset, init var first)
-        || !TryReadImportTableByte(rowStart + offset + 1, init var second)
-        || !TryReadImportTableByte(rowStart + offset + 2, init var third)
-        || !TryReadImportTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadImportTableByte(rowStart + offset, ref init first)
+        || !TryReadImportTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadImportTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadImportTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadImportTableByte(int32 offset, init ref<int32> value)
+bool TryReadImportTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.Imports.Length)
     {
@@ -471,28 +501,32 @@ bool TryReadImportTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
 
-bool TryReadInterfaceDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadInterfaceDefTableWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.InterfaceDefs.Length - 48
         || offset < 0 || offset > 44
-        || !TryReadInterfaceDefTableByte(rowStart + offset, init var first)
-        || !TryReadInterfaceDefTableByte(rowStart + offset + 1, init var second)
-        || !TryReadInterfaceDefTableByte(rowStart + offset + 2, init var third)
-        || !TryReadInterfaceDefTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadInterfaceDefTableByte(rowStart + offset, ref init first)
+        || !TryReadInterfaceDefTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadInterfaceDefTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadInterfaceDefTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadInterfaceDefTableByte(int32 offset, init ref<int32> value)
+bool TryReadInterfaceDefTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.InterfaceDefs.Length)
     {
@@ -505,29 +539,33 @@ bool TryReadInterfaceDefTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
 
 bool TryReadAssociatedTypeDefTableWord(int32 rowStart, int32 offset,
-    init ref<uint32> value)
+    ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.AssociatedTypeDefs.Length - 12
         || offset < 0 || offset > 8
-        || !TryReadAssociatedTypeDefTableByte(rowStart + offset, init var first)
-        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 1, init var second)
-        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 2, init var third)
-        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset, ref init first)
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadAssociatedTypeDefTableByte(int32 offset, init ref<int32> value)
+bool TryReadAssociatedTypeDefTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.AssociatedTypeDefs.Length)
     {
@@ -540,28 +578,32 @@ bool TryReadAssociatedTypeDefTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
 
-bool TryReadFieldDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+bool TryReadFieldDefTableWord(int32 rowStart, int32 offset, ref<init uint32> value)
 {
+    init int32 first;
+    init int32 second;
+    init int32 third;
+    init int32 fourth;
     if (rowStart < 0 || rowStart > Host.FieldDefs.Length - 16
         || offset < 0 || offset > 12
-        || !TryReadFieldDefTableByte(rowStart + offset, init var first)
-        || !TryReadFieldDefTableByte(rowStart + offset + 1, init var second)
-        || !TryReadFieldDefTableByte(rowStart + offset + 2, init var third)
-        || !TryReadFieldDefTableByte(rowStart + offset + 3, init var fourth))
+        || !TryReadFieldDefTableByte(rowStart + offset, ref init first)
+        || !TryReadFieldDefTableByte(rowStart + offset + 1, ref init second)
+        || !TryReadFieldDefTableByte(rowStart + offset + 2, ref init third)
+        || !TryReadFieldDefTableByte(rowStart + offset + 3, ref init fourth))
     {
         return false;
     }
 
-    value = uint32(first) | (uint32(second) << 8)
+    *value = uint32(first) | (uint32(second) << 8)
         | (uint32(third) << 16) | (uint32(fourth) << 24);
     return true;
 }
 
-bool TryReadFieldDefTableByte(int32 offset, init ref<int32> value)
+bool TryReadFieldDefTableByte(int32 offset, ref<init int32> value)
 {
     if (offset < 0 || offset >= Host.FieldDefs.Length)
     {
@@ -574,6 +616,6 @@ bool TryReadFieldDefTableByte(int32 offset, init ref<int32> value)
         return false;
     }
 
-    value = part;
+    *value = part;
     return true;
 }
