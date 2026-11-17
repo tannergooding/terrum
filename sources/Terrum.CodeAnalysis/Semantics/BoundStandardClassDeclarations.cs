@@ -27,8 +27,10 @@ internal sealed record BoundStandardClassTypeView(
     internal bool TryGetDeclaredMutability(out bool isMutable)
     {
         if (Provider is not null
-            && StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
-                "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1"))
+            && (StringComparer.Ordinal.Equals(Provider.SchemaIdentity,
+                    "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1")
+                || BoundStandardEnumDeclarationContract
+                    .IsSelectedSchemaIdentity(Provider.SchemaIdentity)))
         {
             isMutable = (TypeDefFlags & 0x80) != 0;
             return true;
@@ -173,7 +175,10 @@ internal static class BoundStandardClassDeclarationContract
             || !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
                 C1SchemaIdentity)
                 && !StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
-                    C1M1SchemaIdentity))
+                    C1M1SchemaIdentity)
+                && !BoundStandardEnumDeclarationContract
+                    .IsSelectedSchemaIdentity(
+                        view.Provider.SchemaIdentity))
         {
             return false;
         }
@@ -181,7 +186,10 @@ internal static class BoundStandardClassDeclarationContract
         var kind = (view.TypeDefFlags >> 2) & 7;
         var schemaAllowsMutability
             = StringComparer.Ordinal.Equals(view.Provider.SchemaIdentity,
-                C1M1SchemaIdentity);
+                C1M1SchemaIdentity)
+                || BoundStandardEnumDeclarationContract
+                    .IsSelectedSchemaIdentity(
+                        view.Provider.SchemaIdentity);
         uint allowedFlags = schemaAllowsMutability ? 0x8Fu : 0x0Fu;
         if (kind != 2 || (view.TypeDefFlags & ~allowedFlags) != 0
             || (view.TypeDefFlags & 3) == 3)

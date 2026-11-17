@@ -568,6 +568,75 @@ internal sealed class TrRmC1EnumClosureSourceTests
     }
 
     [Test]
+    public void EmitsEN1ClassFieldsWithTypedEnumReferences()
+    {
+        var schemaIdentity = s_schemaIdentities[0];
+        var tree = SyntaxTree.Parse("""
+            namespace Demo {
+                public enum Shade : int8 { Dark = -1 }
+                public class Palette {
+                    public Shade ShadeValue;
+                    public int32 Id;
+                }
+            }
+            """);
+        var compilation = Compilation.CreateLibrary(tree);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = (BoundProgram)compilation.Program!;
+        var classDeclaration = tree.Root.Children.OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclarations = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var classExport = new TrRmSourceClassExport(program, 0,
+            classDeclaration.Span, "type.palette", [
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclarations[0].Span, "field.palette.shade"),
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclarations[1].Span, "field.palette.id"),
+            ]);
+        var enumExport = CreateExport(program, tree, 0, "Shade",
+            ["type.shade"], "shade");
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "PaletteModule", schemaIdentity, 1, [], [], [classExport],
+            [enumExport]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(new TrRmArtifactIndex(
+                artifact, SchemaFor(schemaIdentity)));
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(tables.TypeDefs.GetKind(1), Is.EqualTo(4));
+        Assert.That(tables.TypeDefs.GetKind(2), Is.EqualTo(2));
+        Assert.That(tables.TypeDefs.GetFlags(2), Is.EqualTo(0x0Au));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "type.palette", out var paletteDefinition), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "field.palette.shade", out var shadeFieldDefinition), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "field.palette.id", out var idFieldDefinition), Is.True);
+        var paletteTypeDefRow = checked((int)(paletteDefinition
+            & 0x00FF_FFFF));
+        var shadeFieldRow = checked((int)(shadeFieldDefinition
+            & 0x00FF_FFFF));
+        var idFieldRow = checked((int)(idFieldDefinition
+            & 0x00FF_FFFF));
+        Assert.That(tables.Fields.GetOwnerTypeDef(shadeFieldRow),
+            Is.EqualTo(paletteTypeDefRow));
+        Assert.That(tables.Fields.GetOwnerTypeDef(idFieldRow),
+            Is.EqualTo(paletteTypeDefRow));
+        var shadeFieldType = tables.TypeSpecs.GetTypeSpecRef(
+            tables.Fields.GetTypeSpecRef(shadeFieldRow));
+        Assert.That(shadeFieldType.Form, Is.EqualTo((byte)0x02));
+        Assert.That(shadeFieldType.Row, Is.EqualTo(1));
+        Assert.That(Enumerable.Range(1, tables.Features.Count)
+                .Select(row => tables.Features.GetFeature(row).FeatureId),
+            Does.Contain(13u).And.Contain(18u));
+    }
+
+    [Test]
     public void ReconstructsSelectedAndClosureOnlyStandardEnumIdentities()
     {
         var secondary = SyntaxTree.Parse("""

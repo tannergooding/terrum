@@ -50,14 +50,16 @@ public static partial class TrRmExecutableCompiler
         BoundSourceTypeProviderSnapshot? rootSnapshot = null;
         if ((sourceEnumExports is not null
                 && !ReferenceEquals(sourceEnumExports.Program, program))
+            || (sourceClassExports is not null
+                && !ReferenceEquals(sourceClassExports.Program, program))
             || sourceGenericMethodExports?.Exports.IsEmpty == false
-            || sourceClassExports?.Exports.IsEmpty == false
             || (hasSourceTypeExports && sourceEnumExports is null)
             || (sourceEnumExports is not null && hasStandardStructViews)
             || program.EntryPoint != -1 || !program.Functions.IsEmpty
             || (!program.Structures.IsEmpty && !hasSourceTypeExports
-                && !hasStandardStructViews)
-            || !program.Classes.IsEmpty
+                && !hasStandardStructViews
+                && sourceClassExports?.Exports.IsEmpty != false)
+            || (!program.Classes.IsEmpty && sourceClassExports is null)
             || !program.Interfaces.IsEmpty
             || !program.InterfaceWitnesses.IsEmpty
             || !program.Buffers.IsEmpty
@@ -93,7 +95,8 @@ public static partial class TrRmExecutableCompiler
             || program.InvocationProfileId is not null
             || program.NativeLoweringAgreement is not null
             || (!program.SourceTypeDeclarations.IsEmpty
-                && !hasSourceTypeExports)
+                && !hasSourceTypeExports
+                && sourceClassExports?.Exports.IsEmpty != false)
             || !program.SourceGenericTypeDefinitions.IsEmpty
             || !program.SourceGenericTypeInstances.IsEmpty
             || !program.GenericNominalTypeDefinitions.IsEmpty
@@ -113,7 +116,7 @@ public static partial class TrRmExecutableCompiler
                         is not BoundEnumDeclarationIdentity.Standard)))
         {
             throw Unsupported(
-                "The bounded EN1 declaration route accepts mapped source enums or retained Standard enum views, plus mapped local non-generic struct closure; class and executable closure remain outside this writer.");
+                "The bounded EN1 declaration route accepts mapped source enums or retained Standard enum views, with local class and non-generic struct declaration closure; executable class members and Bodies remain outside this writer.");
         }
 
         if (hasSourceTypeExports)
@@ -130,6 +133,10 @@ public static partial class TrRmExecutableCompiler
                     nameof(sourceTypeExports));
             }
 
+            SemanticVerifier.VerifyLibraryReferences(program);
+        }
+        else if (sourceClassExports is not null)
+        {
             SemanticVerifier.VerifyLibraryReferences(program);
         }
         else if (hasStandardStructViews)
@@ -567,6 +574,96 @@ public static partial class TrRmExecutableCompiler
                 ? new Dictionary<int, BoundSourceTypeDeclaration>()
                 : program.SourceTypeDeclarations.ToDictionary(
                     static declaration => declaration.StructureIndex);
+        var usedExportKeys = new HashSet<string>(StringComparer.Ordinal);
+        var sourceClassExportsByIndex
+            = new SortedDictionary<int, List<string>>();
+        var sourceClassFieldExportsByIndex = new Dictionary<
+            (int ClassIndex, int FieldIndex), List<string>>();
+        var retainedClassIndexes = new SortedSet<int>();
+        var sourceClassAssociation = program.SourceClassProgramAssociation;
+        var localClassIndexes = sourceClassAssociation is null
+            || sourceClassAssociation.Declarations.IsDefault
+                ? new HashSet<int>()
+                : sourceClassAssociation.Declarations.Select(
+                    static declaration => declaration.ClassIndex)
+                    .ToHashSet();
+        if (sourceClassExports is not null)
+        {
+            if (sourceClassAssociation is null
+                || !ReferenceEquals(sourceClassAssociation.Program, program)
+                || sourceClassAssociation.Declarations.IsDefault)
+            {
+                throw new ArgumentException(
+                    "EN1 class exports require exact compiler-owned source class declarations.",
+                    nameof(sourceClassExports));
+            }
+
+            foreach (var classExport in sourceClassExports.Exports)
+            {
+                var classIndex = classExport.Declaration.ClassIndex;
+                if ((uint)classIndex >= (uint)program.Classes.Length
+                    || !localClassIndexes.Contains(classIndex)
+                    || !ReferenceEquals(program.Classes[classIndex],
+                        classExport.Declaration.DeclarationSnapshot)
+                    || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                        classExport.ExportKey)
+                    || !usedExportKeys.Add(classExport.ExportKey))
+                {
+                    throw new ArgumentException(
+                        "An EN1 class mapping does not identify one exact local declaration with a unique ExportKey.",
+                        nameof(sourceClassExports));
+                }
+
+                if (!sourceClassExportsByIndex.TryGetValue(classIndex,
+                        out var classExportKeys))
+                {
+                    classExportKeys = [];
+                    sourceClassExportsByIndex.Add(classIndex,
+                        classExportKeys);
+                }
+                classExportKeys.Add(classExport.ExportKey);
+
+                foreach (var memberExport in classExport.MemberExports)
+                {
+                    if (memberExport.Kind != SourceClassMemberKind.Field)
+                    {
+                        throw Unsupported(
+                            "The bounded EN1 class route emits FieldDefs only; constructors, methods and properties require their complete Body closure.");
+                    }
+
+                    var fields = program.Classes[classIndex].Fields;
+                    if ((uint)memberExport.FieldIndex >= (uint)fields.Length)
+                    {
+                        throw new ArgumentException(
+                            "An EN1 class FieldDef ExportKey must select one public direct field and be Module-unique.",
+                            nameof(sourceClassExports));
+                    }
+
+                    var field = fields[memberExport.FieldIndex];
+                    if (field is null
+                        || field.IsPrivate || field.IsInternal
+                        || !BoundEnumTypes.IsValidModuleDeclarationKey(
+                            memberExport.ExportKey)
+                        || !usedExportKeys.Add(memberExport.ExportKey))
+                    {
+                        throw new ArgumentException(
+                            "An EN1 class FieldDef ExportKey must select one public direct field and be Module-unique.",
+                            nameof(sourceClassExports));
+                    }
+
+                    if (!sourceClassFieldExportsByIndex.TryGetValue(
+                            (classIndex, memberExport.FieldIndex),
+                            out var fieldKeys))
+                    {
+                        fieldKeys = [];
+                        sourceClassFieldExportsByIndex.Add(
+                            (classIndex, memberExport.FieldIndex), fieldKeys);
+                    }
+                    fieldKeys.Add(memberExport.ExportKey);
+                }
+            }
+        }
+
         bool IsSupportedSourceStruct(BoundStruct structure)
             => hasStandardStructViews
                 ? structure.StandardLayoutOnly
@@ -604,7 +701,6 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
-        var usedExportKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var emittedEnum in emittedEnums)
         {
             foreach (var exportKey in emittedEnum.ExportKeys)
@@ -1233,68 +1329,183 @@ public static partial class TrRmExecutableCompiler
         }
 
         var retainedStructureIndexes = new SortedSet<int>();
+        var pendingClassIndexes = new Queue<int>(
+            sourceClassExportsByIndex.Keys);
         var pendingStructureIndexes = new Queue<int>(
             sourceStructExportsByIndex.Keys);
-        while (pendingStructureIndexes.TryDequeue(
-            out var structureIndex))
+        while (pendingClassIndexes.Count != 0
+            || pendingStructureIndexes.Count != 0)
         {
-            if (!retainedStructureIndexes.Add(structureIndex))
+            while (pendingClassIndexes.TryDequeue(out var classIndex))
             {
-                continue;
-            }
-
-            var structure = program.Structures[structureIndex];
-            if (!IsSupportedSourceStruct(structure))
-            {
-                throw Unsupported(
-                    "EN1 source struct closure supports only non-generic local structs with auto layout and no ownership or cleanup contract.");
-            }
-
-            foreach (var field in structure.Fields)
-            {
-                if (TryGetEN1SourceStructFieldType(field.Type,
-                        out var dependencyStructureIndex))
+                if (!retainedClassIndexes.Add(classIndex))
                 {
-                    if ((uint)dependencyStructureIndex
-                            >= (uint)program.Structures.Length
-                        || !IsSupportedSourceStruct(
-                            program.Structures[dependencyStructureIndex]))
+                    continue;
+                }
+
+                if ((uint)classIndex >= (uint)program.Classes.Length
+                    || !localClassIndexes.Contains(classIndex)
+                    || retainedClassIndexes.Count
+                        > ManagedClassTypes.OptionalFirst
+                            - ManagedClassTypes.First)
+                {
+                    throw Unsupported(
+                        "EN1 class closure supports only checked local classes within the registered limit.");
+                }
+
+                var @class = program.Classes[classIndex];
+                if (@class.Fields.IsDefaultOrEmpty
+                    || @class.IsUnique is not false
+                    || @class.HasCleanup is not false
+                    || @class.CleanupMethod is not null)
+                {
+                    throw Unsupported(
+                        "The bounded EN1 class TypeDef route requires nonempty fields, known aliasable ownership and no Cleanup.");
+                }
+
+                foreach (var field in @class.Fields)
+                {
+                    if (field is null || (field.IsPrivate && field.IsInternal)
+                        || field.RequiresUnsafeCaller
+                        || field.BackingPropertyName is not null)
                     {
                         throw Unsupported(
-                            "EN1 source struct fields require retained local non-generic struct declarations.");
+                            "EN1 class FieldDefs cannot discard conflicting access, unsafe-caller or backing-property facts.");
                     }
 
-                    if (!retainedStructureIndexes.Contains(
-                            dependencyStructureIndex))
+                    if (TryGetC1M1SourceClassFieldType(field.Type,
+                            out var dependencyClassIndex, out _, out _))
+                    {
+                        if ((uint)dependencyClassIndex
+                                >= (uint)program.Classes.Length
+                            || !localClassIndexes.Contains(
+                                dependencyClassIndex))
+                        {
+                            throw Unsupported(
+                                "The bounded EN1 class closure does not admit imported or private class TypeDef dependencies.");
+                        }
+                        if (!sourceClassExportsByIndex.ContainsKey(
+                                dependencyClassIndex))
+                        {
+                            sourceClassExportsByIndex.Add(
+                                dependencyClassIndex, []);
+                        }
+                        pendingClassIndexes.Enqueue(dependencyClassIndex);
+                        continue;
+                    }
+
+                    if (TryGetC1M1SourceStructFieldType(field.Type,
+                            sourceStructDeclarationsByIndex,
+                            out var dependencyStructureIndex))
                     {
                         pendingStructureIndexes.Enqueue(
                             dependencyStructureIndex);
+                        continue;
                     }
+
+                    if (BoundEnumTypes.IsType(field.Type))
+                    {
+                        if ((uint)BoundEnumTypes.Index(field.Type)
+                            >= (uint)program.EnumDefinitions.Length)
+                        {
+                            throw Invalid(
+                                "An EN1 class field refers to an invalid enum identity.");
+                        }
+                        continue;
+                    }
+
+                    if ((field.Type is PrimitiveType.NativeInt
+                            or PrimitiveType.NativeUInt)
+                        && moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                    {
+                        throw Unsupported(
+                            "EN1 native-width class fields require the selected Windows x64 target.");
+                    }
+
+                    _ = GetC1M1SourceScalarTypeSpecReference(field.Type);
+                }
+            }
+
+            while (pendingStructureIndexes.TryDequeue(
+                out var structureIndex))
+            {
+                if (!retainedStructureIndexes.Add(structureIndex))
+                {
                     continue;
                 }
 
-                if ((field.Type is PrimitiveType.NativeInt
-                        or PrimitiveType.NativeUInt)
-                    && moduleTargetRequirement
-                        != TrRmModuleTableReader
-                            .WindowsX64NativeTargetRequirement)
+                var structure = program.Structures[structureIndex];
+                if (!IsSupportedSourceStruct(structure))
                 {
                     throw Unsupported(
-                        "EN1 native-width struct fields require the selected Windows x64 target.");
+                        "EN1 source struct closure supports only non-generic local structs with auto layout and no ownership or cleanup contract.");
                 }
 
-                if (BoundEnumTypes.IsType(field.Type))
+                foreach (var field in structure.Fields)
                 {
-                    if ((uint)BoundEnumTypes.Index(field.Type)
-                        >= (uint)program.EnumDefinitions.Length)
+                    if (TryGetC1M1SourceClassFieldType(field.Type,
+                            out var dependencyClassIndex, out _, out _))
                     {
-                        throw new InvalidDataException(
-                            "An EN1 source struct field refers to an invalid enum identity.");
+                        if ((uint)dependencyClassIndex
+                                >= (uint)program.Classes.Length
+                            || !localClassIndexes.Contains(
+                                dependencyClassIndex))
+                        {
+                            throw Unsupported(
+                                "EN1 struct fields require retained local class declarations.");
+                        }
+                        if (!sourceClassExportsByIndex.ContainsKey(
+                                dependencyClassIndex))
+                        {
+                            sourceClassExportsByIndex.Add(
+                                dependencyClassIndex, []);
+                        }
+                        pendingClassIndexes.Enqueue(dependencyClassIndex);
+                        continue;
                     }
-                    continue;
-                }
 
-                _ = GetC1M1SourceScalarTypeSpecReference(field.Type);
+                    if (TryGetEN1SourceStructFieldType(field.Type,
+                            out var dependencyStructureIndex))
+                    {
+                        if ((uint)dependencyStructureIndex
+                                >= (uint)program.Structures.Length
+                            || !IsSupportedSourceStruct(
+                                program.Structures[dependencyStructureIndex]))
+                        {
+                            throw Unsupported(
+                                "EN1 source struct fields require retained local non-generic struct declarations.");
+                        }
+
+                        pendingStructureIndexes.Enqueue(
+                            dependencyStructureIndex);
+                        continue;
+                    }
+
+                    if ((field.Type is PrimitiveType.NativeInt
+                            or PrimitiveType.NativeUInt)
+                        && moduleTargetRequirement
+                            != TrRmModuleTableReader
+                                .WindowsX64NativeTargetRequirement)
+                    {
+                        throw Unsupported(
+                            "EN1 native-width struct fields require the selected Windows x64 target.");
+                    }
+
+                    if (BoundEnumTypes.IsType(field.Type))
+                    {
+                        if ((uint)BoundEnumTypes.Index(field.Type)
+                            >= (uint)program.EnumDefinitions.Length)
+                        {
+                            throw new InvalidDataException(
+                                "An EN1 source struct field refers to an invalid enum identity.");
+                        }
+                        continue;
+                    }
+
+                    _ = GetC1M1SourceScalarTypeSpecReference(field.Type);
+                }
             }
         }
 
@@ -1307,11 +1518,14 @@ public static partial class TrRmExecutableCompiler
             [moduleIdentity] = 2,
         };
         var typeDefRows = new List<TrRmTypeDefRow>(
-            emittedEnums.Count + retainedStructureIndexes.Count);
+            emittedEnums.Count + retainedClassIndexes.Count
+                + retainedStructureIndexes.Count);
         var typeDefNames = new List<(string Namespace, string Name)>(
-            emittedEnums.Count + retainedStructureIndexes.Count);
+            emittedEnums.Count + retainedClassIndexes.Count
+                + retainedStructureIndexes.Count);
         var layoutRows = new List<TrRmLayoutRow>(
             checked(emittedEnums.Count * 2
+                + retainedClassIndexes.Count
                 + retainedStructureIndexes.Count));
         var fieldRows = new List<TrRmFieldDefRow>();
         var fieldNames = new List<string>();
@@ -1325,11 +1539,19 @@ public static partial class TrRmExecutableCompiler
         var typeDefRowByEnumIndex = new Dictionary<int, int>();
         var importRowByEnumIndex = new Dictionary<int, int>();
         var importRowByStructureIndex = new Dictionary<int, int>();
+        var typeDefRowByClass = retainedClassIndexes
+            .Select((classIndex, ordinal) => (classIndex,
+                typeDefRow: emittedEnums.Count + ordinal + 1))
+            .ToDictionary(static item => item.classIndex,
+                static item => item.typeDefRow);
         var typeDefRowByStructure = retainedStructureIndexes
             .Select((structureIndex, ordinal) => (structureIndex,
-                typeDefRow: emittedEnums.Count + ordinal + 1))
+                typeDefRow: emittedEnums.Count + retainedClassIndexes.Count
+                    + ordinal + 1))
             .ToDictionary(static item => item.structureIndex,
                 static item => item.typeDefRow);
+        var typeSpecByClassType = new Dictionary<
+            (int ClassIndex, bool IsWritable, bool IsOptional), uint>();
         var typeSpecByStructure = new Dictionary<int, uint>();
         var exportRows = new List<TrRmExportRow>();
         var fieldExportRows = new List<TrRmExportRow>();
@@ -1356,6 +1578,41 @@ public static partial class TrRmExecutableCompiler
 
         uint FieldTypeSpecReference(PrimitiveType type)
         {
+            if (TryGetC1M1SourceClassFieldType(type,
+                    out var classIndex, out var isWritable,
+                    out var isOptional))
+            {
+                if (!typeDefRowByClass.TryGetValue(classIndex,
+                        out var typeDefRow))
+                {
+                    throw new InvalidDataException(
+                        "A captured EN1 class FieldDef refers to an unretained local class.");
+                }
+
+                var key = (classIndex, isWritable, isOptional);
+                if (!typeSpecByClassType.TryGetValue(key,
+                        out var typeSpecRow))
+                {
+                    var classTypeSpecRow
+                        = checked((uint)typeSpecRows.Count + 1);
+                    var qualifiers = (byte)(0x02
+                        | (isWritable ? 0x01 : 0));
+                    typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(
+                        0x02, checked((uint)typeDefRow), qualifiers));
+                    typeSpecRow = classTypeSpecRow;
+                    if (isOptional)
+                    {
+                        typeSpecRow = checked((uint)typeSpecRows.Count + 1);
+                        typeSpecRows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                            0x06, classTypeSpecRow));
+                    }
+
+                    typeSpecByClassType.Add(key, typeSpecRow);
+                }
+
+                return typeSpecRow;
+            }
+
             if (TryGetEN1SourceStructFieldType(type,
                     out var structureIndex))
             {
@@ -1604,6 +1861,81 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        foreach (var classIndex in retainedClassIndexes)
+        {
+            var @class = program.Classes[classIndex];
+            var className = @class.Name;
+            var separator = className.LastIndexOf('.',
+                StringComparison.Ordinal);
+            var namespaceName = separator < 0
+                ? "" : className[..separator];
+            var typeName = separator < 0
+                ? className : className[(separator + 1)..];
+            if (string.IsNullOrWhiteSpace(typeName) || separator == 0)
+            {
+                throw Unsupported(
+                    "EN1 class names require valid namespace and type-name components.");
+            }
+
+            var typeDefRow = typeDefRowByClass[classIndex];
+            var classExportKeys = sourceClassExportsByIndex[classIndex];
+            var typeDefFlags = (classExportKeys.Count != 0 ? 2u
+                : @class.IsInternal ? 1u : 2u) | 0x08u
+                    | (@class.IsMutable ? 0x80u : 0u);
+            var fieldFirst = fieldRows.Count + 1;
+            var layoutFieldFirst = layoutFieldRows.Count + 1;
+            var fieldNamesForClass = new HashSet<string>(
+                StringComparer.Ordinal);
+            for (var fieldOrdinal = 0;
+                fieldOrdinal < @class.Fields.Length; fieldOrdinal++)
+            {
+                var field = @class.Fields[fieldOrdinal];
+                if (field is null || (field.IsPrivate && field.IsInternal)
+                    || field.RequiresUnsafeCaller
+                    || field.BackingPropertyName is not null
+                    || !fieldNamesForClass.Add(field.Name))
+                {
+                    throw Unsupported(
+                        "EN1 class FieldDefs cannot discard conflicting access, unsafe-caller or backing-property facts.");
+                }
+
+                var visibility = field.IsPrivate ? 0u
+                    : field.IsInternal ? 1u : 2u;
+                var fieldFlags = visibility
+                    | (field.IsMutable ? 0x04u : 0u);
+                var fieldDefRow = fieldRows.Count + 1;
+                fieldRows.Add(new TrRmFieldDefRow(typeDefRow, 0,
+                    FieldTypeSpecReference(field.Type), fieldFlags));
+                fieldNames.Add(field.Name);
+                layoutFieldRows.Add(new TrRmLayoutFieldRow(
+                    layoutRows.Count + 1, fieldOrdinal, fieldDefRow));
+                if (sourceClassFieldExportsByIndex.TryGetValue(
+                        (classIndex, fieldOrdinal),
+                        out var fieldExportKeys))
+                {
+                    foreach (var exportKey in fieldExportKeys)
+                    {
+                        fieldExportRows.Add(new TrRmExportRow(
+                            0x1400_0000u | checked((uint)fieldDefRow),
+                            AddString(exportKey)));
+                    }
+                }
+            }
+
+            typeDefRows.Add(new TrRmTypeDefRow(0, 0, typeDefFlags,
+                fieldFirst, @class.Fields.Length, 0, 0,
+                checked((uint)(layoutRows.Count + 1)), 1, 0, 0));
+            typeDefNames.Add((namespaceName, typeName));
+            layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, 0, 0, 0, 0,
+                layoutFieldFirst, @class.Fields.Length));
+            foreach (var exportKey in classExportKeys)
+            {
+                exportRows.Add(new TrRmExportRow(
+                    0x1300_0000u | checked((uint)typeDefRow),
+                    AddString(exportKey)));
+            }
+        }
+
         foreach (var (structureIndex, importsForType) in
             sourceStructImportsByIndex.OrderBy(
                 static item => item.Key))
@@ -1809,7 +2141,8 @@ public static partial class TrRmExecutableCompiler
             featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
             featureRows.Add(new TrRmFeatureRow(18, 1));
         }
-        if (sourceStructFieldExportsByIndex.Count != 0
+        if (sourceClassFieldExportsByIndex.Count != 0
+            || sourceStructFieldExportsByIndex.Count != 0
             || sourceStructFieldImportsByIndex.Count != 0)
         {
             featureRows.Add(TrRmFeatureRow.LayoutQueries);
