@@ -2421,13 +2421,19 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
-                if (readRoots.Count == 0)
+                if (readRoots.Count == 0
+                    && (predicate is not BoundConstant {
+                            Type: PrimitiveType.Bool,
+                            Value: 1,
+                        }
+                        || group.Any(static output => output.State != 0)))
                 {
                     throw Unsupported(
-                        "A GeneralPredicateGraphsDraft selector requires an input read root.");
+                        "A GeneralPredicateGraphsDraft selector without read roots must be an unconditional vacancy predicate.");
                 }
 
-                var firstRootRow = checked(predicateReadRoots.Count + 1);
+                var firstRootRow = readRoots.Count == 0
+                    ? 0 : checked(predicateReadRoots.Count + 1);
                 var rootRowsByIdentity = new Dictionary<
                     (byte Kind, int Identity), uint>(
                     readRoots.Count);
