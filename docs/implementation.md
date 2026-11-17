@@ -1731,7 +1731,9 @@ ordinary value use. Query emission writes provider-backed TypeDef/FieldDef
 Imports and TypeSpec Import references; `LoadStandard` validates the provider
 bindings before using the Standard query Body loader rather than the
 NativeAddress admission path. Imported `offsetof(Pair, Tag)` is available
-through Feature 13. The provisional
+through Feature 13. Field-provider validation checks exact Import bindings for
+FieldPath rows, register FieldMaps and compact field-access descriptors; this
+does not add compact-body execution. The provisional
 `CreateStandardReferenceSet` host composition is described below; broader
 provider graphs, replacement and re-emission remain open. None of these
 mappings grants Copy or value-use capability.
