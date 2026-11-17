@@ -29,7 +29,7 @@ internal sealed class ExpressionBodyTests
             public Box(int32 value) => _value = value;
             public int32 Value => _value;
         }
-        T Identity<T>(T value) where T : [Copy] => value;
+        T Identity<T>(T value) => value;
         void Ensure(int32 value) => require value > 0;
         void Discard(int32 value) => _ = value + 1;
         int32 Main() {

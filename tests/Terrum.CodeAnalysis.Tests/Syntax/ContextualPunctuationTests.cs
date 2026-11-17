@@ -74,7 +74,7 @@ internal sealed class ContextualPunctuationTests
                 "struct S { public write Node# Next; }",
                 "struct S { public Node# Value => value; }",
                 "void F() { Node# value = null; }",
-                "void F(init ref<Node#> value) { }",
+                "void F(ref<init Node#> value) { }",
                 "Box<Box<Node>># F() { return value; }",
                 "Box<\nBox<Node>\n># F() { return value; }",
                 "void F() { Get<Box<Box<Node>>#>(); }",
@@ -148,10 +148,20 @@ internal sealed class ContextualPunctuationTests
         Assert.That(tree.HasErrors, Is.True);
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
-    [TestCase("enum E : int32 { A = 1 }")]
     [TestCase("void F() { var pair = (name: 1, other: 2); }")]
     public void UnsupportedColonRolesDoNotBecomeImplemented(string source) =>
         Assert.That(SyntaxTree.Parse(source).HasErrors, Is.True);
+
+    [Test]
+    public void EnumUnderlyingTypeIsAcceptedAsADeclarationColonRole()
+    {
+        const string source = "enum E : int32 { A = 1 }";
+        var tree = SyntaxTree.Parse(source);
+
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+    }
 
     [Test]
     public void AttributeTargetSyntaxDoesNotRegisterAnAttributeSchema()
@@ -249,8 +259,8 @@ internal sealed class ContextualPunctuationTests
                 result = first * 10 + second;
                 return true;
             }
-            bool Initialize(int32 value, init ref<int32> result) {
-                result = value;
+            bool Initialize(int32 value, ref<init int32> result) {
+                *result = value;
                 return true;
             }
             int32 Main() {
@@ -259,7 +269,7 @@ internal sealed class ContextualPunctuationTests
                 if (!Fill(second: Record(2), result: out filled, first: Record(1))) {
                     return 1;
                 }
-                if (!Initialize(result: init initialized, value: filled)) {
+                if (!Initialize(result: ref init initialized, value: filled)) {
                     return 2;
                 }
                 return filled + initialized + Host.Trace[0] - 3;

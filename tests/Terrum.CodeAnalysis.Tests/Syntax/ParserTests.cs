@@ -71,6 +71,66 @@ internal sealed class ParserTests
     }
 
     [Test]
+    public void ParsesRegisteredTypeAndLayoutQueries()
+    {
+        const string Source = """
+            int32 Main() {
+                int32 value = 1;
+                var identity = typeof(int32);
+                var placeIdentity = typeof(value);
+                var size = sizeof([int32; 4]);
+                var alignment = alignof(value);
+                var pathOffset = offsetof(Pair, Inner.Field);
+                var placeOffset = offsetof(value.Field);
+                var typeCount = countof([int32; 4]);
+                var shapeCount = countof([1, 2]);
+                var valueCount = countof(value);
+                return 0;
+            }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.TypeOfQueryExpression), Is.EqualTo(2));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.SizeOfQueryExpression), Is.EqualTo(1));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.AlignOfQueryExpression), Is.EqualTo(1));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.OffsetOfTypeQueryExpression), Is.EqualTo(1));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.OffsetOfPlaceQueryExpression), Is.EqualTo(1));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.CountOfQueryExpression), Is.EqualTo(3));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.FieldPath), Is.EqualTo(1));
+        AssertLossless(tree);
+
+        var escaped = SyntaxTree.Parse("void Main() { @typeof(42); }");
+        Assert.That(escaped.HasErrors, Is.False,
+            string.Join(Environment.NewLine, escaped.Diagnostics));
+        Assert.That(escaped.Root.DescendantNodes().Any(static node =>
+            node.Kind == SyntaxKind.TypeOfQueryExpression), Is.False);
+        Assert.That(escaped.Root.DescendantNodes().Any(static node =>
+            node.Kind == SyntaxKind.InvocationExpression), Is.True);
+    }
+
+    [Test]
+    public void TypeofIsReservedButEscapable()
+    {
+        var reserved = SyntaxTree.Parse("void typeof() {}");
+        Assert.That(reserved.HasErrors, Is.True);
+
+        var escaped = SyntaxTree.Parse("void @typeof() {}");
+        Assert.That(escaped.HasErrors, Is.False,
+            string.Join(Environment.NewLine, escaped.Diagnostics));
+        Assert.That(escaped.Root.DescendantNodes().Any(static node =>
+            node.Kind == SyntaxKind.FunctionDeclaration), Is.True);
+    }
+
+    [Test]
     public void ParsesNativeCallConvAsAFunctionPointerTypeUseAttribute()
     {
         const string Source = """
@@ -112,6 +172,24 @@ internal sealed class ParserTests
     }
 
     [Test]
+    public void ParsesWholeRangeInitializationOnlyAsSpanTypeArgument()
+    {
+        var span = SyntaxTree.Parse(
+            "void Accept(Span<init int32> value) {}");
+        Assert.That(span.HasErrors, Is.False,
+            string.Join(Environment.NewLine, span.Diagnostics));
+        Assert.That(span.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.SpanInitializationTypeArgument),
+            Is.EqualTo(1));
+        AssertLossless(span);
+
+        var unrelated = SyntaxTree.Parse(
+            "void Accept(Box<init int32> value) {}");
+        Assert.That(unrelated.HasErrors, Is.True,
+            "A generic init type argument is reserved for the Span family.");
+    }
+
+    [Test]
     public void ParsesNativeDeclarationCallConvNamedArguments()
     {
         const string Source = """
@@ -128,6 +206,29 @@ internal sealed class ParserTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.That(tree.Root.DescendantNodes().Count(static node =>
             node.Kind == SyntaxKind.Attribute), Is.EqualTo(2));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesOrdinaryParameterConstantDefaults()
+    {
+        var tree = SyntaxTree.Parse("""
+            int32 Sum(int32 first = 1 + 2, int32 second = 4) {
+                return first + second;
+            }
+            """);
+
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        var parameters = tree.Root.DescendantNodes()
+            .Where(static node => node.Kind == SyntaxKind.Parameter)
+            .ToArray();
+        Assert.That(parameters, Has.Length.EqualTo(2));
+        Assert.That(parameters.All(parameter =>
+                parameter.Children.OfType<SyntaxTokenElement>().Any(
+                    static token => token.Token.Kind == TokenKind.Equals)
+                && parameter.Children.OfType<SyntaxNode>().Count() == 2),
+            Is.True);
         AssertLossless(tree);
     }
 
@@ -416,6 +517,30 @@ internal sealed class ParserTests
         }),Is.True);
         AssertLossless(tree);
     }
+
+    [Test]
+    public void ParsesGetterTargetedEvaluationAttributes()
+    {
+        const string Source = """
+            struct ValueProvider {
+                public int32 Field;
+                [get: Pure]
+                public static int32 Count { get { return 42; } }
+            }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        var attribute = tree.Root.DescendantNodes().Single(
+            static node => node.Kind == SyntaxKind.Attribute);
+        Assert.That(attribute.Children.OfType<SyntaxTokenElement>()
+                .Select(static element => element.Token.Name),
+            Is.EqualTo(["[", "get", ":", "Pure", "]"]));
+        AssertLossless(tree);
+    }
+
     [TestCase("mut class Leaf { public mut int32 Value; public Leaf(int32 value) { Value = value; } public mut void Set(int32 value) { Value = value; } }")]
     [TestCase("bool Create(out write ManagedNode node) { return ManagedNode.TryCreate(42, out node); }")]
     [TestCase("mut class Link { public mut write Link? Next; public Link() { Next = null; } }")]
@@ -457,6 +582,52 @@ internal sealed class ParserTests
         Assert.That(global::System.Linq.Enumerable.Any(unattachedIndex.Diagnostics,static diagnostic => diagnostic.Code == "TRM1009"),Is.True);
         AssertLossless(unattachedIndex);
     }
+
+    [Test]
+    public void ParsesCommaSeparatedIndexerArgumentsWithoutLosingSource()
+    {
+        const string Source = """
+            public interface IMatrix {
+                int32 this[int32 row, int32 column] { get; }
+            }
+            internal struct Matrix {
+                public int32 IMatrix.this[int32 row, int32 column] {
+                    get { return row + column; }
+                }
+            }
+            int32 Read(IMatrix matrix, int32 row, int32 column) {
+                return matrix[row, column];
+            }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        var index = tree.Root.DescendantNodes().Single(
+            static node => node.Kind == SyntaxKind.IndexExpression);
+        var arguments = (SyntaxNode)index.Children[2];
+        Assert.That(arguments.Kind, Is.EqualTo(SyntaxKind.IndexArgumentList));
+        Assert.That(arguments.Children.OfType<SyntaxNode>().Select(
+                static argument => argument.Kind),
+            Is.EqualTo([SyntaxKind.NameExpression, SyntaxKind.NameExpression]));
+        Assert.That(tree.Root.DescendantNodes().Count(
+            static node => node.Kind == SyntaxKind.IndexerDeclaration),
+            Is.EqualTo(2));
+        AssertLossless(tree);
+    }
+
+    [TestCase("interface I { int32 this[] { get; } }")]
+    [TestCase("interface I { int32 this[int32 index,] { get; } }")]
+    public void RejectsEmptyAndTrailingIndexerParameterLists(string source)
+    {
+        var tree = SyntaxTree.Parse(source);
+
+        Assert.That(tree.HasErrors, Is.True,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM1001"), Is.True);
+        AssertLossless(tree);
+    }
+
     [TestCase("int32")]
     [TestCase("uint32")]
     [TestCase("int64")]

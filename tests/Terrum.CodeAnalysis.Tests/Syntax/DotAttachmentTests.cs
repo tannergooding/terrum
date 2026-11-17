@@ -33,7 +33,7 @@ internal sealed class DotAttachmentTests
         "struct Box { public N#T Value; }",
         "struct Box { public N#T Value => value; }",
         "void F() { N#T value = source; }",
-        "void F(init ref<N#T> value) { }",
+        "void F(ref<init N#T> value) { }",
         "struct Box : N#I<Box> { }",
         "T F<T>(T value) where T : N#I<T> { return value; }",
         "N#Box<\nN.Value\n> F() { return value; }",
@@ -219,7 +219,7 @@ internal sealed class DotAttachmentTests
                         public Box(int32 value) { Value = value; }
                         public int32 Read() { return Value; }
                     }
-                    T Identity<T>(T value) where T : [Copy] { return value; }
+                    T Identity<T>(T value) { return value; }
                     """ + "int32 Main() { " + body + " }";
                 var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
                 Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
