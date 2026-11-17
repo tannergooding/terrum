@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -19,6 +20,10 @@ public sealed record TrRmStandardArtifactInput(
 
 public static partial class TrRmExecutableCompiler
 {
+    private readonly record struct EN1ClassQueryRoot(
+        string ProviderIdentity, string ExportKey, uint TypeSpecReference,
+        byte TypeSpecForm, byte Qualifiers);
+
     /// <summary>Loads one explicitly selected Standard Module and its supplied provider artifacts.</summary>
     /// <param name="input">The complete root artifact and its exact schema selection.</param>
     /// <param name="moduleIdentity">The exact identity of the root Module to load.</param>
@@ -460,7 +465,9 @@ public static partial class TrRmExecutableCompiler
                 && (schemaIdentities.All(static schemaIdentity =>
                         StringComparer.Ordinal.Equals(schemaIdentity,
                             StandardLayoutQueriesSchemaIdentity))
-                    || includesInitializationReferenceNestedFieldDestinations)
+                    || includesInitializationReferenceNestedFieldDestinations
+                    || schemaIdentities.All(
+                        IsSelectedC1EnumClosureSchemaIdentity))
                 ? TrRmFixedArrayProviderBindingValidator
                     .ValidateFieldDefImports(
                         ValidateForeignInvocationArtifact(
@@ -540,6 +547,13 @@ public static partial class TrRmExecutableCompiler
                 .Validate(tables, artifacts, schemaIdentities,
                     moduleValidation.Modules, rootModuleRow);
         }
+        else if (schemaIdentities.Length != 0
+            && schemaIdentities.All(
+                    IsSelectedC1EnumClosureSchemaIdentity))
+        {
+            typeProviderBindings
+                    = standardFieldProviderValidation.TypeBindings;
+        }
         if (StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardForeignInvocationStorageFixedArrayCopyReturnCoverageRepeatInitializationSchemaIdentity)
             && typeProviderBindings.Any(binding =>
@@ -554,12 +568,9 @@ public static partial class TrRmExecutableCompiler
                 "A2R1 TypeDef provider edges require exact A2 or A2R1+Repeat selections.");
         }
 
-        var allTypeProviderBindings = includesInitializationReferenceNestedFieldDestinations
-            ? typeProviderBindings.AddRange(
+        var allTypeProviderBindings = typeProviderBindings.AddRange(
                 standardFieldProviderValidation.TypeBindings)
-                .Distinct().ToImmutableArray()
-            : typeProviderBindings.AddRange(
-                standardFieldProviderValidation.TypeBindings);
+            .Distinct().ToImmutableArray();
 
         var includesInitializationReferencePointerLoads
             = schemaIdentities.Length != 0
@@ -642,6 +653,9 @@ public static partial class TrRmExecutableCompiler
         if (includesInitializationReferenceBodies
             && tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0)
         {
+            var classQueryProgram = CreateEN1ClassQueryReferenceProgram(
+                artifacts, schemaIdentities, moduleIdentity, rootModuleRow,
+                tables);
             return LoadDevelopment(artifacts[0],
                 GetForeignInvocationSchema(schemaIdentities[0]),
                 standardSchemaIdentity: schemaIdentities[0],
@@ -649,7 +663,8 @@ public static partial class TrRmExecutableCompiler
                     new Dictionary<int, BoundModuleImport>(),
                 coreContractFailureIdentitySelections:
                     coreContractFailureIdentitySelections,
-                selectedModuleRow: rootModuleRow);
+                selectedModuleRow: rootModuleRow,
+                standardClassQueryProgram: classQueryProgram);
         }
 
         if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0
@@ -830,6 +845,9 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
+            var classQueryProgram = CreateEN1ClassQueryReferenceProgram(
+                artifacts, schemaIdentities, moduleIdentity, rootModuleRow,
+                tables);
             return LoadDevelopment(artifacts[0],
                 GetForeignInvocationSchema(schemaIdentities[0]),
                 standardSchemaIdentity: schemaIdentities[0],
@@ -837,7 +855,8 @@ public static partial class TrRmExecutableCompiler
                     selectedInitializationReferenceImports,
                 coreContractFailureIdentitySelections:
                     coreContractFailureIdentitySelections,
-                selectedModuleRow: rootModuleRow);
+                selectedModuleRow: rootModuleRow,
+                standardClassQueryProgram: classQueryProgram);
         }
 
         if (methodImportRows.Count == 0
@@ -974,6 +993,421 @@ public static partial class TrRmExecutableCompiler
         return RetainStandardFieldProviderClosure(program,
             standardFieldProviderValidation, artifacts, schemaIdentities,
             moduleValidation.Modules, rootModuleRow, moduleIdentity);
+    }
+
+    private static BoundProgram? CreateEN1ClassQueryReferenceProgram(
+        byte[][] artifacts, string[] schemaIdentities,
+        string moduleIdentity, int rootModuleRow,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        if (schemaIdentities.Length == 0
+            || !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                schemaIdentities[0]))
+        {
+            return null;
+        }
+
+        var typeExportKeys = new List<string>();
+        var typeExportKeySet = new HashSet<string>(StringComparer.Ordinal);
+        var fieldExportKeys = new List<string>();
+        var fieldExportKeySet = new HashSet<string>(StringComparer.Ordinal);
+        var importedTypeKeys
+            = ImmutableArray.CreateBuilder<(string ProviderIdentity,
+                string ExportKey)>();
+        var importedTypeKeySet = new HashSet<(string ProviderIdentity,
+            string ExportKey)>();
+        var roots = new List<EN1ClassQueryRoot>();
+        var rootSet = new HashSet<EN1ClassQueryRoot>();
+
+        void AddTypeKey(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                throw new InvalidDataException(
+                    "An EN1 class query Body has an empty TypeDef ExportKey.");
+            }
+
+            if (typeExportKeySet.Add(key))
+            {
+                typeExportKeys.Add(key);
+            }
+        }
+
+        void AddFieldKey(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                throw new InvalidDataException(
+                    "An EN1 class query Body has an empty FieldDef ExportKey.");
+            }
+
+            if (fieldExportKeySet.Add(key))
+            {
+                fieldExportKeys.Add(key);
+            }
+        }
+
+        for (var dependencyRow = 1;
+            dependencyRow <= tables.TargetLayoutDependencies.Count;
+            dependencyRow++)
+        {
+            if (tables.ConstantExecutions
+                    .OwnsTargetLayoutDependency(dependencyRow))
+            {
+                continue;
+            }
+
+            var queryKind = tables.TargetLayoutDependencies
+                .GetQueryKind(dependencyRow);
+            if (queryKind is not (3 or 4))
+            {
+                continue;
+            }
+
+            var typeSpecReference = tables.TargetLayoutDependencies
+                .GetSubjectTypeSpecRef(dependencyRow);
+            var typeReference = tables.TypeSpecs
+                .GetTypeSpecRef(typeSpecReference);
+            if (!typeReference.IsRow
+                || typeReference.Qualifiers != 0
+                || typeReference.Form is not (0x02 or 0x03 or 0x05))
+            {
+                continue;
+            }
+
+            var typeDefRow = tables.TypeSpecs.GetNominalTypeDefRow(
+                typeSpecReference, tables.TypeDefs, tables.Imports);
+            if (tables.TypeDefs.GetKind(typeDefRow) != 2)
+            {
+                continue;
+            }
+            if (typeReference.Form == 0x05)
+            {
+                throw new NotSupportedException(
+                    "EN1 class query Bodies do not yet bind generic class roots.");
+            }
+
+            string providerIdentity;
+            string typeExportKey;
+            if (typeReference.Form == 0x02)
+            {
+                var providerModuleRow = tables.TypeDefs.GetOwnerModule(
+                    typeDefRow);
+                if (providerModuleRow != rootModuleRow)
+                {
+                    throw new InvalidDataException(
+                        "A direct EN1 class query root is not owned by its using Module.");
+                }
+
+                var classDefinition
+                    = 0x1300_0000u | checked((uint)typeDefRow);
+                var typeKeys = tables.Exports.GetExportsForModule(
+                        providerModuleRow)
+                    .Where(export => export.Definition == classDefinition)
+                    .Select(static export => export.ExportKey)
+                    .ToArray();
+                if (typeKeys.Length == 0)
+                {
+                    throw new InvalidDataException(
+                        "A direct EN1 class query root has no TypeDef ExportKey.");
+                }
+
+                foreach (var key in typeKeys)
+                {
+                    AddTypeKey(key);
+                }
+
+                providerIdentity = moduleIdentity;
+                typeExportKey = typeKeys[0];
+            }
+            else
+            {
+                var typeImportRow = checked((int)typeReference.Row);
+                var import = tables.Imports.GetBindingForImportRow(
+                    typeImportRow);
+                providerIdentity = import.ProducerIdentity;
+                typeExportKey = import.ExportKey;
+                var importedKey = (providerIdentity, typeExportKey);
+                if (importedTypeKeySet.Add(importedKey))
+                {
+                    importedTypeKeys.Add(importedKey);
+                }
+            }
+
+            var (fieldFirst, fieldCount)
+                = tables.TargetLayoutDependencies.GetFieldRange(
+                    dependencyRow);
+            for (var ordinal = 0; ordinal < fieldCount; ordinal++)
+            {
+                var fieldReference
+                    = tables.TargetLayoutDependencyFields
+                        .GetFieldReference(fieldFirst + ordinal);
+                var referenceKind = (byte)(fieldReference >> 24);
+                var referenceRow = checked((int)(
+                    fieldReference & 0x00FF_FFFF));
+                if (referenceKind == 0x1C)
+                {
+                    AddFieldKey(tables.Imports.GetBindingForImportRow(
+                        referenceRow).ExportKey);
+                    continue;
+                }
+
+                if (referenceKind != 0x14 || referenceRow <= 0
+                    || referenceRow > tables.Fields.Count)
+                {
+                    throw new InvalidDataException(
+                        "An EN1 class query Body has an invalid FieldDef reference.");
+                }
+
+                var ownerModule = tables.TypeDefs.GetOwnerModule(
+                    tables.Fields.GetOwnerTypeDef(referenceRow));
+                var fieldDefinition
+                    = 0x1400_0000u | checked((uint)referenceRow);
+                foreach (var export in tables.Exports
+                    .GetExportsForModule(ownerModule))
+                {
+                    if (export.Definition == fieldDefinition)
+                    {
+                        AddFieldKey(export.ExportKey);
+                    }
+                }
+            }
+
+            var root = new EN1ClassQueryRoot(providerIdentity,
+                typeExportKey, typeSpecReference, typeReference.Form,
+                typeReference.Qualifiers);
+            if (rootSet.Add(root))
+            {
+                roots.Add(root);
+            }
+        }
+
+        if (roots.Count == 0)
+        {
+            return null;
+        }
+
+        var consumerReference = CreateEN1ClassLayoutQuerySourceTypeReference(
+            artifacts, schemaIdentities, moduleIdentity,
+            [.. typeExportKeys], [.. fieldExportKeys],
+            importedTypeKeys.ToImmutable());
+        var distinctProviders = roots.Select(static root =>
+                root.ProviderIdentity)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (distinctProviders.Length != 1)
+        {
+            throw new NotSupportedException(
+                "The bounded EN1 class query Body loader requires one selected class provider.");
+        }
+
+        BoundProgram program;
+        if (StringComparer.Ordinal.Equals(distinctProviders[0],
+                moduleIdentity))
+        {
+            program = BindEN1ClassQueryReference(consumerReference);
+        }
+        else
+        {
+            var moduleValidation = ValidateStandardInputModules(artifacts,
+                schemaIdentities, moduleIdentity,
+                a3LayoutResourceLedger: null);
+            var (providerArtifactIndex, providerArtifact,
+                _) = FindSelectedProviderModule(artifacts,
+                    moduleValidation.Modules, rootModuleRow,
+                    distinctProviders[0]);
+            var providerArtifacts = new List<byte[]> {
+                providerArtifact,
+            };
+            var providerSchemas = new List<string> {
+                schemaIdentities[providerArtifactIndex],
+            };
+            for (var artifactIndex = 0;
+                artifactIndex < artifacts.Length; artifactIndex++)
+            {
+                if (artifactIndex == 0
+                    || artifactIndex == providerArtifactIndex)
+                {
+                    continue;
+                }
+
+                providerArtifacts.Add(artifacts[artifactIndex]);
+                providerSchemas.Add(schemaIdentities[artifactIndex]);
+            }
+
+            var providerTypeKeys = roots
+                .Where(root => StringComparer.Ordinal.Equals(
+                    root.ProviderIdentity, distinctProviders[0]))
+                .Select(static root => root.ExportKey)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            var providerReference
+                = CreateEN1ClassLayoutQuerySourceTypeReference(
+                    [.. providerArtifacts], [.. providerSchemas],
+                    distinctProviders[0], providerTypeKeys,
+                    [.. fieldExportKeys], []);
+            var providerProgram = BindEN1ClassQueryReference(
+                providerReference);
+            program = MergeEN1ClassQueryReferencePrograms(providerProgram,
+                consumerReference);
+        }
+
+        var instances = program.GenericNominalTypeInstances.ToBuilder();
+        foreach (var root in roots)
+        {
+            var declaration = program.StandardClassDeclarations
+                .SingleOrDefault(candidate =>
+                    StringComparer.Ordinal.Equals(
+                        candidate.Declaration.Provider.ModuleIdentity,
+                        root.ProviderIdentity)
+                    && candidate.SelectedExportKeys.Contains(
+                        root.ExportKey, StringComparer.Ordinal));
+            if (declaration is null)
+            {
+                throw new InvalidDataException(
+                    "An EN1 class query Body root has no selected Standard class declaration.");
+            }
+
+            var identity = declaration.Declaration.Identity;
+            if (instances.Any(instance =>
+                instance.Definition == identity
+                && instance.Arguments.IsEmpty
+                && instance.Qualifiers == root.Qualifiers
+                && instance.TypeSpecReference == root.TypeSpecReference
+                && StringComparer.Ordinal.Equals(
+                    instance.TypeSpecProviderIdentity, moduleIdentity)
+                && instance.TypeSpecForm == root.TypeSpecForm))
+            {
+                continue;
+            }
+
+            instances.Add(new BoundGenericNominalTypeInstance(identity, [],
+                root.Qualifiers, root.TypeSpecReference, moduleIdentity,
+                root.TypeSpecForm));
+        }
+
+        program = program with {
+            GenericNominalTypeInstances = instances.ToImmutable(),
+        };
+        SemanticVerifier.VerifyLibraryReferences(program);
+        return program;
+    }
+
+    private static BoundProgram BindEN1ClassQueryReference(
+        CompilationReference reference)
+    {
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(string.Empty), reference);
+        if (compilation.HasErrors)
+        {
+            throw new InvalidDataException(
+                "The EN1 class query Body TypeDef/FieldDef closure failed semantic binding: "
+                + string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+
+        return (BoundProgram)compilation.Program!;
+    }
+
+    private static BoundProgram MergeEN1ClassQueryReferencePrograms(
+        BoundProgram providerProgram,
+        CompilationReference consumerReference)
+    {
+        var definitions = providerProgram.GenericNominalTypeDefinitions
+            .ToBuilder();
+        var definitionIndexes = definitions.Select((definition, index) =>
+                (definition.Identity, index))
+            .ToDictionary(static item => item.Identity,
+                static item => item.index);
+        foreach (var definition in consumerReference
+            .GenericNominalTypeDefinitions)
+        {
+            if (definitionIndexes.TryGetValue(definition.Identity,
+                    out var definitionIndex))
+            {
+                definitions[definitionIndex] = definition;
+            }
+            else
+            {
+                definitionIndexes.Add(definition.Identity,
+                    definitions.Count);
+                definitions.Add(definition);
+            }
+        }
+
+        var declarations = providerProgram.StandardClassDeclarations
+            .ToBuilder();
+        var declarationIndexes = declarations.Select((declaration, index) =>
+                (declaration.Declaration.Identity, index))
+            .ToDictionary(static item => item.Identity,
+                static item => item.index);
+        foreach (var consumerDeclaration in consumerReference
+            .StandardClassDeclarations)
+        {
+            if (!declarationIndexes.TryGetValue(
+                    consumerDeclaration.Declaration.Identity,
+                    out var declarationIndex))
+            {
+                declarationIndexes.Add(
+                    consumerDeclaration.Declaration.Identity,
+                    declarations.Count);
+                declarations.Add(consumerDeclaration);
+                continue;
+            }
+
+            var providerDeclaration = declarations[declarationIndex];
+            var providerFields
+                = providerDeclaration.Declaration.Fields.ToBuilder();
+            for (var fieldIndex = 0;
+                fieldIndex < providerFields.Count; fieldIndex++)
+            {
+                var providerField = providerFields[fieldIndex];
+                var consumerField
+                    = consumerDeclaration.Declaration.Fields.SingleOrDefault(
+                        field => field.DefinitionId
+                            == providerField.DefinitionId);
+                if (consumerField is null
+                    || consumerField.SelectedExportKeys.IsEmpty)
+                {
+                    continue;
+                }
+
+                providerFields[fieldIndex] = providerField with {
+                    SelectedExportKeys
+                        = consumerField.SelectedExportKeys,
+                };
+            }
+
+            var expectations = providerDeclaration.Expectations.ToBuilder();
+            foreach (var consumerExpectation
+                in consumerDeclaration.Expectations)
+            {
+                if (!expectations.Any(existing =>
+                        existing.Binding.ImportRow
+                            == consumerExpectation.Binding.ImportRow
+                        && StringComparer.Ordinal.Equals(
+                            existing.Binding.UsingModule.ModuleIdentity,
+                            consumerExpectation.Binding.UsingModule
+                                .ModuleIdentity)))
+                {
+                    expectations.Add(consumerExpectation);
+                }
+            }
+
+            declarations[declarationIndex] = providerDeclaration with {
+                Declaration = providerDeclaration.Declaration with {
+                    Fields = providerFields.ToImmutable(),
+                },
+                Expectations = expectations.ToImmutable(),
+                SelectedExportKeys
+                    = consumerDeclaration.SelectedExportKeys.IsEmpty
+                        ? providerDeclaration.SelectedExportKeys
+                        : consumerDeclaration.SelectedExportKeys,
+            };
+        }
+
+        return providerProgram with {
+            GenericNominalTypeDefinitions = definitions.ToImmutable(),
+            StandardClassDeclarations = declarations.ToImmutable(),
+        };
     }
 
     private static BoundProgram RetainStandardFieldProviderClosure(

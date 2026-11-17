@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -3170,8 +3171,17 @@ public static partial class TrRmExecutableCompiler
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
         TrRmImportTableReader imports,
         List<NativePointerTypeDefinition> nativePointerTypes,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        BoundProgram? standardClassQueryProgram = null,
+        string? typeSpecProviderIdentity = null)
     {
+        if (standardClassQueryProgram is not null
+            && (body.BlockCount != 1 || body.HasTypeIdentityCarrier))
+        {
+            throw Unsupported(
+                "The bounded EN1 class query Body consumer accepts one direct registered layout query.");
+        }
+
         if (body.BlockCount == 8 && body.RecordCount == 11
             && function.ReturnType == PrimitiveType.NativeInt
             && body.GetBlockCode(1).Length == 4
@@ -3489,7 +3499,9 @@ public static partial class TrRmExecutableCompiler
                             fieldMapToken, typeDefs, typeSpecs, fields,
                             fieldPaths, imports, nativePointerTypes,
                             signatureIndexByAnchorMethod,
-                            structureTypeByTypeDef);
+                            structureTypeByTypeDef,
+                            standardClassQueryProgram,
+                            typeSpecProviderIdentity);
                         var isOffsetOfPlace = queryKind == 4;
                         if (isOffsetOfPlace && path.Steps.Length != 1)
                         {
@@ -3497,18 +3509,28 @@ public static partial class TrRmExecutableCompiler
                                 "OffsetOfPlace requires an immediate one-field path.");
                         }
 
+                        var classRoot = standardClassQueryProgram is not null
+                            && BoundGenericNominalTypeContract
+                            .IsNominalClassType(path.RootType,
+                                standardClassQueryProgram
+                                    .GenericNominalTypeInstances,
+                                standardClassQueryProgram
+                                    .GenericNominalTypeDefinitions);
                         var subject = isOffsetOfPlace
                             ? new BoundQuerySubject(path.LeafType,
                                 BoundQuerySubjectKind.FieldPathPlace, null,
-                                path, false, false)
+                            path, classRoot, classRoot)
                             : new BoundQuerySubject(path.RootType,
-                                BoundQuerySubjectKind.Type, null, path, false,
-                                false);
-                        query = new BoundLayoutQuery(
+                            BoundQuerySubjectKind.Type, null, path,
+                            classRoot, classRoot);
+                        var layoutQuery = new BoundLayoutQuery(
                             isOffsetOfPlace
                                 ? BoundLayoutQueryKind.OffsetOfPlace
                                 : BoundLayoutQueryKind.OffsetOfType,
                             subject, default);
+                        query = classRoot
+                            ? new BoundUnsafeExpression(layoutQuery, default)
+                            : layoutQuery;
                     }
 
                     if (destination != 15)
@@ -7615,7 +7637,9 @@ public static partial class TrRmExecutableCompiler
         TrRmTypeSpecTableReader typeSpecs, TrRmFieldDefTableReader fields,
         TrRmFieldPathTableReader fieldPaths, TrRmImportTableReader imports,
         List<NativePointerTypeDefinition> nativePointerTypes,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        BoundProgram? standardClassQueryProgram = null,
+        string? typeSpecProviderIdentity = null)
     {
         var tokenKind = (byte)(fieldMapToken >> 24);
         var tokenRow = (int)(fieldMapToken & 0x00FF_FFFF);
@@ -7646,6 +7670,35 @@ public static partial class TrRmExecutableCompiler
         }
 
         var rootTypeSpecRef = fieldPaths.GetRootTypeSpecRef(tokenRow);
+        var rootTypeSpec = typeSpecs.GetTypeSpecRef(rootTypeSpecRef);
+        if (rootTypeSpec.IsRow && rootTypeSpec.Qualifiers == 0
+            && rootTypeSpec.Form is 0x02 or 0x03
+            && typeDefs.GetKind(typeSpecs.GetNominalTypeDefRow(
+                rootTypeSpecRef, typeDefs, imports)) == 2)
+        {
+            if (standardClassQueryProgram is null
+                || typeSpecProviderIdentity is null)
+            {
+                throw Unsupported(
+                    "An EN1 class query Body has no selected source-free class declaration context.");
+            }
+
+            var classFieldCount = fieldPaths.GetFieldCount(tokenRow);
+            if (classFieldCount is <= 0
+                or > SemanticVerifier.MaximumAnalysisVisits)
+            {
+                throw Invalid(
+                    "An EN1 class query FieldPath has an invalid length.");
+            }
+
+            return ReadStandardRegisteredQueryClassFieldPath(
+                rootTypeSpecRef, rootTypeSpec, tokenRow, classFieldCount,
+                typeSpecProviderIdentity, typeDefs, typeSpecs, fields,
+                fieldPaths, imports, nativePointerTypes,
+                signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                standardClassQueryProgram);
+        }
+
         var rootType = ReadForeignInvocationType(typeSpecs,
             NormalizeStandardRegisteredQueryTypeSpecRef(rootTypeSpecRef),
             nativePointerTypes, signatureIndexByAnchorMethod,
@@ -7694,6 +7747,204 @@ public static partial class TrRmExecutableCompiler
         if (!path.HasValidStructure)
         {
             throw Invalid("A registered-query FieldPath is invalid.");
+        }
+
+        return path;
+    }
+
+    private static BoundQueryFieldPath
+        ReadStandardRegisteredQueryClassFieldPath(
+            uint rootTypeSpecRef, TrRmTypeSpecRefInfo rootTypeSpec,
+            int fieldPathRow, int fieldCount,
+            string typeSpecProviderIdentity,
+            TrRmTypeDefTableReader typeDefs,
+            TrRmTypeSpecTableReader typeSpecs,
+            TrRmFieldDefTableReader fields,
+            TrRmFieldPathTableReader fieldPaths,
+            TrRmImportTableReader imports,
+            List<NativePointerTypeDefinition> nativePointerTypes,
+            int[] signatureIndexByAnchorMethod,
+            int[] structureTypeByTypeDef,
+            BoundProgram classQueryProgram)
+    {
+        var expectedRootTypeDefRow = typeSpecs.GetNominalTypeDefRow(
+            rootTypeSpecRef, typeDefs, imports);
+        string? providerIdentity = null;
+        string? typeExportKey = null;
+        if (rootTypeSpec.Form == 0x03)
+        {
+            var binding = imports.GetBindingForImportRow(
+                rootTypeSpec.Row);
+            providerIdentity = binding.ProducerIdentity;
+            typeExportKey = binding.ExportKey;
+        }
+        else
+        {
+            providerIdentity = typeSpecProviderIdentity;
+        }
+
+        var classDeclaration = classQueryProgram
+            .StandardClassDeclarations.SingleOrDefault(declaration =>
+                StringComparer.Ordinal.Equals(
+                    declaration.Declaration.Provider.ModuleIdentity,
+                    providerIdentity)
+                && (typeExportKey is not null
+                    ? declaration.SelectedExportKeys.Contains(typeExportKey,
+                        StringComparer.Ordinal)
+                    : declaration.Declaration.Identity.DefinitionId
+                        == (0x1300_0000u
+                            | checked((uint)expectedRootTypeDefRow))
+                        && !declaration.SelectedExportKeys.IsEmpty));
+        if (classDeclaration is null)
+        {
+            throw Invalid(
+                "An EN1 class query FieldPath has no selected class declaration.");
+        }
+
+        var classTypeIndex
+            = classQueryProgram.GenericNominalTypeInstances
+                .Select((instance, index) => (instance, index))
+                .Where(item =>
+                    item.instance.Definition
+                        == classDeclaration.Declaration.Identity
+                    && item.instance.Arguments.IsEmpty
+                    && item.instance.Qualifiers == rootTypeSpec.Qualifiers
+                    && item.instance.TypeSpecReference == rootTypeSpecRef
+                    && StringComparer.Ordinal.Equals(
+                        item.instance.TypeSpecProviderIdentity,
+                        typeSpecProviderIdentity)
+                    && item.instance.TypeSpecForm == rootTypeSpec.Form)
+                .Select(static item => item.index)
+                .SingleOrDefault(-1);
+        if (classTypeIndex < 0)
+        {
+            throw Invalid(
+                "An EN1 class query FieldPath has no matching TypeSpec instance.");
+        }
+
+        var rootType = BoundGenericNominalTypeTypes.Type(classTypeIndex);
+        var (expectedFieldFirst, expectedFieldEnd)
+            = typeDefs.GetFieldRange(expectedRootTypeDefRow);
+        var steps = ImmutableArray.CreateBuilder<BoundQueryFieldStep>(
+            fieldCount);
+        var currentType = rootType;
+        for (var ordinal = 0; ordinal < fieldCount; ordinal++)
+        {
+            var fieldReference = fieldPaths.GetFieldReference(
+                fieldPathRow, ordinal);
+            var tokenKind = (byte)(fieldReference >> 24);
+            var tokenRow = checked((int)(fieldReference & 0x00FF_FFFF));
+            var fieldRow = ResolveStandardRegisteredQueryFieldRow(
+                tokenKind, tokenRow, imports, fields);
+            var ownerTypeDef = fields.GetOwnerTypeDef(fieldRow);
+            if (ordinal == 0)
+            {
+                if (ownerTypeDef != expectedRootTypeDefRow
+                    || fieldRow < expectedFieldFirst
+                    || fieldRow >= expectedFieldEnd)
+                {
+                    throw Invalid(
+                        "An EN1 class query FieldPath field is outside its root TypeDef.");
+                }
+
+                BoundStandardClassFieldDeclaration classField;
+                if (tokenKind == 0x1C)
+                {
+                    var binding
+                        = imports.GetBindingForImportRow(tokenRow);
+                    if (!StringComparer.Ordinal.Equals(
+                            binding.ProducerIdentity,
+                            classDeclaration.Declaration.Provider
+                                .ModuleIdentity))
+                    {
+                        throw Invalid(
+                            "An EN1 class FieldDef Import differs from its selected class provider.");
+                    }
+
+                    classField = classDeclaration.Declaration.Fields
+                        .SingleOrDefault(field =>
+                            field.SelectedExportKeys.Contains(
+                                binding.ExportKey,
+                                StringComparer.Ordinal))
+                        ?? throw Invalid(
+                            "An EN1 class query FieldPath has no selected FieldDef.");
+                    var expectation
+                        = classDeclaration.Expectations
+                            .SelectMany(static item =>
+                                item.FieldExpectations)
+                            .SingleOrDefault(fieldExpectation =>
+                                fieldExpectation.ImportRow == tokenRow);
+                    if (expectation is null
+                        || expectation.OwnerImportRow
+                            != (rootTypeSpec.Form == 0x03
+                                ? rootTypeSpec.Row : 0)
+                        || expectation.ExpectedDefinitionId
+                            != (0x1400_0000u
+                                | checked((uint)fieldRow))
+                        || expectation.ExpectedOwnerDefinitionId
+                            != (0x1300_0000u
+                                | checked((uint)expectedRootTypeDefRow))
+                        || expectation.ProviderDefinitionId
+                            != classField.DefinitionId
+                        || expectation.ProviderOwnerDefinitionId
+                            != classField.OwnerDefinitionId
+                        || !StringComparer.Ordinal.Equals(
+                            expectation.ExportKey, binding.ExportKey))
+                    {
+                        throw Invalid(
+                            "An EN1 class FieldDef Import lost its original expectation.");
+                    }
+                }
+                else
+                {
+                    classField = classDeclaration.Declaration.Fields
+                        .SingleOrDefault(field =>
+                            field.DefinitionId
+                                == (0x1400_0000u
+                                    | checked((uint)fieldRow)))
+                        ?? throw Invalid(
+                            "An EN1 class query FieldPath has no matching local FieldDef.");
+                }
+
+                var fieldOrdinal = checked((uint)(fieldRow
+                    - expectedFieldFirst));
+                if (classField.Type == PrimitiveType.Void
+                    || classDeclaration.Declaration.Fields[
+                        checked((int)fieldOrdinal)].DefinitionId
+                        != classField.DefinitionId)
+                {
+                    throw Invalid(
+                        "An EN1 class query FieldPath lost its complete field type or ordinal.");
+                }
+
+                steps.Add(new BoundQueryFieldStep(currentType,
+                    fieldOrdinal, classField.Type, false) {
+                    StandardClassFieldOrigin = classField,
+                });
+                currentType = classField.Type;
+                continue;
+            }
+
+            var ownerType = GetStandardRegisteredQueryStructureType(
+                ownerTypeDef, structureTypeByTypeDef);
+            if (ownerType != currentType)
+            {
+                throw Invalid(
+                    "An EN1 class query FieldPath has a discontinuous inline-struct owner.");
+            }
+
+            var step = CreateStandardRegisteredQueryFieldStep(
+                ownerTypeDef, fieldRow, ownerType, typeDefs, typeSpecs,
+                fields, nativePointerTypes, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef, imports);
+            steps.Add(step);
+            currentType = step.FieldType;
+        }
+
+        var path = new BoundQueryFieldPath(rootType, steps.MoveToImmutable());
+        if (!path.HasValidStructure)
+        {
+            throw Invalid("An EN1 class query FieldPath is invalid.");
         }
 
         return path;

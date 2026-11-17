@@ -202,11 +202,8 @@ public static partial class TrRmExecutableCompiler
 
     internal static bool IsSelectedC1ClassInstanceLayoutSchemaIdentity(
         string schemaIdentity)
-        => schemaIdentity is
-            StandardC1M1ConstructionL1R1ClassInstanceLayoutSchemaIdentity
-            or StandardC1M1Construction2L1R1ClassInstanceLayoutSchemaIdentity
-            or StandardC1M1ConstructionL1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity
-            or StandardC1M1Construction2L1R1PropertyInitializedStateClassInstanceLayoutSchemaIdentity;
+        => BoundStandardEnumDeclarationContract
+            .IsSelectedClassInstanceLayoutSchemaIdentity(schemaIdentity);
 
     private static bool IsSelectedGeneralPredicateGraphsSchemaIdentity(
         string schemaIdentity)
@@ -4490,7 +4487,8 @@ public static partial class TrRmExecutableCompiler
             selectedModuleImports = null,
         ImmutableArray<CoreContractFailureIdentitySelection>
             coreContractFailureIdentitySelections = default,
-        int selectedModuleRow = 0)
+        int selectedModuleRow = 0,
+        BoundProgram? standardClassQueryProgram = null)
     {
         var standardInitializationReferenceBodies
             = standardSchemaIdentity is not null
@@ -5423,14 +5421,34 @@ public static partial class TrRmExecutableCompiler
                     var registerBody = bodies.GetRegisterBody(
                         defs.GetBodyRow(row), contractTable.Count,
                         generalPredicateGraphsInitializationReferenceBodies);
-                    statements = DecodeStandardInitializationReferenceBody(
-                        registerBody, declaration, variables, typeDefs, fields,
-                        fieldPaths, types, imports, standardNativeImports,
-                        checkedReferenceTypeDefinitions,
-                        checkedReferenceTypeIndexes,
-                        nativePointerTypeDefinitions, structureTypeByTypeDef,
-                        structures,
-                        functions, functionIndexByMethodRow);
+                    if (standardSchemaIdentity is { } classQuerySchema
+                        && IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                            classQuerySchema)
+                        && registerBody.HasLayoutQueryOperation)
+                    {
+                        statements = DecodeStandardRegisteredQueryBody(
+                            registerBody, declaration, variables, typeDefs,
+                            types, fields, fieldPaths, imports,
+                            nativePointerTypeDefinitions,
+                            signatureIndexByAnchorMethod,
+                            structureTypeByTypeDef,
+                            standardClassQueryProgram,
+                            modules.GetIdentity(defs.GetOwnerModule(row)));
+                    }
+                    else
+                    {
+                        statements
+                            = DecodeStandardInitializationReferenceBody(
+                                registerBody, declaration, variables,
+                                typeDefs, fields, fieldPaths, types, imports,
+                                standardNativeImports,
+                                checkedReferenceTypeDefinitions,
+                                checkedReferenceTypeIndexes,
+                                nativePointerTypeDefinitions,
+                                structureTypeByTypeDef, structures,
+                                functions, functionIndexByMethodRow);
+                    }
+
                     registeredQueryBody = true;
                 }
                 else if ((schema is TrRmArtifactSchema.Standard
@@ -5498,16 +5516,39 @@ public static partial class TrRmExecutableCompiler
 
         var program = new BoundProgram(programFunctions, entryFunctionIndex) {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
-            Structures = structures,
+            Structures = standardClassQueryProgram is null
+                ? structures : standardClassQueryProgram.Structures,
             CoreExceptionIdentitySelections =
                 coreExceptionIdentitySelections.IsDefault
                     ? [] : coreExceptionIdentitySelections,
             CoreContractFailureIdentitySelections =
                 coreContractFailureIdentitySelections.IsDefault
                     ? [] : coreContractFailureIdentitySelections,
-            NativeFunctionPointerSignatures = nativeFunctionPointerSignatureArray,
-            NativePointerTypes = [.. nativePointerTypeDefinitions],
-            CheckedReferenceTypes = checkedReferenceTypes,
+            NativeFunctionPointerSignatures = standardClassQueryProgram is null
+                ? nativeFunctionPointerSignatureArray
+                : standardClassQueryProgram.NativeFunctionPointerSignatures,
+            NativePointerTypes = standardClassQueryProgram is null
+                ? [.. nativePointerTypeDefinitions]
+                : standardClassQueryProgram.NativePointerTypes,
+            CheckedReferenceTypes = standardClassQueryProgram is null
+                ? checkedReferenceTypes
+                : standardClassQueryProgram.CheckedReferenceTypes,
+            EnumDefinitions = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.EnumDefinitions,
+            Interfaces = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.Interfaces,
+            InterfaceWitnesses = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.InterfaceWitnesses,
+            NativeFixedArrayTypes = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.NativeFixedArrayTypes,
+            SpanTypes = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.SpanTypes,
+            GenericNominalTypeDefinitions = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.GenericNominalTypeDefinitions,
+            GenericNominalTypeInstances = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.GenericNominalTypeInstances,
+            StandardClassDeclarations = standardClassQueryProgram is null
+                ? [] : standardClassQueryProgram.StandardClassDeclarations,
         };
         try
         {

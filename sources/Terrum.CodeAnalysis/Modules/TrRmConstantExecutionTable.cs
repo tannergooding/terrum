@@ -41,8 +41,7 @@ internal readonly ref struct TrRmConstantExecutionTableReader
         TrRmTargetProfileTableReader targetProfiles,
         TrRmIntrinsicRegistrationTableReader intrinsicRegistrations,
         TrRmImportTableReader imports, TrRmFeatureTableReader features,
-        TrRmModuleTableReader modules, TrRmArtifactSchema schema,
-        bool allowUnownedTargetLayoutDependencies = false)
+        TrRmModuleTableReader modules, TrRmArtifactSchema schema)
     {
         if (!TrRmConstantExecutionTableValidation.ValidCount(recordCount)
             || !TrRmConstantExecutionTableValidation.ValidCount(bodyCount)
@@ -554,7 +553,7 @@ internal static class TrRmConstantExecutionTableWriter
             targetLayoutDependencies, methods, typeDefs, signatures, generics,
             contracts, typeSpecs,
             targetProfiles, intrinsicRegistrations, imports, features, modules,
-            schema, allowUnownedTargetLayoutDependencies);
+            schema);
         return result;
     }
 }

@@ -17686,10 +17686,7 @@ public static partial class SemanticVerifier
         }
 
         var instance = program.GenericNominalTypeInstances[instanceIndex];
-        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0
-            || instance.TypeSpecReference != 0
-            || instance.TypeSpecProviderIdentity is not null
-            || instance.TypeSpecForm != 0)
+        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0)
         {
             return null;
         }
@@ -17699,7 +17696,28 @@ public static partial class SemanticVerifier
             declaration =>
                 declaration.Declaration.Identity == identity
                 && !declaration.SelectedExportKeys.IsEmpty
-                && declaration.Expectations.IsEmpty);
+                && (instance.TypeSpecReference == 0
+                    ? instance.TypeSpecProviderIdentity is null
+                        && instance.TypeSpecForm == 0
+                        && (declaration.Expectations.IsEmpty
+                            || BoundStandardEnumDeclarationContract
+                                .IsSelectedClassInstanceLayoutSchemaIdentity(
+                                    declaration.Declaration.Provider
+                                        .SchemaIdentity))
+                    : instance.TypeSpecProviderIdentity is string providerIdentity
+                        && (instance.TypeSpecForm is 0x02 or 0x03)
+                        && BoundStandardEnumDeclarationContract
+                            .IsSelectedClassInstanceLayoutSchemaIdentity(
+                                declaration.Declaration.Provider
+                                    .SchemaIdentity)
+                        && (StringComparer.Ordinal.Equals(
+                                declaration.Declaration.Provider
+                                    .ModuleIdentity, providerIdentity)
+                            || declaration.Expectations.Any(expectation =>
+                                StringComparer.Ordinal.Equals(
+                                    expectation.Binding.UsingModule
+                                        .ModuleIdentity,
+                                    providerIdentity))));
     }
 
     private static bool MatchesStandardClassQueryField(

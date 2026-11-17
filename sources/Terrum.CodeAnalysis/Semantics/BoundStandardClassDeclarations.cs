@@ -124,7 +124,11 @@ internal static class BoundStandardClassDeclarationContract
                     !declaration.ExportKeys.Contains(key,
                         StringComparer.Ordinal))
                 || (!declaration.Expectations.IsEmpty
-                    && !declaration.SelectedExportKeys.IsEmpty))
+                    && !declaration.SelectedExportKeys.IsEmpty
+                    && !BoundStandardEnumDeclarationContract
+                        .IsSelectedClassInstanceLayoutSchemaIdentity(
+                            declaration.Declaration.Provider
+                                .SchemaIdentity))
             {
                 return false;
             }

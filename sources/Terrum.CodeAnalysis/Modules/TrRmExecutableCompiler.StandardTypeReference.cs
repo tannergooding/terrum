@@ -198,7 +198,11 @@ public static partial class TrRmExecutableCompiler
                 IsSelectedC1EnumClosureSchemaIdentity))
         {
             return CreateC1EnumClosureSourceTypeReference(artifacts,
-                schemaIdentities, moduleIdentity, typeKeys, fieldKeys);
+                schemaIdentities, moduleIdentity, typeKeys, fieldKeys,
+                resolveAllClassFieldTypes:
+                    fieldKeys.Length != 0
+                        && IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                            schemaIdentities[0]));
         }
 
         if (schemaIdentities.All(static schemaIdentity =>
@@ -231,7 +235,11 @@ public static partial class TrRmExecutableCompiler
 
     private static CompilationReference CreateC1M1ClassSourceTypeReference(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
-        string[] exportKeys, string[] selectedFieldExportKeys)
+        string[] exportKeys, string[] selectedFieldExportKeys,
+        ImmutableArray<(string ProviderIdentity, string ExportKey)>
+            selectedImportedClassTypeKeys = default,
+        bool allowClassLayoutQueryBody = false,
+        bool resolveAllClassFieldTypes = false)
     {
         var isEN1 = IsSelectedC1EnumClosureSchemaIdentity(
             schemaIdentities[0]);
@@ -243,6 +251,20 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported(
                 "The C1 class source-reference projection requires one exact C1M1 or EN1 schema selection for every provider.");
+        }
+        if (allowClassLayoutQueryBody
+            && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                schemaIdentities[0]))
+        {
+            throw Unsupported(
+                "Class query Body type references require an exact class-instance-layout successor.");
+        }
+        if (resolveAllClassFieldTypes
+            && !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                schemaIdentities[0]))
+        {
+            throw Unsupported(
+                "Complete class field layout closure requires an exact class-instance-layout successor.");
         }
 
         var moduleValidation = ValidateStandardInputModules(artifacts,
@@ -260,7 +282,7 @@ public static partial class TrRmExecutableCompiler
         var (methodStart, methodEnd)
             = rootTables.Modules.GetMethodDefRange(rootModuleRow);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
-            || methodStart != methodEnd)
+            || (methodStart != methodEnd && !allowClassLayoutQueryBody))
         {
             throw Unsupported(
                 "The C1 metadata-only class projection requires a type-only Module without MethodDefs.");
@@ -871,12 +893,39 @@ public static partial class TrRmExecutableCompiler
                     schemaIdentities[binding.ProviderArtifactIndex],
                     binding.ProviderModuleRow),
                 binding.ProviderTypeDefRow);
+            var selectedFields = ImmutableArray.CreateBuilder<
+                BoundStandardClassFieldDeclaration>(
+                    declaration.Fields.Length);
+            foreach (var field in declaration.Fields)
+            {
+                selectedFields.Add(field with {
+                    SelectedExportKeys = [.. field.ExportKeys.Where(
+                        selectedFieldKeySet.Contains)],
+                });
+            }
+            declaration = declaration with {
+                Fields = selectedFields.MoveToImmutable(),
+            };
+            var selectedTypeKeys
+                = selectedImportedClassTypeKeys.IsDefault
+                    ? ImmutableArray<string>.Empty
+                    : selectedImportedClassTypeKeys.Where(selection =>
+                            StringComparer.Ordinal.Equals(
+                                selection.ProviderIdentity,
+                                providerModule.Identity))
+                        .Select(static selection => selection.ExportKey)
+                        .Where(key => declaration.ExportKeys.Contains(key,
+                            StringComparer.Ordinal))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToImmutableArray();
             classDeclarations.Add(new BoundStandardClassDeclaration(
                 declaration,
                 GetStandardTypeExportKeys(providerTables,
                     binding.ProviderModuleRow, binding.ProviderTypeDefRow),
                 classExpectationsByActualType.TryGetValue(identity,
-                    out var expectations) ? [.. expectations] : []));
+                    out var expectations) ? [.. expectations] : []) {
+                SelectedExportKeys = selectedTypeKeys,
+            });
         }
 
         if (isEN1)
@@ -1050,7 +1099,11 @@ public static partial class TrRmExecutableCompiler
 
     private static CompilationReference CreateC1EnumClosureSourceTypeReference(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
-        string[] selectedExportKeys, string[] selectedFieldExportKeys)
+        string[] selectedExportKeys, string[] selectedFieldExportKeys,
+        ImmutableArray<(string ProviderIdentity, string ExportKey)>
+            selectedImportedClassTypeKeys = default,
+        bool allowClassLayoutQueryBody = false,
+        bool resolveAllClassFieldTypes = false)
     {
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
@@ -1082,7 +1135,9 @@ public static partial class TrRmExecutableCompiler
         {
             return CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
                 schemaIdentities, moduleIdentity, selectedExportKeys,
-                selectedFieldExportKeys);
+                selectedFieldExportKeys,
+                allowClassLayoutQueryBody: allowClassLayoutQueryBody,
+                resolveAllClassFieldTypes: resolveAllClassFieldTypes);
         }
 
         var classKeySet = selectedClassKeys.ToHashSet(
@@ -1091,11 +1146,14 @@ public static partial class TrRmExecutableCompiler
             !classKeySet.Contains(exportKey)).ToArray();
         var classReference = CreateC1M1ClassSourceTypeReference(artifacts,
             schemaIdentities, moduleIdentity, [.. selectedClassKeys],
-            selectedFieldExportKeys);
+            selectedFieldExportKeys, selectedImportedClassTypeKeys,
+            allowClassLayoutQueryBody, resolveAllClassFieldTypes);
         var enumAndStructReference
             = CreateC1EnumClosureSourceTypeReferenceCore(artifacts,
                 schemaIdentities, moduleIdentity, enumAndStructKeys,
-                selectedFieldExportKeys, classReference);
+                selectedFieldExportKeys, classReference,
+                allowClassLayoutQueryBody,
+                resolveAllClassFieldTypes);
         if (selectedFieldExportKeys.Length != 0)
         {
             var selectedFields = new Dictionary<string, (
@@ -1170,10 +1228,36 @@ public static partial class TrRmExecutableCompiler
         return enumAndStructReference;
     }
 
+    internal static CompilationReference
+        CreateEN1ClassLayoutQuerySourceTypeReference(
+            byte[][] artifacts, string[] schemaIdentities,
+            string moduleIdentity, string[] selectedTypeExportKeys,
+            string[] selectedFieldExportKeys,
+            ImmutableArray<(string ProviderIdentity, string ExportKey)>
+                selectedImportedClassTypeKeys)
+    {
+        if (schemaIdentities.Length == 0
+            || schemaIdentities.Any(schemaIdentity =>
+                !IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                    schemaIdentity)))
+        {
+            throw Unsupported(
+                "An EN1 class query Body reference requires one exact class-instance-layout successor for every provider.");
+        }
+
+        return CreateC1EnumClosureSourceTypeReference(artifacts,
+            schemaIdentities, moduleIdentity, selectedTypeExportKeys,
+            selectedFieldExportKeys, selectedImportedClassTypeKeys,
+            allowClassLayoutQueryBody: true,
+            resolveAllClassFieldTypes: true);
+    }
+
     private static CompilationReference CreateC1EnumClosureSourceTypeReferenceCore(
         byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
         string[] selectedExportKeys, string[] selectedFieldExportKeys,
-        CompilationReference? standardClassReference = null)
+        CompilationReference? standardClassReference = null,
+        bool allowClassLayoutQueryBody = false,
+        bool resolveAllClassFieldTypes = false)
     {
         var moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
@@ -1290,7 +1374,7 @@ public static partial class TrRmExecutableCompiler
         var enumTypeDefCount = typeDefRows.Count(typeDefRow =>
             rootTables.TypeDefs.GetKind(typeDefRow) == 4);
         if (rootTables.Modules.GetEntryMethod(rootModuleRow) != 0
-            || methodStart != methodEnd
+            || (methodStart != methodEnd && !allowClassLayoutQueryBody)
             || typeDefCount == 0
             || typeDefCount > SemanticVerifier.MaximumAnalysisVisits
             || structTypeDefRows.Length
@@ -2014,13 +2098,21 @@ public static partial class TrRmExecutableCompiler
                     fieldIndex++)
                 {
                     var field = fields[fieldIndex];
-                    if (field.SelectedExportKeys.IsEmpty)
+                    if (field.SelectedExportKeys.IsEmpty
+                        && !resolveAllClassFieldTypes)
                     {
                         continue;
                     }
                     if (!TryDecodeSelectedClassFieldType(
                             field.TypeSpecReference, out var fieldType))
                     {
+                        if (resolveAllClassFieldTypes
+                            && !field.SelectedExportKeys.IsEmpty)
+                        {
+                            throw Unsupported(
+                                "An EN1 class query FieldDef does not have a supported selected type.");
+                        }
+
                         continue;
                     }
 

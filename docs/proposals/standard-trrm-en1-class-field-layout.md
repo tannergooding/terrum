@@ -249,7 +249,7 @@ Inspected source, **not executed qualification**:
 | [`BoundStandardClassLayoutVariant`](../../sources/Terrum.CodeAnalysis/Semantics/BoundStandardClassDeclarations.cs), [`CreateStandardClassTypeView`](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.StandardTypeReference.cs) | Retain target/kind/flags/alignment/pack and ordered FieldDef identities, not physical offsets. Sufficient inputs only after selecting this recipe and resolving complete field layouts. |
 | [`TrRmLayoutTableReader`](../../sources/Terrum.CodeAnalysis/Modules/TrRmLayoutTableReader.cs) | Already selects exact-profile-or-default complete variants and validates declared controls; it does not establish a class placement algorithm. |
 | [`DeclareClass`](../../sources/Terrum.CodeAnalysis/Semantics/Binder.ManagedClasses.cs), [`ValueLayout`](../../sources/Terrum.CodeAnalysis/Semantics/ValueLayout.cs) | Hosted class geometry includes bounded payload/eight-byte rounding and managed-handle assumptions. Those private facts are not this Standard agreement. |
-| [`NativeEmitter` query lowering](../../sources/Terrum.CodeAnalysis/Native/NativeEmitter.cs) | Resolves query field paths through `BoundStruct` fields today. A class-aware declaration-derived resolver and its verification/provenance integration remain implementation work. |
+| [`NativeEmitter` query lowering](../../sources/Terrum.CodeAnalysis/Native/NativeEmitter.cs) | The bounded EN1 path now derives Auto/Sequential class-field offsets from ordered layout fields and complete field types. Full representation/replacement coverage and native qualification remain open; this proposal stays unapproved. |
 
 ## Required acceptance, not current results
 

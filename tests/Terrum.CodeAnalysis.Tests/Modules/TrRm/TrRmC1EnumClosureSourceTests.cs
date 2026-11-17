@@ -4,9 +4,11 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 
@@ -1030,6 +1032,22 @@ internal sealed class TrRmC1EnumClosureSourceTests
                 consumerTables.Methods.GetBodyRow(1),
                 consumerTables.Contracts.Count);
             Assert.That(queryBody.HasLayoutQueryOperation, Is.True);
+            var loadedClassQuery = TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    emittedConsumer), "ClassLayoutConsumer", [input]);
+            BoundLayoutQuery? loadedQuery = null;
+            Assert.That(BoundTreeTraversal.VisitExpressions(
+                loadedClassQuery.Functions.Single().Body,
+                expression => loadedQuery ??=
+                    expression as BoundLayoutQuery), Is.True);
+            Assert.That(loadedQuery, Is.Not.Null);
+            Assert.That(loadedQuery!.Subject.RequiresUnsafe, Is.True);
+            Assert.That(loadedQuery.Subject.IsUnsafeAuthorized, Is.True);
+            Assert.That(loadedQuery.Subject.FieldPath!.Steps.Single()
+                .StandardClassFieldOrigin!.SelectedExportKeys,
+                Is.EqualTo(["field.box.value"]));
+            Assert.That(NativeEmitter.EmitLibrary(loadedClassQuery,
+                ["Offset"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
             var staticArtifact = AsStaticClassField(artifact,
                 SchemaFor(schemaIdentity));
@@ -1049,6 +1067,94 @@ internal sealed class TrRmC1EnumClosureSourceTests
                             baseArtifact),
                     ], ["type.box"], ["field.box.value"]));
         }
+    }
+
+    [Test]
+    public void LowersEN1ClassQueryFromCompleteProviderFieldLayout()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var schemaIdentity
+            = $"{s_schemaIdentities[0]}-class-instance-layout-1";
+        var providerTree = SyntaxTree.Parse("""
+            namespace Demo {
+                public class Box {
+                    public uint8 Prefix;
+                    public int32 Value;
+                }
+            }
+            """);
+        var providerCompilation = Compilation.CreateLibrary(providerTree);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerProgram = (BoundProgram)providerCompilation.Program!;
+        var classDeclaration = providerTree.Root.Children
+            .OfType<SyntaxNode>()
+            .Single(static node =>
+                node.Kind == SyntaxKind.ClassDeclaration);
+        var fieldDeclarations = classDeclaration.Children
+            .OfType<SyntaxNode>()
+            .Where(static node => node.Kind == SyntaxKind.FieldDeclaration)
+            .ToArray();
+        var classIndex = providerProgram.SourceClassProgramAssociation!
+            .Declarations.Single(declaration =>
+                declaration.Span == classDeclaration.Span).ClassIndex;
+        var classExport = new TrRmSourceClassExport(providerProgram,
+            classIndex, classDeclaration.Span, "type.box", [
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclarations[0].Span, "field.box.prefix"),
+                new TrRmSourceClassMemberExport(0,
+                    fieldDeclarations[1].Span, "field.box.value"),
+            ]);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerProgram, "ClassLayoutProvider", schemaIdentity, 1,
+            [], [], [classExport], []);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, "ClassLayoutProvider", [], ["type.box"],
+            ["field.box.value"]);
+        var queryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                using Demo;
+                nint Offset() {
+                    return unsafe(offsetof(Box, Value));
+                }
+                """), reference, new CompilationOptions {
+                LayoutCoreRegistration
+                    = LayoutCoreRegistrationTestData.Create(),
+            });
+        Assert.That(queryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, queryCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            queryCompilation.Program!, "ClassLayoutConsumer",
+            schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "ClassLayoutConsumer", [providerInput]);
+        var returned = (BoundReturn)loaded.Functions.Single().Body
+            .Statements.Single();
+        var unsafeQuery = (BoundUnsafeExpression)returned.Value!;
+        var query = (BoundLayoutQuery)unsafeQuery.Expression;
+        var main = loaded.Functions.Single() with {
+            Name = "Main",
+            ReturnType = PrimitiveType.Int32,
+            Body = new BoundBlock([
+                new BoundReturn(new BoundCast(unsafeQuery,
+                    PrimitiveType.Int32, default), default),
+            ], default),
+        };
+        var executable = loaded with {
+            Functions = [main],
+            EntryPoint = 0,
+        };
+
+        Assert.That(NativeJit.Execute(executable,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(4));
+        Assert.That(NativeEmitter.EmitLibrary(loaded, ["Offset"],
+            NativeRuntimePolicy.FailFast), Is.Not.Empty);
+        Assert.That(query.Subject.RequiresUnsafe, Is.True);
     }
 
     [Test]

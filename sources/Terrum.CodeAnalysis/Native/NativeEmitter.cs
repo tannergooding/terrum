@@ -9,6 +9,7 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 
@@ -4188,14 +4189,14 @@ internal sealed partial class PeCompiler
                 when query.Subject.Kind == BoundQuerySubjectKind.Type
                     && query.Subject.FieldPath is BoundQueryFieldPath path
                     && path.RootType == query.Subject.Type
-                => GetNativeQueryFieldPathOffset(path, _program.Structures,
+            => GetNativeQueryFieldPathOffset(path, _program,
                     terminalOnly: false),
             BoundLayoutQueryKind.OffsetOfPlace
                 when (query.Subject.Kind is BoundQuerySubjectKind.Place
                         or BoundQuerySubjectKind.FieldPathPlace)
                     && query.Subject.FieldPath is BoundQueryFieldPath path
                     && path.LeafType == query.Subject.Type
-                => GetNativeQueryFieldPathOffset(path, _program.Structures,
+                => GetNativeQueryFieldPathOffset(path, _program,
                     terminalOnly: true),
             _ => throw new NotSupportedException(
                 "The native emitter received an unsupported layout-query subject."),
@@ -4265,8 +4266,7 @@ internal sealed partial class PeCompiler
     }
 
     private static ulong GetNativeQueryFieldPathOffset(
-        BoundQueryFieldPath path, ImmutableArray<BoundStruct> structures,
-        bool terminalOnly)
+        BoundQueryFieldPath path, BoundProgram program, bool terminalOnly)
     {
         if (!path.HasValidStructure
             || (terminalOnly && path.Steps.Length != 1))
@@ -4276,19 +4276,46 @@ internal sealed partial class PeCompiler
         }
 
         ulong offset = 0;
-        foreach (var step in path.Steps)
+        for (var index = 0; index < path.Steps.Length; index++)
         {
+            var step = path.Steps[index];
+            if (step.StandardClassFieldOrigin is
+                BoundStandardClassFieldDeclaration classField)
+            {
+                if (index != 0
+                    || !BoundGenericNominalTypeContract.IsNominalClassType(
+                        step.OwnerType,
+                        program.GenericNominalTypeInstances,
+                        program.GenericNominalTypeDefinitions))
+                {
+                    throw new InvalidOperationException(
+                        "A verified class layout-query FieldPath has an invalid class root.");
+                }
+
+                var classFieldOffset
+                    = GetNativeQueryClassFieldOffset(step.OwnerType,
+                        classField, program);
+                if (terminalOnly)
+                {
+                    return classFieldOffset;
+                }
+
+                offset = checked(offset + classFieldOffset);
+                continue;
+            }
+
             var structureIndex = (int)step.OwnerType - 100;
             var fieldOrdinal = checked((int)step.FieldOrdinal);
-            if ((uint)structureIndex >= (uint)structures.Length
+            if ((uint)structureIndex >= (uint)program.Structures.Length
                 || (uint)fieldOrdinal
-                    >= (uint)structures[structureIndex].Fields.Length)
+                    >= (uint)program.Structures[structureIndex].Fields.Length)
             {
                 throw new InvalidOperationException(
                     "A verified layout-query FieldPath has an unrepresented field.");
             }
 
-            var field = structures[structureIndex].Fields[fieldOrdinal];
+            var field = program.Structures[structureIndex]
+                .Fields[fieldOrdinal];
             if (field.Type != step.FieldType)
             {
                 throw new InvalidOperationException(
@@ -4297,14 +4324,318 @@ internal sealed partial class PeCompiler
 
             if (terminalOnly)
             {
-                return field.Offset;
+                return checked((ulong)field.Offset);
             }
 
-            offset = checked(offset + field.Offset);
+            offset = checked(offset + checked((ulong)field.Offset));
         }
 
         return offset;
     }
+
+    private static ulong GetNativeQueryClassFieldOffset(
+        PrimitiveType classType,
+        BoundStandardClassFieldDeclaration selectedField,
+        BoundProgram program)
+    {
+        var instanceIndex = BoundGenericNominalTypeTypes.Index(classType);
+        if ((uint)instanceIndex
+            >= (uint)program.GenericNominalTypeInstances.Length)
+        {
+            throw new InvalidOperationException(
+                "A verified class layout-query FieldPath has no nominal class instance.");
+        }
+
+        var instance = program.GenericNominalTypeInstances[instanceIndex];
+        if (!instance.Arguments.IsEmpty || instance.Qualifiers != 0)
+        {
+            throw new NotSupportedException(
+                "The native class layout query does not support generic or qualified class roots.");
+        }
+
+        var declaration = program.StandardClassDeclarations
+            .SingleOrDefault(candidate =>
+                candidate.Declaration.Identity == instance.Definition
+                && !candidate.SelectedExportKeys.IsEmpty);
+        if (declaration is null
+            || !TrRmExecutableCompiler
+                .IsSelectedC1ClassInstanceLayoutSchemaIdentity(
+                    declaration.Declaration.Provider.SchemaIdentity)
+            || declaration.Declaration.Provider.TargetRequirement != 1
+            || declaration.Declaration.Provider.RuntimePolicy != 0
+            || declaration.Declaration.Fields.All(field =>
+                field.DefinitionId != selectedField.DefinitionId)
+            || selectedField.OwnerDefinitionId
+                != declaration.Declaration.Identity.DefinitionId)
+        {
+            throw new NotSupportedException(
+                "The native class layout query requires an exact EN1 class-instance-layout provider and selected FieldDef.");
+        }
+
+        var view = declaration.Declaration;
+        var declaredField = view.Fields.SingleOrDefault(field =>
+            field.DefinitionId == selectedField.DefinitionId);
+        if (declaredField is null
+            || declaredField.OwnerDefinitionId
+                != selectedField.OwnerDefinitionId
+            || declaredField.Type != selectedField.Type
+            || declaredField.Flags != selectedField.Flags
+            || declaredField.TypeSpecReference
+                != selectedField.TypeSpecReference)
+        {
+            throw new InvalidOperationException(
+                "A verified class query FieldDef changed before native layout lowering.");
+        }
+
+        var selectedLayouts = view.Layouts.Where(layout =>
+                layout.TargetProfileId == 1
+                && layout.TargetProfileRuleRevision == 1)
+            .ToArray();
+        BoundStandardClassLayoutVariant layout;
+        if (selectedLayouts.Length == 1)
+        {
+            layout = selectedLayouts[0];
+        }
+        else if (selectedLayouts.Length == 0)
+        {
+            var defaultLayouts = view.Layouts.Where(layout =>
+                    layout.TargetProfileReference == 0)
+                .ToArray();
+            if (defaultLayouts.Length != 1)
+            {
+                throw new NotSupportedException(
+                    "The native class layout query has no unique default or Windows x64 Layout variant.");
+            }
+
+            layout = defaultLayouts[0];
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "The native class layout query has duplicate Windows x64 Layout variants.");
+        }
+
+        if (layout.Kind is not (0 or 1) || layout.Flags != 0
+            || (layout.Kind == 0
+                && (layout.Alignment != 0 || layout.Pack != 0))
+            || (layout.Kind == 1
+                && (layout.Pack is not (1 or 2 or 4 or 8 or 16)
+                    || (layout.Alignment != 0
+                        && (layout.Alignment > 8192
+                            || (layout.Alignment
+                                & (layout.Alignment - 1)) != 0))))
+        {
+            throw new NotSupportedException(
+                "The selected class Layout variant is outside the EN1 Auto/Sequential recipe.");
+        }
+
+        var fields = view.Fields;
+        var instanceFields = fields.Where(field => (field.Flags & 8) == 0)
+            .ToDictionary(static field => field.DefinitionId);
+        if (layout.FieldDefinitionIds.Length != instanceFields.Count)
+        {
+            throw new InvalidOperationException(
+                "The selected class Layout does not enumerate every instance FieldDef.");
+        }
+
+        var seenFields = new HashSet<uint>();
+        ulong end = 0;
+        ulong blockAlignment = 1;
+        ulong selectedOffset = 0;
+        var foundSelectedField = false;
+        foreach (var definitionId in layout.FieldDefinitionIds)
+        {
+            if (!instanceFields.TryGetValue(definitionId,
+                    out var field)
+                || !seenFields.Add(definitionId))
+            {
+                throw new InvalidOperationException(
+                    "The selected class Layout contains a missing or duplicate instance FieldDef.");
+            }
+
+            var (size, naturalAlignment, requiredAlignment)
+                = GetNativeQueryClassFieldLayout(field.Type, program);
+            if (size == 0 || naturalAlignment <= 0
+                || requiredAlignment <= 0
+                || !IsPowerOfTwo((uint)naturalAlignment)
+                || !IsPowerOfTwo((uint)requiredAlignment))
+            {
+                throw new NotSupportedException(
+                    $"Class field '{field.Name}' has no complete positive layout representation.");
+            }
+
+            var placementAlignment = layout.Kind == 0
+                ? Math.Max(naturalAlignment, requiredAlignment)
+                : Math.Max(Math.Min(naturalAlignment,
+                    checked((int)layout.Pack)), requiredAlignment);
+            var fieldOffset = RoundUp(end,
+                checked((ulong)placementAlignment));
+            if (definitionId == selectedField.DefinitionId)
+            {
+                selectedOffset = fieldOffset;
+                foundSelectedField = true;
+            }
+
+            end = checked(fieldOffset + size);
+            blockAlignment = Math.Max(blockAlignment,
+                checked((ulong)placementAlignment));
+        }
+
+        if (!foundSelectedField)
+        {
+            throw new InvalidOperationException(
+                "The selected class FieldDef is absent from its Layout variant.");
+        }
+
+        if (layout.Kind == 1 && layout.Alignment != 0)
+        {
+            if ((ulong)layout.Alignment < blockAlignment)
+            {
+                throw new NotSupportedException(
+                    "The Sequential class Layout alignment weakens its derived field alignment.");
+            }
+
+            blockAlignment = layout.Alignment;
+        }
+
+        _ = RoundUp(Math.Max(end, 1UL), blockAlignment);
+        return selectedOffset;
+    }
+
+    private static (ulong Size, int Alignment, int RequiredAlignment)
+        GetNativeQueryClassFieldLayout(PrimitiveType type,
+            BoundProgram program)
+    {
+        if (BoundGenericNominalTypeContract.IsNominalClassType(type,
+                program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions)
+            || ManagedClassTypes.IsManaged(type)
+            || BoundGenericNominalTypeTypes.IsType(type))
+        {
+            throw new NotSupportedException(
+                "Class handle, generic nominal and managed descriptor fields have no selected EN1 inline representation.");
+        }
+
+        if (BoundEnumTypes.IsType(type))
+        {
+            if (!BoundEnumTypes.IsValidType(type, program.EnumDefinitions))
+            {
+                throw new NotSupportedException(
+                    "The class field enum has no complete selected definition.");
+            }
+        }
+        else if (!PrimitiveTypeFacts.IsBuiltInScalar(type)
+            && !NativePointerTypes.IsType(type)
+            && !NativeFunctionPointerTypes.IsType(type)
+            && type != PrimitiveType.NativeRawPointer
+            && !IsInlineClassLayoutStruct(type, program))
+        {
+            throw new NotSupportedException(
+                "The class field representation is outside the EN1 inline layout recipe.");
+        }
+
+        if (IsInlineClassLayoutStruct(type, program))
+        {
+            var structure = program.Structures[(int)type - 100];
+            if (structure.BlittableTargetRequirement
+                    != FixedLayoutStorage.WindowsX64TargetRequirement
+                || structure.Size <= 0 || structure.Alignment <= 0)
+            {
+                throw new NotSupportedException(
+                    "An inline class field struct has no complete selected Windows x64 layout.");
+            }
+
+            var activeStructures = new HashSet<int>();
+            ValidateInlineClassLayoutStruct(type, program,
+                activeStructures, 0);
+        }
+
+        var size = ValueLayout.Size(type, program.Structures,
+            program.CheckedReferenceTypes, program.NativeLoweringAgreement,
+            program.NativeFixedArrayTypes, program.EnumDefinitions);
+        var alignment = ValueLayout.Alignment(type, program.Structures,
+            program.CheckedReferenceTypes, program.NativeLoweringAgreement,
+            program.NativeFixedArrayTypes, program.EnumDefinitions);
+        var requiredAlignment = ValueLayout.RequiredAlignment(type,
+            program.Structures, program.NativeFixedArrayTypes,
+            program.CheckedReferenceTypes, program.EnumDefinitions);
+        return (size, alignment, requiredAlignment);
+    }
+
+    private static bool IsInlineClassLayoutStruct(PrimitiveType type,
+        BoundProgram program)
+    {
+        var structureIndex = (int)type - 100;
+        return !BoundEnumTypes.IsType(type)
+            && (int)type >= 100
+            && (int)type < ManagedClassTypes.First
+            && (uint)structureIndex < (uint)program.Structures.Length;
+    }
+
+    private static void ValidateInlineClassLayoutStruct(PrimitiveType type,
+        BoundProgram program, HashSet<int> activeStructures, int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw new NotSupportedException(
+                "The class inline-struct layout closure exceeds the checked depth limit.");
+        }
+
+        var structureIndex = (int)type - 100;
+        if (!activeStructures.Add(structureIndex))
+        {
+            throw new NotSupportedException(
+                "The class inline-struct layout closure is cyclic.");
+        }
+
+        try
+        {
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                if (IsInlineClassLayoutStruct(field.Type, program))
+                {
+                    ValidateInlineClassLayoutStruct(field.Type, program,
+                        activeStructures, depth + 1);
+                }
+                else if (BoundGenericNominalTypeContract.IsNominalClassType(
+                             field.Type,
+                             program.GenericNominalTypeInstances,
+                             program.GenericNominalTypeDefinitions)
+                    || ManagedClassTypes.IsManaged(field.Type)
+                    || BoundGenericNominalTypeTypes.IsType(field.Type)
+                    || (!PrimitiveTypeFacts.IsBuiltInScalar(field.Type)
+                        && !BoundEnumTypes.IsType(field.Type)
+                        && !NativePointerTypes.IsType(field.Type)
+                        && !NativeFunctionPointerTypes.IsType(field.Type)
+                        && field.Type != PrimitiveType.NativeRawPointer))
+                {
+                    throw new NotSupportedException(
+                        "An inline class field struct contains an unsupported field representation.");
+                }
+            }
+        }
+        finally
+        {
+            _ = activeStructures.Remove(structureIndex);
+        }
+    }
+
+    private static ulong RoundUp(ulong value, ulong alignment)
+    {
+        if (alignment == 0 || (alignment & (alignment - 1)) != 0)
+        {
+            throw new InvalidOperationException(
+                "A native class layout alignment is invalid.");
+        }
+
+        var remainder = value & (alignment - 1);
+        return remainder == 0
+            ? value
+            : checked(value + alignment - remainder);
+    }
+
+    private static bool IsPowerOfTwo(uint value)
+        => value != 0 && (value & (value - 1)) == 0;
 
     private static bool TryGetNativeTypeIdentity(
         BoundExpression expression, out PrimitiveType type)

@@ -114,7 +114,6 @@ public static partial class TrRmExecutableCompiler
         var declaration = program.StandardClassDeclarations.SingleOrDefault(
             candidate =>
                 candidate.Declaration.Identity == instance.Definition
-                && candidate.Expectations.IsEmpty
                 && !candidate.SelectedExportKeys.IsEmpty);
         if (declaration is null || fieldPath.Steps.Length != 1)
         {
@@ -143,6 +142,54 @@ public static partial class TrRmExecutableCompiler
         => ((BoundLayoutQuery)((BoundUnsafeExpression)
             ((BoundReturn)function.Body.Statements[0]).Value!).Expression)
             .Subject.FieldPath!;
+
+    private static int GetEN1ClassQueryRootTypeDefRow(
+        BoundGenericNominalTypeInstance instance,
+        BoundSourceTypeProviderSnapshot rootSnapshot,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables rootTables)
+    {
+        if (instance.TypeSpecProviderIdentity is not string providerIdentity
+            || !StringComparer.Ordinal.Equals(providerIdentity,
+                rootSnapshot.ModuleIdentity)
+            || instance.Qualifiers != 0
+            || instance.TypeSpecForm is not (0x02 or 0x03))
+        {
+            throw Unsupported(
+                "An EN1 class query Body root has no exact unqualified root TypeSpec.");
+        }
+
+        var typeSpec = rootTables.TypeSpecs.GetTypeSpecRef(
+            instance.TypeSpecReference);
+        if (!typeSpec.IsRow || typeSpec.Form != instance.TypeSpecForm
+            || typeSpec.Qualifiers != 0)
+        {
+            throw Invalid(
+                "An EN1 class query Body root TypeSpec changed before emission.");
+        }
+
+        var typeDefRow = typeSpec.Form switch {
+            0x02 => typeSpec.Row,
+            0x03 => checked((int)(
+                rootTables.Imports.GetExpectedDefinitionForImportRow(
+                    typeSpec.Row) & 0x00FF_FFFF)),
+            _ => throw Invalid(
+                "An EN1 class query Body root TypeSpec has an unsupported form."),
+        };
+        if (typeSpec.Form == 0x03
+            && rootTables.Imports.GetExpectedDefinitionForImportRow(
+                typeSpec.Row) >> 24 != 0x13)
+        {
+            throw Invalid(
+                "An EN1 class query Body root Import does not expect a TypeDef.");
+        }
+        if (rootTables.TypeDefs.GetKind(typeDefRow) != 2)
+        {
+            throw Invalid(
+                "An EN1 class query Body root TypeSpec is not a class.");
+        }
+
+        return typeDefRow;
+    }
 
     private sealed record C1EnumClosureEmissionLayout(
         uint TargetProfileId, uint TargetProfileRuleRevision,
@@ -515,25 +562,28 @@ public static partial class TrRmExecutableCompiler
                 = new List<BoundSourceTypeProviderSnapshot>();
             foreach (var declaration in standardClassDeclarations)
             {
-                if (declaration.Expectations.IsEmpty
-                    && StringComparer.Ordinal.Equals(
-                        declaration.Declaration.Provider.ModuleIdentity,
-                        moduleIdentity)
-                    || (declaration.Expectations.IsEmpty
-                        && !declaration.SelectedExportKeys.IsEmpty))
+                if (declaration.Expectations.IsEmpty)
                 {
-                    classRootProviders.Add(
-                        declaration.Declaration.Provider);
-                }
-
-                foreach (var expectation in declaration.Expectations)
-                {
-                    if (StringComparer.Ordinal.Equals(
-                            expectation.Binding.UsingModule.ModuleIdentity,
+                    if (!declaration.SelectedExportKeys.IsEmpty
+                        || StringComparer.Ordinal.Equals(
+                            declaration.Declaration.Provider.ModuleIdentity,
                             moduleIdentity))
                     {
                         classRootProviders.Add(
-                            expectation.Binding.UsingModule);
+                            declaration.Declaration.Provider);
+                    }
+                }
+                else
+                {
+                    foreach (var expectation in declaration.Expectations)
+                    {
+                        if (StringComparer.Ordinal.Equals(
+                                expectation.Binding.UsingModule.ModuleIdentity,
+                                moduleIdentity))
+                        {
+                            classRootProviders.Add(
+                                expectation.Binding.UsingModule);
+                        }
                     }
                 }
             }
@@ -3083,13 +3133,22 @@ public static partial class TrRmExecutableCompiler
             var classTypeIndex
                 = BoundGenericNominalTypeTypes.Index(
                     classFieldPath.RootType);
-            var classIdentity = program.GenericNominalTypeInstances[
-                classTypeIndex].Definition;
-            var rootClassTypeDefRow = checked((int)(
-                classIdentity.DefinitionId & 0x00FF_FFFF));
-            if (rootSnapshot is null
-                || !typeDefRowByRootClassTypeDef.TryGetValue(
-                    rootClassTypeDefRow, out var outputTypeDefRow)
+            var classInstance = program.GenericNominalTypeInstances[
+                classTypeIndex];
+            var classIdentity = classInstance.Definition;
+            if (rootSnapshot is null || standardClassRootTables is null)
+            {
+                throw Unsupported(
+                    "An EN1 class query Body has no selected class provider snapshot.");
+            }
+
+            var rootClassTypeDefRow = classInstance.TypeSpecReference == 0
+                ? checked((int)(classIdentity.DefinitionId
+                    & 0x00FF_FFFF))
+                : GetEN1ClassQueryRootTypeDefRow(classInstance,
+                    rootSnapshot, standardClassRootTables);
+            if (!typeDefRowByRootClassTypeDef.TryGetValue(
+                    rootClassTypeDefRow, out _)
                 || (!StringComparer.Ordinal.Equals(
                         rootSnapshot.ModuleIdentity, moduleIdentity)
                     && !importRowByRootClassTypeDef.ContainsKey(
@@ -3100,7 +3159,8 @@ public static partial class TrRmExecutableCompiler
             }
 
             var classQueryRootTypeSpecRows
-                = new Dictionary<BoundGenericNominalTypeIdentity, uint>();
+                = new Dictionary<(BoundGenericNominalTypeIdentity Identity,
+                    uint TypeSpecReference), uint>();
             uint GetClassQueryRootTypeSpecReference(PrimitiveType type)
             {
                 if (!BoundGenericNominalTypeContract.IsNominalClassType(type,
@@ -3120,10 +3180,14 @@ public static partial class TrRmExecutableCompiler
                         "An EN1 class query Body root has an invalid type instance.");
                 }
 
-                var identity = program.GenericNominalTypeInstances[
-                    instanceIndex].Definition;
-                var typeDefRow = checked((int)(
-                    identity.DefinitionId & 0x00FF_FFFF));
+                var instance = program.GenericNominalTypeInstances[
+                    instanceIndex];
+                var identity = instance.Definition;
+                var typeDefRow = instance.TypeSpecReference == 0
+                    ? checked((int)(identity.DefinitionId
+                        & 0x00FF_FFFF))
+                    : GetEN1ClassQueryRootTypeDefRow(instance,
+                        rootSnapshot!, standardClassRootTables!);
                 if (!typeDefRowByRootClassTypeDef.TryGetValue(typeDefRow,
                         out var localTypeDefRow))
                 {
@@ -3131,21 +3195,53 @@ public static partial class TrRmExecutableCompiler
                         "An EN1 class query Body root has no emitted TypeDef stub.");
                 }
 
-                if (classQueryRootTypeSpecRows.TryGetValue(identity,
+                var typeSpecKey = (identity, instance.TypeSpecReference);
+                if (classQueryRootTypeSpecRows.TryGetValue(typeSpecKey,
                         out var existingTypeSpecRow))
                 {
                     return existingTypeSpecRow;
                 }
 
                 var typeSpecRow = checked((uint)typeSpecRows.Count + 1);
-                var typeReference = importRowByRootClassTypeDef.TryGetValue(
-                    typeDefRow, out var importRow)
-                    ? TrRmTypeSpecTableWriter.Reference(0x03,
-                        checked((uint)importRow))
-                    : TrRmTypeSpecTableWriter.Reference(0x02,
+                ReadOnlyMemory<byte> typeReference;
+                if (instance.TypeSpecReference != 0)
+                {
+                    var sourceType = standardClassRootTables!.TypeSpecs
+                        .GetTypeSpecRef(instance.TypeSpecReference);
+                    if (sourceType.Form == 0x03
+                        && importRowByRootClassImport.TryGetValue(
+                            sourceType.Row, out var importedRootRow))
+                    {
+                        typeReference
+                            = TrRmTypeSpecTableWriter.Reference(0x03,
+                                checked((uint)importedRootRow));
+                    }
+                    else if (sourceType.Form == 0x02)
+                    {
+                        typeReference
+                            = TrRmTypeSpecTableWriter.Reference(0x02,
+                                checked((uint)localTypeDefRow));
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "An EN1 class query Body root lost its exact TypeDef Import.");
+                    }
+                }
+                else if (importRowByRootClassTypeDef.TryGetValue(typeDefRow,
+                        out var importRow))
+                {
+                    typeReference = TrRmTypeSpecTableWriter.Reference(0x03,
+                        checked((uint)importRow));
+                }
+                else
+                {
+                    typeReference = TrRmTypeSpecTableWriter.Reference(0x02,
                         checked((uint)localTypeDefRow));
+                }
+
                 typeSpecRows.Add(typeReference);
-                classQueryRootTypeSpecRows.Add(identity, typeSpecRow);
+                classQueryRootTypeSpecRows.Add(typeSpecKey, typeSpecRow);
                 return typeSpecRow;
             }
 

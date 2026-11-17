@@ -79,6 +79,14 @@ internal static class BoundStandardEnumDeclarationContract
             && s_schemaIdentities.Contains(schemaIdentity,
                 StringComparer.Ordinal);
 
+    internal static bool IsSelectedClassInstanceLayoutSchemaIdentity(
+        string? schemaIdentity)
+        => schemaIdentity is
+            "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-enum-closure-1-class-instance-layout-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-1-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1"
+            or "trrm/1-draft-init-reference-bodies-general-predicate-graphs-generic-method-calls-1-class-mutability-1-construction-2-parameter-labels-1-receiver-access-1-property-initialized-state-1-enum-closure-1-class-instance-layout-1";
+
     internal static bool IsValidDefinition(
         BoundStandardEnumOccurrence occurrence,
         BoundEnumDefinition definition)
