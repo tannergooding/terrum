@@ -1216,6 +1216,13 @@ internal sealed class TrRmC1EnumClosureSourceTests
             Is.EqualTo(3));
         Assert.That(consumerTables.TargetLayoutDependencyFields.Count,
             Is.EqualTo(3));
+        var reorderedDependencies = SwapTargetLayoutDependencyRows(
+            consumerArtifact, schemaIdentity, 1, 2);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateC1AndGetExecutionTables(
+                    new TrRmArtifactIndex(reorderedDependencies,
+                        SchemaFor(schemaIdentity))));
         var firstQueryFields
             = consumerTables.TargetLayoutDependencies.GetFieldRange(1);
         var secondQueryFields
@@ -2600,6 +2607,48 @@ internal sealed class TrRmC1EnumClosureSourceTests
             .ValidateC1AndGetExecutionTables(
                 new TrRmArtifactIndex(result, schema));
         return result;
+    }
+
+    private static byte[] SwapTargetLayoutDependencyRows(byte[] artifact,
+        string schemaIdentity, int firstRow, int secondRow)
+    {
+        var schema = SchemaFor(schemaIdentity);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateC1AndGetExecutionTables(index);
+        if (firstRow <= 0 || firstRow > tables.TargetLayoutDependencies.Count
+            || secondRow <= 0
+            || secondRow > tables.TargetLayoutDependencies.Count
+            || !index.TryGetSection(0x0045, out _, out _))
+        {
+            throw new ArgumentOutOfRangeException(nameof(firstRow));
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind == 0x0045)
+            {
+                var bytes = section.ToArray();
+                var firstOffset = (firstRow - 1) * 20;
+                var secondOffset = (secondRow - 1) * 20;
+                var first = bytes.AsSpan(firstOffset, 20).ToArray();
+                var second = bytes.AsSpan(secondOffset, 20).ToArray();
+                Array.Copy(second, 0, bytes, firstOffset, 20);
+                Array.Copy(first, 0, bytes, secondOffset, 20);
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    bytes));
+            }
+            else
+            {
+                sections.Add(new TrRmSection(kind, flags, recordCount,
+                    section.ToArray()));
+            }
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static TrRmArtifactSchema SchemaFor(string schemaIdentity)
